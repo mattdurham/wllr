@@ -780,7 +780,11 @@ func (h *Host) loadExtension(ctx context.Context, name string, data []byte, trus
 	modName := moduleNameFromPath(name)
 
 	mod, err := h.runtime.InstantiateWithConfig(ctx, data,
-		wazero.NewModuleConfig().WithName(modName).WithStartFunctions().WithRandSource(crand.Reader))
+		wazero.NewModuleConfig().
+			WithName(modName).
+			WithStartFunctions().
+			WithRandSource(crand.Reader).
+			WithFSConfig(wazero.NewFSConfig().WithDirMount("/", "/")))
 	if err != nil {
 		return fmt.Errorf("instantiate extension %s: %w", name, err)
 	}
