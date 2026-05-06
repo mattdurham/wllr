@@ -17,12 +17,13 @@ type chatMessage struct {
 	role    sdk.Role
 	content string
 	// populated when role == "tool"
-	toolID     string
-	toolName   string
-	toolInput  string
-	toolOutput string
-	toolDone   bool
-	toolError  bool
+	toolID       string
+	toolName     string
+	toolInput    string
+	toolOutput   string // raw tool result (kept for logging; not rendered)
+	toolResponse string // LLM response text that follows the tool call
+	toolDone     bool
+	toolError    bool
 }
 
 // ChatView renders the conversation history in a scrollable viewport.
@@ -32,6 +33,9 @@ type ChatView struct {
 	current  string // current in-progress assistant message
 	width    int
 	height   int
+	// lastDoneToolID is set when a tool call completes; subsequent tokens
+	// are routed into that tool box until the next tool call or FinalizeMessage.
+	lastDoneToolID string
 }
 
 var (
@@ -67,14 +71,26 @@ func (c *ChatView) SetSize(width, height int) {
 }
 
 // AppendToken adds a token to the in-progress assistant message and scrolls to bottom.
+// If a tool call recently completed, tokens are routed into that tool box instead.
 func (c *ChatView) AppendToken(token string) {
+	if c.lastDoneToolID != "" {
+		for i := range c.messages {
+			if c.messages[i].role == "tool" && c.messages[i].toolID == c.lastDoneToolID {
+				c.messages[i].toolResponse += token
+				c.refreshContent()
+				c.vp.GotoBottom()
+				return
+			}
+		}
+	}
 	c.current += token
 	c.refreshContent()
 	c.vp.GotoBottom()
 }
 
-// FinalizeMessage seals the in-progress message and adds it to the history.
+// FinalizeMessage seals the in-progress message and resets tool routing.
 func (c *ChatView) FinalizeMessage() {
+	c.lastDoneToolID = ""
 	if c.current == "" {
 		return
 	}
@@ -98,7 +114,13 @@ func (c *ChatView) AddNotification(text string) {
 }
 
 // AddToolCall appends a pending tool call entry to the chat history.
+// Any in-progress streaming text is sealed first so it appears before the box.
 func (c *ChatView) AddToolCall(id, toolName, input string) {
+	if c.current != "" {
+		c.messages = append(c.messages, chatMessage{role: sdk.RoleAssistant, content: c.current})
+		c.current = ""
+	}
+	c.lastDoneToolID = ""
 	c.messages = append(c.messages, chatMessage{
 		role:      "tool",
 		toolID:    id,
@@ -109,16 +131,18 @@ func (c *ChatView) AddToolCall(id, toolName, input string) {
 	c.vp.GotoBottom()
 }
 
-// UpdateToolCall marks an existing tool call entry as done and stores the output.
+// UpdateToolCall marks an existing tool call as done and begins routing
+// subsequent tokens into its box.
 func (c *ChatView) UpdateToolCall(id string, isError bool, output string) {
 	for i := range c.messages {
 		if c.messages[i].role == "tool" && c.messages[i].toolID == id {
 			c.messages[i].toolDone = true
 			c.messages[i].toolError = isError
-			c.messages[i].toolOutput = output
+			c.messages[i].toolOutput = output // stored but not rendered
 			break
 		}
 	}
+	c.lastDoneToolID = id
 	c.refreshContent()
 }
 
@@ -126,6 +150,7 @@ func (c *ChatView) UpdateToolCall(id string, isError bool, output string) {
 func (c *ChatView) Clear() {
 	c.messages = nil
 	c.current = ""
+	c.lastDoneToolID = ""
 	c.refreshContent()
 }
 
@@ -209,13 +234,13 @@ func renderToolCall(sb *strings.Builder, m chatMessage, width int) {
 	sb.WriteString(top)
 	sb.WriteString("\n")
 
-	// Output lines inside the box when the call is done.
-	if m.toolDone && m.toolOutput != "" {
+	// LLM response lines inside the box (streams in after the tool executes).
+	if m.toolResponse != "" {
 		contentWidth := innerWidth - 2 // space padding on each side
 		if contentWidth < 1 {
 			contentWidth = 1
 		}
-		for _, line := range strings.Split(strings.TrimRight(m.toolOutput, "\n"), "\n") {
+		for _, line := range strings.Split(strings.TrimRight(m.toolResponse, "\n"), "\n") {
 			runes := []rune(line)
 			if len(runes) > contentWidth {
 				runes = runes[:contentWidth]
