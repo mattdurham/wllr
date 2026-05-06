@@ -46,6 +46,7 @@ type ToolCallStartMsg struct {
 type ToolCallDoneMsg struct {
 	ID      string
 	IsError bool
+	Output  string
 }
 
 // abortStreamMsg is sent by the OnAbort callback to cancel the active agent turn

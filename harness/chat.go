@@ -17,11 +17,12 @@ type chatMessage struct {
 	role    sdk.Role
 	content string
 	// populated when role == "tool"
-	toolID    string
-	toolName  string
-	toolInput string
-	toolDone  bool
-	toolError bool
+	toolID     string
+	toolName   string
+	toolInput  string
+	toolOutput string
+	toolDone   bool
+	toolError  bool
 }
 
 // ChatView renders the conversation history in a scrollable viewport.
@@ -108,12 +109,13 @@ func (c *ChatView) AddToolCall(id, toolName, input string) {
 	c.vp.GotoBottom()
 }
 
-// UpdateToolCall marks an existing tool call entry as done (success or error).
-func (c *ChatView) UpdateToolCall(id string, isError bool) {
+// UpdateToolCall marks an existing tool call entry as done and stores the output.
+func (c *ChatView) UpdateToolCall(id string, isError bool, output string) {
 	for i := range c.messages {
 		if c.messages[i].role == "tool" && c.messages[i].toolID == id {
 			c.messages[i].toolDone = true
 			c.messages[i].toolError = isError
+			c.messages[i].toolOutput = output
 			break
 		}
 	}
@@ -166,9 +168,7 @@ func renderMessage(sb *strings.Builder, m chatMessage, width int) {
 		sb.WriteString(lipgloss.Wrap(m.content, width-5, ""))
 		sb.WriteString("\n\n")
 	case sdk.RoleAssistant:
-		prefix := assistantStyle.Render("wllr: ")
-		sb.WriteString(prefix)
-		sb.WriteString(lipgloss.Wrap(m.content, width-6, ""))
+		sb.WriteString(assistantStyle.Render(lipgloss.Wrap(m.content, width, "")))
 		sb.WriteString("\n\n")
 	case "tool":
 		renderToolCall(sb, m, width)
@@ -206,11 +206,33 @@ func renderToolCall(sb *strings.Builder, m chatMessage, width int) {
 
 	// ╭─ ◌  toolname  preview──────╮
 	top := toolBorderStyle.Render("╭─ ") + dot + toolBorderStyle.Render("  "+m.toolName+"  "+preview+fill+"╮")
-	// ╰──────────────────────────────╯
-	bottom := toolBorderStyle.Render("╰" + strings.Repeat("─", innerWidth) + "╯")
-
 	sb.WriteString(top)
 	sb.WriteString("\n")
+
+	// Output lines inside the box when the call is done.
+	if m.toolDone && m.toolOutput != "" {
+		contentWidth := innerWidth - 2 // space padding on each side
+		if contentWidth < 1 {
+			contentWidth = 1
+		}
+		for _, line := range strings.Split(strings.TrimRight(m.toolOutput, "\n"), "\n") {
+			runes := []rune(line)
+			if len(runes) > contentWidth {
+				runes = runes[:contentWidth]
+			}
+			padding := strings.Repeat(" ", contentWidth-len(runes))
+			sb.WriteString(toolBorderStyle.Render("│"))
+			sb.WriteString(" ")
+			sb.WriteString(string(runes))
+			sb.WriteString(padding)
+			sb.WriteString(" ")
+			sb.WriteString(toolBorderStyle.Render("│"))
+			sb.WriteString("\n")
+		}
+	}
+
+	// ╰──────────────────────────────╯
+	bottom := toolBorderStyle.Render("╰" + strings.Repeat("─", innerWidth) + "╯")
 	sb.WriteString(bottom)
 	sb.WriteString("\n\n")
 }

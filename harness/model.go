@@ -90,8 +90,8 @@ func (m *Model) SetProgram(p *tea.Program) {
 		m.extHost.OnAbort = func() {
 			p.Send(abortStreamMsg{})
 		}
-		m.extHost.OnAfterToolCall = func(id, _, _ string, isError bool) {
-			p.Send(ToolCallDoneMsg{ID: id, IsError: isError})
+		m.extHost.OnAfterToolCall = func(id, _, result string, isError bool) {
+			p.Send(ToolCallDoneMsg{ID: id, IsError: isError, Output: result})
 		}
 	}
 	// Wire the main agent's token and done callbacks so streaming output reaches the TUI.
@@ -270,7 +270,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case ToolCallDoneMsg:
-		m.chat.UpdateToolCall(msg.ID, msg.IsError)
+		m.chat.UpdateToolCall(msg.ID, msg.IsError, msg.Output)
 		return m, nil
 	}
 
