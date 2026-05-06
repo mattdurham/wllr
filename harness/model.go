@@ -223,7 +223,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if chatH < 5 {
 					chatH = 5
 				}
-				contentLines := chatH - 2
+				modalH := chatH * 8 / 10
+				if modalH < 5 {
+					modalH = 5
+				}
+				contentLines := modalH - 2
 				lines := strings.Split(strings.TrimRight(m.modalContent, "\n"), "\n")
 				if max := len(lines) - contentLines; m.modalScroll < max {
 					m.modalScroll++
@@ -608,7 +612,22 @@ func (m Model) renderDropdown() string {
 func (m Model) View() tea.View {
 	var sb strings.Builder
 	if m.modalContent != "" {
-		sb.WriteString(strings.TrimRight(m.renderModal(), "\n") + "\n")
+		chatH := m.height - inputAreaHeight
+		if chatH < 5 {
+			chatH = 5
+		}
+		modalH := chatH * 8 / 10
+		topMargin := (chatH - modalH) / 2
+		bottomMargin := chatH - topMargin - modalH
+
+		blank := strings.Repeat(" ", m.width)
+		for i := 0; i < topMargin; i++ {
+			sb.WriteString(blank + "\n")
+		}
+		sb.WriteString(m.renderModal(modalH) + "\n")
+		for i := 0; i < bottomMargin; i++ {
+			sb.WriteString(blank + "\n")
+		}
 	} else {
 		sb.WriteString(strings.TrimRight(m.chat.View(), "\n") + "\n")
 		if dropdown := m.renderDropdown(); dropdown != "" {
@@ -622,19 +641,23 @@ func (m Model) View() tea.View {
 	return v
 }
 
-// renderModal renders a scrollable modal overlay that fills the chat area.
-func (m Model) renderModal() string {
-	chatH := m.height - inputAreaHeight
-	if chatH < 5 {
-		chatH = 5
+// renderModal renders a centered modal popup sized at 80% width × height lines.
+// The caller is responsible for adding the top/bottom margin blank lines.
+func (m Model) renderModal(height int) string {
+	if height < 5 {
+		height = 5
 	}
-	width := m.width
-	if width < 20 {
-		width = 20
+	// 80% width, horizontally centered.
+	modalW := m.width * 8 / 10
+	if modalW < 20 {
+		modalW = 20
 	}
+	leftPad := strings.Repeat(" ", (m.width-modalW)/2)
+
+	width := modalW
 	innerWidth := width - 2
 	contentWidth := innerWidth - 2
-	contentLines := chatH - 2 // room for top + bottom border
+	contentLines := height - 2 // room for top + bottom border
 
 	b := lipgloss.NewStyle().Foreground(lipgloss.Color("#AAAAAA"))
 	lines := strings.Split(strings.TrimRight(m.modalContent, "\n"), "\n")
@@ -659,7 +682,7 @@ func (m Model) renderModal() string {
 	if fillLen < 0 {
 		fillLen = 0
 	}
-	top := b.Render("╭" + hint + strings.Repeat("─", fillLen) + "╮")
+	top := leftPad + b.Render("╭"+hint+strings.Repeat("─", fillLen)+"╮")
 
 	var body strings.Builder
 	for i := 0; i < contentLines; i++ {
@@ -673,10 +696,10 @@ func (m Model) renderModal() string {
 			runes = runes[:contentWidth]
 		}
 		padding := strings.Repeat(" ", contentWidth-len(runes))
-		body.WriteString(b.Render("│") + " " + string(runes) + padding + " " + b.Render("│") + "\n")
+		body.WriteString(leftPad + b.Render("│") + " " + string(runes) + padding + " " + b.Render("│") + "\n")
 	}
 
-	bottom := b.Render("╰" + strings.Repeat("─", innerWidth) + "╯")
+	bottom := leftPad + b.Render("╰"+strings.Repeat("─", innerWidth)+"╯")
 	return top + "\n" + body.String() + bottom
 }
 
