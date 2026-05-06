@@ -280,6 +280,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.chat.AddNotification(fmt.Sprintf("Extension error: %s", r.Error))
 			}
 		}
+		// Refresh autocomplete in case extensions registered new commands.
+		m.updateSuggestions()
 		return m, nil
 
 	case ReloadMsg:

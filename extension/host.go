@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -779,12 +780,18 @@ func (h *Host) LoadBytes(ctx context.Context, name string, data []byte, trusted 
 func (h *Host) loadExtension(ctx context.Context, name string, data []byte, trusted bool, perms []sdk.Permission) error {
 	modName := moduleNameFromPath(name)
 
-	mod, err := h.runtime.InstantiateWithConfig(ctx, data,
-		wazero.NewModuleConfig().
-			WithName(modName).
-			WithStartFunctions().
-			WithRandSource(crand.Reader).
-			WithFSConfig(wazero.NewFSConfig().WithDirMount("/", "/")))
+	cfg := wazero.NewModuleConfig().
+		WithName(modName).
+		WithStartFunctions().
+		WithRandSource(crand.Reader).
+		WithFSConfig(wazero.NewFSConfig().WithDirMount("/", "/"))
+	// Pass all host environment variables to WASM modules.
+	for _, kv := range os.Environ() {
+		if idx := strings.IndexByte(kv, '='); idx > 0 {
+			cfg = cfg.WithEnv(kv[:idx], kv[idx+1:])
+		}
+	}
+	mod, err := h.runtime.InstantiateWithConfig(ctx, data, cfg)
 	if err != nil {
 		return fmt.Errorf("instantiate extension %s: %w", name, err)
 	}
@@ -800,7 +807,7 @@ func (h *Host) loadExtension(ctx context.Context, name string, data []byte, trus
 	}
 
 	ext := &Extension{
-		name:          modName,
+		name:          extensionDisplayName(name),
 		module:        mod,
 		subscriptions: make(map[sdk.EventType]bool),
 		store:         NewStore(),
@@ -1112,8 +1119,14 @@ func (h *Host) removeExtension(target *Extension) {
 	h.extensions = filtered
 }
 
-// moduleNameFromPath derives a unique module name from a file path.
+// moduleNameFromPath returns the full path as the wazero module name.
+// This guarantees uniqueness and avoids conflicts with host modules (e.g. "env").
 func moduleNameFromPath(path string) string {
-	// Use the full path to avoid name collisions.
 	return path
+}
+
+// extensionDisplayName returns a short human-readable name for logging:
+// the base filename without the .wasm suffix.
+func extensionDisplayName(path string) string {
+	return strings.TrimSuffix(filepath.Base(path), ".wasm")
 }
