@@ -295,7 +295,7 @@ func renderToolCall(sb *strings.Builder, m chatMessage, width int) {
 			padding := strings.Repeat(" ", contentWidth-len(runes))
 			sb.WriteString(toolBorderStyle.Render("│"))
 			sb.WriteString(" ")
-			sb.WriteString(string(runes))
+			sb.WriteString(assistantStyle.Render(string(runes)))
 			sb.WriteString(padding)
 			sb.WriteString(" ")
 			sb.WriteString(toolBorderStyle.Render("│"))
