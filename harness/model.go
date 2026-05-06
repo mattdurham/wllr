@@ -257,14 +257,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			case "tab":
-				// Autocomplete: fill the selected command name into the input.
+				// Replace the /word at the cursor with the completed command name.
 				if m.suggestionIdx < len(m.suggestions) {
-					m.input.SetValue("/" + m.suggestions[m.suggestionIdx].Name + " ")
+					val := m.input.Value()
+					if slashIdx := slashWordAt(val); slashIdx >= 0 {
+						m.input.SetValue(val[:slashIdx] + "/" + m.suggestions[m.suggestionIdx].Name + " ")
+					} else {
+						m.input.SetValue("/" + m.suggestions[m.suggestionIdx].Name + " ")
+					}
 				}
 				m.closeSuggestions()
 				return m, nil
 			case "enter":
-				// Select and immediately dispatch the command.
+				// Dispatch the selected command and clear input.
 				if m.suggestionIdx < len(m.suggestions) {
 					cmd := m.suggestions[m.suggestionIdx]
 					m.input.Reset()
@@ -508,15 +513,36 @@ func (m Model) dropdownHeight() int {
 	return n + 2 // top border + entries + bottom border
 }
 
+// slashWordAt finds the index of a slash that starts the current incomplete
+// command word — the last "/" that is either at position 0 or preceded by a
+// space, with no space between it and the end of the string.
+// Returns -1 if no such position exists.
+func slashWordAt(val string) int {
+	idx := strings.LastIndex(val, "/")
+	if idx < 0 {
+		return -1
+	}
+	// Must be word-start: first char or preceded by a space.
+	if idx > 0 && val[idx-1] != ' ' {
+		return -1
+	}
+	// No space between the / and end of input (still typing the command).
+	if strings.ContainsRune(val[idx+1:], ' ') {
+		return -1
+	}
+	return idx
+}
+
 // updateSuggestions recomputes the autocomplete list based on current input.
-// If the input starts with / and has no spaces, suggestions are filtered commands.
+// Triggers when a "/" word-start is found anywhere in the input.
 func (m *Model) updateSuggestions() {
 	val := m.input.Value()
-	if !strings.HasPrefix(val, "/") || strings.ContainsRune(val, ' ') {
+	idx := slashWordAt(val)
+	if idx < 0 {
 		m.closeSuggestions()
 		return
 	}
-	query := strings.ToLower(val[1:])
+	query := strings.ToLower(val[idx+1:])
 	var matched []Command
 	for _, cmd := range m.commands.List() {
 		if strings.HasPrefix(cmd.Name, query) {
