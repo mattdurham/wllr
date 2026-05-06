@@ -71,6 +71,13 @@ func extensionInit() int32 {
 		return rc
 	}
 
+	// Register /skills slash command.
+	type cmdParams struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	}
+	hostCallJSON("register_command", cmdParams{Name: "skills", Description: "List loaded skills"})
+
 	// Register list_skills tool.
 	if rc := registerTool(
 		"list_skills",
@@ -182,6 +189,28 @@ func onCommand(raw json.RawMessage) {
 		Args []string `json:"args"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
+		return
+	}
+
+	// /skills lists all loaded skill names and descriptions.
+	if payload.Name == "skills" {
+		if len(skills) == 0 {
+			hostCallJSON("notify", map[string]string{"text": "No skills loaded. Add SKILL.md files to ~/.wllr/skills/<name>/"})
+			return
+		}
+		var lines []string
+		for _, entry := range skills {
+			line := "  /" + entry.meta.Name
+			if entry.meta.Description != "" {
+				line += " — " + entry.meta.Description
+			}
+			lines = append(lines, line)
+		}
+		text := "Loaded skills:\n"
+		for _, l := range lines {
+			text += l + "\n"
+		}
+		hostCallJSON("notify", map[string]string{"text": text})
 		return
 	}
 

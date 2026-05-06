@@ -106,6 +106,7 @@ func registerBuiltins(r *Registry) {
 			return func() tea.Msg { return setModelMsg{Model: args[0]} }
 		},
 	})
+
 }
 
 // Internal message types used by built-in command handlers.
