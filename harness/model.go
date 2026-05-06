@@ -114,7 +114,13 @@ func (m *Model) SetProgram(p *tea.Program) {
 			p.Send(NotifyMsg{Text: text})
 		}
 		m.extHost.OnSendMessage = func(msg sdk.Message) {
-			p.Send(SubmitMsg{Content: msg.Content})
+			sm := SubmitMsg{Content: msg.Content}
+			// For skill XML blocks, show a compact indicator in the chat
+			// instead of the raw XML so the UI stays clean and responsive.
+			if strings.HasPrefix(strings.TrimSpace(msg.Content), "<skill ") {
+				sm.Display = skillDisplayName(msg.Content)
+			}
+			p.Send(sm)
 		}
 		m.extHost.OnAbort = func() {
 			p.Send(abortStreamMsg{})
@@ -350,7 +356,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case SubmitMsg:
 		m.closeSuggestions()
-		return m.submitToAgent(msg.Content)
+		return m.submitToAgent(msg.Content, msg.Display)
 
 	case CommandMsg:
 		if msg.Name == "help" {
@@ -418,10 +424,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // addAssistantMsgToHistoryMsg carries a finalised assistant message to add to history.
 type addAssistantMsgToHistoryMsg struct{ content string }
 
+// skillDisplayName extracts a compact display string from a skill XML block.
+// Returns something like "[skill: bob:work]" instead of the raw XML.
+func skillDisplayName(xml string) string {
+	if idx := strings.Index(xml, `name="`); idx >= 0 {
+		rest := xml[idx+6:]
+		if end := strings.Index(rest, `"`); end >= 0 {
+			return "[skill: " + rest[:end] + "]"
+		}
+	}
+	return "[skill]"
+}
+
 // submitToAgent processes user input: adds to history, marks streaming, submits to the main agent.
 // The agent's onToken/onDone callbacks (wired in SetProgram) deliver results back to the program.
-func (m Model) submitToAgent(content string) (tea.Model, tea.Cmd) {
-	m.chat.AddUserMessage(content)
+func (m Model) submitToAgent(content, display string) (tea.Model, tea.Cmd) {
+	// Use display text if provided; otherwise derive one from the content.
+	chatText := display
+	if chatText == "" {
+		chatText = content
+	}
+	m.chat.AddUserMessage(chatText)
 	m.history = append(m.history, sdk.Message{Role: sdk.RoleUser, Content: content})
 	m.streaming = true
 	m.streamStart = time.Now()
