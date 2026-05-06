@@ -164,6 +164,11 @@ func main() {
 		}
 	}
 
+	// Create the harness model BEFORE loading extensions so that
+	// OnRegisterCommand (wired in harness.New) is set when _init and
+	// session_start handlers call register_command.
+	m := harness.New(pool, "main", h)
+
 	// Load built-in trusted extensions first.
 	builtins := []struct {
 		name string
@@ -180,8 +185,7 @@ func main() {
 		}
 	}
 
-	// Load extensions from ~/.wllr/extensions/ (subdirectory-per-extension layout)
-	// and from WLLR_EXTENSIONS_DIR (flat layout, for custom overrides).
+	// Load extensions from ~/.wllr/extensions/ and WLLR_EXTENSIONS_DIR.
 	var extPaths []string
 	extPaths = append(extPaths, loadExtensionsFromSubdirs(ctx, h, wllrExtensionsDir())...)
 	if cfg.ExtensionsDir != "" && cfg.ExtensionsDir != wllrExtensionsDir() {
@@ -232,7 +236,6 @@ func main() {
 		return
 	}
 
-	m := harness.New(pool, "main", h)
 	m.SetExtensionPaths(extPaths)
 	m.SetLogFn(func(level int, msg string) {
 		lvl := []slog.Level{slog.LevelDebug, slog.LevelInfo, slog.LevelWarn, slog.LevelError}

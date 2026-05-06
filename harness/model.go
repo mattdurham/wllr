@@ -76,6 +76,24 @@ func New(pool *agent.AgentPool, mainAgentID string, h *extension.Host) Model {
 	}
 
 	registerBuiltins(m.commands)
+
+	// Wire OnRegisterCommand here so extensions can register slash commands
+	// during _init (before SetProgram is called).
+	if h != nil {
+		cmds := m.commands
+		h.OnRegisterCommand = func(name, desc string) {
+			cmds.Register(Command{
+				Name: name,
+				Desc: desc,
+				Handler: func(args []string) tea.Cmd {
+					return func() tea.Msg {
+						return dispatchOnCommandMsg{Name: name, Args: args}
+					}
+				},
+			})
+		}
+	}
+
 	return m
 }
 
@@ -98,17 +116,6 @@ func (m *Model) SetProgram(p *tea.Program) {
 		}
 		m.extHost.OnAfterToolCall = func(id, _, result string, isError bool) {
 			p.Send(ToolCallDoneMsg{ID: id, IsError: isError, Output: result})
-		}
-		m.extHost.OnRegisterCommand = func(name, desc string) {
-			m.commands.Register(Command{
-				Name: name,
-				Desc: desc,
-				Handler: func(args []string) tea.Cmd {
-					return func() tea.Msg {
-						return dispatchOnCommandMsg{Name: name, Args: args}
-					}
-				},
-			})
 		}
 	}
 	// Wire the main agent's token and done callbacks so streaming output reaches the TUI.
