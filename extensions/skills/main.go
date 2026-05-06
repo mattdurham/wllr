@@ -141,8 +141,17 @@ func onSessionStart() {
 
 		fm, body := parseFrontmatter(string(data))
 
+		// Use frontmatter "name" as the command name (e.g. "bob:work");
+		// fall back to directory name if absent.
+		cmdName := dirName
+		if fm != nil {
+			if v := fm["name"]; v != "" {
+				cmdName = v
+			}
+		}
+
 		meta := skillMeta{
-			Name: dirName,
+			Name: cmdName,
 		}
 		if fm != nil {
 			if v := fm["description"]; v != "" {
@@ -153,10 +162,10 @@ func onSessionStart() {
 			}
 		}
 		if meta.Description == "" {
-			meta.Description = dirName + " skill"
+			meta.Description = cmdName + " skill"
 		}
 
-		skills[dirName] = skillEntry{meta: meta, body: body}
+		skills[cmdName] = skillEntry{meta: meta, body: body}
 
 		// Only register user-invocable skills as slash commands.
 		if fm != nil && fm["user-invocable"] == "true" {
@@ -164,10 +173,10 @@ func onSessionStart() {
 				Name        string `json:"name"`
 				Description string `json:"description"`
 			}
-			hostCallJSON("register_command", cmdParams{Name: dirName, Description: meta.Description})
+			hostCallJSON("register_command", cmdParams{Name: cmdName, Description: meta.Description})
 		}
 
-		logMsg(1, "skills: loaded skill "+dirName)
+		logMsg(1, "skills: loaded skill "+cmdName)
 		loaded++
 	}
 
