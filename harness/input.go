@@ -24,6 +24,7 @@ func NewInputArea(width int) InputArea {
 	ta.SetHeight(3)
 	ta.Placeholder = "Type a message… (Enter to send, /command for commands)"
 	ta.ShowLineNumbers = false
+	ta.Prompt = " " // suppress the ┃ cursor-line indicator (we have our own box)
 	// Override InsertNewline to only fire on shift+enter.
 	ta.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("shift+enter"))
 	_ = ta.Focus()

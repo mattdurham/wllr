@@ -205,6 +205,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case StreamDoneMsg:
 		m.streaming = false
+		if m.agentPool != nil {
+			m.statusBar.totalTokens = int(m.agentPool.TokenCount())
+		}
 		if msg.Err != nil && !errors.Is(msg.Err, context.Canceled) {
 			m.chat.AddNotification(fmt.Sprintf("Error: %v", msg.Err))
 			m.statusBar.statuses["stream"] = "error"
@@ -374,7 +377,6 @@ func (m Model) cmdReloadExtensions() tea.Cmd {
 func (m Model) View() tea.View {
 	var sb strings.Builder
 	sb.WriteString(m.chat.View())
-	sb.WriteString("\n")
 	sb.WriteString(m.renderInputBox())
 	v := tea.NewView(sb.String())
 	v.AltScreen = true
@@ -407,15 +409,16 @@ func (m Model) renderInputBox() string {
 	top := b.Render("╭" + prefix + fill + "╮")
 
 	// Embed textarea lines between side borders.
+	// Use lipgloss.Width for padding — len([]rune) counts ANSI escape bytes.
 	taLines := strings.Split(strings.TrimRight(m.input.View(), "\n"), "\n")
 	var body strings.Builder
 	for _, line := range taLines {
-		runes := []rune(line)
-		if len(runes) > contentWidth {
-			runes = runes[:contentWidth]
+		visible := lipgloss.Width(line)
+		pad := contentWidth - visible
+		if pad < 0 {
+			pad = 0
 		}
-		padding := strings.Repeat(" ", contentWidth-len(runes))
-		body.WriteString(b.Render("│") + " " + string(runes) + padding + " " + b.Render("│") + "\n")
+		body.WriteString(b.Render("│") + " " + line + strings.Repeat(" ", pad) + " " + b.Render("│") + "\n")
 	}
 
 	bottom := b.Render("╰" + strings.Repeat("─", innerWidth) + "╯")
