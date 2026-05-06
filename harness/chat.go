@@ -36,6 +36,11 @@ type ChatView struct {
 	// lastDoneToolID is set when a tool call completes; subsequent tokens
 	// are routed into that tool box until the next tool call or FinalizeMessage.
 	lastDoneToolID string
+
+	// histContent caches the rendered historical messages.
+	// Rebuilt only when messages change, not on every streaming token.
+	histContent string
+	histDirty   bool
 }
 
 var (
@@ -70,6 +75,7 @@ func (c *ChatView) SetSize(width, height int) {
 	c.height = height
 	c.vp.SetWidth(width)
 	c.vp.SetHeight(height)
+	c.invalidateHistory()
 	c.refreshContent()
 }
 
@@ -99,12 +105,15 @@ func (c *ChatView) FinalizeMessage() {
 	}
 	c.messages = append(c.messages, chatMessage{role: sdk.RoleAssistant, content: c.current})
 	c.current = ""
+	c.invalidateHistory()
 	c.refreshContent()
+	c.vp.GotoBottom()
 }
 
 // AddUserMessage prepends a user message to the history.
 func (c *ChatView) AddUserMessage(content string) {
 	c.messages = append(c.messages, chatMessage{role: sdk.RoleUser, content: content})
+	c.invalidateHistory()
 	c.refreshContent()
 	c.vp.GotoBottom()
 }
@@ -112,6 +121,7 @@ func (c *ChatView) AddUserMessage(content string) {
 // AddNotification appends a system/notification line.
 func (c *ChatView) AddNotification(text string) {
 	c.messages = append(c.messages, chatMessage{role: "system", content: text})
+	c.invalidateHistory()
 	c.refreshContent()
 	c.vp.GotoBottom()
 }
@@ -130,6 +140,7 @@ func (c *ChatView) AddToolCall(id, toolName, input string) {
 		toolName:  toolName,
 		toolInput: input,
 	})
+	c.invalidateHistory()
 	c.refreshContent()
 	c.vp.GotoBottom()
 }
@@ -146,7 +157,9 @@ func (c *ChatView) UpdateToolCall(id string, isError bool, output string) {
 		}
 	}
 	c.lastDoneToolID = id
+	c.invalidateHistory()
 	c.refreshContent()
+	c.vp.GotoBottom()
 }
 
 // Clear resets the chat history.
@@ -154,6 +167,8 @@ func (c *ChatView) Clear() {
 	c.messages = nil
 	c.current = ""
 	c.lastDoneToolID = ""
+	c.histContent = ""
+	c.histDirty = false
 	c.refreshContent()
 }
 
@@ -172,26 +187,41 @@ func (c ChatView) View() string {
 	return c.vp.View()
 }
 
+// invalidateHistory marks the historical-messages cache as stale so it will
+// be rebuilt on the next refreshContent call.
+func (c *ChatView) invalidateHistory() {
+	c.histDirty = true
+}
+
 // refreshContent rebuilds the viewport content from messages.
-// Messages before the most recent user message are rendered "old" (dimmed).
+// The rendered historical messages are cached; only the streaming current
+// message is appended on every token, avoiding a full O(n) rebuild each time.
 func (c *ChatView) refreshContent() {
-	// Find the start of the most recent turn.
-	recentStart := 0
-	for i := len(c.messages) - 1; i >= 0; i-- {
-		if c.messages[i].role == sdk.RoleUser {
-			recentStart = i
-			break
+	if c.histDirty || c.histContent == "" {
+		// Find the start of the most recent turn.
+		recentStart := 0
+		for i := len(c.messages) - 1; i >= 0; i-- {
+			if c.messages[i].role == sdk.RoleUser {
+				recentStart = i
+				break
+			}
 		}
+		var sb strings.Builder
+		for i, m := range c.messages {
+			renderMessage(&sb, m, c.width, i < recentStart)
+		}
+		c.histContent = sb.String()
+		c.histDirty = false
 	}
 
-	var sb strings.Builder
-	for i, m := range c.messages {
-		renderMessage(&sb, m, c.width, i < recentStart)
-	}
 	if c.current != "" {
+		var sb strings.Builder
+		sb.WriteString(c.histContent)
 		renderMessage(&sb, chatMessage{role: sdk.RoleAssistant, content: c.current}, c.width, false)
+		c.vp.SetContent(sb.String())
+	} else {
+		c.vp.SetContent(c.histContent)
 	}
-	c.vp.SetContent(sb.String())
 }
 
 func renderMessage(sb *strings.Builder, m chatMessage, width int, old bool) {
