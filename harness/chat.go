@@ -39,16 +39,20 @@ type ChatView struct {
 }
 
 var (
-	assistantStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#89CFF0")) // light blue
-	assistantOldStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")) // dimmed
-	systemStyle       = lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("#555555"))
-	userBorderStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#00AA00"))
+	// Assistant box: blue border, white text.
+	asstBorderStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#89CFF0"))
+	asstBorderOldStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#444444"))
+	asstTextStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
+	asstTextOldStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
+
+	systemStyle        = lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("#555555"))
+	userBorderStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#00AA00"))
 	userBorderOldStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#444444"))
-	oldTextStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
-	toolBorderStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
-	toolSuccessStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#00AA00"))
-	toolErrorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#CC3333"))
-	toolPendingStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
+	oldTextStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
+	toolBorderStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
+	toolSuccessStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#00AA00"))
+	toolErrorStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#CC3333"))
+	toolPendingStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
 )
 
 // NewChatView creates a ChatView with the given dimensions.
@@ -199,19 +203,52 @@ func renderMessage(sb *strings.Builder, m chatMessage, width int, old bool) {
 		renderUserMessage(sb, m.content, width, old)
 		return
 	case sdk.RoleAssistant:
-		style := assistantStyle
-		if old {
-			style = assistantOldStyle
-		}
-		sb.WriteString(style.Render(lipgloss.Wrap(m.content, width, "")))
-		sb.WriteString("\n\n")
+		renderAssistantMessage(sb, m.content, width, old)
+		return
 	case "tool":
-		renderToolCall(sb, m, width)
+		renderToolCall(sb, m, width, old)
 		return
 	default:
 		sb.WriteString(systemStyle.Render(lipgloss.Wrap("» "+m.content, width, "")))
 		sb.WriteString("\n\n")
 	}
+}
+
+func renderAssistantMessage(sb *strings.Builder, content string, width int, old bool) {
+	if width < 14 {
+		width = 14
+	}
+	innerWidth := width - 2
+	contentWidth := innerWidth - 2
+	if contentWidth < 1 {
+		contentWidth = 1
+	}
+
+	border := asstBorderStyle
+	text := asstTextStyle
+	if old {
+		border = asstBorderOldStyle
+		text = asstTextOldStyle
+	}
+
+	sb.WriteString(border.Render("╭" + strings.Repeat("─", innerWidth) + "╮"))
+	sb.WriteString("\n")
+
+	wrapped := lipgloss.Wrap(content, contentWidth, "")
+	for _, line := range strings.Split(strings.TrimRight(wrapped, "\n"), "\n") {
+		runes := []rune(line)
+		if len(runes) > contentWidth {
+			runes = runes[:contentWidth]
+		}
+		padding := strings.Repeat(" ", contentWidth-len(runes))
+		sb.WriteString(border.Render("│"))
+		sb.WriteString(" " + text.Render(string(runes)) + padding + " ")
+		sb.WriteString(border.Render("│"))
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString(border.Render("╰" + strings.Repeat("─", innerWidth) + "╯"))
+	sb.WriteString("\n\n")
 }
 
 func renderUserMessage(sb *strings.Builder, content string, width int, old bool) {
@@ -251,9 +288,11 @@ func renderUserMessage(sb *strings.Builder, content string, width int, old bool)
 	sb.WriteString("\n\n")
 }
 
-func renderToolCall(sb *strings.Builder, m chatMessage, width int) {
+func renderToolCall(sb *strings.Builder, m chatMessage, width int, old bool) {
 	var dot string
-	if !m.toolDone {
+	if old {
+		dot = toolBorderStyle.Render("●")
+	} else if !m.toolDone {
 		dot = toolPendingStyle.Render("◌")
 	} else if m.toolError {
 		dot = toolErrorStyle.Render("●")
@@ -295,7 +334,11 @@ func renderToolCall(sb *strings.Builder, m chatMessage, width int) {
 			padding := strings.Repeat(" ", contentWidth-len(runes))
 			sb.WriteString(toolBorderStyle.Render("│"))
 			sb.WriteString(" ")
-			sb.WriteString(assistantStyle.Render(string(runes)))
+			textSt := asstTextStyle
+			if old {
+				textSt = asstTextOldStyle
+			}
+			sb.WriteString(textSt.Render(string(runes)))
 			sb.WriteString(padding)
 			sb.WriteString(" ")
 			sb.WriteString(toolBorderStyle.Render("│"))
