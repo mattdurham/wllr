@@ -39,14 +39,9 @@ type ChatView struct {
 }
 
 var (
-	userStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#00FFFF"))
-	assistantStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFFFFF"))
-	systemStyle = lipgloss.NewStyle().
-			Italic(true).
-			Foreground(lipgloss.Color("#888888"))
+	assistantStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
+	systemStyle      = lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("#888888"))
+	userBorderStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#00AA00"))
 	toolBorderStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
 	toolSuccessStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00AA00"))
 	toolErrorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#CC3333"))
@@ -188,10 +183,8 @@ func renderMessage(sb *strings.Builder, m chatMessage, width int) {
 	}
 	switch m.role {
 	case sdk.RoleUser:
-		prefix := userStyle.Render("You: ")
-		sb.WriteString(prefix)
-		sb.WriteString(lipgloss.Wrap(m.content, width-5, ""))
-		sb.WriteString("\n\n")
+		renderUserMessage(sb, m.content, width)
+		return
 	case sdk.RoleAssistant:
 		sb.WriteString(assistantStyle.Render(lipgloss.Wrap(m.content, width, "")))
 		sb.WriteString("\n\n")
@@ -202,6 +195,36 @@ func renderMessage(sb *strings.Builder, m chatMessage, width int) {
 		sb.WriteString(systemStyle.Render(lipgloss.Wrap("» "+m.content, width, "")))
 		sb.WriteString("\n\n")
 	}
+}
+
+func renderUserMessage(sb *strings.Builder, content string, width int) {
+	if width < 14 {
+		width = 14
+	}
+	innerWidth := width - 2
+	contentWidth := innerWidth - 2
+	if contentWidth < 1 {
+		contentWidth = 1
+	}
+
+	sb.WriteString(userBorderStyle.Render("╭" + strings.Repeat("─", innerWidth) + "╮"))
+	sb.WriteString("\n")
+
+	wrapped := lipgloss.Wrap(content, contentWidth, "")
+	for _, line := range strings.Split(strings.TrimRight(wrapped, "\n"), "\n") {
+		runes := []rune(line)
+		if len(runes) > contentWidth {
+			runes = runes[:contentWidth]
+		}
+		padding := strings.Repeat(" ", contentWidth-len(runes))
+		sb.WriteString(userBorderStyle.Render("│"))
+		sb.WriteString(" " + string(runes) + padding + " ")
+		sb.WriteString(userBorderStyle.Render("│"))
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString(userBorderStyle.Render("╰" + strings.Repeat("─", innerWidth) + "╯"))
+	sb.WriteString("\n\n")
 }
 
 func renderToolCall(sb *strings.Builder, m chatMessage, width int) {
