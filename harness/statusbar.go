@@ -55,6 +55,29 @@ func (s StatusBar) Update(msg tea.Msg) (StatusBar, tea.Cmd) {
 // AddTokens increments the total token counter.
 func (s *StatusBar) AddTokens(n int) { s.totalTokens += n }
 
+// Line returns the bare status text without any lipgloss styling.
+func (s StatusBar) Line() string {
+	var parts []string
+	if s.providerName != "" {
+		parts = append(parts, s.providerName)
+	}
+	if s.modelName != "" {
+		parts = append(parts, s.modelName)
+	}
+	if s.totalTokens > 0 {
+		parts = append(parts, fmt.Sprintf("tokens:%d", s.totalTokens))
+	}
+	keys := make([]string, 0, len(s.statuses))
+	for k := range s.statuses {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%s:%s", k, s.statuses[k]))
+	}
+	return strings.Join(parts, "  ")
+}
+
 // View renders the status bar as a single line.
 func (s StatusBar) View() string {
 	var parts []string

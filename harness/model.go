@@ -12,6 +12,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/fantasy"
+	lipgloss "charm.land/lipgloss/v2"
 	"github.com/mattdurham/wllr/agent"
 	"github.com/mattdurham/wllr/extension"
 	"github.com/mattdurham/wllr/sdk"
@@ -47,8 +48,9 @@ type Model struct {
 	logFn func(int, string)
 }
 
+// inputAreaHeight = top border (1) + textarea rows (3) + bottom border (1)
 const inputAreaHeight = 5
-const statusBarHeight = 1
+const statusBarHeight = 0
 
 // New creates a Model wired to the given agent pool, main agent ID, and extension host.
 // The pool must have its provider name set via SetProviderName before calling New
@@ -170,7 +172,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			chatHeight = 1
 		}
 		m.chat.SetSize(msg.Width, chatHeight)
-		m.input.SetWidth(msg.Width)
+		m.input.SetWidth(msg.Width - 4) // textarea sits inside the bordered box
 		m.statusBar.SetWidth(msg.Width)
 		return m, nil
 
@@ -371,19 +373,51 @@ func (m Model) cmdReloadExtensions() tea.Cmd {
 // View renders the full TUI.
 func (m Model) View() tea.View {
 	var sb strings.Builder
-
-	// Chat view.
 	sb.WriteString(m.chat.View())
 	sb.WriteString("\n")
-
-	// Status bar.
-	sb.WriteString(m.statusBar.View())
-	sb.WriteString("\n")
-
-	// Input area.
-	sb.WriteString(m.input.View())
-
+	sb.WriteString(m.renderInputBox())
 	v := tea.NewView(sb.String())
 	v.AltScreen = true
 	return v
+}
+
+// renderInputBox wraps the textarea in a white-bordered box with the status
+// line embedded in the top border, matching the tool-call box style.
+func (m Model) renderInputBox() string {
+	width := m.width
+	if width < 8 {
+		width = 8
+	}
+	innerWidth := width - 2
+	contentWidth := innerWidth - 2
+
+	b := lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
+
+	// Build top border: ╭─ provider  model  status ──────────────╮
+	label := m.statusBar.Line()
+	var prefix string
+	if label != "" {
+		prefix = "─ " + label + " "
+	}
+	fillLen := innerWidth - len([]rune(prefix))
+	if fillLen < 0 {
+		fillLen = 0
+	}
+	fill := strings.Repeat("─", fillLen)
+	top := b.Render("╭" + prefix + fill + "╮")
+
+	// Embed textarea lines between side borders.
+	taLines := strings.Split(strings.TrimRight(m.input.View(), "\n"), "\n")
+	var body strings.Builder
+	for _, line := range taLines {
+		runes := []rune(line)
+		if len(runes) > contentWidth {
+			runes = runes[:contentWidth]
+		}
+		padding := strings.Repeat(" ", contentWidth-len(runes))
+		body.WriteString(b.Render("│") + " " + string(runes) + padding + " " + b.Render("│") + "\n")
+	}
+
+	bottom := b.Render("╰" + strings.Repeat("─", innerWidth) + "╯")
+	return top + "\n" + body.String() + bottom
 }
