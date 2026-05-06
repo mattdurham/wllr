@@ -53,8 +53,9 @@ type skillMeta struct {
 
 // skillEntry holds both metadata and body for a loaded skill.
 type skillEntry struct {
-	meta skillMeta
-	body string
+	meta     skillMeta
+	body     string
+	filePath string // absolute path to the SKILL.md file
 }
 
 // skills maps skill directory name to its loaded entry.
@@ -165,7 +166,7 @@ func onSessionStart() {
 			meta.Description = cmdName + " skill"
 		}
 
-		skills[cmdName] = skillEntry{meta: meta, body: body}
+		skills[cmdName] = skillEntry{meta: meta, body: body, filePath: skillPath}
 
 		// Only register user-invocable skills as slash commands.
 		if fm != nil && fm["user-invocable"] == "true" {
@@ -228,10 +229,19 @@ func onCommand(raw json.RawMessage) {
 		return
 	}
 
-	type promptParams struct {
-		Prompt string `json:"prompt"`
+	// Inject the skill as a user message using the pi Agent Skills XML format:
+	//   <skill name="..." location="...">
+	//   [content]
+	//   </skill>
+	// The LLM reads the skill instructions from the block and acts accordingly.
+	// This preserves the AGENTS.md system prompt rather than replacing it.
+	skillMsg := "<skill name=\"" + entry.meta.Name + "\" location=\"" + entry.filePath + "\">\n" +
+		entry.body + "\n</skill>"
+	type msgParams struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
 	}
-	hostCallJSON("set_system_prompt", promptParams{Prompt: entry.body})
+	hostCallJSON("send_message", msgParams{Role: "user", Content: skillMsg})
 	logMsg(1, "skills: activated skill "+payload.Name)
 }
 

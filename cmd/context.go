@@ -100,4 +100,3 @@ func loadSystemPrompt() string {
 
 	return strings.Join(parts, "\n\n---\n\n")
 }
-

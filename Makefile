@@ -4,6 +4,8 @@
 # make extensions  — build WASM extensions → cmd/builtins/*.wasm + install optional extensions
 # make all         — build extensions then the binary
 # make clean       — remove dist/ and cmd/builtins/*.wasm
+# make lint        — run golangci-lint
+# make test        — run tests
 #
 # Built-in extensions (embedded in the binary):
 #   readfile, writefile, exec, env, agents
@@ -16,7 +18,7 @@ BINARY      := $(DIST_DIR)/wllr
 BUILTINS    := cmd/builtins
 EXT_DIR     := $(HOME)/.wllr/extensions
 
-.PHONY: all build extensions clean
+.PHONY: all build extensions clean lint test
 
 all: extensions build
 
@@ -46,6 +48,12 @@ $(DIST_DIR):
 
 $(BUILTINS):
 	mkdir -p $(BUILTINS)
+
+lint:
+	golangci-lint run ./...
+
+test:
+	go test -v ./...
 
 clean:
 	rm -rf $(DIST_DIR)

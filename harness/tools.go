@@ -141,32 +141,3 @@ func BuildFantasyTools(extHost *extension.Host, logFn func(int, string)) []fanta
 	}
 	return sdkToolsToFantasy(sdkTools, extHost, logFn)
 }
-
-// toolCallIDFromEvent extracts the tool_call_id from a fantasy.ToolCallContent.
-// Used to dispatch EventOnToolCall and EventOnToolResult extension events.
-func dispatchToolCallEvent(ctx context.Context, extHost *extension.Host, toolCallID, toolName string, input json.RawMessage) {
-	if extHost == nil {
-		return
-	}
-	payload, _ := json.Marshal(sdk.OnToolCallPayload{
-		ToolCallID: toolCallID,
-		ToolName:   toolName,
-		Input:      input,
-	})
-	evt := sdk.Event{Type: sdk.EventOnToolCall, Payload: payload}
-	_, _ = extHost.DispatchEvent(ctx, evt)
-}
-
-// dispatchToolResultEvent dispatches EventOnToolResult to extensions.
-func dispatchToolResultEvent(ctx context.Context, extHost *extension.Host, toolCallID, result string, isError bool) {
-	if extHost == nil {
-		return
-	}
-	payload, _ := json.Marshal(sdk.OnToolResultPayload{
-		ToolCallID: toolCallID,
-		Result:     result,
-		IsError:    isError,
-	})
-	evt := sdk.Event{Type: sdk.EventOnToolResult, Payload: payload}
-	_, _ = extHost.DispatchEvent(ctx, evt)
-}

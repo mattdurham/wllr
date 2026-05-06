@@ -1,0 +1,60 @@
+# golangci-lint configuration for wllr
+# Initial baseline configuration — intentionally minimal to avoid noise.
+# errcheck is disabled in tests due to deferred Close() calls.
+# Enable additional linters incrementally as code is cleaned up.
+
+version: 2
+
+run:
+  timeout: 5m
+  tests: true
+  modules-download-mode: readonly
+  allow-parallel-runners: false
+
+linters:
+  disable-all: true
+  enable:
+    - govet
+    - staticcheck
+    - unused
+    - misspell
+    - unconvert
+
+  disable:
+    - errcheck  # too noisy in tests with deferred Close
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+linters-settings:
+  govet:
+    enable-all: true
+    disable:
+      - shadow
+
+  staticcheck:
+    checks: ["all"]
+
+  misspell:
+    locale: US
+
+issues:
+  exclude-use-default: false
+  exclude-rules:
+    - linters:
+        - staticcheck
+      text: "SA1019:"  # deprecated usage
+
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+output:
+  formats:
+    colored-line-number:
+      path: stdout
+  print-issued-lines: true
+  print-linter-name: true
+  uniq-by-line: true
+  sort-results: true

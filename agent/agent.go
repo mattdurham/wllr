@@ -285,4 +285,3 @@ func sdkToFantasyMessages(msgs []sdk.Message) []fantasy.Message {
 	}
 	return result
 }
-
