@@ -23,6 +23,9 @@ const (
 	EventBeforeToolCall EventType = "before_tool_call"
 	// EventAfterToolCall is dispatched after a tool result is available.
 	EventAfterToolCall EventType = "after_tool_call"
+	// EventOnCommand is dispatched when the user invokes a slash command registered
+	// by an extension via register_command.
+	EventOnCommand EventType = "on_command"
 )
 
 // Event is dispatched to extensions via _on_event.
@@ -162,6 +165,12 @@ type AfterToolCallPayload struct {
 	ToolName   string `json:"tool_name"`
 	Result     string `json:"result"`
 	IsError    bool   `json:"is_error"`
+}
+
+// OnCommandPayload is the payload for EventOnCommand.
+type OnCommandPayload struct {
+	Name string   `json:"name"`
+	Args []string `json:"args"`
 }
 
 // HostCallRequest is the JSON payload sent by an extension via host_call.

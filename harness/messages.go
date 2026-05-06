@@ -53,5 +53,12 @@ type ToolCallDoneMsg struct {
 // through the bubbletea program.
 type abortStreamMsg struct{}
 
+// dispatchOnCommandMsg is sent when an extension-registered slash command is invoked.
+// The harness dispatches EventOnCommand to all subscribed extensions.
+type dispatchOnCommandMsg struct {
+	Name string
+	Args []string
+}
+
 // streamTickMsg fires periodically while streaming to update the working indicator.
 type streamTickMsg struct{}

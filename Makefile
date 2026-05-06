@@ -26,6 +26,7 @@ extensions: $(DIST_DIR) $(BUILTINS)
 	cd extensions/env       && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(BUILTINS)/env.wasm .
 	cd extensions/agents    && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(BUILTINS)/agents.wasm .
 	cd extensions/context   && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(BUILTINS)/context.wasm .
+	cd extensions/skills    && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(BUILTINS)/skills.wasm .
 	@echo "Built all extensions"
 
 $(DIST_DIR):
@@ -36,4 +37,4 @@ $(BUILTINS):
 
 clean:
 	rm -rf $(DIST_DIR)
-	rm -f $(BUILTINS)/readfile.wasm $(BUILTINS)/writefile.wasm $(BUILTINS)/exec.wasm $(BUILTINS)/env.wasm $(BUILTINS)/agents.wasm $(BUILTINS)/context.wasm
+	rm -f $(BUILTINS)/readfile.wasm $(BUILTINS)/writefile.wasm $(BUILTINS)/exec.wasm $(BUILTINS)/env.wasm $(BUILTINS)/agents.wasm $(BUILTINS)/context.wasm $(BUILTINS)/skills.wasm

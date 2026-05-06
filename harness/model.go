@@ -95,6 +95,17 @@ func (m *Model) SetProgram(p *tea.Program) {
 		m.extHost.OnAfterToolCall = func(id, _, result string, isError bool) {
 			p.Send(ToolCallDoneMsg{ID: id, IsError: isError, Output: result})
 		}
+		m.extHost.OnRegisterCommand = func(name, desc string) {
+			m.commands.Register(Command{
+				Name: name,
+				Desc: desc,
+				Handler: func(args []string) tea.Cmd {
+					return func() tea.Msg {
+						return dispatchOnCommandMsg{Name: name, Args: args}
+					}
+				},
+			})
+		}
 	}
 	// Wire the main agent's token and done callbacks so streaming output reaches the TUI.
 	m.wireMainAgentCallbacks(p)
@@ -276,6 +287,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ToolCallDoneMsg:
 		m.chat.UpdateToolCall(msg.ID, msg.IsError, msg.Output)
+		return m, nil
+
+	case dispatchOnCommandMsg:
+		if m.extHost != nil {
+			extHost := m.extHost
+			return m, func() tea.Msg {
+				payload, _ := json.Marshal(sdk.OnCommandPayload{Name: msg.Name, Args: msg.Args})
+				evt := sdk.Event{Type: sdk.EventOnCommand, Payload: payload}
+				results, err := extHost.DispatchEvent(context.Background(), evt)
+				return ExtensionEventResultMsg{Results: results, Err: err}
+			}
+		}
 		return m, nil
 	}
 
