@@ -71,13 +71,6 @@ func extensionInit() int32 {
 		return rc
 	}
 
-	// Register /skills slash command.
-	type cmdParams struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-	}
-	hostCallJSON("register_command", cmdParams{Name: "skills", Description: "List loaded skills"})
-
 	// Register list_skills tool.
 	if rc := registerTool(
 		"list_skills",
@@ -177,6 +170,13 @@ func onSessionStart() {
 		logMsg(1, "skills: loaded skill "+dirName)
 		loaded++
 	}
+
+	// Register /skills command after loading so OnRegisterCommand is wired.
+	type cmdParams struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	}
+	hostCallJSON("register_command", cmdParams{Name: "skills", Description: "List loaded skills"})
 
 	if loaded > 0 {
 		logMsg(1, "skills: loaded "+itoa(loaded)+" skill(s)")
