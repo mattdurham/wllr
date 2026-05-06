@@ -78,6 +78,18 @@ func (a *Agent) SetSystemPrompt(prompt string) {
 	a.systemPromptMu.Unlock()
 }
 
+// AppendSystemPrompt appends text to the current system prompt with a blank
+// line separator. Thread-safe; safe to call before the first Submit.
+func (a *Agent) AppendSystemPrompt(text string) {
+	a.systemPromptMu.Lock()
+	if a.systemPrompt == "" {
+		a.systemPrompt = text
+	} else {
+		a.systemPrompt += "\n\n" + text
+	}
+	a.systemPromptMu.Unlock()
+}
+
 // SetOnToolCall sets the callback invoked when the agent dispatches a tool call.
 // The callback receives the tool call ID, tool name, and JSON input string.
 // Thread-safe; may be called before each Submit.

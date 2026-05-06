@@ -190,7 +190,37 @@ func onSessionStart() {
 
 	if loaded > 0 {
 		logMsg(1, "skills: loaded "+itoa(loaded)+" skill(s)")
+		// Append skill listing to system prompt so the LLM knows skills exist
+		// and can proactively use them (matching pi's formatSkillsForPrompt).
+		appendSkillsToPrompt()
 	}
+}
+
+// appendSkillsToPrompt adds an <available_skills> XML block to the system
+// prompt, matching pi's format so the LLM knows to use read_file to load
+// a skill when the task matches its description.
+func appendSkillsToPrompt() {
+	if len(skills) == 0 {
+		return
+	}
+	text := "\n\nThe following skills provide specialized instructions for specific tasks.\n" +
+		"Use the read_file tool to load a skill's file when the task matches its description.\n" +
+		"When a skill file references a relative path, resolve it against the skill directory " +
+		"(parent of SKILL.md) and use that absolute path in tool commands.\n\n" +
+		"<available_skills>"
+	for _, entry := range skills {
+		text += "\n  <skill>"
+		text += "\n    <name>" + entry.meta.Name + "</name>"
+		text += "\n    <description>" + entry.meta.Description + "</description>"
+		text += "\n    <location>" + entry.filePath + "</location>"
+		text += "\n  </skill>"
+	}
+	text += "\n</available_skills>"
+
+	type params struct {
+		Text string `json:"text"`
+	}
+	hostCallJSON("append_system_prompt", params{Text: text})
 }
 
 func onCommand(raw json.RawMessage) {

@@ -209,6 +209,8 @@ const (
 	MethodModal = "modal"
 	// MethodSetSystemPrompt sets the system prompt on the main agent.
 	MethodSetSystemPrompt = "set_system_prompt"
+	// MethodAppendSystemPrompt appends text to the existing system prompt.
+	MethodAppendSystemPrompt = "append_system_prompt"
 	// MethodExec executes a shell command on the host. Requires PermExec.
 	MethodExec = "exec"
 	// MethodBeforeToolCall is sent by extensions that want to intercept tool

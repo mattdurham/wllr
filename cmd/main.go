@@ -169,6 +169,11 @@ func main() {
 			a.SetSystemPrompt(prompt)
 		}
 	}
+	h.OnAppendSystemPrompt = func(text string) {
+		if a := pool.Get("main"); a != nil {
+			a.AppendSystemPrompt(text)
+		}
+	}
 
 	// Create the harness model BEFORE loading extensions so that
 	// OnRegisterCommand (wired in harness.New) is set when _init and

@@ -88,8 +88,9 @@ type Host struct {
 	OnAbort           func()
 	OnToolResult      func(toolCallID, result string, isError bool)
 	OnAfterToolCall   func(toolCallID, toolName, result string, isError bool)
-	OnModal           func(text string)
-	OnSetSystemPrompt func(prompt string)
+	OnModal              func(text string)
+	OnSetSystemPrompt    func(prompt string)
+	OnAppendSystemPrompt func(text string)
 	OnExec            func(command, dir string) (string, error)
 	OnGetEnv          func(name string) (string, error)
 	OnConfigRead      func(group string) (json.RawMessage, error)
@@ -323,6 +324,9 @@ func (h *Host) routeHostCall(ctx context.Context, _ api.Module, ext *Extension, 
 	case sdk.MethodSetSystemPrompt:
 		return h.handleSetSystemPrompt(req)
 
+	case sdk.MethodAppendSystemPrompt:
+		return h.handleAppendSystemPrompt(req)
+
 	case sdk.MethodExec:
 		return h.handleExec(ctx, ext, req)
 
@@ -470,6 +474,20 @@ func (h *Host) handleModal(req sdk.HostCallRequest) sdk.HostCallResponse {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("modal: %v", err)}
 	}
 	h.OnModal(params.Text)
+	return sdk.HostCallResponse{}
+}
+
+func (h *Host) handleAppendSystemPrompt(req sdk.HostCallRequest) sdk.HostCallResponse {
+	if h.OnAppendSystemPrompt == nil {
+		return sdk.HostCallResponse{Error: "append_system_prompt: not supported by host"}
+	}
+	var params struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return sdk.HostCallResponse{Error: fmt.Sprintf("append_system_prompt: %v", err)}
+	}
+	h.OnAppendSystemPrompt(params.Text)
 	return sdk.HostCallResponse{}
 }
 
