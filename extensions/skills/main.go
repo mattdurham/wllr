@@ -195,22 +195,22 @@ func onCommand(raw json.RawMessage) {
 	// /skills lists all loaded skill names and descriptions.
 	if payload.Name == "skills" {
 		if len(skills) == 0 {
-			hostCallJSON("notify", map[string]string{"text": "No skills loaded. Add SKILL.md files to ~/.wllr/skills/<name>/"})
+			hostCallJSON("modal", map[string]string{"text": "No skills loaded.\n\nAdd SKILL.md files to ~/.wllr/skills/<name>/"})
 			return
 		}
 		var lines []string
 		for _, entry := range skills {
-			line := "  /" + entry.meta.Name
+			line := "/" + entry.meta.Name
 			if entry.meta.Description != "" {
-				line += " — " + entry.meta.Description
+				line += "\n  " + entry.meta.Description
 			}
 			lines = append(lines, line)
 		}
-		text := "Loaded skills:\n"
+		text := "Skills\n" + strings.Repeat("─", 40) + "\n\n"
 		for _, l := range lines {
-			text += l + "\n"
+			text += l + "\n\n"
 		}
-		hostCallJSON("notify", map[string]string{"text": text})
+		hostCallJSON("modal", map[string]string{"text": strings.TrimRight(text, "\n")})
 		return
 	}
 

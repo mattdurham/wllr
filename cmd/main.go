@@ -81,7 +81,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	slog.SetDefault(slog.New(newTeeHandler(os.Stderr)))
+	// In TUI mode stderr is suppressed (it bleeds into alt-screen).
+	// In --exec mode stderr stays on so the user can see output.
+	tuiMode := *execPrompt == ""
+	slog.SetDefault(slog.New(newTeeHandler(os.Stderr, !tuiMode)))
 
 	// Create agent pool and spawn the main agent.
 	pool := agent.NewPool()

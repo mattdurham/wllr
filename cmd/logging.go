@@ -18,8 +18,13 @@ type teeHandler struct {
 	logFile *os.File
 }
 
-func newTeeHandler(stderr *os.File) *teeHandler {
-	stderrH := slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: slog.LevelInfo})
+// newTeeHandler creates a handler that writes to the log file and optionally stderr.
+// Pass writeStderr=false in TUI mode to prevent log output bleeding into the display.
+func newTeeHandler(stderr *os.File, writeStderr bool) *teeHandler {
+	var stderrH slog.Handler
+	if writeStderr && stderr != nil {
+		stderrH = slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: slog.LevelInfo})
+	}
 
 	logDir := logDir()
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
@@ -37,7 +42,7 @@ func newTeeHandler(stderr *os.File) *teeHandler {
 }
 
 func (h *teeHandler) Enabled(ctx context.Context, level slog.Level) bool {
-	if h.stderr.Enabled(ctx, level) {
+	if h.stderr != nil && h.stderr.Enabled(ctx, level) {
 		return true
 	}
 	if h.file != nil && h.file.Enabled(ctx, level) {
@@ -47,7 +52,9 @@ func (h *teeHandler) Enabled(ctx context.Context, level slog.Level) bool {
 }
 
 func (h *teeHandler) Handle(ctx context.Context, r slog.Record) error {
-	_ = h.stderr.Handle(ctx, r)
+	if h.stderr != nil {
+		_ = h.stderr.Handle(ctx, r)
+	}
 	if h.file != nil {
 		_ = h.file.Handle(ctx, r)
 	}
@@ -55,7 +62,10 @@ func (h *teeHandler) Handle(ctx context.Context, r slog.Record) error {
 }
 
 func (h *teeHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	n := &teeHandler{stderr: h.stderr.WithAttrs(attrs), logFile: h.logFile}
+	n := &teeHandler{logFile: h.logFile}
+	if h.stderr != nil {
+		n.stderr = h.stderr.WithAttrs(attrs)
+	}
 	if h.file != nil {
 		n.file = h.file.WithAttrs(attrs)
 	}
@@ -63,7 +73,10 @@ func (h *teeHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 }
 
 func (h *teeHandler) WithGroup(name string) slog.Handler {
-	n := &teeHandler{stderr: h.stderr.WithGroup(name), logFile: h.logFile}
+	n := &teeHandler{logFile: h.logFile}
+	if h.stderr != nil {
+		n.stderr = h.stderr.WithGroup(name)
+	}
 	if h.file != nil {
 		n.file = h.file.WithGroup(name)
 	}

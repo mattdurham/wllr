@@ -88,6 +88,7 @@ type Host struct {
 	OnAbort           func()
 	OnToolResult      func(toolCallID, result string, isError bool)
 	OnAfterToolCall   func(toolCallID, toolName, result string, isError bool)
+	OnModal           func(text string)
 	OnSetSystemPrompt func(prompt string)
 	OnExec            func(command, dir string) (string, error)
 	OnGetEnv          func(name string) (string, error)
@@ -191,7 +192,12 @@ func (h *Host) hostLogImpl(ctx context.Context, m api.Module, level, ptr, length
 		h.logger.Error("extension: host_log: invalid memory read", "extension", m.Name())
 		return
 	}
-	h.logger.Log(ctx, slogLevel(level), string(bs), "extension", m.Name())
+	// Use the friendly short name if available.
+	extName := m.Name()
+	if ext := h.findExtensionByModule(m); ext != nil {
+		extName = ext.name
+	}
+	h.logger.Log(ctx, slogLevel(level), string(bs), "extension", extName)
 }
 
 // hostAllocImpl is the host_alloc import: unused in v1, always returns 0.
@@ -310,6 +316,9 @@ func (h *Host) routeHostCall(ctx context.Context, _ api.Module, ext *Extension, 
 
 	case sdk.MethodRequestPermission:
 		return h.handleRequestPermission(ext, req)
+
+	case sdk.MethodModal:
+		return h.handleModal(req)
 
 	case sdk.MethodSetSystemPrompt:
 		return h.handleSetSystemPrompt(req)
@@ -447,6 +456,20 @@ func (h *Host) handleNotify(req sdk.HostCallRequest) sdk.HostCallResponse {
 	if h.OnNotify != nil {
 		h.OnNotify(params.Text)
 	}
+	return sdk.HostCallResponse{}
+}
+
+func (h *Host) handleModal(req sdk.HostCallRequest) sdk.HostCallResponse {
+	if h.OnModal == nil {
+		return sdk.HostCallResponse{Error: "modal: not supported by host"}
+	}
+	var params struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return sdk.HostCallResponse{Error: fmt.Sprintf("modal: %v", err)}
+	}
+	h.OnModal(params.Text)
 	return sdk.HostCallResponse{}
 }
 

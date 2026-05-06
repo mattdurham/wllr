@@ -42,6 +42,9 @@ type ToolCallStartMsg struct {
 	Input    string
 }
 
+// ShowModalMsg asks the TUI to open a modal overlay with the given text.
+type ShowModalMsg struct{ Text string }
+
 // ToolCallDoneMsg is sent when a tool call completes (via OnAfterToolCall).
 type ToolCallDoneMsg struct {
 	ID      string

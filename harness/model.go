@@ -50,6 +50,10 @@ type Model struct {
 	// Autocomplete dropdown state.
 	suggestions   []Command
 	suggestionIdx int
+
+	// Modal overlay state (non-empty when modal is open).
+	modalContent string
+	modalScroll  int
 }
 
 // inputAreaHeight = top border (1) + textarea rows (3) + bottom border (1)
@@ -116,6 +120,9 @@ func (m *Model) SetProgram(p *tea.Program) {
 		}
 		m.extHost.OnAfterToolCall = func(id, _, result string, isError bool) {
 			p.Send(ToolCallDoneMsg{ID: id, IsError: isError, Output: result})
+		}
+		m.extHost.OnModal = func(text string) {
+			p.Send(ShowModalMsg{Text: text})
 		}
 	}
 	// Wire the main agent's token and done callbacks so streaming output reaches the TUI.
@@ -194,7 +201,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.statusBar.SetWidth(msg.Width)
 		return m, nil
 
+	case ShowModalMsg:
+		m.modalContent = msg.Text
+		m.modalScroll = 0
+		return m, nil
+
 	case tea.KeyPressMsg:
+		// Modal consumes all keys; esc/enter/q close it.
+		if m.modalContent != "" {
+			switch msg.String() {
+			case "esc", "enter", "q":
+				m.modalContent = ""
+				m.modalScroll = 0
+			case "up":
+				if m.modalScroll > 0 {
+					m.modalScroll--
+				}
+			case "down":
+				m.modalScroll++
+			}
+			return m, nil
+		}
+
 		// Dropdown navigation takes priority over textarea key handling.
 		if len(m.suggestions) > 0 {
 			switch msg.String() {
@@ -300,10 +328,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.submitToAgent(msg.Content)
 
 	case CommandMsg:
-		// /help is special: show command list in chat
 		if msg.Name == "help" {
-			m.chat.AddNotification(m.commands.HelpText())
-			return m, nil
+			return m, func() tea.Msg { return ShowModalMsg{Text: m.commands.HelpText()} }
 		}
 		return m, m.commands.Dispatch(msg.Name, msg.Args)
 
@@ -561,15 +587,70 @@ func (m Model) renderDropdown() string {
 // View renders the full TUI.
 func (m Model) View() tea.View {
 	var sb strings.Builder
-	sb.WriteString(strings.TrimRight(m.chat.View(), "\n") + "\n")
-	if dropdown := m.renderDropdown(); dropdown != "" {
-		sb.WriteString(dropdown)
-		sb.WriteString("\n")
+	if m.modalContent != "" {
+		sb.WriteString(strings.TrimRight(m.renderModal(), "\n") + "\n")
+	} else {
+		sb.WriteString(strings.TrimRight(m.chat.View(), "\n") + "\n")
+		if dropdown := m.renderDropdown(); dropdown != "" {
+			sb.WriteString(dropdown)
+			sb.WriteString("\n")
+		}
 	}
 	sb.WriteString(m.renderInputBox())
 	v := tea.NewView(sb.String())
 	v.AltScreen = true
 	return v
+}
+
+// renderModal renders a scrollable modal overlay that fills the chat area.
+func (m Model) renderModal() string {
+	chatH := m.height - inputAreaHeight
+	if chatH < 5 {
+		chatH = 5
+	}
+	width := m.width
+	if width < 20 {
+		width = 20
+	}
+	innerWidth := width - 2
+	contentWidth := innerWidth - 2
+	contentLines := chatH - 2 // room for top + bottom border
+
+	b := lipgloss.NewStyle().Foreground(lipgloss.Color("#AAAAAA"))
+	hint := " ↑↓ scroll · esc close "
+	fillLen := innerWidth - len([]rune(hint))
+	if fillLen < 0 {
+		fillLen = 0
+	}
+	top := b.Render("╭" + hint + strings.Repeat("─", fillLen) + "╮")
+
+	lines := strings.Split(strings.TrimRight(m.modalContent, "\n"), "\n")
+	maxScroll := len(lines) - contentLines
+	scroll := m.modalScroll
+	if scroll > maxScroll {
+		scroll = maxScroll
+	}
+	if scroll < 0 {
+		scroll = 0
+	}
+
+	var body strings.Builder
+	for i := 0; i < contentLines; i++ {
+		idx := scroll + i
+		line := ""
+		if idx < len(lines) {
+			line = lines[idx]
+		}
+		runes := []rune(line)
+		if len(runes) > contentWidth {
+			runes = runes[:contentWidth]
+		}
+		padding := strings.Repeat(" ", contentWidth-len(runes))
+		body.WriteString(b.Render("│") + " " + string(runes) + padding + " " + b.Render("│") + "\n")
+	}
+
+	bottom := b.Render("╰" + strings.Repeat("─", innerWidth) + "╯")
+	return top + "\n" + body.String() + bottom
 }
 
 // renderInputBox wraps the textarea in a white-bordered box with the status
