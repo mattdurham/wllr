@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log/slog"
 	"os"
@@ -11,7 +12,7 @@ import (
 	"path/filepath"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/fantasy"
+	fantasy "charm.land/fantasy"
 	fantasyanthropicprovider "charm.land/fantasy/providers/anthropic"
 	fantasygoogleprovider "charm.land/fantasy/providers/google"
 	fantasyopenapiprovider "charm.land/fantasy/providers/openai"
@@ -36,9 +37,12 @@ var execWASM []byte
 var envWASM []byte
 
 func main() {
+	execPrompt := flag.String("exec", "", "run a single prompt non-interactively and print the response to stdout")
+	flag.Parse()
+
 	cfg, err := LoadConfig()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "bob: "+err.Error())
+		fmt.Fprintln(os.Stderr, "wllr: "+err.Error())
 		os.Exit(1)
 	}
 
@@ -62,18 +66,18 @@ func main() {
 			fantasygoogleprovider.WithGeminiAPIKey(cfg.GeminiAPIKey),
 		)
 	default:
-		fmt.Fprintf(os.Stderr, "bob: unknown provider %q\n", cfg.Provider)
+		fmt.Fprintf(os.Stderr, "wllr: unknown provider %q\n", cfg.Provider)
 		os.Exit(1)
 	}
 
 	if provErr != nil {
-		fmt.Fprintf(os.Stderr, "bob: create provider: %v\n", provErr)
+		fmt.Fprintf(os.Stderr, "wllr: create provider: %v\n", provErr)
 		os.Exit(1)
 	}
 
 	langModel, provErr := fantasyProv.LanguageModel(ctx, cfg.Model)
 	if provErr != nil {
-		fmt.Fprintf(os.Stderr, "bob: get language model %q from provider %q: %v\n", cfg.Model, cfg.Provider, provErr)
+		fmt.Fprintf(os.Stderr, "wllr: get language model %q from provider %q: %v\n", cfg.Model, cfg.Provider, provErr)
 		os.Exit(1)
 	}
 
@@ -85,7 +89,7 @@ func main() {
 	pool.SetProviderName(cfg.Provider)
 
 	if _, spawnErr := pool.Spawn("main", langModel, agent.SpawnOpts{}); spawnErr != nil {
-		fmt.Fprintf(os.Stderr, "bob: spawn main agent: %v\n", spawnErr)
+		fmt.Fprintf(os.Stderr, "wllr: spawn main agent: %v\n", spawnErr)
 		os.Exit(1)
 	}
 
@@ -167,7 +171,7 @@ func main() {
 	}
 	for _, b := range builtins {
 		if loadErr := h.LoadBytes(ctx, b.name+".wasm", b.data, true); loadErr != nil {
-			fmt.Fprintf(os.Stderr, "bob: load built-in extension %q: %v\n", b.name, loadErr)
+			fmt.Fprintf(os.Stderr, "wllr: load built-in extension %q: %v\n", b.name, loadErr)
 		}
 	}
 
@@ -176,7 +180,7 @@ func main() {
 	if cfg.ExtensionsDir != "" {
 		entries, readErr := os.ReadDir(cfg.ExtensionsDir)
 		if readErr != nil {
-			fmt.Fprintf(os.Stderr, "bob: extensions dir %q not found, skipping\n", cfg.ExtensionsDir)
+			fmt.Fprintf(os.Stderr, "wllr: extensions dir %q not found, skipping\n", cfg.ExtensionsDir)
 		} else {
 			for _, e := range entries {
 				if e.IsDir() || filepath.Ext(e.Name()) != ".wasm" {
@@ -184,7 +188,7 @@ func main() {
 				}
 				path := filepath.Join(cfg.ExtensionsDir, e.Name())
 				if loadErr := h.Load(ctx, path); loadErr != nil {
-					fmt.Fprintf(os.Stderr, "bob: load extension %q: %v\n", e.Name(), loadErr)
+					fmt.Fprintf(os.Stderr, "wllr: load extension %q: %v\n", e.Name(), loadErr)
 					continue
 				}
 				extPaths = append(extPaths, path)
@@ -194,9 +198,44 @@ func main() {
 
 	defer func() {
 		if err := h.Close(ctx); err != nil {
-			fmt.Fprintf(os.Stderr, "bob: close extension host: %v\n", err)
+			fmt.Fprintf(os.Stderr, "wllr: close extension host: %v\n", err)
 		}
 	}()
+
+	// Log registered tools so startup issues are visible in the log.
+	{
+		registered := h.RegisteredTools()
+		names := make([]string, 0, len(registered))
+		for _, t := range registered {
+			names = append(names, t.Tool.Name)
+		}
+		slog.Info("wllr: extensions ready", "tools", names)
+	}
+
+	// --exec mode: run a single prompt non-interactively and exit.
+	if *execPrompt != "" {
+		fantasyTools := harness.BuildFantasyTools(h, func(level int, msg string) {
+			slog.Log(ctx, []slog.Level{slog.LevelDebug, slog.LevelInfo, slog.LevelWarn, slog.LevelError}[min(level, 3)], msg)
+		})
+		var agentOpts []fantasy.AgentOption
+		if len(fantasyTools) > 0 {
+			agentOpts = append(agentOpts, fantasy.WithTools(fantasyTools...))
+		}
+		fa := fantasy.NewAgent(langModel, agentOpts...)
+		_, execErr := fa.Stream(ctx, fantasy.AgentStreamCall{
+			Prompt: *execPrompt,
+			OnTextDelta: func(_, text string) error {
+				fmt.Print(text)
+				return nil
+			},
+		})
+		fmt.Println()
+		if execErr != nil {
+			fmt.Fprintf(os.Stderr, "wllr: %v\n", execErr)
+			os.Exit(1)
+		}
+		return
+	}
 
 	m := harness.New(pool, "main", h)
 	m.SetExtensionPaths(extPaths)
@@ -224,7 +263,7 @@ func main() {
 	m.SetProgram(prog)
 
 	if _, err := prog.Run(); err != nil {
-		fmt.Fprintln(os.Stderr, "bob: "+err.Error())
+		fmt.Fprintln(os.Stderr, "wllr: "+err.Error())
 		os.Exit(1)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/fantasy"
 	"github.com/mattdurham/wllr/agent"
 	"github.com/mattdurham/wllr/extension"
 	"github.com/mattdurham/wllr/sdk"
@@ -94,8 +95,7 @@ func (m *Model) SetProgram(p *tea.Program) {
 	m.wireMainAgentCallbacks(p)
 }
 
-// wireMainAgentCallbacks sets the onToken and onDone callbacks on the main agent.
-// onToken sends TokenMsg to prog; onDone sends StreamDoneMsg to prog.
+// wireMainAgentCallbacks sets the onToken, onDone, and toolsFn callbacks on the main agent.
 func (m *Model) wireMainAgentCallbacks(p *tea.Program) {
 	if m.agentPool == nil {
 		return
@@ -109,6 +109,11 @@ func (m *Model) wireMainAgentCallbacks(p *tea.Program) {
 	})
 	a.SetOnDone(func(err error) {
 		p.Send(StreamDoneMsg{Err: err})
+	})
+	extHost := m.extHost
+	logFn := m.logFn
+	a.SetToolsFn(func() []fantasy.AgentTool {
+		return BuildFantasyTools(extHost, logFn)
 	})
 }
 

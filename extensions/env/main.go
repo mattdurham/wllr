@@ -78,7 +78,28 @@ func onBeforeToolCall(raw json.RawMessage) {
 		sendToolResult(p.ToolCallID, "get_env: no response from host", true)
 		return
 	}
-	sendToolResult(p.ToolCallID, result, false)
+
+	// Unwrap HostCallResponse envelope: {"result":{"value":"..."},"error":"..."}
+	var envelope struct {
+		Result json.RawMessage `json:"result"`
+		Error  string          `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(result), &envelope); err != nil {
+		sendToolResult(p.ToolCallID, result, false)
+		return
+	}
+	if envelope.Error != "" {
+		sendToolResult(p.ToolCallID, envelope.Error, true)
+		return
+	}
+	var resp struct {
+		Value string `json:"value"`
+	}
+	if err := json.Unmarshal(envelope.Result, &resp); err != nil {
+		sendToolResult(p.ToolCallID, string(envelope.Result), false)
+		return
+	}
+	sendToolResult(p.ToolCallID, resp.Value, false)
 }
 
 func registerTool(name, desc, inputSchema string) int32 {

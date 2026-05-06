@@ -125,9 +125,9 @@ func (a *sdkToolAdapter) SetProviderOptions(opts fantasy.ProviderOptions) {
 	a.providerOptions = opts
 }
 
-// buildFantasyTools returns the current set of registered tools as []fantasy.AgentTool.
+// BuildFantasyTools returns the current set of registered tools as []fantasy.AgentTool.
 // Returns nil if extHost is nil.
-func buildFantasyTools(extHost *extension.Host, logFn func(int, string)) []fantasy.AgentTool {
+func BuildFantasyTools(extHost *extension.Host, logFn func(int, string)) []fantasy.AgentTool {
 	if extHost == nil {
 		return nil
 	}

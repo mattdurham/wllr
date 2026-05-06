@@ -38,6 +38,11 @@ type Agent struct {
 	// onDone is called when a turn completes (with nil or an error). Set via SetOnDone.
 	onDoneMu sync.RWMutex
 	onDone   func(err error)
+
+	// toolsFn, if set, is called on each Submit to get the current tool list.
+	// Takes priority over opts.Tools; allows dynamic tool registration.
+	toolsFnMu sync.RWMutex
+	toolsFn   func() []fantasy.AgentTool
 }
 
 // SetOnToken sets the callback invoked for each text delta during streaming.
@@ -54,6 +59,14 @@ func (a *Agent) SetOnDone(fn func(err error)) {
 	a.onDoneMu.Lock()
 	a.onDone = fn
 	a.onDoneMu.Unlock()
+}
+
+// SetToolsFn sets a function called on each Submit to get the current tool list.
+// When set, it takes priority over opts.Tools. Thread-safe.
+func (a *Agent) SetToolsFn(fn func() []fantasy.AgentTool) {
+	a.toolsFnMu.Lock()
+	a.toolsFn = fn
+	a.toolsFnMu.Unlock()
 }
 
 // AppendInbox adds msg to the agent's pending inbox.
@@ -131,6 +144,10 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 	onDone := a.onDone
 	a.onDoneMu.RUnlock()
 
+	a.toolsFnMu.RLock()
+	toolsFn := a.toolsFn
+	a.toolsFnMu.RUnlock()
+
 	pool := a.pool
 	lm := a.lm
 	opts := a.opts
@@ -145,10 +162,16 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 			return
 		}
 
-		// Build fantasy agent tools from opts.
+		// Resolve tools: prefer dynamic toolsFn, fall back to opts.Tools.
+		tools := opts.Tools
+		if toolsFn != nil {
+			tools = toolsFn()
+		}
+
+		// Build fantasy agent options.
 		var agentOpts []fantasy.AgentOption
-		if len(opts.Tools) > 0 {
-			agentOpts = append(agentOpts, fantasy.WithTools(opts.Tools...))
+		if len(tools) > 0 {
+			agentOpts = append(agentOpts, fantasy.WithTools(tools...))
 		}
 		if opts.SystemPrompt != "" {
 			agentOpts = append(agentOpts, fantasy.WithSystemPrompt(opts.SystemPrompt))

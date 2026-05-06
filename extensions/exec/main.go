@@ -88,12 +88,26 @@ func onBeforeToolCall(raw json.RawMessage) {
 		return
 	}
 
+	// Unwrap HostCallResponse envelope: {"result":{...},"error":"..."}
+	var envelope struct {
+		Result json.RawMessage `json:"result"`
+		Error  string          `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(result), &envelope); err != nil {
+		sendToolResult(p.ToolCallID, result, false)
+		return
+	}
+	if envelope.Error != "" {
+		sendToolResult(p.ToolCallID, envelope.Error, true)
+		return
+	}
+
 	var resp struct {
 		Output string `json:"output"`
 		Error  string `json:"error,omitempty"`
 	}
-	if err := json.Unmarshal([]byte(result), &resp); err != nil {
-		sendToolResult(p.ToolCallID, result, false)
+	if err := json.Unmarshal(envelope.Result, &resp); err != nil {
+		sendToolResult(p.ToolCallID, string(envelope.Result), false)
 		return
 	}
 	isError := resp.Error != ""

@@ -1,12 +1,12 @@
-# bob/Makefile — build the bob binary and WASM extensions.
+# Makefile — build the wllr binary and WASM extensions.
 #
-# make             — build the bob binary (requires extensions to be built first)
+# make             — build the wllr binary (requires extensions to be built first)
 # make extensions  — build WASM extensions → cmd/builtins/*.wasm
 # make all         — build extensions then the binary
 # make clean       — remove dist/ and cmd/builtins/*.wasm
 
 DIST_DIR  := dist
-BINARY    := $(DIST_DIR)/bob
+BINARY    := $(DIST_DIR)/wllr
 BUILTINS  := cmd/builtins
 
 .PHONY: all build extensions clean

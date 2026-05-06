@@ -33,8 +33,8 @@ type Config struct {
 //  1. Environment variables
 //
 // Defaults:
-//   - BOB_MODEL: claude-sonnet-4-5
-//   - BOB_PROVIDER: anthropic
+//   - WLLR_MODEL: claude-sonnet-4-5
+//   - WLLR_PROVIDER: anthropic
 //
 // Returns an error if the active provider's API key is empty.
 func LoadConfig() (*Config, error) {
@@ -42,9 +42,9 @@ func LoadConfig() (*Config, error) {
 		AnthropicAPIKey: os.Getenv("ANTHROPIC_API_KEY"),
 		OpenAIAPIKey:    os.Getenv("OPENAI_API_KEY"),
 		GeminiAPIKey:    os.Getenv("GEMINI_API_KEY"),
-		ExtensionsDir:   expandTilde(os.Getenv("BOB_EXTENSIONS_DIR")),
-		Model:           os.Getenv("BOB_MODEL"),
-		Provider:        os.Getenv("BOB_PROVIDER"),
+		ExtensionsDir:   expandTilde(os.Getenv("WLLR_EXTENSIONS_DIR")),
+		Model:           os.Getenv("WLLR_MODEL"),
+		Provider:        os.Getenv("WLLR_PROVIDER"),
 	}
 
 	if cfg.Model == "" {
