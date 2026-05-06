@@ -4,7 +4,6 @@ package harness
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/viewport"
@@ -43,9 +42,7 @@ var (
 	systemStyle = lipgloss.NewStyle().
 			Italic(true).
 			Foreground(lipgloss.Color("#888888"))
-	toolBoxStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#555555"))
+	toolBorderStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
 	toolSuccessStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00AA00"))
 	toolErrorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#CC3333"))
 	toolPendingStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
@@ -191,14 +188,31 @@ func renderToolCall(sb *strings.Builder, m chatMessage, width int) {
 	} else {
 		dot = toolSuccessStyle.Render("●")
 	}
+
 	preview := toolInputPreview(m.toolInput)
-	line := fmt.Sprintf("%s  %s  %s", dot, m.toolName, preview)
-	innerWidth := width - 4
-	if innerWidth < 10 {
-		innerWidth = 10
+
+	if width < 14 {
+		width = 14
 	}
-	sb.WriteString(toolBoxStyle.Width(innerWidth).Render(line))
+	innerWidth := width - 2 // subtract ╭ and ╮
+
+	// Visible rune count in the label: "─ " + dot(1) + "  " + toolName + "  " + preview
+	labelRunes := 2 + 1 + 2 + len([]rune(m.toolName)) + 2 + len([]rune(preview))
+	fillLen := innerWidth - labelRunes
+	if fillLen < 0 {
+		fillLen = 0
+	}
+	fill := strings.Repeat("─", fillLen)
+
+	// ╭─ ◌  toolname  preview──────╮
+	top := toolBorderStyle.Render("╭─ ") + dot + toolBorderStyle.Render("  "+m.toolName+"  "+preview+fill+"╮")
+	// ╰──────────────────────────────╯
+	bottom := toolBorderStyle.Render("╰" + strings.Repeat("─", innerWidth) + "╯")
+
+	sb.WriteString(top)
 	sb.WriteString("\n")
+	sb.WriteString(bottom)
+	sb.WriteString("\n\n")
 }
 
 func toolInputPreview(input string) string {
