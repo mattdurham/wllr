@@ -46,6 +46,10 @@ type Model struct {
 	// logFn is used for warning/debug logging from the harness (e.g. tool adapter).
 	// If nil, warnings are silently dropped.
 	logFn func(int, string)
+
+	// Autocomplete dropdown state.
+	suggestions   []Command
+	suggestionIdx int
 }
 
 // inputAreaHeight = top border (1) + textarea rows (3) + bottom border (1)
@@ -178,16 +182,46 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		chatHeight := msg.Height - inputAreaHeight - statusBarHeight
-		if chatHeight < 1 {
-			chatHeight = 1
-		}
-		m.chat.SetSize(msg.Width, chatHeight)
-		m.input.SetWidth(msg.Width - 4) // textarea sits inside the bordered box
+		m.chat.SetSize(msg.Width, m.chatHeight())
+		m.input.SetWidth(msg.Width - 4)
 		m.statusBar.SetWidth(msg.Width)
 		return m, nil
 
 	case tea.KeyPressMsg:
+		// Dropdown navigation takes priority over textarea key handling.
+		if len(m.suggestions) > 0 {
+			switch msg.String() {
+			case "up":
+				if m.suggestionIdx > 0 {
+					m.suggestionIdx--
+				}
+				return m, nil
+			case "down":
+				if m.suggestionIdx < len(m.suggestions)-1 {
+					m.suggestionIdx++
+				}
+				return m, nil
+			case "tab":
+				// Autocomplete: fill the selected command name into the input.
+				if m.suggestionIdx < len(m.suggestions) {
+					m.input.SetValue("/" + m.suggestions[m.suggestionIdx].Name + " ")
+				}
+				m.closeSuggestions()
+				return m, nil
+			case "enter":
+				// Select and immediately dispatch the command.
+				if m.suggestionIdx < len(m.suggestions) {
+					cmd := m.suggestions[m.suggestionIdx]
+					m.input.Reset()
+					m.closeSuggestions()
+					return m, cmd.Handler(nil)
+				}
+			case "esc":
+				m.closeSuggestions()
+				return m, nil
+			}
+		}
+
 		switch msg.String() {
 		case "ctrl+c":
 			if m.streaming {
@@ -253,7 +287,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case SubmitMsg:
-		// With the pool-based model, messages are always queued — no streaming guard.
+		m.closeSuggestions()
 		return m.submitToAgent(msg.Content)
 
 	case CommandMsg:
@@ -305,6 +339,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Forward to sub-models.
 	var inputCmd tea.Cmd
 	m.input, inputCmd = m.input.Update(msg)
+	m.updateSuggestions() // recompute dropdown after any key that may change input
 	cmds = append(cmds, inputCmd)
 
 	var chatCmd tea.Cmd
@@ -396,12 +431,132 @@ func (m Model) cmdReloadExtensions() tea.Cmd {
 	}
 }
 
+// chatHeight returns the number of lines available for the chat viewport,
+// accounting for the input box and any visible suggestion dropdown.
+func (m Model) chatHeight() int {
+	h := m.height - inputAreaHeight - statusBarHeight - m.dropdownHeight()
+	if h < 1 {
+		h = 1
+	}
+	return h
+}
+
+// dropdownHeight returns the rendered height of the suggestion dropdown (0 when hidden).
+func (m Model) dropdownHeight() int {
+	n := len(m.suggestions)
+	if n == 0 {
+		return 0
+	}
+	if n > 8 {
+		n = 8
+	}
+	return n + 2 // top border + entries + bottom border
+}
+
+// updateSuggestions recomputes the autocomplete list based on current input.
+// If the input starts with / and has no spaces, suggestions are filtered commands.
+func (m *Model) updateSuggestions() {
+	val := m.input.Value()
+	if !strings.HasPrefix(val, "/") || strings.ContainsRune(val, ' ') {
+		m.closeSuggestions()
+		return
+	}
+	query := strings.ToLower(val[1:])
+	var matched []Command
+	for _, cmd := range m.commands.List() {
+		if strings.HasPrefix(cmd.Name, query) {
+			matched = append(matched, cmd)
+		}
+	}
+	prevH := m.dropdownHeight()
+	m.suggestions = matched
+	if m.suggestionIdx >= len(matched) {
+		m.suggestionIdx = 0
+	}
+	if m.dropdownHeight() != prevH {
+		m.chat.SetSize(m.width, m.chatHeight())
+	}
+}
+
+// closeSuggestions hides the dropdown and restores the full chat height.
+func (m *Model) closeSuggestions() {
+	if len(m.suggestions) == 0 {
+		return
+	}
+	m.suggestions = nil
+	m.suggestionIdx = 0
+	m.chat.SetSize(m.width, m.chatHeight())
+}
+
+// renderDropdown builds the suggestion dropdown string, or "" when hidden.
+func (m Model) renderDropdown() string {
+	if len(m.suggestions) == 0 {
+		return ""
+	}
+	shown := m.suggestions
+	if len(shown) > 8 {
+		shown = shown[:8]
+	}
+
+	width := m.width
+	if width < 20 {
+		width = 20
+	}
+	innerWidth := width - 2
+	contentWidth := innerWidth - 2
+
+	border := lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
+	selStyle := lipgloss.NewStyle().Background(lipgloss.Color("#1A4A8A")).Foreground(lipgloss.Color("#FFFFFF"))
+	normStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#CCCCCC"))
+	dimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
+
+	var sb strings.Builder
+	sb.WriteString(border.Render("╭" + strings.Repeat("─", innerWidth) + "╮"))
+	sb.WriteString("\n")
+
+	for i, cmd := range shown {
+		name := "/" + cmd.Name
+		desc := cmd.Desc
+		// name in brighter colour, desc dimmed — measure combined visible width
+		sep := "  "
+		visLen := len([]rune(name)) + len(sep) + len([]rune(desc))
+		if visLen > contentWidth {
+			// Truncate description to fit
+			trim := contentWidth - len([]rune(name)) - len(sep)
+			if trim < 0 {
+				trim = 0
+			}
+			desc = string([]rune(desc)[:min(trim, len([]rune(desc)))])
+		}
+		padding := strings.Repeat(" ", max(0, contentWidth-len([]rune(name))-len(sep)-len([]rune(desc))))
+
+		sb.WriteString(border.Render("│") + " ")
+		if i == m.suggestionIdx {
+			line := name + sep + desc + padding
+			if len([]rune(line)) > contentWidth {
+				line = string([]rune(line)[:contentWidth])
+			}
+			sb.WriteString(selStyle.Render(line))
+		} else {
+			sb.WriteString(normStyle.Render(name))
+			sb.WriteString(dimStyle.Render(sep + desc))
+			sb.WriteString(padding)
+		}
+		sb.WriteString(" " + border.Render("│") + "\n")
+	}
+
+	sb.WriteString(border.Render("╰" + strings.Repeat("─", innerWidth) + "╯"))
+	return sb.String()
+}
+
 // View renders the full TUI.
 func (m Model) View() tea.View {
 	var sb strings.Builder
-	// Normalise chat viewport output to exactly one trailing newline so the
-	// input box top border always starts on its own line.
 	sb.WriteString(strings.TrimRight(m.chat.View(), "\n") + "\n")
+	if dropdown := m.renderDropdown(); dropdown != "" {
+		sb.WriteString(dropdown)
+		sb.WriteString("\n")
+	}
 	sb.WriteString(m.renderInputBox())
 	v := tea.NewView(sb.String())
 	v.AltScreen = true

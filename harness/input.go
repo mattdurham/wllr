@@ -43,6 +43,9 @@ func (i InputArea) Value() string { return i.ta.Value() }
 // Reset clears the textarea.
 func (i *InputArea) Reset() { i.ta.Reset() }
 
+// SetValue replaces the textarea content with v and moves the cursor to the end.
+func (i *InputArea) SetValue(v string) { i.ta.SetValue(v) }
+
 // Update handles keyboard input for the input area.
 // It intercepts Enter (submit) and Esc (clear input or abort active stream on double-press)
 // before forwarding remaining events to the textarea.
