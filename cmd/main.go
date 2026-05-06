@@ -36,12 +36,6 @@ var execWASM []byte
 //go:embed builtins/env.wasm
 var envWASM []byte
 
-//go:embed builtins/context.wasm
-var contextWASM []byte
-
-//go:embed builtins/skills.wasm
-var skillsWASM []byte
-
 func main() {
 	execPrompt := flag.String("exec", "", "run a single prompt non-interactively and print the response to stdout")
 	flag.Parse()
@@ -179,8 +173,6 @@ func main() {
 		{"writefile", writefileWASM},
 		{"exec", execWASM},
 		{"env", envWASM},
-		{"context", contextWASM},
-		{"skills", skillsWASM},
 	}
 	for _, b := range builtins {
 		if loadErr := h.LoadBytes(ctx, b.name+".wasm", b.data, true); loadErr != nil {
@@ -188,25 +180,12 @@ func main() {
 		}
 	}
 
-	// Load .wasm extensions from the configured directory.
+	// Load extensions from ~/.wllr/extensions/ (subdirectory-per-extension layout)
+	// and from WLLR_EXTENSIONS_DIR (flat layout, for custom overrides).
 	var extPaths []string
-	if cfg.ExtensionsDir != "" {
-		entries, readErr := os.ReadDir(cfg.ExtensionsDir)
-		if readErr != nil {
-			fmt.Fprintf(os.Stderr, "wllr: extensions dir %q not found, skipping\n", cfg.ExtensionsDir)
-		} else {
-			for _, e := range entries {
-				if e.IsDir() || filepath.Ext(e.Name()) != ".wasm" {
-					continue
-				}
-				path := filepath.Join(cfg.ExtensionsDir, e.Name())
-				if loadErr := h.Load(ctx, path); loadErr != nil {
-					fmt.Fprintf(os.Stderr, "wllr: load extension %q: %v\n", e.Name(), loadErr)
-					continue
-				}
-				extPaths = append(extPaths, path)
-			}
-		}
+	extPaths = append(extPaths, loadExtensionsFromSubdirs(ctx, h, wllrExtensionsDir())...)
+	if cfg.ExtensionsDir != "" && cfg.ExtensionsDir != wllrExtensionsDir() {
+		extPaths = append(extPaths, loadExtensionsFlat(ctx, h, cfg.ExtensionsDir)...)
 	}
 
 	defer func() {
