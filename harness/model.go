@@ -218,7 +218,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.modalScroll--
 				}
 			case "down":
-				m.modalScroll++
+				chatH := m.height - inputAreaHeight
+				if chatH < 5 {
+					chatH = 5
+				}
+				contentLines := chatH - 2
+				lines := strings.Split(strings.TrimRight(m.modalContent, "\n"), "\n")
+				if max := len(lines) - contentLines; m.modalScroll < max {
+					m.modalScroll++
+				}
 			}
 			return m, nil
 		}
@@ -617,22 +625,29 @@ func (m Model) renderModal() string {
 	contentLines := chatH - 2 // room for top + bottom border
 
 	b := lipgloss.NewStyle().Foreground(lipgloss.Color("#AAAAAA"))
+	lines := strings.Split(strings.TrimRight(m.modalContent, "\n"), "\n")
+	maxScroll := len(lines) - contentLines
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	scroll := m.modalScroll
+	if scroll > maxScroll {
+		scroll = maxScroll
+	}
+
 	hint := " ↑↓ scroll · esc close "
+	if maxScroll > 0 {
+		pct := 0
+		if maxScroll > 0 {
+			pct = scroll * 100 / maxScroll
+		}
+		hint = fmt.Sprintf(" ↑↓ scroll (%d%%) · esc close ", pct)
+	}
 	fillLen := innerWidth - len([]rune(hint))
 	if fillLen < 0 {
 		fillLen = 0
 	}
 	top := b.Render("╭" + hint + strings.Repeat("─", fillLen) + "╮")
-
-	lines := strings.Split(strings.TrimRight(m.modalContent, "\n"), "\n")
-	maxScroll := len(lines) - contentLines
-	scroll := m.modalScroll
-	if scroll > maxScroll {
-		scroll = maxScroll
-	}
-	if scroll < 0 {
-		scroll = 0
-	}
 
 	var body strings.Builder
 	for i := 0; i < contentLines; i++ {
