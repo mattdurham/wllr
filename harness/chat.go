@@ -3,6 +3,8 @@ package harness
 // NOTE: Any changes to this file must be reflected in the corresponding SPECS.md or NOTES.md.
 
 import (
+	"encoding/json"
+	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/viewport"
@@ -15,6 +17,12 @@ import (
 type chatMessage struct {
 	role    sdk.Role
 	content string
+	// populated when role == "tool"
+	toolID    string
+	toolName  string
+	toolInput string
+	toolDone  bool
+	toolError bool
 }
 
 // ChatView renders the conversation history in a scrollable viewport.
@@ -35,6 +43,12 @@ var (
 	systemStyle = lipgloss.NewStyle().
 			Italic(true).
 			Foreground(lipgloss.Color("#888888"))
+	toolBoxStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#555555"))
+	toolSuccessStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00AA00"))
+	toolErrorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#CC3333"))
+	toolPendingStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
 )
 
 // NewChatView creates a ChatView with the given dimensions.
@@ -85,6 +99,30 @@ func (c *ChatView) AddNotification(text string) {
 	c.vp.GotoBottom()
 }
 
+// AddToolCall appends a pending tool call entry to the chat history.
+func (c *ChatView) AddToolCall(id, toolName, input string) {
+	c.messages = append(c.messages, chatMessage{
+		role:      "tool",
+		toolID:    id,
+		toolName:  toolName,
+		toolInput: input,
+	})
+	c.refreshContent()
+	c.vp.GotoBottom()
+}
+
+// UpdateToolCall marks an existing tool call entry as done (success or error).
+func (c *ChatView) UpdateToolCall(id string, isError bool) {
+	for i := range c.messages {
+		if c.messages[i].role == "tool" && c.messages[i].toolID == id {
+			c.messages[i].toolDone = true
+			c.messages[i].toolError = isError
+			break
+		}
+	}
+	c.refreshContent()
+}
+
 // Clear resets the chat history.
 func (c *ChatView) Clear() {
 	c.messages = nil
@@ -129,12 +167,58 @@ func renderMessage(sb *strings.Builder, m chatMessage, width int) {
 		prefix := userStyle.Render("You: ")
 		sb.WriteString(prefix)
 		sb.WriteString(lipgloss.Wrap(m.content, width-5, ""))
+		sb.WriteString("\n\n")
 	case sdk.RoleAssistant:
-		prefix := assistantStyle.Render("Bob: ")
+		prefix := assistantStyle.Render("wllr: ")
 		sb.WriteString(prefix)
-		sb.WriteString(lipgloss.Wrap(m.content, width-5, ""))
+		sb.WriteString(lipgloss.Wrap(m.content, width-6, ""))
+		sb.WriteString("\n\n")
+	case "tool":
+		renderToolCall(sb, m, width)
+		return // renderToolCall writes its own newlines
 	default:
 		sb.WriteString(systemStyle.Render(lipgloss.Wrap("» "+m.content, width, "")))
+		sb.WriteString("\n\n")
 	}
-	sb.WriteString("\n\n")
+}
+
+func renderToolCall(sb *strings.Builder, m chatMessage, width int) {
+	var dot string
+	if !m.toolDone {
+		dot = toolPendingStyle.Render("◌")
+	} else if m.toolError {
+		dot = toolErrorStyle.Render("●")
+	} else {
+		dot = toolSuccessStyle.Render("●")
+	}
+	preview := toolInputPreview(m.toolInput)
+	line := fmt.Sprintf("%s  %s  %s", dot, m.toolName, preview)
+	innerWidth := width - 4
+	if innerWidth < 10 {
+		innerWidth = 10
+	}
+	sb.WriteString(toolBoxStyle.Width(innerWidth).Render(line))
+	sb.WriteString("\n")
+}
+
+func toolInputPreview(input string) string {
+	var m map[string]json.RawMessage
+	if json.Unmarshal([]byte(input), &m) == nil {
+		for _, key := range []string{"command", "path", "name", "query", "text", "content", "url"} {
+			if v, ok := m[key]; ok {
+				var s string
+				if json.Unmarshal(v, &s) == nil && s != "" {
+					if len([]rune(s)) > 20 {
+						return string([]rune(s)[:20]) + "…"
+					}
+					return s
+				}
+			}
+		}
+	}
+	r := []rune(input)
+	if len(r) > 20 {
+		return string(r[:20]) + "…"
+	}
+	return input
 }

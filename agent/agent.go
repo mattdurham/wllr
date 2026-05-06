@@ -39,6 +39,10 @@ type Agent struct {
 	onDoneMu sync.RWMutex
 	onDone   func(err error)
 
+	// onToolCall is called when a tool call is dispatched. Set via SetOnToolCall.
+	onToolCallMu sync.RWMutex
+	onToolCallFn func(id, toolName, input string)
+
 	// toolsFn, if set, is called on each Submit to get the current tool list.
 	// Takes priority over opts.Tools; allows dynamic tool registration.
 	toolsFnMu sync.RWMutex
@@ -59,6 +63,15 @@ func (a *Agent) SetOnDone(fn func(err error)) {
 	a.onDoneMu.Lock()
 	a.onDone = fn
 	a.onDoneMu.Unlock()
+}
+
+// SetOnToolCall sets the callback invoked when the agent dispatches a tool call.
+// The callback receives the tool call ID, tool name, and JSON input string.
+// Thread-safe; may be called before each Submit.
+func (a *Agent) SetOnToolCall(fn func(id, toolName, input string)) {
+	a.onToolCallMu.Lock()
+	a.onToolCallFn = fn
+	a.onToolCallMu.Unlock()
 }
 
 // SetToolsFn sets a function called on each Submit to get the current tool list.
@@ -148,6 +161,10 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 	toolsFn := a.toolsFn
 	a.toolsFnMu.RUnlock()
 
+	a.onToolCallMu.RLock()
+	onToolCall := a.onToolCallFn
+	a.onToolCallMu.RUnlock()
+
 	pool := a.pool
 	lm := a.lm
 	opts := a.opts
@@ -201,6 +218,12 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 				}
 				if onToken != nil {
 					onToken(text)
+				}
+				return nil
+			},
+			OnToolCall: func(toolCall fantasy.ToolCallContent) error {
+				if onToolCall != nil && !toolCall.ProviderExecuted {
+					onToolCall(toolCall.ToolCallID, toolCall.ToolName, toolCall.Input)
 				}
 				return nil
 			},

@@ -35,6 +35,19 @@ type CommandMsg struct {
 	Args []string
 }
 
+// ToolCallStartMsg is sent when the agent dispatches a tool call.
+type ToolCallStartMsg struct {
+	ID       string
+	ToolName string
+	Input    string
+}
+
+// ToolCallDoneMsg is sent when a tool call completes (via OnAfterToolCall).
+type ToolCallDoneMsg struct {
+	ID      string
+	IsError bool
+}
+
 // abortStreamMsg is sent by the OnAbort callback to cancel the active agent turn
 // through the bubbletea program.
 type abortStreamMsg struct{}

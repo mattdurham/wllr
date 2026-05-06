@@ -81,7 +81,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	slog.SetDefault(slog.New(newTeeHandler(os.Stderr)))
 
 	// Create agent pool and spawn the main agent.
 	pool := agent.NewPool()

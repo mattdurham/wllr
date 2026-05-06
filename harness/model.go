@@ -90,6 +90,9 @@ func (m *Model) SetProgram(p *tea.Program) {
 		m.extHost.OnAbort = func() {
 			p.Send(abortStreamMsg{})
 		}
+		m.extHost.OnAfterToolCall = func(id, _, _ string, isError bool) {
+			p.Send(ToolCallDoneMsg{ID: id, IsError: isError})
+		}
 	}
 	// Wire the main agent's token and done callbacks so streaming output reaches the TUI.
 	m.wireMainAgentCallbacks(p)
@@ -114,6 +117,9 @@ func (m *Model) wireMainAgentCallbacks(p *tea.Program) {
 	logFn := m.logFn
 	a.SetToolsFn(func() []fantasy.AgentTool {
 		return BuildFantasyTools(extHost, logFn)
+	})
+	a.SetOnToolCall(func(id, toolName, input string) {
+		p.Send(ToolCallStartMsg{ID: id, ToolName: toolName, Input: input})
 	})
 }
 
@@ -257,6 +263,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.agentPool != nil {
 			_ = m.agentPool.Cancel(m.mainAgentID)
 		}
+		return m, nil
+
+	case ToolCallStartMsg:
+		m.chat.AddToolCall(msg.ID, msg.ToolName, msg.Input)
+		return m, nil
+
+	case ToolCallDoneMsg:
+		m.chat.UpdateToolCall(msg.ID, msg.IsError)
 		return m, nil
 	}
 
