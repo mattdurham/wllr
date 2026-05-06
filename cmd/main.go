@@ -145,6 +145,30 @@ func main() {
 		return pool.TokenCount()
 	}
 
+	// Wire team management callbacks.
+	h.OnTeamCreate = func(id, name string) error {
+		_, err := pool.CreateTeam(id)
+		return err
+	}
+	h.OnTeamClose = func(id string) error {
+		return pool.CloseTeam(ctx, id)
+	}
+	h.OnTeamAddMember = func(teamID, agentID string) error {
+		t := pool.GetTeam(teamID)
+		if t == nil {
+			return fmt.Errorf("team not found: %s", teamID)
+		}
+		return t.AddMember(agentID)
+	}
+	h.OnTeamRemoveMember = func(teamID, agentID string) error {
+		t := pool.GetTeam(teamID)
+		if t == nil {
+			return fmt.Errorf("team not found: %s", teamID)
+		}
+		t.RemoveMember(agentID)
+		return nil
+	}
+
 	// Wire host capabilities.
 	h.OnExec = func(command, dir string) (string, error) {
 		if dir == "" {
