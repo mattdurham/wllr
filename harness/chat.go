@@ -39,13 +39,16 @@ type ChatView struct {
 }
 
 var (
-	assistantStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
-	systemStyle      = lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("#888888"))
-	userBorderStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#00AA00"))
-	toolBorderStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
-	toolSuccessStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00AA00"))
-	toolErrorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#CC3333"))
-	toolPendingStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
+	assistantStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#89CFF0")) // light blue
+	assistantOldStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")) // dimmed
+	systemStyle       = lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("#555555"))
+	userBorderStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#00AA00"))
+	userBorderOldStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#444444"))
+	oldTextStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
+	toolBorderStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
+	toolSuccessStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#00AA00"))
+	toolErrorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#CC3333"))
+	toolPendingStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
 )
 
 // NewChatView creates a ChatView with the given dimensions.
@@ -165,39 +168,53 @@ func (c ChatView) View() string {
 }
 
 // refreshContent rebuilds the viewport content from messages.
+// Messages before the most recent user message are rendered "old" (dimmed).
 func (c *ChatView) refreshContent() {
+	// Find the start of the most recent turn.
+	recentStart := 0
+	for i := len(c.messages) - 1; i >= 0; i-- {
+		if c.messages[i].role == sdk.RoleUser {
+			recentStart = i
+			break
+		}
+	}
+
 	var sb strings.Builder
-	for _, m := range c.messages {
-		renderMessage(&sb, m, c.width)
+	for i, m := range c.messages {
+		renderMessage(&sb, m, c.width, i < recentStart)
 	}
 	if c.current != "" {
-		renderMessage(&sb, chatMessage{role: sdk.RoleAssistant, content: c.current}, c.width)
+		renderMessage(&sb, chatMessage{role: sdk.RoleAssistant, content: c.current}, c.width, false)
 	}
 	c.vp.SetContent(sb.String())
 }
 
-func renderMessage(sb *strings.Builder, m chatMessage, width int) {
+func renderMessage(sb *strings.Builder, m chatMessage, width int, old bool) {
 	const minWidth = 20
 	if width < minWidth {
 		width = minWidth
 	}
 	switch m.role {
 	case sdk.RoleUser:
-		renderUserMessage(sb, m.content, width)
+		renderUserMessage(sb, m.content, width, old)
 		return
 	case sdk.RoleAssistant:
-		sb.WriteString(assistantStyle.Render(lipgloss.Wrap(m.content, width, "")))
+		style := assistantStyle
+		if old {
+			style = assistantOldStyle
+		}
+		sb.WriteString(style.Render(lipgloss.Wrap(m.content, width, "")))
 		sb.WriteString("\n\n")
 	case "tool":
 		renderToolCall(sb, m, width)
-		return // renderToolCall writes its own newlines
+		return
 	default:
 		sb.WriteString(systemStyle.Render(lipgloss.Wrap("» "+m.content, width, "")))
 		sb.WriteString("\n\n")
 	}
 }
 
-func renderUserMessage(sb *strings.Builder, content string, width int) {
+func renderUserMessage(sb *strings.Builder, content string, width int, old bool) {
 	if width < 14 {
 		width = 14
 	}
@@ -207,7 +224,14 @@ func renderUserMessage(sb *strings.Builder, content string, width int) {
 		contentWidth = 1
 	}
 
-	sb.WriteString(userBorderStyle.Render("╭" + strings.Repeat("─", innerWidth) + "╮"))
+	border := userBorderStyle
+	text := lipgloss.NewStyle().Foreground(lipgloss.Color("#CCFFCC")) // soft green tint
+	if old {
+		border = userBorderOldStyle
+		text = oldTextStyle
+	}
+
+	sb.WriteString(border.Render("╭" + strings.Repeat("─", innerWidth) + "╮"))
 	sb.WriteString("\n")
 
 	wrapped := lipgloss.Wrap(content, contentWidth, "")
@@ -217,13 +241,13 @@ func renderUserMessage(sb *strings.Builder, content string, width int) {
 			runes = runes[:contentWidth]
 		}
 		padding := strings.Repeat(" ", contentWidth-len(runes))
-		sb.WriteString(userBorderStyle.Render("│"))
-		sb.WriteString(" " + string(runes) + padding + " ")
-		sb.WriteString(userBorderStyle.Render("│"))
+		sb.WriteString(border.Render("│"))
+		sb.WriteString(" " + text.Render(string(runes)) + padding + " ")
+		sb.WriteString(border.Render("│"))
 		sb.WriteString("\n")
 	}
 
-	sb.WriteString(userBorderStyle.Render("╰" + strings.Repeat("─", innerWidth) + "╯"))
+	sb.WriteString(border.Render("╰" + strings.Repeat("─", innerWidth) + "╯"))
 	sb.WriteString("\n\n")
 }
 
