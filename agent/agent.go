@@ -47,6 +47,11 @@ type Agent struct {
 	// Takes priority over opts.Tools; allows dynamic tool registration.
 	toolsFnMu sync.RWMutex
 	toolsFn   func() []fantasy.AgentTool
+
+	// systemPrompt overrides opts.SystemPrompt when non-empty.
+	// Set via SetSystemPrompt; safe to call before the first Submit.
+	systemPromptMu sync.RWMutex
+	systemPrompt   string
 }
 
 // SetOnToken sets the callback invoked for each text delta during streaming.
@@ -63,6 +68,14 @@ func (a *Agent) SetOnDone(fn func(err error)) {
 	a.onDoneMu.Lock()
 	a.onDone = fn
 	a.onDoneMu.Unlock()
+}
+
+// SetSystemPrompt sets the system prompt for all subsequent turns, overriding
+// the value in SpawnOpts. Thread-safe; safe to call before the first Submit.
+func (a *Agent) SetSystemPrompt(prompt string) {
+	a.systemPromptMu.Lock()
+	a.systemPrompt = prompt
+	a.systemPromptMu.Unlock()
 }
 
 // SetOnToolCall sets the callback invoked when the agent dispatches a tool call.
@@ -185,13 +198,21 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 			tools = toolsFn()
 		}
 
+		// Resolve system prompt: dynamic override takes priority over SpawnOpts.
+		a.systemPromptMu.RLock()
+		sysPrompt := a.systemPrompt
+		a.systemPromptMu.RUnlock()
+		if sysPrompt == "" {
+			sysPrompt = opts.SystemPrompt
+		}
+
 		// Build fantasy agent options.
 		var agentOpts []fantasy.AgentOption
 		if len(tools) > 0 {
 			agentOpts = append(agentOpts, fantasy.WithTools(tools...))
 		}
-		if opts.SystemPrompt != "" {
-			agentOpts = append(agentOpts, fantasy.WithSystemPrompt(opts.SystemPrompt))
+		if sysPrompt != "" {
+			agentOpts = append(agentOpts, fantasy.WithSystemPrompt(sysPrompt))
 		}
 
 		fa := fantasy.NewAgent(lm, agentOpts...)

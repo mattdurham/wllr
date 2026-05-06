@@ -196,6 +196,8 @@ const (
 	// MethodConfigRead reads the calling extension's config group from the shared config file.
 	// No params — the group is determined by the extension's registered name.
 	MethodConfigRead = "config_read"
+	// MethodSetSystemPrompt sets the system prompt on the main agent.
+	MethodSetSystemPrompt = "set_system_prompt"
 	// MethodExec executes a shell command on the host. Requires PermExec.
 	MethodExec = "exec"
 	// MethodBeforeToolCall is sent by extensions that want to intercept tool

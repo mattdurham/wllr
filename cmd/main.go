@@ -36,6 +36,9 @@ var execWASM []byte
 //go:embed builtins/env.wasm
 var envWASM []byte
 
+//go:embed builtins/context.wasm
+var contextWASM []byte
+
 func main() {
 	execPrompt := flag.String("exec", "", "run a single prompt non-interactively and print the response to stdout")
 	flag.Parse()
@@ -158,6 +161,11 @@ func main() {
 		return string(data), nil
 	}
 	h.OnConfigRead = loadConfigGroup
+	h.OnSetSystemPrompt = func(prompt string) {
+		if a := pool.Get("main"); a != nil {
+			a.SetSystemPrompt(prompt)
+		}
+	}
 
 	// Load built-in trusted extensions first.
 	builtins := []struct {
@@ -168,6 +176,7 @@ func main() {
 		{"writefile", writefileWASM},
 		{"exec", execWASM},
 		{"env", envWASM},
+		{"context", contextWASM},
 	}
 	for _, b := range builtins {
 		if loadErr := h.LoadBytes(ctx, b.name+".wasm", b.data, true); loadErr != nil {
@@ -220,6 +229,9 @@ func main() {
 		var agentOpts []fantasy.AgentOption
 		if len(fantasyTools) > 0 {
 			agentOpts = append(agentOpts, fantasy.WithTools(fantasyTools...))
+		}
+		if sp := loadSystemPrompt(); sp != "" {
+			agentOpts = append(agentOpts, fantasy.WithSystemPrompt(sp))
 		}
 		fa := fantasy.NewAgent(langModel, agentOpts...)
 		_, execErr := fa.Stream(ctx, fantasy.AgentStreamCall{
