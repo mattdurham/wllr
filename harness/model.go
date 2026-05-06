@@ -376,9 +376,9 @@ func (m Model) cmdReloadExtensions() tea.Cmd {
 // View renders the full TUI.
 func (m Model) View() tea.View {
 	var sb strings.Builder
-	// TrimRight strips the trailing newline the viewport appends, which would
-	// otherwise consume the top border line of the input box.
-	sb.WriteString(strings.TrimRight(m.chat.View(), "\n"))
+	// Normalise chat viewport output to exactly one trailing newline so the
+	// input box top border always starts on its own line.
+	sb.WriteString(strings.TrimRight(m.chat.View(), "\n") + "\n")
 	sb.WriteString(m.renderInputBox())
 	v := tea.NewView(sb.String())
 	v.AltScreen = true
