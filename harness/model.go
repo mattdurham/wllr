@@ -48,8 +48,9 @@ type Model struct {
 	logFn func(int, string)
 
 	// Autocomplete dropdown state.
-	suggestions   []Command
-	suggestionIdx int
+	suggestions    []Command
+	suggestionIdx  int
+	dropdownOffset int // first visible suggestion index
 
 	// Modal overlay state (non-empty when modal is open).
 	modalContent string
@@ -237,11 +238,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "up":
 				if m.suggestionIdx > 0 {
 					m.suggestionIdx--
+					if m.suggestionIdx < m.dropdownOffset {
+						m.dropdownOffset = m.suggestionIdx
+					}
 				}
 				return m, nil
 			case "down":
 				if m.suggestionIdx < len(m.suggestions)-1 {
 					m.suggestionIdx++
+					const maxShow = 8
+					if m.suggestionIdx >= m.dropdownOffset+maxShow {
+						m.dropdownOffset = m.suggestionIdx - maxShow + 1
+					}
 				}
 				return m, nil
 			case "tab":
@@ -528,6 +536,7 @@ func (m *Model) closeSuggestions() {
 	}
 	m.suggestions = nil
 	m.suggestionIdx = 0
+	m.dropdownOffset = 0
 	m.chat.SetSize(m.width, m.chatHeight())
 }
 
@@ -536,10 +545,13 @@ func (m Model) renderDropdown() string {
 	if len(m.suggestions) == 0 {
 		return ""
 	}
-	shown := m.suggestions
-	if len(shown) > 8 {
-		shown = shown[:8]
+	const maxShow = 8
+	start := m.dropdownOffset
+	end := start + maxShow
+	if end > len(m.suggestions) {
+		end = len(m.suggestions)
 	}
+	shown := m.suggestions[start:end]
 
 	width := m.width
 	if width < 20 {
@@ -574,7 +586,7 @@ func (m Model) renderDropdown() string {
 		padding := strings.Repeat(" ", max(0, contentWidth-len([]rune(name))-len(sep)-len([]rune(desc))))
 
 		sb.WriteString(border.Render("│") + " ")
-		if i == m.suggestionIdx {
+		if start+i == m.suggestionIdx {
 			line := name + sep + desc + padding
 			if len([]rune(line)) > contentWidth {
 				line = string([]rune(line)[:contentWidth])
