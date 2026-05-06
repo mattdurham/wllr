@@ -36,6 +36,9 @@ var execWASM []byte
 //go:embed builtins/env.wasm
 var envWASM []byte
 
+//go:embed builtins/agents.wasm
+var agentsWASM []byte
+
 func main() {
 	execPrompt := flag.String("exec", "", "run a single prompt non-interactively and print the response to stdout")
 	flag.Parse()
@@ -181,6 +184,7 @@ func main() {
 		{"writefile", writefileWASM},
 		{"exec", execWASM},
 		{"env", envWASM},
+		{"agents", agentsWASM},
 	}
 	for _, b := range builtins {
 		if loadErr := h.LoadBytes(ctx, b.name+".wasm", b.data, true); loadErr != nil {
