@@ -37,3 +37,6 @@ cmd/builtins/*.wasm
 
 # macOS
 .DS_Store
+
+# bob/pi working directory
+.bob/
