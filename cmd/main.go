@@ -99,6 +99,28 @@ func main() {
 	// Build extension host — extension logs flow through slog with "extension" attribute.
 	h := extension.NewHost(nil)
 
+	// Initialize MCP manager and load MCP servers from config.
+	mcpMgr := extension.NewMCPManager(h, nil)
+	defer mcpMgr.Close()
+
+	// Load MCP servers from "mcp" config group.
+	mcpCfgData, mcpCfgErr := loadConfigGroup("mcp")
+	if mcpCfgErr == nil && len(mcpCfgData) > 2 {
+		var mcpCfg struct {
+			Servers []extension.MCPServerConfig `json:"servers"`
+		}
+		if err := json.Unmarshal(mcpCfgData, &mcpCfg); err != nil {
+			slog.Warn("mcp: parse config error", "err", err)
+		} else if len(mcpCfg.Servers) > 0 {
+			if err := mcpMgr.LoadServers(ctx, mcpCfg.Servers); err != nil {
+				slog.Warn("mcp: load servers error", "err", err)
+			}
+		}
+	}
+
+	// Hook MCP tool handling into extension host.
+	h.OnMCPToolCall = mcpMgr.HandleToolCall
+
 	// Declare prog early so OnAgentSpawn closure can reference it.
 	// It will be assigned before prog.Run() is called.
 	var prog *tea.Program
@@ -166,8 +188,6 @@ func main() {
 			a.SetSystemPrompt(prompt)
 		}
 	}
-
-	// Create the harness model BEFORE loading extensions so that
 	// OnRegisterCommand (wired in harness.New) is set when _init and
 	// session_start handlers call register_command.
 	m := harness.New(pool, "main", h)

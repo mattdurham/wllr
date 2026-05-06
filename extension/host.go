@@ -94,6 +94,10 @@ type Host struct {
 	OnGetEnv          func(name string) (string, error)
 	OnConfigRead      func(group string) (json.RawMessage, error)
 
+
+	// OnMCPToolCall is called before dispatching to extensions.
+	// If it returns (result, isError, true), the call is handled and not dispatched.
+	OnMCPToolCall func(ctx context.Context, toolName string, input json.RawMessage) (string, bool, bool)
 	// Agent management callbacks. Set by the pool layer.
 	// OnAgentSpawn creates a new named agent with the given system prompt and model.
 	OnAgentSpawn func(id, name, systemPrompt, modelName string) error
@@ -877,6 +881,28 @@ func loadManifestPermissions(wasmPath string, logger *slog.Logger) []sdk.Permiss
 // It dispatches EventBeforeToolCall so extensions may intercept the call.
 // The call is cancelled and an error is returned if ctx is cancelled.
 func (h *Host) ExecuteTool(ctx context.Context, toolCallID, toolName string, input json.RawMessage) (toolResult, error) {
+	// Check MCP handler first.
+	if h.OnMCPToolCall != nil {
+		result, isError, handled := h.OnMCPToolCall(ctx, toolName, input)
+		if handled {
+			res := toolResult{Result: result, IsError: isError}
+			// Dispatch after_tool_call event for MCP tools too.
+			afterPayload, _ := json.Marshal(sdk.AfterToolCallPayload{
+				ToolCallID: toolCallID,
+				ToolName:   toolName,
+				Result:     result,
+				IsError:    isError,
+			})
+			afterEvt := sdk.Event{Type: sdk.EventAfterToolCall, Payload: afterPayload}
+			_, _ = h.DispatchEvent(ctx, afterEvt)
+
+			if h.OnAfterToolCall != nil {
+				h.OnAfterToolCall(toolCallID, toolName, result, isError)
+			}
+			return res, nil
+		}
+	}
+
 	ch := make(chan toolResult, 1)
 
 	h.pendingMu.Lock()
@@ -917,7 +943,7 @@ func (h *Host) ExecuteTool(ctx context.Context, toolCallID, toolName string, inp
 		delete(h.pendingTools, toolCallID)
 		h.pendingMu.Unlock()
 		return toolResult{}, ctx.Err()
-	}
+}
 }
 
 // GetRegisteredTools returns a snapshot of all currently registered tools.
