@@ -662,7 +662,18 @@ func (m Model) View() tea.View {
 		}
 	}
 	sb.WriteString(m.renderInputBox())
-	v := tea.NewView(sb.String())
+
+	// Pad to exactly m.height lines so no old content bleeds through when
+	// the viewport shrinks (e.g. dropdown appears/disappears).
+	out := sb.String()
+	if m.height > 0 {
+		lineCount := strings.Count(out, "\n")
+		if lineCount < m.height-1 {
+			out += strings.Repeat("\n", m.height-1-lineCount)
+		}
+	}
+
+	v := tea.NewView(out)
 	v.AltScreen = true
 	return v
 }

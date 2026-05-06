@@ -50,6 +50,7 @@ var (
 	userBorderOldStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#444444"))
 	oldTextStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
 	toolBorderStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
+	toolBorderOldStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#333333"))
 	toolSuccessStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#00AA00"))
 	toolErrorStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#CC3333"))
 	toolPendingStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
@@ -289,9 +290,11 @@ func renderUserMessage(sb *strings.Builder, content string, width int, old bool)
 }
 
 func renderToolCall(sb *strings.Builder, m chatMessage, width int, old bool) {
+	border := toolBorderStyle
 	var dot string
 	if old {
-		dot = toolBorderStyle.Render("●")
+		border = toolBorderOldStyle
+		dot = toolBorderOldStyle.Render("●")
 	} else if !m.toolDone {
 		dot = toolPendingStyle.Render("◌")
 	} else if m.toolError {
@@ -316,7 +319,7 @@ func renderToolCall(sb *strings.Builder, m chatMessage, width int, old bool) {
 	fill := strings.Repeat("─", fillLen)
 
 	// ╭─ ◌  toolname  preview──────╮
-	top := toolBorderStyle.Render("╭─ ") + dot + toolBorderStyle.Render("  "+m.toolName+"  "+preview+fill+"╮")
+	top := border.Render("╭─ ") + dot + border.Render("  "+m.toolName+"  "+preview+fill+"╮")
 	sb.WriteString(top)
 	sb.WriteString("\n")
 
@@ -326,28 +329,25 @@ func renderToolCall(sb *strings.Builder, m chatMessage, width int, old bool) {
 		if contentWidth < 1 {
 			contentWidth = 1
 		}
+		textSt := asstTextStyle
+		if old {
+			textSt = asstTextOldStyle
+		}
 		for _, line := range strings.Split(strings.TrimRight(m.toolResponse, "\n"), "\n") {
 			runes := []rune(line)
 			if len(runes) > contentWidth {
 				runes = runes[:contentWidth]
 			}
 			padding := strings.Repeat(" ", contentWidth-len(runes))
-			sb.WriteString(toolBorderStyle.Render("│"))
-			sb.WriteString(" ")
-			textSt := asstTextStyle
-			if old {
-				textSt = asstTextOldStyle
-			}
+			sb.WriteString(border.Render("│") + " ")
 			sb.WriteString(textSt.Render(string(runes)))
-			sb.WriteString(padding)
-			sb.WriteString(" ")
-			sb.WriteString(toolBorderStyle.Render("│"))
-			sb.WriteString("\n")
+			sb.WriteString(padding + " ")
+			sb.WriteString(border.Render("│") + "\n")
 		}
 	}
 
 	// ╰──────────────────────────────╯
-	bottom := toolBorderStyle.Render("╰" + strings.Repeat("─", innerWidth) + "╯")
+	bottom := border.Render("╰" + strings.Repeat("─", innerWidth) + "╯")
 	sb.WriteString(bottom)
 	sb.WriteString("\n\n")
 }
