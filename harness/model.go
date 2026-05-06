@@ -402,9 +402,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.updateSuggestions() // recompute dropdown after any key that may change input
 	cmds = append(cmds, inputCmd)
 
-	var chatCmd tea.Cmd
-	m.chat, chatCmd = m.chat.Update(msg)
-	cmds = append(cmds, chatCmd)
+	// Only forward non-key events to the chat viewport. Key events would be
+	// interpreted by the viewport's default key map (k/j/u/d/f/b/space etc.)
+	// as scroll commands while the user is typing, causing unwanted scrolling.
+	// Mouse wheel events (MouseWheelDown/Up) are non-key and still work.
+	if _, isKey := msg.(tea.KeyPressMsg); !isKey {
+		var chatCmd tea.Cmd
+		m.chat, chatCmd = m.chat.Update(msg)
+		cmds = append(cmds, chatCmd)
+	}
 
 	return m, tea.Batch(cmds...)
 }

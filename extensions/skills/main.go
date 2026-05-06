@@ -235,7 +235,9 @@ func onCommand(raw json.RawMessage) {
 	//   </skill>
 	// The LLM reads the skill instructions from the block and acts accordingly.
 	// This preserves the AGENTS.md system prompt rather than replacing it.
+	baseDir := filepath.Dir(entry.filePath)
 	skillMsg := "<skill name=\"" + entry.meta.Name + "\" location=\"" + entry.filePath + "\">\n" +
+		"References are relative to " + baseDir + ".\n\n" +
 		entry.body + "\n</skill>"
 	type msgParams struct {
 		Role    string `json:"role"`
