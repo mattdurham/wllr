@@ -25,7 +25,6 @@ extensions: $(DIST_DIR) $(BUILTINS)
 	cd extensions/exec      && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(BUILTINS)/exec.wasm .
 	cd extensions/env       && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(BUILTINS)/env.wasm .
 	cd extensions/agents    && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(BUILTINS)/agents.wasm .
-	cd extensions/example   && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(DIST_DIR)/hello.wasm .
 	@echo "Built all extensions"
 
 $(DIST_DIR):
