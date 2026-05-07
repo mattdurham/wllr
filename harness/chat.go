@@ -383,26 +383,31 @@ func renderToolCall(sb *strings.Builder, m chatMessage, width int, old bool) {
 	sb.WriteString("\n")
 
 	// LLM response lines inside the box (streams in after the tool executes).
-	if m.toolResponse != "" {
-		contentWidth := innerWidth - 2 // space padding on each side
-		if contentWidth < 1 {
-			contentWidth = 1
+	// If there is no response, skip the bottom border entirely — the single
+	// header line is enough and avoids an empty box taking up visual space.
+	if m.toolResponse == "" {
+		sb.WriteString("\n")
+		return
+	}
+
+	contentWidth := innerWidth - 2 // space padding on each side
+	if contentWidth < 1 {
+		contentWidth = 1
+	}
+	textSt := asstTextStyle
+	if old {
+		textSt = asstTextOldStyle
+	}
+	for _, line := range strings.Split(strings.TrimRight(m.toolResponse, "\n"), "\n") {
+		runes := []rune(line)
+		if len(runes) > contentWidth {
+			runes = runes[:contentWidth]
 		}
-		textSt := asstTextStyle
-		if old {
-			textSt = asstTextOldStyle
-		}
-		for _, line := range strings.Split(strings.TrimRight(m.toolResponse, "\n"), "\n") {
-			runes := []rune(line)
-			if len(runes) > contentWidth {
-				runes = runes[:contentWidth]
-			}
-			padding := strings.Repeat(" ", contentWidth-len(runes))
-			sb.WriteString(border.Render("│") + " ")
-			sb.WriteString(textSt.Render(string(runes)))
-			sb.WriteString(padding + " ")
-			sb.WriteString(border.Render("│") + "\n")
-		}
+		padding := strings.Repeat(" ", contentWidth-len(runes))
+		sb.WriteString(border.Render("│") + " ")
+		sb.WriteString(textSt.Render(string(runes)))
+		sb.WriteString(padding + " ")
+		sb.WriteString(border.Render("│") + "\n")
 	}
 
 	// ╰──────────────────────────────╯
