@@ -1,60 +1,137 @@
 # golangci-lint configuration for wllr
-# Initial baseline configuration — intentionally minimal to avoid noise.
-# errcheck is disabled in tests due to deferred Close() calls.
-# Enable additional linters incrementally as code is cleaned up.
+# Comprehensive static analysis based on blockpack configuration
 
-version: 2
-
-run:
-  timeout: 5m
-  tests: true
-  modules-download-mode: readonly
-  allow-parallel-runners: false
+version: "2"
 
 linters:
-  disable-all: true
   enable:
-    - govet
-    - staticcheck
-    - unused
-    - misspell
-    - unconvert
+    # Correctness & Bugs
+    - errcheck        # Unchecked errors
+    - govet           # Suspicious constructs
+    - staticcheck     # Comprehensive static analysis (SA*, ST* checks)
+    - unused          # Unused code detection
+    - ineffassign     # Ineffective assignments
+    - bodyclose       # Unclosed HTTP response bodies
+    - rowserrcheck    # SQL rows.Err() checks
+    - sqlclosecheck   # SQL Close() checks
+    - nilerr          # Returning nil with non-nil error
 
-  disable:
-    - errcheck  # too noisy in tests with deferred Close
+    # Security
+    - gosec           # Security vulnerabilities (G101-G602)
 
-formatters:
-  enable:
-    - gofmt
-    - goimports
+    # Code Quality
+    - revive          # Configurable style checker (replaces golint)
+    - gocritic        # Opinionated style and performance checks
+    - gocyclo         # Cyclomatic complexity (threshold: 30)
+    - dupl            # Duplicate code detection
+    - goconst         # Repeated string/number constants
+    - unconvert       # Unnecessary type conversions
+    - misspell        # Common typos in code/comments
 
-linters-settings:
-  govet:
-    enable-all: true
-    disable:
-      - shadow
+    # Performance
+    - prealloc        # Slice preallocation opportunities
 
-  staticcheck:
-    checks: ["all"]
+  settings:
+    errcheck:
+      check-type-assertions: false
+      check-blank: false  # Allow explicit error ignoring via _ = assignment
 
-  misspell:
-    locale: US
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment  # Too noisy, betteralign handles this better
+        - shadow          # Too many false positives
 
-issues:
-  exclude-use-default: false
-  exclude-rules:
-    - linters:
-        - staticcheck
-      text: "SA1019:"  # deprecated usage
+    gocyclo:
+      min-complexity: 30  # Match blockpack threshold
 
-  max-issues-per-linter: 0
-  max-same-issues: 0
+    dupl:
+      threshold: 200
 
-output:
-  formats:
-    colored-line-number:
-      path: stdout
-  print-issued-lines: true
-  print-linter-name: true
-  uniq-by-line: true
-  sort-results: true
+    goconst:
+      min-len: 3
+      min-occurrences: 5  # Increased to reduce noise
+
+    misspell:
+      locale: US
+
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: dot-imports
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: if-return
+        - name: increment-decrement
+        - name: var-naming
+        - name: var-declaration
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: indent-error-flow
+        - name: errorf
+        - name: superfluous-else
+        - name: unreachable-code
+        # Enforce one public struct per file. Combined with the project convention
+        # that any struct with more than two methods lives in its own file, this
+        # keeps types discoverable and files focused.
+        - name: max-public-structs
+          arguments: [1]
+
+    staticcheck:
+      checks: ["all", "-ST1000"]  # Disable package comment requirement
+
+    gosec:
+      excludes:
+        - G104  # Allow unhandled errors where errcheck is sufficient
+        - G204  # Subprocess launched with variable - needed for exec extension
+        - G301  # Directory permissions - 0755 is standard
+        - G302  # File permissions - 0644 is standard for logs
+        - G304  # File inclusion via variable - needed for dynamic loading
+        - G706  # Log injection - false positives on structured logging
+
+    gocritic:
+      disabled-checks:
+        - ifElseChain  # Too many false positives in UI code
+        - singleCaseSwitch  # Sometimes more readable than if
+        - exitAfterDefer  # Known pattern in main()
+
+  exclusions:
+    # Exclude some linters from test files
+    rules:
+      - path: _test\.go
+        linters:
+          - dupl
+          - goconst
+          - errcheck  # defer Close() in tests is fine
+
+      # Exclude G404 (weak random number generator) for tests
+      - path: _test\.go
+        text: "G404:"
+        linters:
+          - gosec
+
+      # appendAssign in tests is intentional
+      - path: _test\.go
+        text: "appendAssign:"
+        linters:
+          - gocritic
+
+      # ifElseChain in cmd/ — chains use function calls or mixed conditions
+      - path: cmd/
+        text: "ifElseChain:"
+        linters:
+          - gocritic
+
+      # Integer overflow conversion in extension host is checked
+      - path: extension/host\.go
+        text: "G115:"
+        linters:
+          - gosec
+
+      # British spellings used consistently in comments
+      - text: "(finalised|initialised|colour|cancelled|cancelling)"
+        linters:
+          - misspell
