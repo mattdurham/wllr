@@ -799,6 +799,7 @@ func (m Model) View() tea.View {
 
 	v := tea.NewView(out)
 	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion // enable scroll wheel
 	return v
 }
 
