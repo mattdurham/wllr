@@ -349,27 +349,10 @@ func renderUserMessage(sb *strings.Builder, content string, width int, old bool)
 	sb.WriteString("\n\n")
 }
 
-// renderToolGroup renders a run of consecutive tool calls as a single compact
-// summary line (↳ tool1 · tool2 · tool3) followed by the LLM response from
-// the last tool call, if any.  Individual tool boxes are no longer shown.
-func renderToolGroup(sb *strings.Builder, group []chatMessage, width int, old bool) {
-	if len(group) == 0 {
-		return
-	}
-
-	// Build the summary: ↳ toolname · toolname · …
-	summaryStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
-	if old {
-		summaryStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#444444"))
-	}
-	var names []string
-	for _, m := range group {
-		names = append(names, m.toolName)
-	}
-	summary := "↳ " + strings.Join(names, " · ")
-	sb.WriteString(summaryStyle.Render(summary))
-	sb.WriteString("\n\n")
-}
+// renderToolGroup is intentionally empty — tool calls are not shown in the
+// chat. Only the LLM's text responses (rendered as assistant messages) are
+// visible. Tool calls happen silently in the background.
+func renderToolGroup(_ *strings.Builder, _ []chatMessage, _ int, _ bool) {}
 
 func renderToolCall(sb *strings.Builder, m chatMessage, width int, old bool) {
 	border := toolBorderStyle

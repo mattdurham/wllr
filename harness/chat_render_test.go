@@ -96,116 +96,16 @@ func TestChatRender_OldAssistantMsg_HasGreyBorder(t *testing.T) {
 // Tool call dot colours
 // ──────────────────────────────────────────────────────────────
 
-func TestChatRender_SingleToolCall_ShowsAsSummary(t *testing.T) {
+func TestChatRender_ToolCalls_NotRendered(t *testing.T) {
+	// Tool calls are completely hidden — only LLM text responses are shown.
 	msgs := []chatMessage{
 		{role: sdk.RoleUser, content: "do something"},
-		{role: "tool", toolID: "t1", toolName: "exec", toolInput: `{"command":"ls"}`,
-			toolDone: true, toolError: false},
+		{role: "tool", toolID: "t1", toolName: "exec", toolInput: `{"command":"ls"}`, toolDone: true},
+		{role: "tool", toolID: "t2", toolName: "read_file", toolInput: `{"path":"/tmp"}`, toolDone: true},
 	}
 	out := renderChat(t, 80, 20, msgs)
-	// Single tool call renders as ↳ toolname summary
-	if !strings.Contains(out, "↳") {
-		t.Error("single tool call should render as ↳ summary line")
-	}
-	if !strings.Contains(out, "exec") {
-		t.Error("tool name should appear in summary")
-	}
-}
-
-func TestChatRender_MultipleToolCalls_ShowAsSummary(t *testing.T) {
-	msgs := []chatMessage{
-		{role: sdk.RoleUser, content: "do something"},
-		{role: "tool", toolID: "t1", toolName: "exec", toolInput: `{"command":"ls"}`,
-			toolDone: true},
-		{role: "tool", toolID: "t2", toolName: "read_file", toolInput: `{"path":"/tmp/x"}`,
-			toolDone: true},
-	}
-	out := renderChat(t, 80, 20, msgs)
-	// Both tool names should appear in the summary line
-	if !strings.Contains(out, "↳") {
-		t.Error("multiple tool calls should render as a ↳ summary line")
-	}
-	if !strings.Contains(out, "exec") || !strings.Contains(out, "read_file") {
-		t.Error("summary should list all tool names")
-	}
-}
-
-func TestChatRender_PendingToolCall_ShowsInSummary(t *testing.T) {
-	msgs := []chatMessage{
-		{role: sdk.RoleUser, content: "run it"},
-		{role: "tool", toolID: "t1", toolName: "exec", toolInput: `{"command":"sleep 1"}`,
-			toolDone: false},
-	}
-	out := renderChat(t, 80, 20, msgs)
-	// Pending tool still shows in summary (no ◌ dot in new design)
-	if !strings.Contains(out, "↳") {
-		t.Error("pending tool call should appear in summary line")
-	}
-	if !strings.Contains(out, "exec") {
-		t.Error("pending tool name should appear in summary")
-	}
-}
-
-func TestChatRender_ErrorToolCall_ShowsInSummary(t *testing.T) {
-	msgs := []chatMessage{
-		{role: sdk.RoleUser, content: "run it"},
-		{role: "tool", toolID: "t1", toolName: "exec", toolInput: `{"command":"bad"}`,
-			toolDone: true, toolError: true},
-	}
-	out := renderChat(t, 80, 20, msgs)
-	// Error tool still shows in summary (no red dot in new design)
-	if !strings.Contains(out, "↳") {
-		t.Error("error tool call should appear in summary line")
-	}
-}
-
-// ──────────────────────────────────────────────────────────────
-// recentStart boundary: only the last user message starts "current"
-// ──────────────────────────────────────────────────────────────
-
-func TestChatRender_ThreeExchanges_OnlyLastIsCurrent(t *testing.T) {
-	msgs := []chatMessage{
-		{role: sdk.RoleUser, content: "q1"},
-		{role: sdk.RoleAssistant, content: "a1"},
-		{role: sdk.RoleUser, content: "q2"},
-		{role: sdk.RoleAssistant, content: "a2"},
-		{role: sdk.RoleUser, content: "q3"},      // most recent
-		{role: sdk.RoleAssistant, content: "a3"}, // current
-	}
-	out := renderChat(t, 80, 40, msgs)
-
-	// Old assistant border present (from a1, a2)
-	if !containsColour(out, "68;68;68") {
-		t.Error("old exchanges should have grey (#444444) borders")
-	}
-	// Current assistant border present (a3)
-	if !containsColour(out, "137;207;240") {
-		t.Error("current exchange should have blue (#89CFF0) assistant border")
-	}
-	// Green user border present (q3)
-	if !containsColour(out, "0;170;0") {
-		t.Error("most recent user message should have green border")
-	}
-}
-
-// ──────────────────────────────────────────────────────────────
-// Tool response content appears inside the box
-// ──────────────────────────────────────────────────────────────
-
-func TestChatRender_ToolSummary_DoesNotIncludeResponse(t *testing.T) {
-	// With the summary design, LLM response goes to c.current/assistant box,
-	// not inside the tool summary line.
-	msgs := []chatMessage{
-		{role: sdk.RoleUser, content: "list files"},
-		{role: "tool", toolID: "t1", toolName: "exec",
-			toolInput: `{"command":"ls -l"}`,
-			toolDone:  true,
-		},
-	}
-	out := renderChat(t, 80, 20, msgs)
-	// Summary line is present
-	if !strings.Contains(out, "↳") {
-		t.Error("tool call should render as ↳ summary")
+	if strings.Contains(out, "↳") || strings.Contains(out, "exec") || strings.Contains(out, "read_file") {
+		t.Error("tool calls should not render anything in the chat")
 	}
 }
 

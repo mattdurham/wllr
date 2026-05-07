@@ -69,7 +69,8 @@ func TestModel_EscEsc_DuringStream_GeneratesAbort(t *testing.T) {
 
 // ─── ToolCallStartMsg ────────────────────────────────────────────────────────
 
-func TestModel_ToolCallStartMsg_AddsToolBoxToChat(t *testing.T) {
+func TestModel_ToolCallStartMsg_NotVisibleInChat(t *testing.T) {
+	// Tool calls are tracked internally but not rendered in the chat.
 	m := newTestModel()
 	m.width = 80
 	m.height = 40
@@ -83,11 +84,12 @@ func TestModel_ToolCallStartMsg_AddsToolBoxToChat(t *testing.T) {
 	m = next.(Model)
 
 	content := m.chat.vp.View()
-	if !strings.Contains(content, "exec") {
-		t.Error("tool summary should show the tool name")
+	if strings.Contains(content, "exec") || strings.Contains(content, "↳") {
+		t.Error("tool call should not be visible in chat")
 	}
-	if !strings.Contains(content, "↳") {
-		t.Error("tool calls should render as ↳ summary")
+	// But it should be tracked internally
+	if m.chat.MessageCount() == 0 {
+		t.Error("tool call should be stored in message list for internal tracking")
 	}
 }
 
