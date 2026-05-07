@@ -37,16 +37,12 @@ type SpawnOpts struct {
 // AgentPool manages all live agents and a shared token counter.
 // It is safe for concurrent use from multiple goroutines.
 type AgentPool struct {
-	mu     sync.RWMutex
-	agents map[string]*Agent
-	teams  map[string]*Team
-
-	// tokenCount accumulates all text tokens emitted by all agents in this pool.
-	tokenCount atomic.Int64
-
 	// provider is stored so sub-agents can request new language model instances
 	// for arbitrary model names.
 	provider fantasy.Provider
+
+	agents map[string]*Agent
+	teams  map[string]*Team
 
 	// providerName is a human-readable display name for the provider (e.g. "anthropic").
 	// Set via SetProviderName; read via ProviderName.
@@ -56,11 +52,17 @@ type AgentPool struct {
 	// empty name (e.g. sub-agents that don't specify a model).
 	defaultModelName string
 
+	baseSystemPrompt string
+
+	// tokenCount accumulates all text tokens emitted by all agents in this pool.
+	tokenCount atomic.Int64
+
+	mu sync.RWMutex
+
 	// baseSystemPrompt is accumulated from set_system_prompt / append_system_prompt
 	// and applied to every agent (current and future) so all agents share the
 	// same base context (AGENTS.md, skill list, etc.).
 	baseSystemPromptMu sync.RWMutex
-	baseSystemPrompt   string
 }
 
 // NewPool creates an empty AgentPool.
@@ -162,10 +164,11 @@ func (p *AgentPool) Spawn(id string, lm fantasy.LanguageModel, opts SpawnOpts) (
 		return nil, ErrAgentExists
 	}
 	a := &Agent{
-		id:   id,
-		lm:   lm,
-		opts: opts,
-		pool: p,
+		id:        id,
+		lm:        lm,
+		opts:      opts,
+		pool:      p,
+		modelName: p.defaultModelName,
 	}
 	// New agents inherit the accumulated base system prompt (AGENTS.md, skills, etc.).
 	p.baseSystemPromptMu.RLock()

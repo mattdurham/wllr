@@ -29,6 +29,7 @@ type Agent struct {
 	toolsFn func() []fantasy.AgentTool
 
 	id           string
+	modelName    string // for context window lookup
 	systemPrompt string
 	opts         SpawnOpts
 	inbox        []sdk.Message
@@ -244,11 +245,65 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 
 		fa := fantasy.NewAgent(lm, agentOpts...)
 
-		// Auto-compact: retry once with trimmed history if context is too long.
+		// Proactive compaction: if the estimated context is close to the model's
+		// limit, summarise old history BEFORE sending, avoiding a 400 error.
+		contextWindow := contextWindowForModel(a.modelName)
 		history := priorHistory
+		if shouldCompact(history, sysPrompt, content, contextWindow) {
+			if onToken != nil {
+				onToken("[Compacting context…]\n\n")
+			}
+			compacted, cerr := compactHistory(childCtx, lm, history)
+			if cerr == nil {
+				history = compacted
+				a.historyMu.Lock()
+				a.history = compacted
+				a.historyMu.Unlock()
+			}
+		}
+
 		var collectedText string
-		var err error
-		for attempt := 0; attempt < 2; attempt++ {
+		_, err := fa.Stream(childCtx, fantasy.AgentStreamCall{
+			Messages: sdkToFantasyMessages(history),
+			Prompt:   content,
+			OnTextDelta: func(id, text string) error {
+				if text == "" {
+					return nil
+				}
+				select {
+				case <-childCtx.Done():
+					return childCtx.Err()
+				default:
+				}
+				collectedText += text
+				if pool != nil {
+					pool.addTokens(1)
+				}
+				if onToken != nil {
+					onToken(text)
+				}
+				return nil
+			},
+			OnToolCall: func(toolCall fantasy.ToolCallContent) error {
+				if onToolCall != nil && !toolCall.ProviderExecuted {
+					onToolCall(toolCall.ToolCallID, toolCall.ToolName, toolCall.Input)
+				}
+				return nil
+			},
+		})
+
+		// Reactive fallback: if we still hit a context error, trim and retry once.
+		if err != nil && isContextTooLong(err) {
+			if onToken != nil {
+				onToken("\n\n[Still too long — trimming and retrying…]\n\n")
+			}
+			keep := keepMessages
+			if len(history) > keep {
+				history = history[len(history)-keep:]
+				a.historyMu.Lock()
+				a.history = history
+				a.historyMu.Unlock()
+			}
 			collectedText = ""
 			_, err = fa.Stream(childCtx, fantasy.AgentStreamCall{
 				Messages: sdkToFantasyMessages(history),
@@ -278,25 +333,6 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 					return nil
 				},
 			})
-
-			if err != nil && isContextTooLong(err) && attempt == 0 {
-				// Trim to the most recent 20 messages and retry once.
-				if onToken != nil {
-					onToken("\n\n[Context too long — compacting history and retrying…]\n\n")
-				}
-				keep := 20
-				if len(history) > keep {
-					history = history[len(history)-keep:]
-				}
-				// Also trim persisted history for future turns.
-				a.historyMu.Lock()
-				if len(a.history) > keep {
-					a.history = a.history[len(a.history)-keep:]
-				}
-				a.historyMu.Unlock()
-				continue
-			}
-			break
 		}
 
 		// Append the user message and assistant reply to history.
