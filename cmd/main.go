@@ -102,73 +102,6 @@ func main() {
 	// Build extension host — extension logs flow through slog with "extension" attribute.
 	h := extension.NewHost(nil)
 
-	// Declare prog early so OnAgentSpawn closure can reference it.
-	// It will be assigned before prog.Run() is called.
-	var prog *tea.Program
-
-	// Wire pool callbacks onto the extension host so extensions can manage agents.
-	h.OnAgentSpawn = func(id, name, systemPrompt, modelName string) error {
-		lm, lmErr := pool.LanguageModelForModel(ctx, modelName)
-		if lmErr != nil {
-			return fmt.Errorf("spawn agent %q: get model %q: %w", id, modelName, lmErr)
-		}
-		a, spawnErr := pool.Spawn(id, lm, agent.SpawnOpts{SystemPrompt: systemPrompt})
-		if spawnErr != nil {
-			return fmt.Errorf("spawn agent %q: %w", id, spawnErr)
-		}
-		// Wire token and done callbacks so the TUI receives updates from sub-agents.
-		if prog != nil {
-			a.SetOnToken(func(token string) {
-				prog.Send(harness.TokenMsg{Token: token})
-			})
-			a.SetOnDone(func(err error) {
-				prog.Send(harness.StreamDoneMsg{Err: err})
-			})
-		}
-		return nil
-	}
-	h.OnAgentClose = func(id string) error {
-		return pool.Close(id)
-	}
-	h.OnAgentSendMessage = func(id, message string) error {
-		return pool.Send(id, message)
-	}
-	h.OnAgentList = func() ([]extension.AgentInfo, error) {
-		ids := pool.ListAgents()
-		infos := make([]extension.AgentInfo, 0, len(ids))
-		for _, id := range ids {
-			infos = append(infos, extension.AgentInfo{ID: id, Name: id})
-		}
-		return infos, nil
-	}
-	h.OnAgentTokenCount = func() int64 {
-		return pool.TokenCount()
-	}
-
-	// Wire team management callbacks.
-	h.OnTeamCreate = func(id, name string) error {
-		_, err := pool.CreateTeam(id)
-		return err
-	}
-	h.OnTeamClose = func(id string) error {
-		return pool.CloseTeam(ctx, id)
-	}
-	h.OnTeamAddMember = func(teamID, agentID string) error {
-		t := pool.GetTeam(teamID)
-		if t == nil {
-			return fmt.Errorf("team not found: %s", teamID)
-		}
-		return t.AddMember(agentID)
-	}
-	h.OnTeamRemoveMember = func(teamID, agentID string) error {
-		t := pool.GetTeam(teamID)
-		if t == nil {
-			return fmt.Errorf("team not found: %s", teamID)
-		}
-		t.RemoveMember(agentID)
-		return nil
-	}
-
 	// Wire host capabilities.
 	h.OnExec = func(command, dir string) (string, error) {
 		if dir == "" {
@@ -282,18 +215,7 @@ func main() {
 		slog.Log(ctx, l, msg)
 	})
 
-	prog = tea.NewProgram(&m)
-
-	// Wire pool callbacks so token delivery and turn completion reach the TUI.
-	if mainAgent := pool.Get("main"); mainAgent != nil {
-		mainAgent.SetOnToken(func(token string) {
-			prog.Send(harness.TokenMsg{Token: token})
-		})
-		mainAgent.SetOnDone(func(err error) {
-			prog.Send(harness.StreamDoneMsg{Err: err})
-		})
-	}
-
+	prog := tea.NewProgram(&m)
 	m.SetProgram(prog)
 
 	if _, err := prog.Run(); err != nil {

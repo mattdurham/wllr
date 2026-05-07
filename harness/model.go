@@ -131,6 +131,89 @@ func (m *Model) SetProgram(p *tea.Program) {
 		m.extHost.OnModal = func(text string) {
 			p.Send(ShowModalMsg{Text: text})
 		}
+
+		// Wire agent and team management — all agent-pool operations belong in
+		// the harness so cmd/main.go stays minimal.
+		pool := m.agentPool
+		m.extHost.OnAgentSpawn = func(id, name, systemPrompt, modelName string) error {
+			if pool == nil {
+				return fmt.Errorf("no agent pool")
+			}
+			lm, err := pool.LanguageModelForModel(context.Background(), modelName)
+			if err != nil {
+				return fmt.Errorf("spawn agent %q: get model %q: %w", id, modelName, err)
+			}
+			a, err := pool.Spawn(id, lm, agent.SpawnOpts{SystemPrompt: systemPrompt})
+			if err != nil {
+				return fmt.Errorf("spawn agent %q: %w", id, err)
+			}
+			a.SetOnToken(func(token string) { p.Send(TokenMsg{Token: token}) })
+			a.SetOnDone(func(e error) { p.Send(StreamDoneMsg{Err: e}) })
+			return nil
+		}
+		m.extHost.OnAgentClose = func(id string) error {
+			if pool == nil {
+				return nil
+			}
+			return pool.Close(id)
+		}
+		m.extHost.OnAgentSendMessage = func(id, message string) error {
+			if pool == nil {
+				return fmt.Errorf("no agent pool")
+			}
+			return pool.Send(id, message)
+		}
+		m.extHost.OnAgentList = func() ([]extension.AgentInfo, error) {
+			if pool == nil {
+				return nil, nil
+			}
+			ids := pool.ListAgents()
+			infos := make([]extension.AgentInfo, 0, len(ids))
+			for _, id := range ids {
+				infos = append(infos, extension.AgentInfo{ID: id, Name: id})
+			}
+			return infos, nil
+		}
+		m.extHost.OnAgentTokenCount = func() int64 {
+			if pool == nil {
+				return 0
+			}
+			return pool.TokenCount()
+		}
+		m.extHost.OnTeamCreate = func(id, _ string) error {
+			if pool == nil {
+				return fmt.Errorf("no agent pool")
+			}
+			_, err := pool.CreateTeam(id)
+			return err
+		}
+		m.extHost.OnTeamClose = func(id string) error {
+			if pool == nil {
+				return nil
+			}
+			return pool.CloseTeam(context.Background(), id)
+		}
+		m.extHost.OnTeamAddMember = func(teamID, agentID string) error {
+			if pool == nil {
+				return fmt.Errorf("no agent pool")
+			}
+			t := pool.GetTeam(teamID)
+			if t == nil {
+				return fmt.Errorf("team not found: %s", teamID)
+			}
+			return t.AddMember(agentID)
+		}
+		m.extHost.OnTeamRemoveMember = func(teamID, agentID string) error {
+			if pool == nil {
+				return nil
+			}
+			t := pool.GetTeam(teamID)
+			if t == nil {
+				return fmt.Errorf("team not found: %s", teamID)
+			}
+			t.RemoveMember(agentID)
+			return nil
+		}
 	}
 	// Wire the main agent's token and done callbacks so streaming output reaches the TUI.
 	m.wireMainAgentCallbacks(p)
