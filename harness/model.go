@@ -88,6 +88,24 @@ func New(pool *agent.AgentPool, mainAgentID string, h *extension.Host) Model {
 
 	registerBuiltins(m.commands)
 
+	// /prompt shows the accumulated system prompt so users can verify
+	// what's actually being sent to the LLM (AGENTS.md, skills list, etc.).
+	if pool != nil {
+		m.commands.Register(Command{
+			Name: "prompt",
+			Desc: "Show the current system prompt sent to the LLM",
+			Handler: func(_ []string) tea.Cmd {
+				return func() tea.Msg {
+					sp := pool.BaseSystemPrompt()
+					if sp == "" {
+						sp = "(no system prompt set)"
+					}
+					return ShowModalMsg{Text: sp}
+				}
+			},
+		})
+	}
+
 	// Wire OnRegisterCommand here so extensions can register slash commands
 	// during _init (before SetProgram is called).
 	if h != nil {
