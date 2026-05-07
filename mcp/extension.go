@@ -74,7 +74,8 @@ func (e *Extension) handleToolCall(ctx context.Context, evt sdk.Event) error {
 	var args map[string]interface{}
 	if len(payload.Input) > 0 {
 		if err := json.Unmarshal(payload.Input, &args); err != nil {
-			return e.sendToolResult(ctx, payload.ToolCallID, "", true, err)
+			e.host.SendToolResult(payload.ToolCallID, err.Error(), true)
+			return nil
 		}
 	}
 
@@ -85,32 +86,9 @@ func (e *Extension) handleToolCall(ctx context.Context, evt sdk.Event) error {
 		result = err.Error()
 	}
 
-	return e.sendToolResult(ctx, payload.ToolCallID, result, isError, nil)
-}
-
-// sendToolResult sends the tool result back to the host via host_call.
-func (e *Extension) sendToolResult(ctx context.Context, toolCallID, result string, isError bool, callErr error) error {
-	if callErr != nil {
-		slog.Error("mcp: tool call error", "tool_call_id", toolCallID, "error", callErr)
-	}
-
-	// We need to call the host's tool_result method, but we're not in WASM.
-	// Instead, we'll directly invoke the host's internal mechanism.
-	// Look at how extensions do this:
-	
-	// Actually, looking at the code, extensions call host methods via host_call.
-	// Since we're native Go, we can directly call the host's internal methods.
-	// But the host expects this to come through the pendingTools channel.
-	
-	// Let me check the host's handleToolResult implementation...
-	
-	// The issue is that we need to write to the pendingTools channel.
-	// Let me create a helper method on the host for this.
-	
-	// For now, I'll use a workaround: call the internal method directly.
-	// This requires adding a public method to the host.
-	
-	return nil // TODO: Need to add method to host to accept tool results
+	// Send the result back to the host
+	e.host.SendToolResult(payload.ToolCallID, result, isError)
+	return nil
 }
 
 // Close stops the MCP bridge and cleans up.

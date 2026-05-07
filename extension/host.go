@@ -380,6 +380,19 @@ func (h *Host) routeHostCall(ctx context.Context, _ api.Module, ext *Extension, 
 	case sdk.MethodTeamRemoveMember:
 		return h.handleTeamRemoveMember(req)
 
+	// MCP bridge methods.
+	case sdk.MethodMCPSpawn:
+		return h.handleMCPSpawn(ext, req)
+
+	case sdk.MethodMCPClose:
+		return h.handleMCPClose(req)
+
+	case sdk.MethodMCPSend:
+		return h.handleMCPSend(req)
+
+	case sdk.MethodMCPRead:
+		return h.handleMCPRead(req)
+
 	default:
 		return sdk.HostCallResponse{Error: fmt.Sprintf("unknown method: %s", req.Method)}
 	}
@@ -795,6 +808,80 @@ func (h *Host) handleTeamRemoveMember(req sdk.HostCallRequest) sdk.HostCallRespo
 	return sdk.HostCallResponse{}
 }
 
+func (h *Host) handleMCPSpawn(ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+	if ext == nil || !ext.HasPermission(sdk.PermExec) {
+		return sdk.HostCallResponse{Error: "mcp_spawn: permission denied: requires exec"}
+	}
+	if h.OnMCPSpawn == nil {
+		return sdk.HostCallResponse{Error: "mcp_spawn: not supported by host"}
+	}
+	var params struct {
+		ID      string            `json:"id"`
+		Command string            `json:"command"`
+		Args    []string          `json:"args"`
+		Env     map[string]string `json:"env"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return sdk.HostCallResponse{Error: fmt.Sprintf("mcp_spawn: %v", err)}
+	}
+	if err := h.OnMCPSpawn(params.ID, params.Command, params.Args, params.Env); err != nil {
+		return sdk.HostCallResponse{Error: err.Error()}
+	}
+	result, _ := json.Marshal(map[string]string{"id": params.ID, "status": "spawned"})
+	return sdk.HostCallResponse{Result: result}
+}
+
+func (h *Host) handleMCPClose(req sdk.HostCallRequest) sdk.HostCallResponse {
+	if h.OnMCPClose == nil {
+		return sdk.HostCallResponse{Error: "mcp_close: not supported by host"}
+	}
+	var params struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return sdk.HostCallResponse{Error: fmt.Sprintf("mcp_close: %v", err)}
+	}
+	if err := h.OnMCPClose(params.ID); err != nil {
+		return sdk.HostCallResponse{Error: err.Error()}
+	}
+	return sdk.HostCallResponse{}
+}
+
+func (h *Host) handleMCPSend(req sdk.HostCallRequest) sdk.HostCallResponse {
+	if h.OnMCPSend == nil {
+		return sdk.HostCallResponse{Error: "mcp_send: not supported by host"}
+	}
+	var params struct {
+		ID   string          `json:"id"`
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return sdk.HostCallResponse{Error: fmt.Sprintf("mcp_send: %v", err)}
+	}
+	if err := h.OnMCPSend(params.ID, []byte(params.Data)); err != nil {
+		return sdk.HostCallResponse{Error: err.Error()}
+	}
+	return sdk.HostCallResponse{}
+}
+
+func (h *Host) handleMCPRead(req sdk.HostCallRequest) sdk.HostCallResponse {
+	if h.OnMCPRead == nil {
+		return sdk.HostCallResponse{Error: "mcp_read: not supported by host"}
+	}
+	var params struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return sdk.HostCallResponse{Error: fmt.Sprintf("mcp_read: %v", err)}
+	}
+	data, err := h.OnMCPRead(params.ID)
+	if err != nil {
+		return sdk.HostCallResponse{Error: err.Error()}
+	}
+	result, _ := json.Marshal(map[string]json.RawMessage{"data": data})
+	return sdk.HostCallResponse{Result: result}
+}
+
 // findExtensionByModule returns the Extension whose module has the given name.
 func (h *Host) findExtensionByModule(m api.Module) *Extension {
 	h.mu.RLock()
@@ -954,6 +1041,27 @@ func (h *Host) ExecuteTool(ctx context.Context, agentID, toolCallID, toolName st
 		return toolResult{}, ctx.Err()
 	}
 }
+
+// SendToolResult delivers a tool result for the given toolCallID.
+// This is used by native Go components (like the MCP bridge) to return tool results
+// without going through the WASM host_call mechanism.
+func (h *Host) SendToolResult(toolCallID, result string, isError bool) {
+	h.pendingMu.Lock()
+	ch, hasPending := h.pendingTools[toolCallID]
+	if hasPending {
+		delete(h.pendingTools, toolCallID)
+	}
+	h.pendingMu.Unlock()
+	
+	if hasPending {
+		ch <- toolResult{Result: result, IsError: isError}
+	}
+	
+	if h.OnToolResult != nil {
+		h.OnToolResult(toolCallID, result, isError)
+	}
+}
+
 
 // GetRegisteredTools returns a snapshot of all currently registered tools.
 func (h *Host) GetRegisteredTools() []sdk.Tool {

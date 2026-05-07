@@ -19,6 +19,7 @@ import (
 	"github.com/mattdurham/wllr/agent"
 	"github.com/mattdurham/wllr/extension"
 	"github.com/mattdurham/wllr/harness"
+	"github.com/mattdurham/wllr/mcp"
 )
 
 // Built-in extension WASM modules embedded at compile time.
@@ -151,6 +152,19 @@ func main() {
 			fmt.Fprintf(os.Stderr, "wllr: load built-in extension %q: %v\n", b.name, loadErr)
 		}
 	}
+	// Initialize MCP bridge for MCP server tool integration.
+	mcpExt := mcp.NewExtension(h)
+	if mcpErr := mcpExt.Start(ctx); mcpErr != nil {
+		// Non-fatal: log and continue if MCP bridge fails to start.
+		slog.Warn("wllr: mcp bridge init failed", "error", mcpErr)
+	}
+	defer func() {
+		if closeErr := mcpExt.Close(); closeErr != nil {
+			slog.Warn("wllr: close mcp bridge", "error", closeErr)
+		}
+	}()
+
+
 
 	// Load extensions from ~/.wllr/extensions/ and WLLR_EXTENSIONS_DIR.
 	var extPaths []string
