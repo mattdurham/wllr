@@ -55,7 +55,8 @@ var (
 	userBorderOldStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#444444"))
 	oldTextStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
 	toolBorderStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
-	toolBorderOldStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#333333"))
+	toolBorderOldStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
+	toolDotOldStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
 	toolSuccessStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#00AA00"))
 	toolErrorStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#CC3333"))
 	toolPendingStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
@@ -332,7 +333,7 @@ func renderToolCall(sb *strings.Builder, m chatMessage, width int, old bool) {
 	var dot string
 	if old {
 		border = toolBorderOldStyle
-		dot = toolBorderOldStyle.Render("●")
+		dot = toolDotOldStyle.Render("●")
 	} else if !m.toolDone {
 		dot = toolPendingStyle.Render("◌")
 	} else if m.toolError {
