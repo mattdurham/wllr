@@ -207,7 +207,7 @@ func (c *ChatView) invalidateHistory() {
 // message is appended on every token, avoiding a full O(n) rebuild each time.
 func (c *ChatView) refreshContent() {
 	if c.histDirty || c.histContent == "" {
-		// Find the start of the most recent turn.
+		// Find the start of the most recent user turn and the last tool call.
 		recentStart := 0
 		for i := len(c.messages) - 1; i >= 0; i-- {
 			if c.messages[i].role == sdk.RoleUser {
@@ -215,9 +215,24 @@ func (c *ChatView) refreshContent() {
 				break
 			}
 		}
+		lastToolIdx := -1
+		for i := len(c.messages) - 1; i >= 0; i-- {
+			if c.messages[i].role == "tool" {
+				lastToolIdx = i
+				break
+			}
+		}
+
 		var sb strings.Builder
 		for i, m := range c.messages {
-			renderMessage(&sb, m, c.width, i < recentStart)
+			var old bool
+			if m.role == "tool" {
+				// Only the most recent tool call keeps color; all others go grey.
+				old = i != lastToolIdx
+			} else {
+				old = i < recentStart
+			}
+			renderMessage(&sb, m, c.width, old)
 		}
 		c.histContent = sb.String()
 		c.histDirty = false
