@@ -81,11 +81,6 @@ func extensionInit() int32 {
 			"Send a message to an agent",
 			`{"type":"object","properties":{"agent_id":{"type":"string","description":"Agent ID"},"message":{"type":"string","description":"Message text"}},"required":["agent_id","message"]}`,
 		},
-		{
-			"read_inbox",
-			"Read pending inbox messages for the current session",
-			`{"type":"object","properties":{}}`,
-		},
 	}
 
 	for _, t := range tools {
@@ -122,23 +117,22 @@ func onSessionStart() {
 
 Use these tools to spawn sub-agents and coordinate work across teams.
 
-### Inbox model
-- Sub-agents communicate back via the inbox. Call read_inbox ONCE after
-  sending work to an agent; do not poll in a loop — it returns immediately
-  with whatever messages have arrived so far.
-- If read_inbox returns empty, the agent is still working. Wait for it
-  to finish by reasoning about the task, then call read_inbox again only
-  when you expect a result.
+### How agents work
+- create_agent spawns a sub-agent and sends its first prompt. The agent
+  runs asynchronously; its response streams back through the session.
+- send_message sends a follow-up message to a running agent. Each message
+  is added to that agent's conversation history so context accumulates.
+- There is no inbox to poll. Results from sub-agents arrive as part of
+  the normal response stream — just continue reasoning after sending.
+- shutdown_agent when the agent's task is complete.
 
 ### Workflow
-1. create_agent — spawn a sub-agent with a focused system prompt
-2. send_message — give it work
-3. (do other work or wait)
-4. read_inbox — collect results once
-5. shutdown_agent — clean up when done
+1. create_agent — spawn with a focused system prompt and initial task
+2. send_message — send follow-ups as needed (each adds to agent context)
+3. shutdown_agent — clean up when done
 
-Teams group agents so you can broadcast or coordinate without tracking
-individual IDs; use create_team / add_to_team / shutdown_team.`
+Teams group agents for broadcast coordination:
+create_team / add_to_team / shutdown_team`
 
 	type params struct {
 		Text string `json:"text"`
@@ -175,8 +169,6 @@ func onBeforeToolCall(raw json.RawMessage) {
 		handleShutdownTeam(p)
 	case "send_message":
 		handleSendMessage(p)
-	case "read_inbox":
-		handleReadInbox(p)
 	}
 }
 
@@ -403,11 +395,6 @@ func handleSendMessage(p beforeToolCallPayload) {
 	sendToolResult(p.ToolCallID, `{"status":"sent"}`, false)
 }
 
-func handleReadInbox(p beforeToolCallPayload) {
-	// The host does not yet have a dedicated read_inbox method.
-	// Return an empty inbox to signal no pending messages.
-	sendToolResult(p.ToolCallID, `{"messages":[]}`, false)
-}
 
 func registerTool(name, desc, inputSchema string) int32 {
 	type toolParams struct {
