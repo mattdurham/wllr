@@ -122,15 +122,12 @@ func main() {
 		return string(data), nil
 	}
 	h.OnConfigRead = loadConfigGroup
+	// Apply system prompt changes to ALL agents so sub-agents stay in sync.
 	h.OnSetSystemPrompt = func(prompt string) {
-		if a := pool.Get("main"); a != nil {
-			a.SetSystemPrompt(prompt)
-		}
+		pool.SetBaseSystemPrompt(prompt)
 	}
 	h.OnAppendSystemPrompt = func(text string) {
-		if a := pool.Get("main"); a != nil {
-			a.AppendSystemPrompt(text)
-		}
+		pool.AppendBaseSystemPrompt(text)
 	}
 
 	// Create the harness model BEFORE loading extensions so that

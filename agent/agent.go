@@ -210,12 +210,19 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 			tools = toolsFn()
 		}
 
-		// Resolve system prompt: dynamic override takes priority over SpawnOpts.
+		// Combine base (dynamic) and agent-specific (SpawnOpts) system prompts.
 		a.systemPromptMu.RLock()
-		sysPrompt := a.systemPrompt
+		base := a.systemPrompt
 		a.systemPromptMu.RUnlock()
-		if sysPrompt == "" {
-			sysPrompt = opts.SystemPrompt
+		specific := opts.SystemPrompt
+		var sysPrompt string
+		switch {
+		case base != "" && specific != "":
+			sysPrompt = base + "\n\n" + specific
+		case base != "":
+			sysPrompt = base
+		default:
+			sysPrompt = specific
 		}
 
 		// Build fantasy agent options.

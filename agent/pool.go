@@ -55,6 +55,12 @@ type AgentPool struct {
 	// defaultModelName is used when LanguageModelForModel is called with an
 	// empty name (e.g. sub-agents that don't specify a model).
 	defaultModelName string
+
+	// baseSystemPrompt is accumulated from set_system_prompt / append_system_prompt
+	// and applied to every agent (current and future) so all agents share the
+	// same base context (AGENTS.md, skill list, etc.).
+	baseSystemPromptMu sync.RWMutex
+	baseSystemPrompt   string
 }
 
 // NewPool creates an empty AgentPool.
@@ -69,6 +75,43 @@ func NewPool() *AgentPool {
 // can call LanguageModelForModel to create sub-agent language models.
 func (p *AgentPool) SetProvider(prov fantasy.Provider) {
 	p.provider = prov
+}
+
+// SetBaseSystemPrompt replaces the base system prompt and applies it to all
+// current and future agents. Used by the context extension (AGENTS.md).
+func (p *AgentPool) SetBaseSystemPrompt(prompt string) {
+	p.baseSystemPromptMu.Lock()
+	p.baseSystemPrompt = prompt
+	p.baseSystemPromptMu.Unlock()
+	p.mu.RLock()
+	for _, a := range p.agents {
+		a.SetSystemPrompt(prompt)
+	}
+	p.mu.RUnlock()
+}
+
+// AppendBaseSystemPrompt appends to the base system prompt and applies the
+// addition to all current and future agents. Used by the skills extension.
+func (p *AgentPool) AppendBaseSystemPrompt(text string) {
+	p.baseSystemPromptMu.Lock()
+	if p.baseSystemPrompt == "" {
+		p.baseSystemPrompt = text
+	} else {
+		p.baseSystemPrompt += "\n\n" + text
+	}
+	p.baseSystemPromptMu.Unlock()
+	p.mu.RLock()
+	for _, a := range p.agents {
+		a.AppendSystemPrompt(text)
+	}
+	p.mu.RUnlock()
+}
+
+// BaseSystemPrompt returns the accumulated base system prompt.
+func (p *AgentPool) BaseSystemPrompt() string {
+	p.baseSystemPromptMu.RLock()
+	defer p.baseSystemPromptMu.RUnlock()
+	return p.baseSystemPrompt
 }
 
 // SetDefaultModelName sets the model name used when spawning sub-agents that
@@ -123,6 +166,13 @@ func (p *AgentPool) Spawn(id string, lm fantasy.LanguageModel, opts SpawnOpts) (
 		lm:   lm,
 		opts: opts,
 		pool: p,
+	}
+	// New agents inherit the accumulated base system prompt (AGENTS.md, skills, etc.).
+	p.baseSystemPromptMu.RLock()
+	base := p.baseSystemPrompt
+	p.baseSystemPromptMu.RUnlock()
+	if base != "" {
+		a.systemPrompt = base
 	}
 	p.agents[id] = a
 	return a, nil

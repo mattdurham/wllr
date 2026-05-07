@@ -149,12 +149,15 @@ func (m *Model) SetProgram(p *tea.Program) {
 			}
 			a.SetOnToken(func(token string) { p.Send(TokenMsg{Token: token}) })
 			a.SetOnDone(func(e error) { p.Send(StreamDoneMsg{Err: e}) })
-			// Give sub-agents the same tool set as the main agent, tagged with their ID.
+			// Give sub-agents identical wiring to the main agent.
 			agentID := id
 			extHostRef := m.extHost
 			logFnRef := m.logFn
 			a.SetToolsFn(func() []fantasy.AgentTool {
 				return BuildFantasyTools(extHostRef, agentID, logFnRef)
+			})
+			a.SetOnToolCall(func(toolCallID, toolName, input string) {
+				p.Send(ToolCallStartMsg{ID: toolCallID, ToolName: toolName, Input: input})
 			})
 			return nil
 		}
