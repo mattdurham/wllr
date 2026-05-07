@@ -93,7 +93,7 @@ func extensionInit() int32 {
 			return rc
 		}
 	}
-	return 0
+	return hostCallJSON("subscribe", map[string]string{"event": "session_start"})
 }
 
 //go:wasmexport _on_event
@@ -107,10 +107,43 @@ func extensionOnEvent(ptr, length int32) int32 {
 	if err := json.Unmarshal(data, &evt); err != nil {
 		return 0
 	}
-	if evt.Type == "before_tool_call" {
+	switch evt.Type {
+	case "session_start":
+		onSessionStart()
+	case "before_tool_call":
 		onBeforeToolCall(evt.Payload)
 	}
 	return 0
+}
+
+func onSessionStart() {
+	guidance := `
+## Agent and Team Tools
+
+Use these tools to spawn sub-agents and coordinate work across teams.
+
+### Inbox model
+- Sub-agents communicate back via the inbox. Call read_inbox ONCE after
+  sending work to an agent; do not poll in a loop — it returns immediately
+  with whatever messages have arrived so far.
+- If read_inbox returns empty, the agent is still working. Wait for it
+  to finish by reasoning about the task, then call read_inbox again only
+  when you expect a result.
+
+### Workflow
+1. create_agent — spawn a sub-agent with a focused system prompt
+2. send_message — give it work
+3. (do other work or wait)
+4. read_inbox — collect results once
+5. shutdown_agent — clean up when done
+
+Teams group agents so you can broadcast or coordinate without tracking
+individual IDs; use create_team / add_to_team / shutdown_team.`
+
+	type params struct {
+		Text string `json:"text"`
+	}
+	hostCallJSON("append_system_prompt", params{Text: guidance})
 }
 
 type beforeToolCallPayload struct {
