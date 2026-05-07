@@ -9,7 +9,12 @@ import "github.com/mattdurham/wllr/sdk"
 type TokenMsg struct{ Token string }
 
 // StreamDoneMsg signals that a provider stream has finished.
-type StreamDoneMsg struct{ Err error }
+// AgentID identifies which agent finished; only the main agent's done
+// message updates streaming state and finalizes the chat message.
+type StreamDoneMsg struct {
+	Err     error
+	AgentID string
+}
 
 // ExtensionEventResultMsg carries results from dispatching an event to extensions.
 type ExtensionEventResultMsg struct {

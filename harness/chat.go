@@ -86,20 +86,9 @@ func (c *ChatView) SetSize(width, height int) {
 }
 
 // AppendToken adds a token to the in-progress assistant message and scrolls to bottom.
-// If a tool call recently completed, tokens are routed into that tool box instead.
+// All tokens go to c.current regardless of tool state so the response is never
+// fragmented across multiple boxes when the LLM interleaves text and tool calls.
 func (c *ChatView) AppendToken(token string) {
-	if c.lastDoneToolID != "" {
-		for i := range c.messages {
-			if c.messages[i].role == roleToolMessage && c.messages[i].toolID == c.lastDoneToolID {
-				c.messages[i].toolResponse += token
-				// toolResponse is part of messages, so the history cache is stale.
-				c.invalidateHistory()
-				c.refreshContent()
-				c.vp.GotoBottom()
-				return
-			}
-		}
-	}
 	c.current += token
 	c.refreshContent()
 	c.vp.GotoBottom()
@@ -380,12 +369,6 @@ func renderToolGroup(sb *strings.Builder, group []chatMessage, width int, old bo
 	summary := "↳ " + strings.Join(names, " · ")
 	sb.WriteString(summaryStyle.Render(summary))
 	sb.WriteString("\n\n")
-
-	// Render the LLM response from the last tool in the group (if any).
-	last := group[len(group)-1]
-	if last.toolResponse != "" {
-		renderAssistantMessage(sb, last.toolResponse, width, old)
-	}
 }
 
 func renderToolCall(sb *strings.Builder, m chatMessage, width int, old bool) {

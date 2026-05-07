@@ -128,26 +128,23 @@ func TestModel_ToolCallDoneMsg_ErrorFlag(t *testing.T) {
 
 // ─── Token routing to toolResponse ───────────────────────────────────────────
 
-func TestChatView_TokenRoutedToToolResponse_WhenLastDoneToolIDSet(t *testing.T) {
+func TestChatView_AppendToken_AlwaysGoesToCurrent(t *testing.T) {
+	// Tokens always go to c.current regardless of tool state so the LLM
+	// response is never fragmented across multiple boxes.
 	c := NewChatView(80, 20)
 	c.AddUserMessage("run it")
 	c.AddToolCall("t1", "exec", `{"command":"ls"}`)
 	c.UpdateToolCall("t1", false, "")
 
-	// lastDoneToolID should now be "t1"
-	if c.lastDoneToolID != "t1" {
-		t.Fatalf("expected lastDoneToolID=t1, got %q", c.lastDoneToolID)
-	}
-
 	c.AppendToken("hello")
 	c.AppendToken(" world")
 
-	// Token should be in toolResponse, not in c.current
-	if c.current != "" {
-		t.Errorf("c.current should be empty, got %q", c.current)
+	// Tokens should always go to c.current, never to toolResponse.
+	if c.current != "hello world" {
+		t.Errorf("tokens should go to c.current, got %q", c.current)
 	}
-	if c.messages[1].toolResponse != "hello world" {
-		t.Errorf("toolResponse should be 'hello world', got %q", c.messages[1].toolResponse)
+	if c.messages[1].toolResponse != "" {
+		t.Errorf("toolResponse should be empty with new routing, got %q", c.messages[1].toolResponse)
 	}
 }
 

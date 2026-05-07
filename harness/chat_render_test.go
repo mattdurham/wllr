@@ -192,19 +192,20 @@ func TestChatRender_ThreeExchanges_OnlyLastIsCurrent(t *testing.T) {
 // Tool response content appears inside the box
 // ──────────────────────────────────────────────────────────────
 
-func TestChatRender_ToolResponse_AppearsInsideBox(t *testing.T) {
-	const response = "total 42"
+func TestChatRender_ToolSummary_DoesNotIncludeResponse(t *testing.T) {
+	// With the summary design, LLM response goes to c.current/assistant box,
+	// not inside the tool summary line.
 	msgs := []chatMessage{
 		{role: sdk.RoleUser, content: "list files"},
 		{role: "tool", toolID: "t1", toolName: "exec",
-			toolInput:    `{"command":"ls -l"}`,
-			toolDone:     true,
-			toolResponse: response,
+			toolInput: `{"command":"ls -l"}`,
+			toolDone:  true,
 		},
 	}
 	out := renderChat(t, 80, 20, msgs)
-	if !strings.Contains(out, response) {
-		t.Errorf("tool response %q should appear inside the box", response)
+	// Summary line is present
+	if !strings.Contains(out, "↳") {
+		t.Error("tool call should render as ↳ summary")
 	}
 }
 
