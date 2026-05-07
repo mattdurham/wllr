@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -171,8 +172,9 @@ func (m *Model) SetProgram(p *tea.Program) {
 			if err != nil {
 				return fmt.Errorf("spawn agent %q: %w", id, err)
 			}
-			a.SetOnToken(func(token string) { p.Send(TokenMsg{Token: token}) })
-			a.SetOnDone(func(e error) { p.Send(StreamDoneMsg{Err: e}) })
+			subOnToken, subStop := makeBatchedOnToken(p)
+			a.SetOnToken(subOnToken)
+			a.SetOnDone(func(e error) { subStop(); p.Send(StreamDoneMsg{Err: e}) })
 			// Give sub-agents identical wiring to the main agent.
 			agentID := id
 			extHostRef := m.extHost
@@ -253,6 +255,52 @@ func (m *Model) SetProgram(p *tea.Program) {
 	m.wireMainAgentCallbacks(p)
 }
 
+// makeBatchedOnToken returns an onToken callback that coalesces tokens into
+// batches sent at most every batchInterval. This prevents O(n²) re-renders
+// as the streaming response grows — instead of one render per token we get
+// at most ~33 renders per second regardless of LLM speed.
+func makeBatchedOnToken(p *tea.Program) (onToken func(string), stop func()) {
+	const batchInterval = 30 * time.Millisecond
+	var mu sync.Mutex
+	var buf strings.Builder
+	ticker := time.NewTicker(batchInterval)
+	done := make(chan struct{})
+
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				mu.Lock()
+				s := buf.String()
+				buf.Reset()
+				mu.Unlock()
+				if s != "" {
+					p.Send(TokenMsg{Token: s})
+				}
+			case <-done:
+				ticker.Stop()
+				// Flush any remaining tokens.
+				mu.Lock()
+				s := buf.String()
+				buf.Reset()
+				mu.Unlock()
+				if s != "" {
+					p.Send(TokenMsg{Token: s})
+				}
+				return
+			}
+		}
+	}()
+
+	return func(token string) {
+			mu.Lock()
+			buf.WriteString(token)
+			mu.Unlock()
+		}, func() {
+			close(done)
+		}
+}
+
 // wireMainAgentCallbacks sets the onToken, onDone, and toolsFn callbacks on the main agent.
 func (m *Model) wireMainAgentCallbacks(p *tea.Program) {
 	if m.agentPool == nil {
@@ -262,10 +310,10 @@ func (m *Model) wireMainAgentCallbacks(p *tea.Program) {
 	if a == nil {
 		return
 	}
-	a.SetOnToken(func(token string) {
-		p.Send(TokenMsg{Token: token})
-	})
+	onToken, stopBatch := makeBatchedOnToken(p)
+	a.SetOnToken(onToken)
 	a.SetOnDone(func(err error) {
+		stopBatch()
 		p.Send(StreamDoneMsg{Err: err})
 	})
 	extHost := m.extHost
