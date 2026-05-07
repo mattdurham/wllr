@@ -182,6 +182,12 @@ func (c ChatView) Update(msg tea.Msg) (ChatView, tea.Cmd) {
 	return c, cmd
 }
 
+// ScrollUp scrolls the chat viewport up by n lines.
+func (c *ChatView) ScrollUp(n int) { c.vp.ScrollUp(n) }
+
+// ScrollDown scrolls the chat viewport down by n lines.
+func (c *ChatView) ScrollDown(n int) { c.vp.ScrollDown(n) }
+
 // View renders the chat content.
 func (c ChatView) View() string {
 	return c.vp.View()

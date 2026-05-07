@@ -382,6 +382,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "ctrl+q":
 			return m, tea.Quit
+		// Explicit chat scroll — pgup/pgdown work while typing without
+		// triggering the viewport's default vim-style key bindings.
+		case "pgup":
+			m.chat.ScrollUp(m.chat.height / 2)
+			return m, nil
+		case "pgdown":
+			m.chat.ScrollDown(m.chat.height / 2)
+			return m, nil
 		}
 
 	case TokenMsg:
@@ -393,7 +401,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			since := time.Since(m.streamStart)
 			dots := strings.Repeat(".", int(since/400/time.Millisecond)%3+1)
 			m.statusBar.statuses["stream"] = fmt.Sprintf("working%-3s %s", dots, formatElapsed(since))
-			cmds = append(cmds, tea.Tick(400*time.Millisecond, func(time.Time) tea.Msg { return streamTickMsg{} }))
+			cmds = append(cmds, tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return streamTickMsg{} }))
 		}
 		return m, tea.Batch(cmds...)
 
@@ -572,8 +580,12 @@ func (m Model) submitToAgent(content, display string) (tea.Model, tea.Cmd) {
 		return nil
 	}
 
-	tick := tea.Tick(400*time.Millisecond, func(time.Time) tea.Msg { return streamTickMsg{} })
-	return m, tea.Batch(cmd, tick)
+	// Fire an immediate tick so the "working." indicator appears on the very
+	// first render, then continue at 100ms to keep the display responsive
+	// during streaming (tokens otherwise pile up and appear all at once).
+	immediateTick := func() tea.Msg { return streamTickMsg{} }
+	tick := tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return streamTickMsg{} })
+	return m, tea.Batch(cmd, immediateTick, tick)
 }
 
 func (m Model) cmdDispatchAfterProviderResponse() tea.Cmd {
