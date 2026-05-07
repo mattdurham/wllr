@@ -84,10 +84,10 @@ func TestModel_ToolCallStartMsg_AddsToolBoxToChat(t *testing.T) {
 
 	content := m.chat.vp.View()
 	if !strings.Contains(content, "exec") {
-		t.Error("tool box should show the tool name")
+		t.Error("tool summary should show the tool name")
 	}
-	if !strings.Contains(content, "ls") {
-		t.Error("tool box should show the command preview")
+	if !strings.Contains(content, "↳") {
+		t.Error("tool calls should render as ↳ summary")
 	}
 }
 

@@ -96,61 +96,66 @@ func TestChatRender_OldAssistantMsg_HasGreyBorder(t *testing.T) {
 // Tool call dot colours
 // ──────────────────────────────────────────────────────────────
 
-func TestChatRender_LatestToolCall_HasGreenDot(t *testing.T) {
+func TestChatRender_SingleToolCall_ShowsAsSummary(t *testing.T) {
 	msgs := []chatMessage{
 		{role: sdk.RoleUser, content: "do something"},
 		{role: "tool", toolID: "t1", toolName: "exec", toolInput: `{"command":"ls"}`,
 			toolDone: true, toolError: false},
 	}
 	out := renderChat(t, 80, 20, msgs)
-	// Success green: #00AA00 → 0;170;0
-	if !containsColour(out, "0;170;0") {
-		t.Error("latest done tool call should have green dot (#00AA00)")
+	// Single tool call renders as ↳ toolname summary
+	if !strings.Contains(out, "↳") {
+		t.Error("single tool call should render as ↳ summary line")
+	}
+	if !strings.Contains(out, "exec") {
+		t.Error("tool name should appear in summary")
 	}
 }
 
-func TestChatRender_OlderToolCall_HasGreyDot(t *testing.T) {
+func TestChatRender_MultipleToolCalls_ShowAsSummary(t *testing.T) {
 	msgs := []chatMessage{
 		{role: sdk.RoleUser, content: "do something"},
 		{role: "tool", toolID: "t1", toolName: "exec", toolInput: `{"command":"ls"}`,
-			toolDone: true, toolError: false},
+			toolDone: true},
 		{role: "tool", toolID: "t2", toolName: "read_file", toolInput: `{"path":"/tmp/x"}`,
-			toolDone: true, toolError: false},
+			toolDone: true},
 	}
 	out := renderChat(t, 80, 20, msgs)
-	// The latest tool (t2) keeps green; t1 should be grey (#888888 → 136;136;136)
-	if !containsColour(out, "136;136;136") {
-		t.Error("non-latest tool call should have grey dot (#888888)")
+	// Both tool names should appear in the summary line
+	if !strings.Contains(out, "↳") {
+		t.Error("multiple tool calls should render as a ↳ summary line")
 	}
-	// Latest still green
-	if !containsColour(out, "0;170;0") {
-		t.Error("latest tool call should still have green dot")
+	if !strings.Contains(out, "exec") || !strings.Contains(out, "read_file") {
+		t.Error("summary should list all tool names")
 	}
 }
 
-func TestChatRender_PendingToolCall_HasPendingDot(t *testing.T) {
+func TestChatRender_PendingToolCall_ShowsInSummary(t *testing.T) {
 	msgs := []chatMessage{
 		{role: sdk.RoleUser, content: "run it"},
 		{role: "tool", toolID: "t1", toolName: "exec", toolInput: `{"command":"sleep 1"}`,
 			toolDone: false},
 	}
 	out := renderChat(t, 80, 20, msgs)
-	// Pending dot: ◌ character present
-	if !strings.Contains(out, "◌") {
-		t.Error("pending tool call should show ◌ indicator")
+	// Pending tool still shows in summary (no ◌ dot in new design)
+	if !strings.Contains(out, "↳") {
+		t.Error("pending tool call should appear in summary line")
+	}
+	if !strings.Contains(out, "exec") {
+		t.Error("pending tool name should appear in summary")
 	}
 }
 
-func TestChatRender_ErrorToolCall_HasRedDot(t *testing.T) {
+func TestChatRender_ErrorToolCall_ShowsInSummary(t *testing.T) {
 	msgs := []chatMessage{
 		{role: sdk.RoleUser, content: "run it"},
 		{role: "tool", toolID: "t1", toolName: "exec", toolInput: `{"command":"bad"}`,
 			toolDone: true, toolError: true},
 	}
 	out := renderChat(t, 80, 20, msgs)
-	// Error red: #CC3333 → 204;51;51
-	if !containsColour(out, "204;51;51") {
-		t.Error("error tool call should have red dot (#CC3333)")
+	// Error tool still shows in summary (no red dot in new design)
+	if !strings.Contains(out, "↳") {
+		t.Error("error tool call should appear in summary line")
 	}
 }
 

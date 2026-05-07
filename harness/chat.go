@@ -229,15 +229,26 @@ func (c *ChatView) refreshContent() {
 		}
 
 		var sb strings.Builder
-		for i, m := range c.messages {
-			var old bool
-			if m.role == roleToolMessage {
-				// Only the most recent tool call keeps color; all others go grey.
-				old = i != lastToolIdx
-			} else {
-				old = i < recentStart
+		i := 0
+		for i < len(c.messages) {
+			m := c.messages[i]
+
+			if m.role != roleToolMessage {
+				old := i < recentStart
+				renderMessage(&sb, m, c.width, old)
+				i++
+				continue
 			}
-			renderMessage(&sb, m, c.width, old)
+
+			// Collect the run of consecutive tool messages.
+			j := i
+			for j < len(c.messages) && c.messages[j].role == roleToolMessage {
+				j++
+			}
+			group := c.messages[i:j]
+			old := lastToolIdx < i // whole group is old if last tool is before this group
+			renderToolGroup(&sb, group, c.width, old)
+			i = j
 		}
 		c.histContent = sb.String()
 		c.histDirty = false
@@ -266,7 +277,8 @@ func renderMessage(sb *strings.Builder, m chatMessage, width int, old bool) {
 		renderAssistantMessage(sb, m.content, width, old)
 		return
 	case roleToolMessage:
-		renderToolCall(sb, m, width, old)
+		// Fallback for single tool messages outside the group path.
+		renderToolGroup(sb, []chatMessage{m}, width, old)
 		return
 	default:
 		sb.WriteString(systemStyle.Render(lipgloss.Wrap("» "+m.content, width, "")))
@@ -346,6 +358,34 @@ func renderUserMessage(sb *strings.Builder, content string, width int, old bool)
 
 	sb.WriteString(border.Render("╰" + strings.Repeat("─", innerWidth) + "╯"))
 	sb.WriteString("\n\n")
+}
+
+// renderToolGroup renders a run of consecutive tool calls as a single compact
+// summary line (↳ tool1 · tool2 · tool3) followed by the LLM response from
+// the last tool call, if any.  Individual tool boxes are no longer shown.
+func renderToolGroup(sb *strings.Builder, group []chatMessage, width int, old bool) {
+	if len(group) == 0 {
+		return
+	}
+
+	// Build the summary: ↳ toolname · toolname · …
+	summaryStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
+	if old {
+		summaryStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#444444"))
+	}
+	var names []string
+	for _, m := range group {
+		names = append(names, m.toolName)
+	}
+	summary := "↳ " + strings.Join(names, " · ")
+	sb.WriteString(summaryStyle.Render(summary))
+	sb.WriteString("\n\n")
+
+	// Render the LLM response from the last tool in the group (if any).
+	last := group[len(group)-1]
+	if last.toolResponse != "" {
+		renderAssistantMessage(sb, last.toolResponse, width, old)
+	}
 }
 
 func renderToolCall(sb *strings.Builder, m chatMessage, width int, old bool) {
