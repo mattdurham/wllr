@@ -86,6 +86,8 @@ func (c *ChatView) AppendToken(token string) {
 		for i := range c.messages {
 			if c.messages[i].role == "tool" && c.messages[i].toolID == c.lastDoneToolID {
 				c.messages[i].toolResponse += token
+				// toolResponse is part of messages, so the history cache is stale.
+				c.invalidateHistory()
 				c.refreshContent()
 				c.vp.GotoBottom()
 				return
