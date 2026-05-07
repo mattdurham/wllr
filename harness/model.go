@@ -876,6 +876,11 @@ func (m Model) renderInputBox() string {
 
 	b := lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
 
+	// Always read the live pool token count so sub-agent tokens are visible.
+	if m.agentPool != nil {
+		m.statusBar.totalTokens = int(m.agentPool.TokenCount())
+	}
+
 	// Build top border: ╭─ provider  model  status ──────────────╮
 	label := m.statusBar.Line()
 	var prefix string
