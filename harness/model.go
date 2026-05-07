@@ -529,6 +529,9 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 		if msg.Name == "help" {
 			return m, func() tea.Msg { return ShowModalMsg{Text: m.commands.HelpText()} }, true
 		}
+		// Show a queuing indicator while the command is dispatched asynchronously
+		// (e.g. skill commands go through WASM before submitToAgent is called).
+		m.statusBar.statuses["stream"] = "queuing…"
 		return m, m.commands.Dispatch(msg.Name, msg.Args), true
 
 	case clearMsg:
@@ -573,6 +576,10 @@ func (m Model) updateExtension(msg tea.Msg) (Model, tea.Cmd, bool) {
 			if r.Error != "" {
 				m.chat.AddNotification(fmt.Sprintf("Extension error: %s", r.Error))
 			}
+		}
+		// Clear queuing… if streaming hasn't started yet (command didn't reach the LLM).
+		if !m.streaming && m.statusBar.statuses["stream"] == "queuing…" {
+			delete(m.statusBar.statuses, "stream")
 		}
 		// Refresh autocomplete in case extensions registered new commands.
 		m.updateSuggestions()
