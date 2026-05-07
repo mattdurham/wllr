@@ -120,16 +120,6 @@ type Host struct {
 	OnTeamAddMember func(teamID, agentID string) error
 	// OnTeamRemoveMember removes an agent from a team (does not close the agent).
 	OnTeamRemoveMember func(teamID, agentID string) error
-
-	// MCP bridge callbacks. Set by the harness to manage MCP server subprocesses.
-	// OnMCPSpawn spawns an MCP server subprocess with the given command, args, and env.
-	OnMCPSpawn func(id, command string, args []string, env map[string]string) error
-	// OnMCPClose terminates an MCP server subprocess.
-	OnMCPClose func(id string) error
-	// OnMCPSend writes JSON-RPC data to an MCP server's stdin.
-	OnMCPSend func(id string, data []byte) error
-	// OnMCPRead reads a JSON-RPC response from an MCP server's stdout.
-	OnMCPRead func(id string) (json.RawMessage, error)
 }
 
 // AgentInfo describes a running agent.

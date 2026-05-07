@@ -234,10 +234,4 @@ const (
 	MethodTeamClose        = "team_close"
 	MethodTeamAddMember    = "team_add_member"
 	MethodTeamRemoveMember = "team_remove_member"
-
-	// MCP bridge host_call methods.
-	MethodMCPSpawn = "mcp_spawn"
-	MethodMCPClose = "mcp_close"
-	MethodMCPSend  = "mcp_send"
-	MethodMCPRead  = "mcp_read"
 )

@@ -293,6 +293,19 @@ func (p *AgentPool) Cancel(id string) error {
 	return nil
 }
 
+// CancelAll cancels the active turn of every agent in the pool.
+func (p *AgentPool) CancelAll() {
+	p.mu.RLock()
+	agents := make([]*Agent, 0, len(p.agents))
+	for _, a := range p.agents {
+		agents = append(agents, a)
+	}
+	p.mu.RUnlock()
+	for _, a := range agents {
+		a.Cancel()
+	}
+}
+
 // CloseTeam cancels all member agents and removes the team from the pool.
 // Returns ErrTeamNotFound if id is unknown.
 func (p *AgentPool) CloseTeam(ctx context.Context, id string) error {

@@ -387,6 +387,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.agentPool != nil {
 					_ = m.agentPool.Cancel(m.mainAgentID)
 				}
+				m.statusBar.statuses["stream"] = "cancelling…"
 				return m, nil
 			}
 			return m, tea.Quit
@@ -480,6 +481,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.agentPool != nil {
 			_ = m.agentPool.Cancel(m.mainAgentID)
 		}
+		m.statusBar.statuses["stream"] = "cancelling…"
 		return m, nil
 
 	case ToolCallStartMsg:

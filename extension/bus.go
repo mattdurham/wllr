@@ -8,7 +8,8 @@ import (
 )
 
 // Handler is a function that receives an event from the bus.
-type Handler func(ctx context.Context, evt sdk.Event)
+// Returning an error is optional — the bus logs it and continues.
+type Handler func(ctx context.Context, evt sdk.Event) error
 
 // EventBus is a single, shared event stream. All events fired anywhere in
 // wllr pass through it. Handlers registered via Subscribe are called
@@ -68,7 +69,7 @@ func (b *EventBus) Publish(ctx context.Context, evt sdk.Event) {
 
 	go func() {
 		for _, h := range hs {
-			h(ctx, evt)
+			_ = h(ctx, evt) // errors are fire-and-forget; callers may log internally
 		}
 	}()
 }
