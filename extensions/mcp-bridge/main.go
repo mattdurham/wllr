@@ -39,10 +39,10 @@ type mcpTool struct {
 
 // mcpServerState tracks a running MCP server process.
 type mcpServerState struct {
-	Name    string
-	Config  mcpServerConfig
-	PID     string // process ID returned by host
-	Tools   []mcpTool
+	Name   string
+	Config mcpServerConfig
+	PID    string // process ID returned by host
+	Tools  []mcpTool
 }
 
 var (

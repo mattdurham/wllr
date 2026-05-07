@@ -22,14 +22,17 @@ func (m *mockLM) Provider() string { return m.provider }
 func (m *mockLM) Generate(_ context.Context, _ fantasy.Call) (*fantasy.Response, error) {
 	return &fantasy.Response{}, nil
 }
+
 func (m *mockLM) Stream(_ context.Context, _ fantasy.Call) (fantasy.StreamResponse, error) {
 	return func(yield func(fantasy.StreamPart) bool) {
 		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop})
 	}, nil
 }
+
 func (m *mockLM) GenerateObject(_ context.Context, _ fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
 	return nil, nil
 }
+
 func (m *mockLM) StreamObject(_ context.Context, _ fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
 	return nil, nil
 }

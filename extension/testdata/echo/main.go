@@ -14,8 +14,10 @@ func hostLog(level, ptr, length uint32)
 func hostCall(reqPtr, reqLen, respPtrPtr, respLenPtr uint32) uint32
 
 // allocBuf is a simple bump-allocator buffer for small allocations.
-var allocBuf [65536]byte
-var allocOff uint32
+var (
+	allocBuf [65536]byte
+	allocOff uint32
+)
 
 //export _alloc
 func alloc(size uint32) uint32 {

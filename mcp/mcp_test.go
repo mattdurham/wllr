@@ -23,17 +23,17 @@ func TestProtocolTypes(t *testing.T) {
 			},
 		},
 	}
-	
+
 	data, err := json.Marshal(req)
 	if err != nil {
 		t.Fatalf("marshal request: %v", err)
 	}
-	
+
 	var decoded JSONRPCRequest
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatalf("unmarshal request: %v", err)
 	}
-	
+
 	if decoded.Method != "initialize" {
 		t.Errorf("expected method initialize, got %s", decoded.Method)
 	}
@@ -51,26 +51,26 @@ func TestConfigLoading(t *testing.T) {
 			},
 		},
 	}
-	
+
 	data, err := json.Marshal(cfg)
 	if err != nil {
 		t.Fatalf("marshal config: %v", err)
 	}
-	
+
 	var decoded Config
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatalf("unmarshal config: %v", err)
 	}
-	
+
 	if len(decoded.MCPServers) != 1 {
 		t.Errorf("expected 1 server, got %d", len(decoded.MCPServers))
 	}
-	
+
 	srv, ok := decoded.MCPServers["test"]
 	if !ok {
 		t.Fatal("missing test server")
 	}
-	
+
 	if srv.Command != "echo" {
 		t.Errorf("expected command echo, got %s", srv.Command)
 	}
@@ -79,17 +79,17 @@ func TestConfigLoading(t *testing.T) {
 // TestBridge tests basic bridge operations without real MCP servers.
 func TestBridge(t *testing.T) {
 	bridge := NewBridge()
-	
+
 	// Test empty bridge
 	tools := bridge.RegisterTools()
 	if len(tools) != 0 {
 		t.Errorf("expected 0 tools, got %d", len(tools))
 	}
-	
+
 	// Test CallTool on non-existent tool
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	
+
 	_, err := bridge.CallTool(ctx, "nonexistent", nil)
 	if err == nil {
 		t.Error("expected error calling nonexistent tool")
@@ -138,7 +138,7 @@ func TestToolResultFormatting(t *testing.T) {
 			expected: "text content",
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := formatToolResult(&tt.result)

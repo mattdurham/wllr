@@ -7,13 +7,6 @@ import (
 	"path/filepath"
 )
 
-// ServerConfig defines the configuration for a single MCP server.
-type ServerConfig struct {
-	Command string            `json:"command"` // Command to execute
-	Args    []string          `json:"args"`    // Command arguments
-	Env     map[string]string `json:"env"`     // Additional environment variables
-}
-
 // Config holds the configuration for all MCP servers.
 type Config struct {
 	MCPServers map[string]ServerConfig `json:"mcpServers"`

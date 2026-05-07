@@ -10,13 +10,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// Command is a slash command registered with the Registry.
-type Command struct {
-	Name    string
-	Desc    string
-	Handler func(args []string) tea.Cmd
-}
-
 // Registry holds registered slash commands and dispatches them.
 type Registry struct {
 	commands map[string]Command
@@ -106,9 +99,10 @@ func registerBuiltins(r *Registry) {
 			return func() tea.Msg { return setModelMsg{Model: args[0]} }
 		},
 	})
-
 }
 
 // Internal message types used by built-in command handlers.
-type clearMsg struct{}
-type setModelMsg struct{ Model string }
+type (
+	clearMsg    struct{}
+	setModelMsg struct{ Model string }
+)

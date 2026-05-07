@@ -7,25 +7,25 @@ import (
 
 // JSONRPCRequest represents a JSON-RPC 2.0 request.
 type JSONRPCRequest struct {
-	JSONRPC string      `json:"jsonrpc"`
-	ID      int         `json:"id,omitempty"`
-	Method  string      `json:"method"`
 	Params  interface{} `json:"params,omitempty"`
+	JSONRPC string      `json:"jsonrpc"`
+	Method  string      `json:"method"`
+	ID      int         `json:"id,omitempty"`
 }
 
 // JSONRPCResponse represents a JSON-RPC 2.0 response.
 type JSONRPCResponse struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      int             `json:"id,omitempty"`
-	Result  json.RawMessage `json:"result,omitempty"`
 	Error   *JSONRPCError   `json:"error,omitempty"`
+	JSONRPC string          `json:"jsonrpc"`
+	Result  json.RawMessage `json:"result,omitempty"`
+	ID      int             `json:"id,omitempty"`
 }
 
 // JSONRPCError represents a JSON-RPC 2.0 error object.
 type JSONRPCError struct {
-	Code    int             `json:"code"`
 	Message string          `json:"message"`
 	Data    json.RawMessage `json:"data,omitempty"`
+	Code    int             `json:"code"`
 }
 
 func (e *JSONRPCError) Error() string {
@@ -75,8 +75,8 @@ type Tool struct {
 
 // CallToolParams are the parameters for tools/call.
 type CallToolParams struct {
-	Name      string                 `json:"name"`
 	Arguments map[string]interface{} `json:"arguments,omitempty"`
+	Name      string                 `json:"name"`
 }
 
 // CallToolResult is the result of tools/call.

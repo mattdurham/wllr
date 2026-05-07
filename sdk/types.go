@@ -36,9 +36,9 @@ type Event struct {
 
 // EventResponse is the optional JSON response from _on_event.
 type EventResponse struct {
+	Error  string `json:"error,omitempty"`
 	Cancel bool   `json:"cancel,omitempty"`
 	Block  bool   `json:"block,omitempty"`
-	Error  string `json:"error,omitempty"`
 }
 
 // Payload types for each event.
@@ -56,8 +56,8 @@ type BeforeAgentStartPayload struct {
 
 // BeforeProviderRequestPayload is the payload for EventBeforeProviderRequest.
 type BeforeProviderRequestPayload struct {
-	Messages []Message `json:"messages"`
 	Model    string    `json:"model"`
+	Messages []Message `json:"messages"`
 }
 
 // AfterProviderResponsePayload is the payload for EventAfterProviderResponse.
@@ -183,8 +183,8 @@ type HostCallRequest struct {
 
 // HostCallResponse is the JSON response returned by the host via host_call.
 type HostCallResponse struct {
-	Result json.RawMessage `json:"result,omitempty"`
 	Error  string          `json:"error,omitempty"`
+	Result json.RawMessage `json:"result,omitempty"`
 }
 
 // host_call method constants.

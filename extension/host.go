@@ -21,20 +21,21 @@ import (
 
 // Extension wraps a loaded WASM module.
 type Extension struct {
-	name   string
 	module api.Module
 	store  *Store
 
-	subMu         sync.RWMutex
 	subscriptions map[sdk.EventType]bool
-
-	// trusted is true for built-in extensions loaded via LoadBytes with trusted=true.
-	// Trusted extensions bypass permission checks.
-	trusted bool
 
 	// permissions holds the declared permissions for untrusted extensions.
 	// Map entries are set to true for each granted permission.
 	permissions map[sdk.Permission]bool
+	name        string
+
+	subMu sync.RWMutex
+
+	// trusted is true for built-in extensions loaded via LoadBytes with trusted=true.
+	// Trusted extensions bypass permission checks.
+	trusted bool
 }
 
 // HasPermission reports whether the extension holds permission p.
@@ -57,16 +58,14 @@ type toolResult struct {
 // that registered it.  OwnerName is empty for tools registered outside of an
 // extension context.
 type RegisteredToolInfo struct {
-	Tool      sdk.Tool
 	OwnerName string
+	Tool      sdk.Tool
 }
 
 // Host manages a collection of WASM extensions.
 type Host struct {
-	mu         sync.RWMutex
-	runtime    wazero.Runtime
-	extensions []*Extension
-	logger     *slog.Logger
+	runtime wazero.Runtime
+	logger  *slog.Logger
 
 	// Bus is the shared event stream. All DispatchEvent calls publish here
 	// in addition to dispatching to WASM extensions.
@@ -78,26 +77,23 @@ type Host struct {
 	// toolOwners maps tool name to the name of the extension that registered it.
 	toolOwners map[string]string
 
-	// pendingTools holds channels waiting for tool_result responses.
-	// Keyed by toolCallID.
-	pendingMu    sync.Mutex
 	pendingTools map[string]chan toolResult
 
 	// Callbacks set by the harness.
-	OnSendMessage     func(msg sdk.Message)
-	OnSetStatus       func(key, value string)
-	OnRegisterTool    func(tool sdk.Tool) error
-	OnRegisterCommand func(name string, desc string)
-	OnNotify          func(text string)
-	OnAbort           func()
-	OnToolResult      func(toolCallID, result string, isError bool)
-	OnAfterToolCall   func(toolCallID, toolName, result string, isError bool)
+	OnSendMessage        func(msg sdk.Message)
+	OnSetStatus          func(key, value string)
+	OnRegisterTool       func(tool sdk.Tool) error
+	OnRegisterCommand    func(name string, desc string)
+	OnNotify             func(text string)
+	OnAbort              func()
+	OnToolResult         func(toolCallID, result string, isError bool)
+	OnAfterToolCall      func(toolCallID, toolName, result string, isError bool)
 	OnModal              func(text string)
 	OnSetSystemPrompt    func(prompt string)
 	OnAppendSystemPrompt func(text string)
-	OnExec            func(command, dir string) (string, error)
-	OnGetEnv          func(name string) (string, error)
-	OnConfigRead      func(group string) (json.RawMessage, error)
+	OnExec               func(command, dir string) (string, error)
+	OnGetEnv             func(name string) (string, error)
+	OnConfigRead         func(group string) (json.RawMessage, error)
 
 	// Agent management callbacks. Set by the pool layer.
 	// OnAgentSpawn creates a new named agent with the given system prompt and model.
@@ -129,7 +125,13 @@ type Host struct {
 	// OnMCPSend writes JSON-RPC data to an MCP server's stdin.
 	OnMCPSend func(id string, data []byte) error
 	// OnMCPRead reads a JSON-RPC response from an MCP server's stdout.
-	OnMCPRead func(id string) (json.RawMessage, error)
+	OnMCPRead  func(id string) (json.RawMessage, error)
+	extensions []*Extension
+	mu         sync.RWMutex
+
+	// pendingTools holds channels waiting for tool_result responses.
+	// Keyed by toolCallID.
+	pendingMu sync.Mutex
 }
 
 // AgentInfo describes a running agent.
@@ -295,7 +297,12 @@ func (h *Host) hostCallImpl(ctx context.Context, m api.Module, reqPtr, reqLen, r
 }
 
 // routeHostCall dispatches req to the appropriate handler and returns a response.
-func (h *Host) routeHostCall(ctx context.Context, _ api.Module, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+func (h *Host) routeHostCall(
+	ctx context.Context,
+	_ api.Module,
+	ext *Extension,
+	req sdk.HostCallRequest,
+) sdk.HostCallResponse {
 	switch req.Method {
 	case sdk.MethodSubscribe:
 		return h.handleSubscribe(ext, req)
@@ -920,7 +927,13 @@ func (h *Host) LoadBytes(ctx context.Context, name string, data []byte, trusted 
 }
 
 // loadExtension is the common implementation for Load and LoadBytes.
-func (h *Host) loadExtension(ctx context.Context, name string, data []byte, trusted bool, perms []sdk.Permission) error {
+func (h *Host) loadExtension(
+	ctx context.Context,
+	name string,
+	data []byte,
+	trusted bool,
+	perms []sdk.Permission,
+) error {
 	modName := moduleNameFromPath(name)
 
 	cfg := wazero.NewModuleConfig().
@@ -996,7 +1009,11 @@ func loadManifestPermissions(wasmPath string, logger *slog.Logger) []sdk.Permiss
 // an extension returns the result via the tool_result host_call method.
 // It dispatches EventBeforeToolCall so extensions may intercept the call.
 // The call is cancelled and an error is returned if ctx is cancelled.
-func (h *Host) ExecuteTool(ctx context.Context, agentID, toolCallID, toolName string, input json.RawMessage) (toolResult, error) {
+func (h *Host) ExecuteTool(
+	ctx context.Context,
+	agentID, toolCallID, toolName string,
+	input json.RawMessage,
+) (toolResult, error) {
 	ch := make(chan toolResult, 1)
 
 	h.pendingMu.Lock()
@@ -1052,16 +1069,15 @@ func (h *Host) SendToolResult(toolCallID, result string, isError bool) {
 		delete(h.pendingTools, toolCallID)
 	}
 	h.pendingMu.Unlock()
-	
+
 	if hasPending {
 		ch <- toolResult{Result: result, IsError: isError}
 	}
-	
+
 	if h.OnToolResult != nil {
 		h.OnToolResult(toolCallID, result, isError)
 	}
 }
-
 
 // GetRegisteredTools returns a snapshot of all currently registered tools.
 func (h *Host) GetRegisteredTools() []sdk.Tool {

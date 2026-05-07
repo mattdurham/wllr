@@ -108,7 +108,10 @@ func registerTool(name, desc, inputSchema string) int32 {
 		Description string          `json:"description"`
 		InputSchema json.RawMessage `json:"input_schema"`
 	}
-	rc := hostCallJSON("register_tool", toolParams{Name: name, Description: desc, InputSchema: json.RawMessage(inputSchema)})
+	rc := hostCallJSON(
+		"register_tool",
+		toolParams{Name: name, Description: desc, InputSchema: json.RawMessage(inputSchema)},
+	)
 	if rc != 0 {
 		return rc
 	}
@@ -171,6 +174,5 @@ func hostCallJSON(method string, params any) int32 {
 	}
 	return int32(rc)
 }
-
 
 func main() {}

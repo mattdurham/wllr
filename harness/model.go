@@ -20,24 +20,11 @@ import (
 
 // Model is the root bubbletea v2 model for the bob TUI.
 type Model struct {
-	chat      ChatView
-	input     InputArea
-	statusBar StatusBar
-	commands  *Registry
-
-	agentPool   *agent.AgentPool
-	mainAgentID string
-	extHost     *extension.Host
-
-	history     []sdk.Message
-	streaming   bool
 	streamStart time.Time
-	activeModel string
+	commands    *Registry
 
-	width, height int
-
-	// Loaded extension paths for reload.
-	extPaths []string
+	agentPool *agent.AgentPool
+	extHost   *extension.Host
 
 	// program is set after the bubbletea program starts so goroutines can
 	// send messages back. Set via SetProgram.
@@ -47,19 +34,38 @@ type Model struct {
 	// If nil, warnings are silently dropped.
 	logFn func(int, string)
 
-	// Autocomplete dropdown state.
-	suggestions    []Command
-	suggestionIdx  int
-	dropdownOffset int // first visible suggestion index
+	mainAgentID string
+	activeModel string
 
 	// Modal overlay state (non-empty when modal is open).
 	modalContent string
-	modalScroll  int
+	input        InputArea
+
+	history []sdk.Message
+
+	// Loaded extension paths for reload.
+	extPaths []string
+
+	// Autocomplete dropdown state.
+	suggestions []Command
+
+	statusBar StatusBar
+	chat      ChatView
+
+	width, height int
+
+	suggestionIdx  int
+	dropdownOffset int // first visible suggestion index
+
+	modalScroll int
+	streaming   bool
 }
 
 // inputAreaHeight = top border (1) + textarea rows (3) + bottom border (1)
-const inputAreaHeight = 5
-const statusBarHeight = 0
+const (
+	inputAreaHeight = 5
+	statusBarHeight = 0
+)
 
 // New creates a Model wired to the given agent pool, main agent ID, and extension host.
 // The pool must have its provider name set via SetProviderName before calling New

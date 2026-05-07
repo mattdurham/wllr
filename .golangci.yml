@@ -135,3 +135,34 @@ linters:
       - text: "(finalised|initialised|colour|cancelled|cancelling)"
         linters:
           - misspell
+
+      # sdk/types.go is intentionally a multi-type file (all SDK types in one place).
+      - path: sdk/types\.go
+        linters:
+          - revive
+
+      # extension/host.go contains tightly-coupled infrastructure types (Extension,
+      # Host, AgentInfo, RegisteredToolInfo) that belong together in the same file.
+      - path: extension/host\.go
+        linters:
+          - revive
+
+      # Pure message-type and protocol-type files are intentionally multi-struct.
+      - path: harness/messages\.go
+        linters:
+          - revive
+      - path: mcp/protocol\.go
+        linters:
+          - revive
+
+      # routeHostCall and Model.Update are dispatch switches over protocol methods
+      # and UI messages respectively. Their cyclomatic complexity is inherent to
+      # the dispatch pattern and not reducible without obscuring intent.
+      - path: extension/host\.go
+        text: "cyclomatic complexity.*routeHostCall"
+        linters:
+          - gocyclo
+      - path: harness/model\.go
+        text: "cyclomatic complexity.*Update"
+        linters:
+          - gocyclo

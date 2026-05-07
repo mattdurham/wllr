@@ -786,8 +786,12 @@ func TestHost_HandleAgentSpawn_CallbackInvoked(t *testing.T) {
 
 	select {
 	case args := <-got:
-		if args.id != "a1" || args.name != "worker" || args.systemPrompt != "you are helpful" || args.modelName != "claude-3" {
-			t.Errorf("OnAgentSpawn got %+v, want id=a1 name=worker systemPrompt='you are helpful' modelName=claude-3", args)
+		if args.id != "a1" || args.name != "worker" || args.systemPrompt != "you are helpful" ||
+			args.modelName != "claude-3" {
+			t.Errorf(
+				"OnAgentSpawn got %+v, want id=a1 name=worker systemPrompt='you are helpful' modelName=claude-3",
+				args,
+			)
 		}
 	default:
 		t.Fatal("OnAgentSpawn was not called")

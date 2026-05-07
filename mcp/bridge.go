@@ -45,7 +45,7 @@ func (b *Bridge) Start(ctx context.Context) error {
 		wg.Add(1)
 		go func(n string, c ServerConfig) {
 			defer wg.Done()
-			
+
 			srv := NewServer(n, c)
 			if err := srv.Start(ctx); err != nil {
 				errCh <- fmt.Errorf("start server %q: %w", n, err)
@@ -54,13 +54,13 @@ func (b *Bridge) Start(ctx context.Context) error {
 
 			b.mu.Lock()
 			b.servers[n] = srv
-			
+
 			// Build tool mapping
 			for _, tool := range srv.Tools() {
 				if existingSrv, exists := b.toolToSrv[tool.Name]; exists {
-					slog.Warn("mcp: tool name collision", 
-						"tool", tool.Name, 
-						"server", n, 
+					slog.Warn("mcp: tool name collision",
+						"tool", tool.Name,
+						"server", n,
 						"existing_server", existingSrv)
 				} else {
 					b.toolToSrv[tool.Name] = n
@@ -99,7 +99,7 @@ func (b *Bridge) RegisterTools() []sdk.Tool {
 	defer b.mu.RUnlock()
 
 	var tools []sdk.Tool
-	
+
 	for _, srv := range b.servers {
 		for _, mcpTool := range srv.Tools() {
 			// Convert MCP tool to sdk.Tool
@@ -123,7 +123,7 @@ func (b *Bridge) CallTool(ctx context.Context, name string, args map[string]inte
 		b.mu.RUnlock()
 		return "", fmt.Errorf("tool %q not found", name)
 	}
-	
+
 	srv, ok := b.servers[srvName]
 	if !ok {
 		b.mu.RUnlock()

@@ -110,6 +110,7 @@ func TestModel_Update_ReloadMsg_TriggersExtensionReload(t *testing.T) {
 		t.Errorf("expected NotifyMsg from reload cmd, got %T", msg)
 	}
 }
+
 func TestModel_Update_ClearMsg_ClearsHistory(t *testing.T) {
 	m := newTestModel()
 	m.history = append(m.history, sdk.Message{Role: sdk.RoleUser, Content: "hello"})

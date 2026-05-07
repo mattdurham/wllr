@@ -14,19 +14,17 @@ import (
 
 // StatusBar renders provider/model info and keyed status values.
 type StatusBar struct {
+	statuses     map[string]string
 	providerName string
 	modelName    string
 	totalTokens  int
-	statuses     map[string]string
 	width        int
 }
 
-var (
-	statusBarStyle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color("#333333"))
-)
+var statusBarStyle = lipgloss.NewStyle().
+	Bold(true).
+	Foreground(lipgloss.Color("#FFFFFF")).
+	Background(lipgloss.Color("#333333"))
 
 // NewStatusBar creates a StatusBar.
 func NewStatusBar(providerName, modelName string) StatusBar {

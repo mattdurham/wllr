@@ -12,11 +12,12 @@ import (
 // grouping for coordinated lifecycle management. All member agents are owned
 // by the pool.
 type Team struct {
-	id   string
 	pool *AgentPool
 
-	mu      sync.RWMutex
 	members map[string]bool // set of agent IDs
+	id      string
+
+	mu sync.RWMutex
 }
 
 // ID returns the team's unique identifier.

@@ -7,8 +7,8 @@ import "sync"
 
 // Store is a thread-safe, in-process key-value store for extension state.
 type Store struct {
-	mu   sync.RWMutex
 	data map[string]string
+	mu   sync.RWMutex
 }
 
 // NewStore returns an initialised Store.

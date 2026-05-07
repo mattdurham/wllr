@@ -164,8 +164,6 @@ func main() {
 		}
 	}()
 
-
-
 	// Load extensions from ~/.wllr/extensions/ and WLLR_EXTENSIONS_DIR.
 	var extPaths []string
 	extPaths = append(extPaths, loadExtensionsFromSubdirs(ctx, h, wllrExtensionsDir())...)
@@ -192,7 +190,11 @@ func main() {
 	// --exec mode: run a single prompt non-interactively and exit.
 	if *execPrompt != "" {
 		fantasyTools := harness.BuildFantasyTools(h, "exec", func(level int, msg string) {
-			slog.Log(ctx, []slog.Level{slog.LevelDebug, slog.LevelInfo, slog.LevelWarn, slog.LevelError}[min(level, 3)], msg)
+			slog.Log(
+				ctx,
+				[]slog.Level{slog.LevelDebug, slog.LevelInfo, slog.LevelWarn, slog.LevelError}[min(level, 3)],
+				msg,
+			)
 		})
 		var agentOpts []fantasy.AgentOption
 		if len(fantasyTools) > 0 {

@@ -15,18 +15,19 @@ import (
 
 // Server represents a running MCP server process.
 type Server struct {
-	name   string
 	config ServerConfig
-	cmd    *exec.Cmd
 	stdin  io.WriteCloser
 	stdout io.ReadCloser
 	stderr io.ReadCloser
 
-	mu      sync.Mutex
-	nextID  atomic.Int32
+	cmd     *exec.Cmd
 	pending map[int]chan *JSONRPCResponse
-	tools   []Tool
 	info    ServerInfo
+	name    string
+	tools   []Tool
+
+	mu     sync.Mutex
+	nextID atomic.Int32
 }
 
 // NewServer creates a new MCP server instance but does not start it.
@@ -42,7 +43,7 @@ func NewServer(name string, config ServerConfig) *Server {
 func (s *Server) Start(ctx context.Context) error {
 	// Build command
 	cmd := exec.CommandContext(ctx, s.config.Command, s.config.Args...)
-	
+
 	// Set environment
 	cmd.Env = os.Environ()
 	for k, v := range s.config.Env {
@@ -80,13 +81,13 @@ func (s *Server) Start(ctx context.Context) error {
 
 	// Perform initialize handshake
 	if err := s.initialize(ctx); err != nil {
-		s.Close()
+		_ = s.Close()
 		return fmt.Errorf("initialize handshake: %w", err)
 	}
 
 	// Discover tools
 	if err := s.discoverTools(ctx); err != nil {
-		s.Close()
+		_ = s.Close()
 		return fmt.Errorf("discover tools: %w", err)
 	}
 
@@ -111,8 +112,16 @@ func (s *Server) initialize(ctx context.Context) error {
 	}
 
 	s.info = result.ServerInfo
-	slog.Debug("mcp: initialized", "name", s.name, "server", result.ServerInfo.Name, "version", result.ServerInfo.Version)
-	
+	slog.Debug(
+		"mcp: initialized",
+		"name",
+		s.name,
+		"server",
+		result.ServerInfo.Name,
+		"version",
+		result.ServerInfo.Version,
+	)
+
 	// Send initialized notification
 	if err := s.notify("notifications/initialized", nil); err != nil {
 		return fmt.Errorf("send initialized notification: %w", err)
@@ -155,7 +164,7 @@ func (s *Server) CallTool(ctx context.Context, name string, args map[string]inte
 // call sends a JSON-RPC request and waits for the response.
 func (s *Server) call(ctx context.Context, method string, params interface{}, result interface{}) error {
 	id := int(s.nextID.Add(1))
-	
+
 	req := JSONRPCRequest{
 		JSONRPC: "2.0",
 		ID:      id,
@@ -221,7 +230,7 @@ func (s *Server) notify(method string, params interface{}) error {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	
+
 	_, err = s.stdin.Write(append(data, '\n'))
 	if err != nil {
 		return fmt.Errorf("write notification: %w", err)
@@ -235,7 +244,7 @@ func (s *Server) readLoop() {
 	scanner := bufio.NewScanner(s.stdout)
 	for scanner.Scan() {
 		line := scanner.Bytes()
-		
+
 		var resp JSONRPCResponse
 		if err := json.Unmarshal(line, &resp); err != nil {
 			slog.Warn("mcp: invalid json-rpc response", "name", s.name, "error", err, "line", string(line))
@@ -275,7 +284,7 @@ func (s *Server) Close() error {
 
 	// Close stdin to signal shutdown
 	if s.stdin != nil {
-		s.stdin.Close()
+		_ = s.stdin.Close()
 	}
 
 	// Wait for process to exit (with timeout handled by context)

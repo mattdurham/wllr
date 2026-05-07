@@ -69,7 +69,7 @@ func TestSDKToolAdapter_Info(t *testing.T) {
 		InputSchema: []byte(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}`),
 	}
 
-	adapter, err := newSDKToolAdapter(tool, nil)
+	adapter, err := newSDKToolAdapter(tool, nil, "test-agent")
 	if err != nil {
 		t.Fatalf("newSDKToolAdapter: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestSDKToolAdapter_Info(t *testing.T) {
 
 func TestSDKToolAdapter_Run_NoHost(t *testing.T) {
 	tool := sdk.Tool{Name: "test"}
-	adapter, err := newSDKToolAdapter(tool, nil)
+	adapter, err := newSDKToolAdapter(tool, nil, "test-agent")
 	if err != nil {
 		t.Fatalf("newSDKToolAdapter: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestSDKToolsToFantasy_SkipsBadSchema(t *testing.T) {
 	}
 
 	var loggedWarning bool
-	adapted := sdkToolsToFantasy(tools, nil, "", func(level int, msg string) {
+	adapted := sdkToolsToFantasy(tools, nil, "test-agent", func(level int, msg string) {
 		if level == 2 {
 			loggedWarning = true
 		}
@@ -135,7 +135,7 @@ func TestSDKToolsToFantasy_SkipsBadSchema(t *testing.T) {
 
 func TestSDKToolAdapter_ProviderOptions(t *testing.T) {
 	tool := sdk.Tool{Name: "x", InputSchema: []byte(`{}`)}
-	adapter, err := newSDKToolAdapter(tool, nil)
+	adapter, err := newSDKToolAdapter(tool, nil, "test-agent")
 	if err != nil {
 		t.Fatalf("newSDKToolAdapter: %v", err)
 	}

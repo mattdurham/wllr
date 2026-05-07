@@ -13,8 +13,8 @@ type StreamDoneMsg struct{ Err error }
 
 // ExtensionEventResultMsg carries results from dispatching an event to extensions.
 type ExtensionEventResultMsg struct {
-	Results []sdk.EventResponse
 	Err     error
+	Results []sdk.EventResponse
 }
 
 // ReloadMsg triggers a hot-reload of all loaded extensions.
@@ -53,8 +53,8 @@ type ShowModalMsg struct{ Text string }
 // ToolCallDoneMsg is sent when a tool call completes (via OnAfterToolCall).
 type ToolCallDoneMsg struct {
 	ID      string
-	IsError bool
 	Output  string
+	IsError bool
 }
 
 // abortStreamMsg is sent by the OnAbort callback to cancel the active agent turn

@@ -98,7 +98,7 @@ func compactHistory(ctx context.Context, lm fantasy.LanguageModel, history []sdk
 	toSummarize := history[:len(history)-keepMessages]
 	toKeep := history[len(history)-keepMessages:]
 
-	// Build a compact representation of the messages to summarise.
+	// Build a compact representation of the messages to summarize.
 	var src strings.Builder
 	for _, m := range toSummarize {
 		src.WriteString(string(m.Role))
@@ -122,7 +122,7 @@ func compactHistory(ctx context.Context, lm fantasy.LanguageModel, history []sdk
 		},
 	})
 	if err != nil {
-		return history, fmt.Errorf("compaction: summarise: %w", err)
+		return history, fmt.Errorf("compaction: summarize: %w", err)
 	}
 	if summary.Len() == 0 {
 		return history, fmt.Errorf("compaction: empty summary")

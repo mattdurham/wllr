@@ -1,11 +1,28 @@
 # Makefile — build the wllr binary and WASM extensions.
 #
-# make             — build the wllr binary (requires extensions to be built first)
-# make extensions  — build WASM extensions → cmd/builtins/*.wasm + install optional extensions
-# make all         — build extensions then the binary
-# make clean       — remove dist/ and cmd/builtins/*.wasm
-# make lint        — run golangci-lint
-# make test        — run tests
+# Build targets:
+#   make             — build the wllr binary (requires extensions to be built first)
+#   make extensions  — build WASM extensions → cmd/builtins/*.wasm + install optional extensions
+#   make all         — build extensions then the binary
+#   make clean       — remove dist/ and cmd/builtins/*.wasm
+#
+# Development targets:
+#   make test             — run all unit tests
+#   make format           — format all Go code with gofumpt
+#   make format-all       — auto-fix all formatting issues (gofumpt, golines, betteralign)
+#   make lint             — run golangci-lint (40+ linters)
+#   make nilaway          — run nil safety checks
+#   make betteralign      — check struct alignment
+#   make betteralign-fix  — auto-fix struct alignment
+#   make gofumpt-check    — check formatting (CI)
+#   make gofumpt          — auto-fix formatting
+#   make golines-check    — check line length (CI)
+#   make golines          — auto-fix line length
+#   make deadcode         — check for unreachable code
+#   make staticcheck      — run staticcheck (additional static analysis)
+#   make install-tools    — install all code quality tools
+#   make ci               — run full CI pipeline locally
+#   make precommit        — run build and all quality checks (REQUIRED before commit)
 #
 # Built-in extensions (embedded in the binary):
 #   readfile, writefile, exec, env, agents
@@ -18,7 +35,10 @@ BINARY      := $(DIST_DIR)/wllr
 BUILTINS    := cmd/builtins
 EXT_DIR     := $(HOME)/.wllr/extensions
 
-.PHONY: all build extensions clean lint test
+# Package list - lazy evaluation
+PACKAGES = $(shell go list -e -f '{{if .GoFiles}}{{.ImportPath}}{{end}}' ./...)
+
+.PHONY: all build extensions clean lint test format precommit ci install-tools nilaway betteralign betteralign-fix gofumpt-check gofumpt golines-check golines format-all deadcode staticcheck
 
 all: extensions build
 
@@ -49,11 +69,210 @@ $(DIST_DIR):
 $(BUILTINS):
 	mkdir -p $(BUILTINS)
 
-lint:
-	golangci-lint run ./...
+# Install all code quality tools
+install-tools:
+	@echo "==> Installing code quality tools..."
+	@go install go.uber.org/nilaway/cmd/nilaway@latest
+	@go install github.com/dkorunic/betteralign/cmd/betteralign@latest
+	@go install mvdan.cc/gofumpt@latest
+	@go install github.com/segmentio/golines@latest
+	@go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	@go install golang.org/x/tools/cmd/deadcode@latest
+	@go install honnef.co/go/tools/cmd/staticcheck@latest
+	@echo "==> All tools installed!"
 
+# Nil safety checks
+nilaway:
+	@echo "==> Running nil safety checks (nilaway)..."
+	@nilaway -include-pkgs "github.com/modernice/wllr/..." ./...
+	@echo "==> Nil safety checks passed!"
+
+# Struct alignment checks
+betteralign:
+	@echo "==> Checking struct alignment..."
+	@betteralign ./...
+	@echo "==> Struct alignment check passed!"
+
+# Auto-fix struct alignment
+betteralign-fix:
+	@echo "==> Auto-fixing struct alignment..."
+	@betteralign -apply ./... || true
+	@echo "==> Struct alignment fixed!"
+
+# Run deadcode check
+deadcode:
+	@echo "==> Running deadcode analysis..."
+	@echo "    Building main to anchor public APIs..."
+	@go build -o /dev/null ./cmd/
+	@echo "    Running deadcode tool..."
+	@output=$$(deadcode -test ./...); \
+	if [ -n "$$output" ]; then \
+		echo "❌ Deadcode found:"; \
+		echo "$$output"; \
+		exit 1; \
+	fi
+	@echo "==> Deadcode check passed!"
+
+# Run staticcheck
+staticcheck:
+	@echo "==> Running staticcheck..."
+	@staticcheck -f stylish ./...
+	@echo "==> Staticcheck passed!"
+
+# Check formatting with gofumpt (CI mode)
+gofumpt-check:
+	@echo "==> Checking formatting (gofumpt)..."
+	@output=$$(gofumpt -l . 2>&1); \
+	if [ -n "$$output" ]; then \
+		echo "❌ Code is not formatted. Run 'make gofumpt' to fix:"; \
+		echo "$$output"; \
+		exit 1; \
+	fi
+	@echo "==> Formatting check passed!"
+
+# Auto-fix formatting with gofumpt
+gofumpt:
+	@echo "==> Formatting Go code (gofumpt)..."
+	@gofumpt -w .
+	@echo "==> Code formatted!"
+
+# Check line length (CI mode)
+golines-check:
+	@echo "==> Checking line length (120 chars)..."
+	@output=$$(golines --dry-run --max-len=120 --base-formatter=gofumpt . 2>&1 | grep -v "^$$"); \
+	if [ -n "$$output" ]; then \
+		echo "❌ Line length violations found. Run 'make golines' to fix:"; \
+		echo "$$output"; \
+		exit 1; \
+	fi
+	@echo "==> Line length check passed!"
+
+# Auto-fix line length
+golines:
+	@echo "==> Fixing line length violations..."
+	@golines -w --max-len=120 --base-formatter=gofumpt .
+	@echo "==> Line length fixed!"
+
+# Auto-fix all formatting issues
+format-all: gofumpt golines betteralign-fix
+	@echo "==> All auto-fixable issues resolved!"
+
+# Format all Go code
+format:
+	@echo "==> Formatting Go code (gofumpt)..."
+	@gofumpt -w .
+	@echo "==> Code formatted!"
+
+# Run linters
+lint:
+	@echo "==> Running golangci-lint (40+ linters)..."
+	@golangci-lint run
+	@echo "==> Linting complete!"
+
+# Run tests
 test:
-	go test -v ./...
+	@echo "==> Running unit tests..."
+	@go test -v -race -timeout=10m $(PACKAGES)
+	@echo "==> All tests passed!"
+
+# Run full CI pipeline locally
+ci:
+	@echo "🔄 Running CI pipeline locally..."
+	@echo ""
+	@PASS=0; FAIL=0; \
+	echo "── [1/7] Format check (gofumpt)"; \
+	if $(MAKE) gofumpt-check > /tmp/wllr-ci-gofumpt.log 2>&1; then \
+		echo "   ✅ PASS"; PASS=$$((PASS + 1)); \
+	else \
+		echo "   ❌ FAIL"; tail -20 /tmp/wllr-ci-gofumpt.log | sed 's/^/   /'; FAIL=$$((FAIL + 1)); \
+	fi; \
+	echo "── [2/7] Line length check (golines)"; \
+	if $(MAKE) golines-check > /tmp/wllr-ci-golines.log 2>&1; then \
+		echo "   ✅ PASS"; PASS=$$((PASS + 1)); \
+	else \
+		echo "   ❌ FAIL"; tail -20 /tmp/wllr-ci-golines.log | sed 's/^/   /'; FAIL=$$((FAIL + 1)); \
+	fi; \
+	echo "── [3/7] Lint (golangci-lint - 40+ linters)"; \
+	if $(MAKE) lint > /tmp/wllr-ci-lint.log 2>&1; then \
+		echo "   ✅ PASS"; PASS=$$((PASS + 1)); \
+	else \
+		echo "   ❌ FAIL"; tail -30 /tmp/wllr-ci-lint.log | sed 's/^/   /'; FAIL=$$((FAIL + 1)); \
+	fi; \
+	echo "── [4/7] Struct alignment (betteralign)"; \
+	if $(MAKE) betteralign > /tmp/wllr-ci-betteralign.log 2>&1; then \
+		echo "   ✅ PASS"; PASS=$$((PASS + 1)); \
+	else \
+		echo "   ❌ FAIL"; tail -20 /tmp/wllr-ci-betteralign.log | sed 's/^/   /'; FAIL=$$((FAIL + 1)); \
+	fi; \
+	echo "── [5/7] Tests"; \
+	if $(MAKE) test > /tmp/wllr-ci.log 2>&1; then \
+		echo "   ✅ PASS"; PASS=$$((PASS + 1)); \
+	else \
+		echo "   ❌ FAIL"; tail -30 /tmp/wllr-ci.log | sed 's/^/   /'; FAIL=$$((FAIL + 1)); \
+	fi; \
+	echo "── [6/7] Deadcode check"; \
+	if $(MAKE) deadcode > /tmp/wllr-ci-deadcode.log 2>&1; then \
+		echo "   ✅ PASS"; PASS=$$((PASS + 1)); \
+	else \
+		echo "   ❌ FAIL"; tail -20 /tmp/wllr-ci-deadcode.log | sed 's/^/   /'; FAIL=$$((FAIL + 1)); \
+	fi; \
+	echo "── [7/7] Staticcheck"; \
+	if $(MAKE) staticcheck > /tmp/wllr-ci-staticcheck.log 2>&1; then \
+		echo "   ✅ PASS"; PASS=$$((PASS + 1)); \
+	else \
+		echo "   ❌ FAIL"; tail -20 /tmp/wllr-ci-staticcheck.log | sed 's/^/   /'; FAIL=$$((FAIL + 1)); \
+	fi; \
+	rm -f /tmp/wllr-ci*.log; \
+	echo ""; \
+	echo "── Summary: $$PASS passed, $$FAIL failed"; \
+	if [ "$$FAIL" -gt 0 ]; then \
+		echo "❌ CI pipeline FAILED"; exit 1; \
+	else \
+		echo "✅ CI pipeline PASSED"; \
+	fi
+
+# Run all pre-commit quality checks
+precommit:
+	@echo "==> Running pre-commit quality checks..."
+	@echo ""
+	@echo "[1/9] Auto-formatting code (gofumpt)..."
+	@$(MAKE) gofumpt
+	@echo "✅ gofumpt: formatted"
+	@echo ""
+	@echo "[2/9] Auto-fixing line length (golines)..."
+	@$(MAKE) golines
+	@echo "✅ golines: fixed"
+	@echo ""
+	@echo "[3/9] Running golangci-lint (40+ linters)..."
+	@$(MAKE) lint
+	@echo "✅ golangci-lint: clean"
+	@echo ""
+	@echo "[4/9] Checking struct alignment (betteralign)..."
+	@$(MAKE) betteralign
+	@echo "✅ betteralign: clean"
+	@echo ""
+	@echo "[5/9] Running nil safety checks (nilaway)..."
+	@$(MAKE) nilaway
+	@echo "✅ nilaway: clean"
+	@echo ""
+	@echo "[6/9] Building project..."
+	@go build $(PACKAGES)
+	@echo "✅ build: successful"
+	@echo ""
+	@echo "[7/9] Running tests..."
+	@$(MAKE) test
+	@echo "✅ tests: all passing"
+	@echo ""
+	@echo "[8/9] Running deadcode check..."
+	@$(MAKE) deadcode
+	@echo "✅ deadcode: no unreachable code"
+	@echo ""
+	@echo "[9/9] Running staticcheck..."
+	@$(MAKE) staticcheck
+	@echo "✅ staticcheck: clean"
+	@echo ""
+	@echo "✅ All pre-commit checks passed!"
+	@echo "✅ Ready to commit"
 
 clean:
 	rm -rf $(DIST_DIR)

@@ -16,17 +16,22 @@ import (
 // When Run is called by the fantasy agent, it dispatches the tool call
 // to the extension host via ExecuteTool and waits for the result.
 type sdkToolAdapter struct {
-	tool            sdk.Tool
 	host            *extension.Host
-	agentID         string
 	params          map[string]any
-	required        []string
 	providerOptions fantasy.ProviderOptions
+	agentID         string
+	required        []string
+	tool            sdk.Tool
 }
 
 // sdkToolsToFantasy converts a slice of sdk.Tool values into []fantasy.AgentTool.
 // Tools that cannot be parsed are skipped with a warning logged via logFn.
-func sdkToolsToFantasy(tools []sdk.Tool, host *extension.Host, agentID string, logFn func(int, string)) []fantasy.AgentTool {
+func sdkToolsToFantasy(
+	tools []sdk.Tool,
+	host *extension.Host,
+	agentID string,
+	logFn func(int, string),
+) []fantasy.AgentTool {
 	result := make([]fantasy.AgentTool, 0, len(tools))
 	for _, t := range tools {
 		adapted, err := newSDKToolAdapter(t, host, agentID)

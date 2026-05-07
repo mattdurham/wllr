@@ -145,7 +145,10 @@ func extensionInit() int32 {
 		Name        string `json:"name"`
 		Description string `json:"description"`
 	}
-	return hostCallJSON("register_command", cmdParams{Name: "agents", Description: "Show running sub-agents and their status"})
+	return hostCallJSON(
+		"register_command",
+		cmdParams{Name: "agents", Description: "Show running sub-agents and their status"},
+	)
 }
 
 //go:wasmexport _on_event
@@ -494,14 +497,16 @@ func onCommand(raw json.RawMessage) {
 	hostCallJSON("modal", map[string]string{"text": strings.TrimRight(text, "\n")})
 }
 
-
 func registerTool(name, desc, inputSchema string) int32 {
 	type toolParams struct {
 		Name        string          `json:"name"`
 		Description string          `json:"description"`
 		InputSchema json.RawMessage `json:"input_schema"`
 	}
-	rc := hostCallJSON("register_tool", toolParams{Name: name, Description: desc, InputSchema: json.RawMessage(inputSchema)})
+	rc := hostCallJSON(
+		"register_tool",
+		toolParams{Name: name, Description: desc, InputSchema: json.RawMessage(inputSchema)},
+	)
 	if rc != 0 {
 		return rc
 	}

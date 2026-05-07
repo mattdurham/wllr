@@ -12,8 +12,6 @@ import (
 	"github.com/mattdurham/wllr/sdk"
 )
 
-const roleToolMessage = "tool"
-
 // chatMessage is a finalised message in the chat history.
 type chatMessage struct {
 	role    sdk.Role
@@ -90,7 +88,7 @@ func (c *ChatView) SetSize(width, height int) {
 func (c *ChatView) AppendToken(token string) {
 	if c.lastDoneToolID != "" {
 		for i := range c.messages {
-			if c.messages[i].role == roleToolMessage && c.messages[i].toolID == c.lastDoneToolID {
+			if c.messages[i].role == "tool" && c.messages[i].toolID == c.lastDoneToolID {
 				c.messages[i].toolResponse += token
 				// toolResponse is part of messages, so the history cache is stale.
 				c.invalidateHistory()
@@ -128,7 +126,7 @@ func (c *ChatView) AddUserMessage(content string) {
 
 // AddNotification appends a system/notification line.
 func (c *ChatView) AddNotification(text string) {
-	c.messages = append(c.messages, chatMessage{role: sdk.Role("system"), content: text})
+	c.messages = append(c.messages, chatMessage{role: "system", content: text})
 	c.invalidateHistory()
 	c.refreshContent()
 	c.vp.GotoBottom()
@@ -143,7 +141,7 @@ func (c *ChatView) AddToolCall(id, toolName, input string) {
 	}
 	c.lastDoneToolID = ""
 	c.messages = append(c.messages, chatMessage{
-		role:      roleToolMessage,
+		role:      "tool",
 		toolID:    id,
 		toolName:  toolName,
 		toolInput: input,
@@ -157,7 +155,7 @@ func (c *ChatView) AddToolCall(id, toolName, input string) {
 // subsequent tokens into its box.
 func (c *ChatView) UpdateToolCall(id string, isError bool, output string) {
 	for i := range c.messages {
-		if c.messages[i].role == roleToolMessage && c.messages[i].toolID == id {
+		if c.messages[i].role == "tool" && c.messages[i].toolID == id {
 			c.messages[i].toolDone = true
 			c.messages[i].toolError = isError
 			c.messages[i].toolOutput = output // stored but not rendered
@@ -222,7 +220,7 @@ func (c *ChatView) refreshContent() {
 		}
 		lastToolIdx := -1
 		for i := len(c.messages) - 1; i >= 0; i-- {
-			if c.messages[i].role == roleToolMessage {
+			if c.messages[i].role == "tool" {
 				lastToolIdx = i
 				break
 			}
@@ -231,7 +229,7 @@ func (c *ChatView) refreshContent() {
 		var sb strings.Builder
 		for i, m := range c.messages {
 			var old bool
-			if m.role == roleToolMessage {
+			if m.role == "tool" {
 				// Only the most recent tool call keeps color; all others go grey.
 				old = i != lastToolIdx
 			} else {
@@ -265,7 +263,7 @@ func renderMessage(sb *strings.Builder, m chatMessage, width int, old bool) {
 	case sdk.RoleAssistant:
 		renderAssistantMessage(sb, m.content, width, old)
 		return
-	case roleToolMessage:
+	case "tool":
 		renderToolCall(sb, m, width, old)
 		return
 	default:

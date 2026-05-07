@@ -39,7 +39,11 @@ func TestEventJSONRoundTrip(t *testing.T) {
 		{
 			name:    "on_tool_call",
 			evtType: sdk.EventOnToolCall,
-			payload: sdk.OnToolCallPayload{ToolCallID: "tc-1", ToolName: "search", Input: json.RawMessage(`{"q":"foo"}`)},
+			payload: sdk.OnToolCallPayload{
+				ToolCallID: "tc-1",
+				ToolName:   "search",
+				Input:      json.RawMessage(`{"q":"foo"}`),
+			},
 		},
 		{
 			name:    "on_tool_result",

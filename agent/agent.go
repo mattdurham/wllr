@@ -246,7 +246,7 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 		fa := fantasy.NewAgent(lm, agentOpts...)
 
 		// Proactive compaction: if the estimated context is close to the model's
-		// limit, summarise old history BEFORE sending, avoiding a 400 error.
+		// limit, summarize old history BEFORE sending, avoiding a 400 error.
 		contextWindow := contextWindowForModel(a.modelName)
 		history := priorHistory
 		if shouldCompact(history, sysPrompt, content, contextWindow) {
@@ -262,77 +262,20 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 			}
 		}
 
-		var collectedText string
-		_, err := fa.Stream(childCtx, fantasy.AgentStreamCall{
-			Messages: sdkToFantasyMessages(history),
-			Prompt:   content,
-			OnTextDelta: func(id, text string) error {
-				if text == "" {
-					return nil
-				}
-				select {
-				case <-childCtx.Done():
-					return childCtx.Err()
-				default:
-				}
-				collectedText += text
-				if pool != nil {
-					pool.addTokens(1)
-				}
-				if onToken != nil {
-					onToken(text)
-				}
-				return nil
-			},
-			OnToolCall: func(toolCall fantasy.ToolCallContent) error {
-				if onToolCall != nil && !toolCall.ProviderExecuted {
-					onToolCall(toolCall.ToolCallID, toolCall.ToolName, toolCall.Input)
-				}
-				return nil
-			},
-		})
+		collectedText, err := streamTurn(childCtx, fa, history, content, pool, onToken, onToolCall)
 
 		// Reactive fallback: if we still hit a context error, trim and retry once.
 		if err != nil && isContextTooLong(err) {
 			if onToken != nil {
 				onToken("\n\n[Still too long — trimming and retrying…]\n\n")
 			}
-			keep := keepMessages
-			if len(history) > keep {
-				history = history[len(history)-keep:]
+			if len(history) > keepMessages {
+				history = history[len(history)-keepMessages:]
 				a.historyMu.Lock()
 				a.history = history
 				a.historyMu.Unlock()
 			}
-			collectedText = ""
-			_, err = fa.Stream(childCtx, fantasy.AgentStreamCall{
-				Messages: sdkToFantasyMessages(history),
-				Prompt:   content,
-				OnTextDelta: func(id, text string) error {
-					if text == "" {
-						return nil
-					}
-					select {
-					case <-childCtx.Done():
-						return childCtx.Err()
-					default:
-					}
-					collectedText += text
-					if pool != nil {
-						pool.addTokens(1)
-					}
-					if onToken != nil {
-						onToken(text)
-					}
-					return nil
-				},
-				OnToolCall: func(toolCall fantasy.ToolCallContent) error {
-					if onToolCall != nil && !toolCall.ProviderExecuted {
-						onToolCall(toolCall.ToolCallID, toolCall.ToolName, toolCall.Input)
-					}
-					return nil
-				},
-			})
+			collectedText, err = streamTurn(childCtx, fa, history, content, pool, onToken, onToolCall)
 		}
 
 		// Append the user message and assistant reply to history.
@@ -347,6 +290,49 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 			onDone(err)
 		}
 	}()
+}
+
+// streamTurn sends history+content to fa and collects the full text response.
+// Extracted from Submit to keep its cyclomatic complexity below threshold.
+func streamTurn(
+	ctx context.Context,
+	fa fantasy.Agent,
+	history []sdk.Message,
+	content string,
+	pool *AgentPool,
+	onToken func(string),
+	onToolCall func(id, name, input string),
+) (string, error) {
+	var collected string
+	_, err := fa.Stream(ctx, fantasy.AgentStreamCall{
+		Messages: sdkToFantasyMessages(history),
+		Prompt:   content,
+		OnTextDelta: func(_, text string) error {
+			if text == "" {
+				return nil
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+			collected += text
+			if pool != nil {
+				pool.addTokens(1)
+			}
+			if onToken != nil {
+				onToken(text)
+			}
+			return nil
+		},
+		OnToolCall: func(toolCall fantasy.ToolCallContent) error {
+			if onToolCall != nil && !toolCall.ProviderExecuted {
+				onToolCall(toolCall.ToolCallID, toolCall.ToolName, toolCall.Input)
+			}
+			return nil
+		},
+	})
+	return collected, err
 }
 
 // isContextTooLong returns true when the API rejected the request because the
