@@ -7,6 +7,7 @@ package main
 
 import (
 	"encoding/json"
+	"strings"
 	"unsafe"
 )
 
@@ -17,6 +18,52 @@ func hostLog(level, ptr, length uint32)
 func hostCall(reqPtr, reqLen, respPtrPtr, respLenPtr uint32) uint32
 
 var pinned = map[uintptr][]byte{}
+
+// agentRecord tracks a running sub-agent's status for the /agents modal.
+type agentRecord struct {
+	id         string
+	name       string
+	task       string // initial prompt (truncated)
+	lastUpdate string // most recent action
+}
+
+var agentRecords []agentRecord // ordered by creation
+
+func truncate(s string, n int) string {
+	r := []rune(s)
+	if len(r) > n {
+		return string(r[:n]) + "…"
+	}
+	return s
+}
+
+func upsertAgent(id, name, task, lastUpdate string) {
+	for i := range agentRecords {
+		if agentRecords[i].id == id {
+			if name != "" {
+				agentRecords[i].name = name
+			}
+			if task != "" {
+				agentRecords[i].task = task
+			}
+			if lastUpdate != "" {
+				agentRecords[i].lastUpdate = lastUpdate
+			}
+			return
+		}
+	}
+	agentRecords = append(agentRecords, agentRecord{id: id, name: name, task: task, lastUpdate: lastUpdate})
+}
+
+func removeAgent(id string) {
+	out := agentRecords[:0]
+	for _, r := range agentRecords {
+		if r.id != id {
+			out = append(out, r)
+		}
+	}
+	agentRecords = out
+}
 
 //go:wasmexport _alloc
 func extensionAlloc(size int32) int32 {
@@ -88,7 +135,17 @@ func extensionInit() int32 {
 			return rc
 		}
 	}
-	return hostCallJSON("subscribe", map[string]string{"event": "session_start"})
+	if rc := hostCallJSON("subscribe", map[string]string{"event": "session_start"}); rc != 0 {
+		return rc
+	}
+	if rc := hostCallJSON("subscribe", map[string]string{"event": "on_command"}); rc != 0 {
+		return rc
+	}
+	type cmdParams struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	}
+	return hostCallJSON("register_command", cmdParams{Name: "agents", Description: "Show running sub-agents and their status"})
 }
 
 //go:wasmexport _on_event
@@ -105,6 +162,8 @@ func extensionOnEvent(ptr, length int32) int32 {
 	switch evt.Type {
 	case "session_start":
 		onSessionStart()
+	case "on_command":
+		onCommand(evt.Payload)
 	case "before_tool_call":
 		onBeforeToolCall(evt.Payload)
 	}
@@ -220,6 +279,7 @@ func handleCreateAgent(p beforeToolCallPayload) {
 		hostCallWithResponse("agent_send_message", msgParams{ID: agentID, Message: input.Prompt})
 	}
 
+	upsertAgent(agentID, input.Name, truncate(input.Prompt, 80), "")
 	out, _ := json.Marshal(map[string]string{"agent_id": agentID, "status": "created"})
 	sendToolResult(p.ToolCallID, string(out), false)
 }
@@ -248,6 +308,7 @@ func handleShutdownAgent(p beforeToolCallPayload) {
 		sendToolResult(p.ToolCallID, "shutdown_agent: "+resp.Error, true)
 		return
 	}
+	removeAgent(input.AgentID)
 	sendToolResult(p.ToolCallID, `{"status":"closed"}`, false)
 }
 
@@ -392,7 +453,39 @@ func handleSendMessage(p beforeToolCallPayload) {
 		sendToolResult(p.ToolCallID, "send_message: "+resp.Error, true)
 		return
 	}
+	upsertAgent(input.AgentID, "", "", "← "+truncate(input.Message, 60))
 	sendToolResult(p.ToolCallID, `{"status":"sent"}`, false)
+}
+
+func onCommand(raw json.RawMessage) {
+	var payload struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil || payload.Name != "agents" {
+		return
+	}
+
+	if len(agentRecords) == 0 {
+		hostCallJSON("modal", map[string]string{"text": "No sub-agents running."})
+		return
+	}
+
+	text := "Sub-agents\n" + strings.Repeat("─", 40) + "\n\n"
+	for _, r := range agentRecords {
+		text += r.id
+		if r.name != "" && r.name != r.id {
+			text += "  (" + r.name + ")"
+		}
+		text += "\n"
+		if r.task != "" {
+			text += "  Task: " + r.task + "\n"
+		}
+		if r.lastUpdate != "" {
+			text += "  Last: " + r.lastUpdate + "\n"
+		}
+		text += "\n"
+	}
+	hostCallJSON("modal", map[string]string{"text": strings.TrimRight(text, "\n")})
 }
 
 
