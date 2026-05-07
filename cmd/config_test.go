@@ -7,9 +7,9 @@ import (
 
 func TestLoadConfig_APIKey(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "test-key-123")
-	t.Setenv("BOB_EXTENSIONS_DIR", "")
-	t.Setenv("BOB_MODEL", "")
-	t.Setenv("BOB_PROVIDER", "")
+	t.Setenv("WLLR_EXTENSIONS_DIR", "")
+	t.Setenv("WLLR_MODEL", "")
+	t.Setenv("WLLR_PROVIDER", "")
 
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -22,7 +22,7 @@ func TestLoadConfig_APIKey(t *testing.T) {
 
 func TestLoadConfig_ExtensionsDir(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "key")
-	t.Setenv("BOB_EXTENSIONS_DIR", "/tmp/extensions")
+	t.Setenv("WLLR_EXTENSIONS_DIR", "/tmp/extensions")
 
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -35,7 +35,7 @@ func TestLoadConfig_ExtensionsDir(t *testing.T) {
 
 func TestLoadConfig_ModelDefault(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "key")
-	t.Setenv("BOB_MODEL", "")
+	t.Setenv("WLLR_MODEL", "")
 
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -48,7 +48,7 @@ func TestLoadConfig_ModelDefault(t *testing.T) {
 
 func TestLoadConfig_ModelOverride(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "key")
-	t.Setenv("BOB_MODEL", "claude-haiku-3-5")
+	t.Setenv("WLLR_MODEL", "claude-haiku-3-5")
 
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -61,7 +61,7 @@ func TestLoadConfig_ModelOverride(t *testing.T) {
 
 func TestLoadConfig_ProviderDefault(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "key")
-	t.Setenv("BOB_PROVIDER", "")
+	t.Setenv("WLLR_PROVIDER", "")
 
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -74,7 +74,7 @@ func TestLoadConfig_ProviderDefault(t *testing.T) {
 
 func TestLoadConfig_ProviderOverride(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "key")
-	t.Setenv("BOB_PROVIDER", "custom")
+	t.Setenv("WLLR_PROVIDER", "custom")
 
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -87,7 +87,7 @@ func TestLoadConfig_ProviderOverride(t *testing.T) {
 
 func TestLoadConfig_MissingAPIKeyError(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
-	t.Setenv("BOB_PROVIDER", "anthropic")
+	t.Setenv("WLLR_PROVIDER", "anthropic")
 
 	_, err := LoadConfig()
 	if err == nil {
@@ -97,7 +97,7 @@ func TestLoadConfig_MissingAPIKeyError(t *testing.T) {
 
 func TestLoadConfig_MissingAPIKeyNonAnthropicOK(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
-	t.Setenv("BOB_PROVIDER", "custom")
+	t.Setenv("WLLR_PROVIDER", "custom")
 
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -112,9 +112,9 @@ func TestLoadConfig_AllEnvVars(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "mykey")
 	t.Setenv("OPENAI_API_KEY", "oai-key")
 	t.Setenv("GEMINI_API_KEY", "gem-key")
-	t.Setenv("BOB_EXTENSIONS_DIR", "/ext")
-	t.Setenv("BOB_MODEL", "claude-opus-4-5")
-	t.Setenv("BOB_PROVIDER", "anthropic")
+	t.Setenv("WLLR_EXTENSIONS_DIR", "/ext")
+	t.Setenv("WLLR_MODEL", "claude-opus-4-5")
+	t.Setenv("WLLR_PROVIDER", "anthropic")
 
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -146,7 +146,7 @@ func TestLoadConfig_ExpandsHomeTilde(t *testing.T) {
 		t.Skip("cannot determine home dir")
 	}
 	t.Setenv("ANTHROPIC_API_KEY", "key")
-	t.Setenv("BOB_EXTENSIONS_DIR", "~/myext")
+	t.Setenv("WLLR_EXTENSIONS_DIR", "~/myext")
 
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -161,7 +161,7 @@ func TestLoadConfig_ExpandsHomeTilde(t *testing.T) {
 func TestLoadConfig_OpenAIAPIKey(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("OPENAI_API_KEY", "oai-key-456")
-	t.Setenv("BOB_PROVIDER", "openai")
+	t.Setenv("WLLR_PROVIDER", "openai")
 
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -175,7 +175,7 @@ func TestLoadConfig_OpenAIAPIKey(t *testing.T) {
 func TestLoadConfig_GeminiAPIKey(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("GEMINI_API_KEY", "gem-key-789")
-	t.Setenv("BOB_PROVIDER", "gemini")
+	t.Setenv("WLLR_PROVIDER", "gemini")
 
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -188,7 +188,7 @@ func TestLoadConfig_GeminiAPIKey(t *testing.T) {
 
 func TestLoadConfig_MissingOpenAIKeyError(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "")
-	t.Setenv("BOB_PROVIDER", "openai")
+	t.Setenv("WLLR_PROVIDER", "openai")
 
 	_, err := LoadConfig()
 	if err == nil {
@@ -198,7 +198,7 @@ func TestLoadConfig_MissingOpenAIKeyError(t *testing.T) {
 
 func TestLoadConfig_MissingGeminiKeyError(t *testing.T) {
 	t.Setenv("GEMINI_API_KEY", "")
-	t.Setenv("BOB_PROVIDER", "gemini")
+	t.Setenv("WLLR_PROVIDER", "gemini")
 
 	_, err := LoadConfig()
 	if err == nil {
