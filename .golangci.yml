@@ -155,14 +155,3 @@ linters:
         linters:
           - revive
 
-      # routeHostCall and Model.Update are dispatch switches over protocol methods
-      # and UI messages respectively. Their cyclomatic complexity is inherent to
-      # the dispatch pattern and not reducible without obscuring intent.
-      - path: extension/host\.go
-        text: "cyclomatic complexity.*routeHostCall"
-        linters:
-          - gocyclo
-      - path: harness/model\.go
-        text: "cyclomatic complexity.*Update"
-        linters:
-          - gocyclo

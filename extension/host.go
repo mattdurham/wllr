@@ -64,8 +64,9 @@ type RegisteredToolInfo struct {
 
 // Host manages a collection of WASM extensions.
 type Host struct {
-	runtime wazero.Runtime
-	logger  *slog.Logger
+	runtime  wazero.Runtime
+	logger   *slog.Logger
+	dispatch map[string]func(ctx context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse
 
 	// Bus is the shared event stream. All DispatchEvent calls publish here
 	// in addition to dispatching to WASM extensions.
@@ -153,6 +154,7 @@ func NewHost(logger *slog.Logger) *Host {
 		pendingTools:    make(map[string]chan toolResult),
 		Bus:             NewEventBus(),
 	}
+	h.dispatch = h.buildDispatch()
 	h.runtime = wazero.NewRuntime(context.Background())
 	// WASI is required by native Go WASM modules (GOOS=wasip1).
 	if _, err := wasi_snapshot_preview1.Instantiate(context.Background(), h.runtime); err != nil {
@@ -296,112 +298,110 @@ func (h *Host) hostCallImpl(ctx context.Context, m api.Module, reqPtr, reqLen, r
 	return uint32(sdk.ErrOK)
 }
 
-// routeHostCall dispatches req to the appropriate handler and returns a response.
-func (h *Host) routeHostCall(
-	ctx context.Context,
-	_ api.Module,
-	ext *Extension,
-	req sdk.HostCallRequest,
-) sdk.HostCallResponse {
-	switch req.Method {
-	case sdk.MethodSubscribe:
-		return h.handleSubscribe(ext, req)
+// routeHostCall dispatches req to the appropriate handler via the dispatch map.
+func (h *Host) routeHostCall(ctx context.Context, _ api.Module, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+	if fn, ok := h.dispatch[req.Method]; ok {
+		return fn(ctx, ext, req)
+	}
+	return sdk.HostCallResponse{Error: fmt.Sprintf("unknown method: %s", req.Method)}
+}
 
-	case sdk.MethodRegisterTool:
-		return h.handleRegisterTool(ext, req)
-
-	case sdk.MethodRegisterCommand:
-		return h.handleRegisterCommand(req)
-
-	case sdk.MethodSendMessage:
-		return h.handleSendMessage(req)
-
-	case sdk.MethodSetStatus:
-		return h.handleSetStatus(req)
-
-	case sdk.MethodNotify:
-		return h.handleNotify(req)
-
-	case sdk.MethodToolResult:
-		return h.handleToolResult(req)
-
-	case sdk.MethodStoreSet:
-		return h.handleStoreSet(ext, req)
-
-	case sdk.MethodStoreGet:
-		return h.handleStoreGet(ext, req)
-
-	case sdk.MethodAbort:
-		if h.OnAbort != nil {
-			h.OnAbort()
-		}
-		return sdk.HostCallResponse{}
-
-	case sdk.MethodRequestPermission:
-		return h.handleRequestPermission(ext, req)
-
-	case sdk.MethodModal:
-		return h.handleModal(req)
-
-	case sdk.MethodSetSystemPrompt:
-		return h.handleSetSystemPrompt(req)
-
-	case sdk.MethodAppendSystemPrompt:
-		return h.handleAppendSystemPrompt(req)
-
-	case sdk.MethodExec:
-		return h.handleExec(ctx, ext, req)
-
-	case sdk.MethodGetEnv:
-		return h.handleGetEnv(ext, req)
-
-	case sdk.MethodConfigRead:
-		return h.handleConfigRead(ext)
-
-	// Agent management methods.
-	case sdk.MethodAgentSpawn:
-		return h.handleAgentSpawn(req)
-
-	case sdk.MethodAgentClose:
-		return h.handleAgentClose(req)
-
-	case sdk.MethodAgentSendMessage:
-		return h.handleAgentSendMessage(req)
-
-	case sdk.MethodAgentList:
-		return h.handleAgentList()
-
-	case sdk.MethodAgentTokenCount:
-		return h.handleAgentTokenCount()
-
-	// Team management methods.
-	case sdk.MethodTeamCreate:
-		return h.handleTeamCreate(req)
-
-	case sdk.MethodTeamClose:
-		return h.handleTeamClose(req)
-
-	case sdk.MethodTeamAddMember:
-		return h.handleTeamAddMember(req)
-
-	case sdk.MethodTeamRemoveMember:
-		return h.handleTeamRemoveMember(req)
-
-	// MCP bridge methods.
-	case sdk.MethodMCPSpawn:
-		return h.handleMCPSpawn(ext, req)
-
-	case sdk.MethodMCPClose:
-		return h.handleMCPClose(req)
-
-	case sdk.MethodMCPSend:
-		return h.handleMCPSend(req)
-
-	case sdk.MethodMCPRead:
-		return h.handleMCPRead(req)
-
-	default:
-		return sdk.HostCallResponse{Error: fmt.Sprintf("unknown method: %s", req.Method)}
+// buildDispatch constructs the method-to-handler dispatch map used by routeHostCall.
+func (h *Host) buildDispatch() map[string]func(ctx context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+	return map[string]func(ctx context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse{
+		sdk.MethodSubscribe: func(_ context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleSubscribe(ext, req)
+		},
+		sdk.MethodRegisterTool: func(_ context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleRegisterTool(ext, req)
+		},
+		sdk.MethodRegisterCommand: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleRegisterCommand(req)
+		},
+		sdk.MethodSendMessage: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleSendMessage(req)
+		},
+		sdk.MethodSetStatus: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleSetStatus(req)
+		},
+		sdk.MethodNotify: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleNotify(req)
+		},
+		sdk.MethodToolResult: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleToolResult(req)
+		},
+		sdk.MethodStoreSet: func(_ context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleStoreSet(ext, req)
+		},
+		sdk.MethodStoreGet: func(_ context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleStoreGet(ext, req)
+		},
+		sdk.MethodAbort: func(_ context.Context, _ *Extension, _ sdk.HostCallRequest) sdk.HostCallResponse {
+			if h.OnAbort != nil {
+				h.OnAbort()
+			}
+			return sdk.HostCallResponse{}
+		},
+		sdk.MethodRequestPermission: func(_ context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleRequestPermission(ext, req)
+		},
+		sdk.MethodModal: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleModal(req)
+		},
+		sdk.MethodSetSystemPrompt: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleSetSystemPrompt(req)
+		},
+		sdk.MethodAppendSystemPrompt: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleAppendSystemPrompt(req)
+		},
+		sdk.MethodExec: func(ctx context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleExec(ctx, ext, req)
+		},
+		sdk.MethodGetEnv: func(_ context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleGetEnv(ext, req)
+		},
+		sdk.MethodConfigRead: func(_ context.Context, ext *Extension, _ sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleConfigRead(ext)
+		},
+		sdk.MethodAgentSpawn: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleAgentSpawn(req)
+		},
+		sdk.MethodAgentClose: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleAgentClose(req)
+		},
+		sdk.MethodAgentSendMessage: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleAgentSendMessage(req)
+		},
+		sdk.MethodAgentList: func(_ context.Context, _ *Extension, _ sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleAgentList()
+		},
+		sdk.MethodAgentTokenCount: func(_ context.Context, _ *Extension, _ sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleAgentTokenCount()
+		},
+		sdk.MethodTeamCreate: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleTeamCreate(req)
+		},
+		sdk.MethodTeamClose: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleTeamClose(req)
+		},
+		sdk.MethodTeamAddMember: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleTeamAddMember(req)
+		},
+		sdk.MethodTeamRemoveMember: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleTeamRemoveMember(req)
+		},
+		sdk.MethodMCPSpawn: func(_ context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleMCPSpawn(ext, req)
+		},
+		sdk.MethodMCPClose: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleMCPClose(req)
+		},
+		sdk.MethodMCPSend: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleMCPSend(req)
+		},
+		sdk.MethodMCPRead: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleMCPRead(req)
+		},
 	}
 }
 

@@ -296,222 +296,27 @@ func (m Model) cmdDispatchSessionStart() tea.Cmd {
 
 // Update handles all incoming messages.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmds []tea.Cmd
-
-	switch msg := msg.(type) {
-	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		m.chat.SetSize(msg.Width, m.chatHeight())
-		m.input.SetWidth(msg.Width - 4)
-		m.statusBar.SetWidth(msg.Width)
-		return m, nil
-
-	case ShowModalMsg:
-		m.modalContent = msg.Text
-		m.modalScroll = 0
-		return m, nil
-
-	case tea.KeyPressMsg:
-		// Modal consumes all keys; esc/enter/q close it.
-		if m.modalContent != "" {
-			switch msg.String() {
-			case "esc", "enter", "q":
-				m.modalContent = ""
-				m.modalScroll = 0
-			case "up":
-				if m.modalScroll > 0 {
-					m.modalScroll--
-				}
-			case "down":
-				chatH := m.height - inputAreaHeight
-				if chatH < 5 {
-					chatH = 5
-				}
-				modalH := chatH * 8 / 10
-				if modalH < 5 {
-					modalH = 5
-				}
-				contentLines := modalH - 2
-				lines := strings.Split(strings.TrimRight(m.modalContent, "\n"), "\n")
-				if max := len(lines) - contentLines; m.modalScroll < max {
-					m.modalScroll++
-				}
-			}
-			return m, nil
-		}
-
-		// Dropdown navigation takes priority over textarea key handling.
-		if len(m.suggestions) > 0 {
-			switch msg.String() {
-			case "up":
-				if m.suggestionIdx > 0 {
-					m.suggestionIdx--
-					if m.suggestionIdx < m.dropdownOffset {
-						m.dropdownOffset = m.suggestionIdx
-					}
-				}
-				return m, nil
-			case "down":
-				if m.suggestionIdx < len(m.suggestions)-1 {
-					m.suggestionIdx++
-					const maxShow = 8
-					if m.suggestionIdx >= m.dropdownOffset+maxShow {
-						m.dropdownOffset = m.suggestionIdx - maxShow + 1
-					}
-				}
-				return m, nil
-			case "tab":
-				// Replace the /word at the cursor with the completed command name.
-				if m.suggestionIdx < len(m.suggestions) {
-					val := m.input.Value()
-					if slashIdx := slashWordAt(val); slashIdx >= 0 {
-						m.input.SetValue(val[:slashIdx] + "/" + m.suggestions[m.suggestionIdx].Name + " ")
-					} else {
-						m.input.SetValue("/" + m.suggestions[m.suggestionIdx].Name + " ")
-					}
-				}
-				m.closeSuggestions()
-				return m, nil
-			case "enter":
-				// Dispatch the selected command and clear input.
-				if m.suggestionIdx < len(m.suggestions) {
-					cmd := m.suggestions[m.suggestionIdx]
-					m.input.Reset()
-					m.closeSuggestions()
-					return m, cmd.Handler(nil)
-				}
-			case "esc":
-				m.closeSuggestions()
-				return m, nil
-			}
-		}
-
-		switch msg.String() {
-		case "ctrl+c":
-			if m.streaming {
-				if m.agentPool != nil {
-					_ = m.agentPool.Cancel(m.mainAgentID)
-				}
-				m.statusBar.statuses["stream"] = "cancelling…"
-				return m, nil
-			}
-			return m, tea.Quit
-		case "ctrl+q":
-			return m, tea.Quit
-		// Explicit chat scroll — pgup/pgdown work while typing without
-		// triggering the viewport's default vim-style key bindings.
-		case "pgup":
-			m.chat.ScrollUp(m.chat.height / 2)
-			return m, nil
-		case "pgdown":
-			m.chat.ScrollDown(m.chat.height / 2)
-			return m, nil
-		}
-
-	case TokenMsg:
-		m.chat.AppendToken(msg.Token)
-		return m, nil
-
-	case streamTickMsg:
-		if m.streaming {
-			since := time.Since(m.streamStart)
-			dots := strings.Repeat(".", int(since/400/time.Millisecond)%3+1)
-			m.statusBar.statuses["stream"] = fmt.Sprintf("working%-3s %s", dots, formatElapsed(since))
-			cmds = append(cmds, tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return streamTickMsg{} }))
-		}
-		return m, tea.Batch(cmds...)
-
-	case StreamDoneMsg:
-		m.streaming = false
-		if m.agentPool != nil {
-			m.statusBar.totalTokens = int(m.agentPool.TokenCount())
-		}
-		if msg.Err != nil && !errors.Is(msg.Err, context.Canceled) {
-			m.chat.AddNotification(fmt.Sprintf("Error: %v", msg.Err))
-			m.statusBar.statuses["stream"] = "error"
-		} else {
-			delete(m.statusBar.statuses, "stream")
-		}
-		m.chat.FinalizeMessage()
-		cmds = append(cmds, m.cmdDispatchAfterProviderResponse())
-		return m, tea.Batch(cmds...)
-
-	case addAssistantMsgToHistoryMsg:
-		m.history = append(m.history, sdk.Message{Role: sdk.RoleAssistant, Content: msg.content})
-		return m, nil
-
-	case ExtensionEventResultMsg:
-		for _, r := range msg.Results {
-			if r.Error != "" {
-				m.chat.AddNotification(fmt.Sprintf("Extension error: %s", r.Error))
-			}
-		}
-		// Refresh autocomplete in case extensions registered new commands.
-		m.updateSuggestions()
-		return m, nil
-
-	case ReloadMsg:
-		return m, m.cmdReloadExtensions()
-
-	case NotifyMsg:
-		m.chat.AddNotification(msg.Text)
-		return m, nil
-
-	case StatusUpdateMsg:
-		m.statusBar, _ = m.statusBar.Update(msg)
-		return m, nil
-
-	case SubmitMsg:
-		m.closeSuggestions()
-		return m.submitToAgent(msg.Content, msg.Display)
-
-	case CommandMsg:
-		if msg.Name == "help" {
-			return m, func() tea.Msg { return ShowModalMsg{Text: m.commands.HelpText()} }
-		}
-		return m, m.commands.Dispatch(msg.Name, msg.Args)
-
-	case clearMsg:
-		m.chat.Clear()
-		m.history = nil
-		return m, nil
-
-	case setModelMsg:
-		m.activeModel = msg.Model
-		m.statusBar.modelName = msg.Model
-		m.chat.AddNotification(fmt.Sprintf("Model set to: %s", msg.Model))
-		return m, nil
-
-	case abortStreamMsg:
-		if m.agentPool != nil {
-			_ = m.agentPool.Cancel(m.mainAgentID)
-		}
-		m.statusBar.statuses["stream"] = "cancelling…"
-		return m, nil
-
-	case ToolCallStartMsg:
-		m.chat.AddToolCall(msg.ID, msg.ToolName, msg.Input)
-		return m, nil
-
-	case ToolCallDoneMsg:
-		m.chat.UpdateToolCall(msg.ID, msg.IsError, msg.Output)
-		return m, nil
-
-	case dispatchOnCommandMsg:
-		if m.extHost != nil {
-			extHost := m.extHost
-			return m, func() tea.Msg {
-				payload, _ := json.Marshal(sdk.OnCommandPayload{Name: msg.Name, Args: msg.Args})
-				evt := sdk.Event{Type: sdk.EventOnCommand, Payload: payload}
-				results, err := extHost.DispatchEvent(context.Background(), evt)
-				return ExtensionEventResultMsg{Results: results, Err: err}
-			}
-		}
-		return m, nil
+	if n, cmd, ok := m.updateWindow(msg); ok {
+		return n, cmd
+	}
+	if n, cmd, ok := m.updateKeyPress(msg); ok {
+		return n, cmd
+	}
+	if n, cmd, ok := m.updateStream(msg); ok {
+		return n, cmd
+	}
+	if n, cmd, ok := m.updateTools(msg); ok {
+		return n, cmd
+	}
+	if n, cmd, ok := m.updateActions(msg); ok {
+		return n, cmd
+	}
+	if n, cmd, ok := m.updateExtension(msg); ok {
+		return n, cmd
 	}
 
 	// Forward to sub-models.
+	var cmds []tea.Cmd
 	var inputCmd tea.Cmd
 	m.input, inputCmd = m.input.Update(msg)
 	m.updateSuggestions() // recompute dropdown after any key that may change input
@@ -528,6 +333,263 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(cmds...)
+}
+
+// updateWindow handles window resize and modal display messages.
+// Returns (model, cmd, true) when the message was handled.
+func (m Model) updateWindow(msg tea.Msg) (Model, tea.Cmd, bool) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		m.chat.SetSize(msg.Width, m.chatHeight())
+		m.input.SetWidth(msg.Width - 4)
+		m.statusBar.SetWidth(msg.Width)
+		return m, nil, true
+	case ShowModalMsg:
+		m.modalContent = msg.Text
+		m.modalScroll = 0
+		return m, nil, true
+	}
+	return m, nil, false
+}
+
+// updateKeyPress handles keyboard input: modal keys, dropdown navigation, and global hotkeys.
+// Returns (model, cmd, true) when the message was handled.
+func (m Model) updateKeyPress(msg tea.Msg) (Model, tea.Cmd, bool) {
+	kp, ok := msg.(tea.KeyPressMsg)
+	if !ok {
+		return m, nil, false
+	}
+
+	// Modal consumes all keys; esc/enter/q close it.
+	if m.modalContent != "" {
+		switch kp.String() {
+		case "esc", "enter", "q":
+			m.modalContent = ""
+			m.modalScroll = 0
+		case "up":
+			if m.modalScroll > 0 {
+				m.modalScroll--
+			}
+		case "down":
+			chatH := m.height - inputAreaHeight
+			if chatH < 5 {
+				chatH = 5
+			}
+			modalH := chatH * 8 / 10
+			if modalH < 5 {
+				modalH = 5
+			}
+			contentLines := modalH - 2
+			lines := strings.Split(strings.TrimRight(m.modalContent, "\n"), "\n")
+			if max := len(lines) - contentLines; m.modalScroll < max {
+				m.modalScroll++
+			}
+		}
+		return m, nil, true
+	}
+
+	// Dropdown navigation takes priority over textarea key handling.
+	if len(m.suggestions) > 0 {
+		switch kp.String() {
+		case "up":
+			if m.suggestionIdx > 0 {
+				m.suggestionIdx--
+				if m.suggestionIdx < m.dropdownOffset {
+					m.dropdownOffset = m.suggestionIdx
+				}
+			}
+			return m, nil, true
+		case "down":
+			if m.suggestionIdx < len(m.suggestions)-1 {
+				m.suggestionIdx++
+				const maxShow = 8
+				if m.suggestionIdx >= m.dropdownOffset+maxShow {
+					m.dropdownOffset = m.suggestionIdx - maxShow + 1
+				}
+			}
+			return m, nil, true
+		case "tab":
+			// Replace the /word at the cursor with the completed command name.
+			if m.suggestionIdx < len(m.suggestions) {
+				val := m.input.Value()
+				if slashIdx := slashWordAt(val); slashIdx >= 0 {
+					m.input.SetValue(val[:slashIdx] + "/" + m.suggestions[m.suggestionIdx].Name + " ")
+				} else {
+					m.input.SetValue("/" + m.suggestions[m.suggestionIdx].Name + " ")
+				}
+			}
+			m.closeSuggestions()
+			return m, nil, true
+		case "enter":
+			// Dispatch the selected command and clear input.
+			if m.suggestionIdx < len(m.suggestions) {
+				cmd := m.suggestions[m.suggestionIdx]
+				m.input.Reset()
+				m.closeSuggestions()
+				return m, cmd.Handler(nil), true
+			}
+		case "esc":
+			m.closeSuggestions()
+			return m, nil, true
+		}
+	}
+
+	switch kp.String() {
+	case "ctrl+c":
+		if m.streaming {
+			if m.agentPool != nil {
+				_ = m.agentPool.Cancel(m.mainAgentID)
+			}
+			m.statusBar.statuses["stream"] = "cancelling…"
+			return m, nil, true
+		}
+		return m, tea.Quit, true
+	case "ctrl+q":
+		return m, tea.Quit, true
+	// Explicit chat scroll — pgup/pgdown work while typing without
+	// triggering the viewport's default vim-style key bindings.
+	case "pgup":
+		m.chat.ScrollUp(m.chat.height / 2)
+		return m, nil, true
+	case "pgdown":
+		m.chat.ScrollDown(m.chat.height / 2)
+		return m, nil, true
+	}
+
+	return m, nil, false
+}
+
+// updateStream handles token streaming messages: TokenMsg, streamTickMsg, StreamDoneMsg, addAssistantMsgToHistoryMsg.
+// Returns (model, cmd, true) when the message was handled.
+func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
+	switch msg := msg.(type) {
+	case TokenMsg:
+		m.chat.AppendToken(msg.Token)
+		return m, nil, true
+
+	case streamTickMsg:
+		cmds := make([]tea.Cmd, 0, 1)
+		if m.streaming {
+			since := time.Since(m.streamStart)
+			dots := strings.Repeat(".", int(since/400/time.Millisecond)%3+1)
+			m.statusBar.statuses["stream"] = fmt.Sprintf("working%-3s %s", dots, formatElapsed(since))
+			cmds = append(cmds, tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return streamTickMsg{} }))
+		}
+		return m, tea.Batch(cmds...), true
+
+	case StreamDoneMsg:
+		cmds := make([]tea.Cmd, 0, 1)
+		m.streaming = false
+		if m.agentPool != nil {
+			m.statusBar.totalTokens = int(m.agentPool.TokenCount())
+		}
+		if msg.Err != nil && !errors.Is(msg.Err, context.Canceled) {
+			m.chat.AddNotification(fmt.Sprintf("Error: %v", msg.Err))
+			m.statusBar.statuses["stream"] = "error"
+		} else {
+			delete(m.statusBar.statuses, "stream")
+		}
+		m.chat.FinalizeMessage()
+		cmds = append(cmds, m.cmdDispatchAfterProviderResponse())
+		return m, tea.Batch(cmds...), true
+
+	case addAssistantMsgToHistoryMsg:
+		m.history = append(m.history, sdk.Message{Role: sdk.RoleAssistant, Content: msg.content})
+		return m, nil, true
+	}
+	return m, nil, false
+}
+
+// updateTools handles tool call lifecycle messages: ToolCallStartMsg and ToolCallDoneMsg.
+// Returns (model, cmd, true) when the message was handled.
+func (m Model) updateTools(msg tea.Msg) (Model, tea.Cmd, bool) {
+	switch msg := msg.(type) {
+	case ToolCallStartMsg:
+		m.chat.AddToolCall(msg.ID, msg.ToolName, msg.Input)
+		return m, nil, true
+	case ToolCallDoneMsg:
+		m.chat.UpdateToolCall(msg.ID, msg.IsError, msg.Output)
+		return m, nil, true
+	}
+	return m, nil, false
+}
+
+// updateActions handles user-action messages: SubmitMsg, CommandMsg, clearMsg, setModelMsg, abortStreamMsg, dispatchOnCommandMsg.
+// Returns (model, cmd, true) when the message was handled.
+func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
+	switch msg := msg.(type) {
+	case SubmitMsg:
+		m.closeSuggestions()
+		n, cmd := m.submitToAgent(msg.Content, msg.Display)
+		return n.(Model), cmd, true
+
+	case CommandMsg:
+		if msg.Name == "help" {
+			return m, func() tea.Msg { return ShowModalMsg{Text: m.commands.HelpText()} }, true
+		}
+		return m, m.commands.Dispatch(msg.Name, msg.Args), true
+
+	case clearMsg:
+		m.chat.Clear()
+		m.history = nil
+		return m, nil, true
+
+	case setModelMsg:
+		m.activeModel = msg.Model
+		m.statusBar.modelName = msg.Model
+		m.chat.AddNotification(fmt.Sprintf("Model set to: %s", msg.Model))
+		return m, nil, true
+
+	case abortStreamMsg:
+		if m.agentPool != nil {
+			_ = m.agentPool.Cancel(m.mainAgentID)
+		}
+		m.statusBar.statuses["stream"] = "cancelling…"
+		return m, nil, true
+
+	case dispatchOnCommandMsg:
+		if m.extHost != nil {
+			extHost := m.extHost
+			return m, func() tea.Msg {
+				payload, _ := json.Marshal(sdk.OnCommandPayload{Name: msg.Name, Args: msg.Args})
+				evt := sdk.Event{Type: sdk.EventOnCommand, Payload: payload}
+				results, err := extHost.DispatchEvent(context.Background(), evt)
+				return ExtensionEventResultMsg{Results: results, Err: err}
+			}, true
+		}
+		return m, nil, true
+	}
+	return m, nil, false
+}
+
+// updateExtension handles extension-related messages: ExtensionEventResultMsg, ReloadMsg, NotifyMsg, StatusUpdateMsg.
+// Returns (model, cmd, true) when the message was handled.
+func (m Model) updateExtension(msg tea.Msg) (Model, tea.Cmd, bool) {
+	switch msg := msg.(type) {
+	case ExtensionEventResultMsg:
+		for _, r := range msg.Results {
+			if r.Error != "" {
+				m.chat.AddNotification(fmt.Sprintf("Extension error: %s", r.Error))
+			}
+		}
+		// Refresh autocomplete in case extensions registered new commands.
+		m.updateSuggestions()
+		return m, nil, true
+
+	case ReloadMsg:
+		return m, m.cmdReloadExtensions(), true
+
+	case NotifyMsg:
+		m.chat.AddNotification(msg.Text)
+		return m, nil, true
+
+	case StatusUpdateMsg:
+		m.statusBar, _ = m.statusBar.Update(msg)
+		return m, nil, true
+	}
+	return m, nil, false
 }
 
 // addAssistantMsgToHistoryMsg carries a finalised assistant message to add to history.
