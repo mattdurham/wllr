@@ -68,6 +68,10 @@ type Host struct {
 	extensions []*Extension
 	logger     *slog.Logger
 
+	// Bus is the shared event stream. All DispatchEvent calls publish here
+	// in addition to dispatching to WASM extensions.
+	Bus *EventBus
+
 	// Registered tools keyed by name (for duplicate detection).
 	registeredTools map[string]sdk.Tool
 
@@ -135,6 +139,7 @@ func NewHost(logger *slog.Logger) *Host {
 		registeredTools: make(map[string]sdk.Tool),
 		toolOwners:      make(map[string]string),
 		pendingTools:    make(map[string]chan toolResult),
+		Bus:             NewEventBus(),
 	}
 	h.runtime = wazero.NewRuntime(context.Background())
 	// WASI is required by native Go WASM modules (GOOS=wasip1).
@@ -970,6 +975,9 @@ func (h *Host) RegisteredTools() []RegisteredToolInfo {
 // DispatchEvent dispatches evt to all subscribed extensions and returns their responses.
 // A WASM trap (error from _on_event) is logged and does not stop dispatch to other extensions.
 func (h *Host) DispatchEvent(ctx context.Context, evt sdk.Event) ([]sdk.EventResponse, error) {
+	// Publish to the event bus (fire-and-forget, no-op if no subscribers).
+	h.Bus.Publish(ctx, evt)
+
 	evtJSON, err := json.Marshal(evt)
 	if err != nil {
 		return nil, fmt.Errorf("marshal event: %w", err)
