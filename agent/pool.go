@@ -51,6 +51,10 @@ type AgentPool struct {
 	// providerName is a human-readable display name for the provider (e.g. "anthropic").
 	// Set via SetProviderName; read via ProviderName.
 	providerName string
+
+	// defaultModelName is used when LanguageModelForModel is called with an
+	// empty name (e.g. sub-agents that don't specify a model).
+	defaultModelName string
 }
 
 // NewPool creates an empty AgentPool.
@@ -65,6 +69,14 @@ func NewPool() *AgentPool {
 // can call LanguageModelForModel to create sub-agent language models.
 func (p *AgentPool) SetProvider(prov fantasy.Provider) {
 	p.provider = prov
+}
+
+// SetDefaultModelName sets the model name used when spawning sub-agents that
+// don't specify one.
+func (p *AgentPool) SetDefaultModelName(name string) {
+	p.mu.Lock()
+	p.defaultModelName = name
+	p.mu.Unlock()
 }
 
 // SetProviderName stores a human-readable display name for the configured provider.
@@ -88,6 +100,11 @@ func (p *AgentPool) ProviderName() string {
 func (p *AgentPool) LanguageModelForModel(ctx context.Context, model string) (fantasy.LanguageModel, error) {
 	if p.provider == nil {
 		return nil, errors.New("agent: no provider configured on pool")
+	}
+	if model == "" {
+		p.mu.RLock()
+		model = p.defaultModelName
+		p.mu.RUnlock()
 	}
 	return p.provider.LanguageModel(ctx, model)
 }

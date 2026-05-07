@@ -93,6 +93,7 @@ func main() {
 	pool := agent.NewPool()
 	pool.SetProvider(fantasyProv)
 	pool.SetProviderName(cfg.Provider)
+	pool.SetDefaultModelName(cfg.Model)
 
 	if _, spawnErr := pool.Spawn("main", langModel, agent.SpawnOpts{}); spawnErr != nil {
 		fmt.Fprintf(os.Stderr, "wllr: spawn main agent: %v\n", spawnErr)
