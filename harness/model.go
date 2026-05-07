@@ -760,6 +760,9 @@ func (m Model) renderDropdown() string {
 
 // View renders the full TUI.
 func (m Model) View() tea.View {
+	// Render the input box once — it's used for both height calculation and output.
+	inputBox := m.renderInputBox()
+
 	var sb strings.Builder
 	if m.modalContent != "" {
 		chatH := m.height - inputAreaHeight
@@ -785,7 +788,7 @@ func (m Model) View() tea.View {
 			sb.WriteString("\n")
 		}
 	}
-	sb.WriteString(m.renderInputBox())
+	sb.WriteString(inputBox)
 
 	// Pad to exactly m.height lines so no old content bleeds through when
 	// the viewport shrinks (e.g. dropdown appears/disappears).

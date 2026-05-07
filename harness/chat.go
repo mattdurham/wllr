@@ -70,8 +70,11 @@ func NewChatView(width, height int) ChatView {
 	return ChatView{vp: vp, width: width, height: height}
 }
 
-// SetSize updates the viewport dimensions.
+// SetSize updates the viewport dimensions. No-op when dimensions are unchanged.
 func (c *ChatView) SetSize(width, height int) {
+	if c.width == width && c.height == height {
+		return
+	}
 	c.width = width
 	c.height = height
 	c.vp.SetWidth(width)
