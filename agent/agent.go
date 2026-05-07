@@ -5,6 +5,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"charm.land/fantasy"
@@ -14,44 +15,51 @@ import (
 // Agent wraps a fantasy.LanguageModel with a message inbox and lifecycle management.
 // Each agent maintains its own conversation history and can run one turn at a time.
 type Agent struct {
-	id   string
 	lm   fantasy.LanguageModel
-	opts SpawnOpts
 	pool *AgentPool
 
-	// inbox holds messages injected between turns via AppendInbox.
-	inboxMu sync.Mutex
-	inbox   []sdk.Message
+	cancel context.CancelFunc
 
-	// cancelMu protects the cancel function for the current active turn.
-	cancelMu sync.Mutex
-	cancel   context.CancelFunc
+	onToken func(token string)
 
-	// history is the conversation history for this agent (all completed turns).
-	historyMu sync.Mutex
-	history   []sdk.Message
+	onDone func(err error)
+
+	onToolCallFn func(id, toolName, input string)
+
+	toolsFn func() []fantasy.AgentTool
+
+	id           string
+	systemPrompt string
+	opts         SpawnOpts
+	inbox        []sdk.Message
+
+	history []sdk.Message
 
 	// onToken is called per text delta. Set via SetOnToken before calling Submit.
 	onTokenMu sync.RWMutex
-	onToken   func(token string)
 
 	// onDone is called when a turn completes (with nil or an error). Set via SetOnDone.
 	onDoneMu sync.RWMutex
-	onDone   func(err error)
 
 	// onToolCall is called when a tool call is dispatched. Set via SetOnToolCall.
 	onToolCallMu sync.RWMutex
-	onToolCallFn func(id, toolName, input string)
 
 	// toolsFn, if set, is called on each Submit to get the current tool list.
 	// Takes priority over opts.Tools; allows dynamic tool registration.
 	toolsFnMu sync.RWMutex
-	toolsFn   func() []fantasy.AgentTool
 
 	// systemPrompt overrides opts.SystemPrompt when non-empty.
 	// Set via SetSystemPrompt; safe to call before the first Submit.
 	systemPromptMu sync.RWMutex
-	systemPrompt   string
+
+	// inbox holds messages injected between turns via AppendInbox.
+	inboxMu sync.Mutex
+
+	// cancelMu protects the cancel function for the current active turn.
+	cancelMu sync.Mutex
+
+	// history is the conversation history for this agent (all completed turns).
+	historyMu sync.Mutex
 }
 
 // SetOnToken sets the callback invoked for each text delta during streaming.
@@ -236,38 +244,60 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 
 		fa := fantasy.NewAgent(lm, agentOpts...)
 
-		// Convert prior history to fantasy messages.
-		fantasyMsgs := sdkToFantasyMessages(priorHistory)
-
+		// Auto-compact: retry once with trimmed history if context is too long.
+		history := priorHistory
 		var collectedText string
-		_, err := fa.Stream(childCtx, fantasy.AgentStreamCall{
-			Messages: fantasyMsgs,
-			Prompt:   content,
-			OnTextDelta: func(id, text string) error {
-				if text == "" {
+		var err error
+		for attempt := 0; attempt < 2; attempt++ {
+			collectedText = ""
+			_, err = fa.Stream(childCtx, fantasy.AgentStreamCall{
+				Messages: sdkToFantasyMessages(history),
+				Prompt:   content,
+				OnTextDelta: func(id, text string) error {
+					if text == "" {
+						return nil
+					}
+					select {
+					case <-childCtx.Done():
+						return childCtx.Err()
+					default:
+					}
+					collectedText += text
+					if pool != nil {
+						pool.addTokens(1)
+					}
+					if onToken != nil {
+						onToken(text)
+					}
 					return nil
-				}
-				select {
-				case <-childCtx.Done():
-					return childCtx.Err()
-				default:
-				}
-				collectedText += text
-				if pool != nil {
-					pool.addTokens(1)
-				}
+				},
+				OnToolCall: func(toolCall fantasy.ToolCallContent) error {
+					if onToolCall != nil && !toolCall.ProviderExecuted {
+						onToolCall(toolCall.ToolCallID, toolCall.ToolName, toolCall.Input)
+					}
+					return nil
+				},
+			})
+
+			if err != nil && isContextTooLong(err) && attempt == 0 {
+				// Trim to the most recent 20 messages and retry once.
 				if onToken != nil {
-					onToken(text)
+					onToken("\n\n[Context too long — compacting history and retrying…]\n\n")
 				}
-				return nil
-			},
-			OnToolCall: func(toolCall fantasy.ToolCallContent) error {
-				if onToolCall != nil && !toolCall.ProviderExecuted {
-					onToolCall(toolCall.ToolCallID, toolCall.ToolName, toolCall.Input)
+				keep := 20
+				if len(history) > keep {
+					history = history[len(history)-keep:]
 				}
-				return nil
-			},
-		})
+				// Also trim persisted history for future turns.
+				a.historyMu.Lock()
+				if len(a.history) > keep {
+					a.history = a.history[len(a.history)-keep:]
+				}
+				a.historyMu.Unlock()
+				continue
+			}
+			break
+		}
 
 		// Append the user message and assistant reply to history.
 		a.historyMu.Lock()
@@ -281,6 +311,19 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 			onDone(err)
 		}
 	}()
+}
+
+// isContextTooLong returns true when the API rejected the request because the
+// prompt exceeded the model's context window.
+func isContextTooLong(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "prompt is too long") ||
+		strings.Contains(s, "context_length_exceeded") ||
+		strings.Contains(s, "maximum context length") ||
+		strings.Contains(s, "tokens > ") // Anthropic: "213370 tokens > 200000 maximum"
 }
 
 // sdkToFantasyMessages converts sdk.Message history to fantasy.Message format.
