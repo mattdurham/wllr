@@ -520,7 +520,7 @@ func TestHost_ExecuteTool_CallbackInvoked(t *testing.T) {
 		})
 	}()
 
-	resp, err := h.ExecuteTool(ctx, toolCallID, toolName, []byte(`{}`))
+	resp, err := h.ExecuteTool(ctx, "test-agent", toolCallID, toolName, []byte(`{}`))
 	if err != nil {
 		t.Fatalf("ExecuteTool: %v", err)
 	}
@@ -551,7 +551,7 @@ func TestHost_ExecuteTool_ErrorResult(t *testing.T) {
 		})
 	}()
 
-	resp, err := h.ExecuteTool(ctx, toolCallID, toolName, []byte(`{}`))
+	resp, err := h.ExecuteTool(ctx, "test-agent", toolCallID, toolName, []byte(`{}`))
 	if err != nil {
 		t.Fatalf("ExecuteTool: %v", err)
 	}
@@ -580,7 +580,7 @@ func TestHost_ExecuteTool_ContextCancelled(t *testing.T) {
 		cancel()
 	}()
 
-	_, err := h.ExecuteTool(ctx, toolCallID, toolName, []byte(`{}`))
+	_, err := h.ExecuteTool(ctx, "test-agent", toolCallID, toolName, []byte(`{}`))
 	if err == nil {
 		t.Fatal("expected error on context cancellation, got nil")
 	}
@@ -615,7 +615,7 @@ func TestHost_ExecuteTool_AfterToolCallDispatched(t *testing.T) {
 		})
 	}()
 
-	resp, err := h.ExecuteTool(ctx, toolCallID, toolName, []byte(`{}`))
+	resp, err := h.ExecuteTool(ctx, "test-agent", toolCallID, toolName, []byte(`{}`))
 	if err != nil {
 		t.Fatalf("ExecuteTool: %v", err)
 	}
@@ -663,7 +663,7 @@ func TestHost_OnAfterToolCall_Callback(t *testing.T) {
 		})
 	}()
 
-	_, err := h.ExecuteTool(ctx, toolCallID, toolName, []byte(`{}`))
+	_, err := h.ExecuteTool(ctx, "test-agent", toolCallID, toolName, []byte(`{}`))
 	if err != nil {
 		t.Fatalf("ExecuteTool: %v", err)
 	}

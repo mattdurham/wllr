@@ -180,7 +180,7 @@ func main() {
 
 	// --exec mode: run a single prompt non-interactively and exit.
 	if *execPrompt != "" {
-		fantasyTools := harness.BuildFantasyTools(h, func(level int, msg string) {
+		fantasyTools := harness.BuildFantasyTools(h, "exec", func(level int, msg string) {
 			slog.Log(ctx, []slog.Level{slog.LevelDebug, slog.LevelInfo, slog.LevelWarn, slog.LevelError}[min(level, 3)], msg)
 		})
 		var agentOpts []fantasy.AgentOption

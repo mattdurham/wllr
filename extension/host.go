@@ -894,7 +894,7 @@ func loadManifestPermissions(wasmPath string, logger *slog.Logger) []sdk.Permiss
 // an extension returns the result via the tool_result host_call method.
 // It dispatches EventBeforeToolCall so extensions may intercept the call.
 // The call is cancelled and an error is returned if ctx is cancelled.
-func (h *Host) ExecuteTool(ctx context.Context, toolCallID, toolName string, input json.RawMessage) (toolResult, error) {
+func (h *Host) ExecuteTool(ctx context.Context, agentID, toolCallID, toolName string, input json.RawMessage) (toolResult, error) {
 	ch := make(chan toolResult, 1)
 
 	h.pendingMu.Lock()
@@ -904,6 +904,7 @@ func (h *Host) ExecuteTool(ctx context.Context, toolCallID, toolName string, inp
 	// Dispatch before_tool_call event. An extension may call tool_result
 	// synchronously within _on_event, which will write to ch.
 	payload, _ := json.Marshal(sdk.BeforeToolCallPayload{
+		AgentID:    agentID,
 		ToolCallID: toolCallID,
 		ToolName:   toolName,
 		Input:      input,
@@ -916,6 +917,7 @@ func (h *Host) ExecuteTool(ctx context.Context, toolCallID, toolName string, inp
 	case result := <-ch:
 		// Dispatch after_tool_call event to all subscribed extensions.
 		afterPayload, _ := json.Marshal(sdk.AfterToolCallPayload{
+			AgentID:    agentID,
 			ToolCallID: toolCallID,
 			ToolName:   toolName,
 			Result:     result.Result,

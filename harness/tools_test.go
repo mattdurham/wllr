@@ -116,7 +116,7 @@ func TestSDKToolsToFantasy_SkipsBadSchema(t *testing.T) {
 	}
 
 	var loggedWarning bool
-	adapted := sdkToolsToFantasy(tools, nil, func(level int, msg string) {
+	adapted := sdkToolsToFantasy(tools, nil, "", func(level int, msg string) {
 		if level == 2 {
 			loggedWarning = true
 		}

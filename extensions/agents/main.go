@@ -200,6 +200,7 @@ create_team / add_to_team / shutdown_team`
 }
 
 type beforeToolCallPayload struct {
+	AgentID    string          `json:"agent_id"`
 	ToolCallID string          `json:"tool_call_id"`
 	ToolName   string          `json:"tool_name"`
 	Input      json.RawMessage `json:"input"`
@@ -209,6 +210,11 @@ func onBeforeToolCall(raw json.RawMessage) {
 	var p beforeToolCallPayload
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return
+	}
+
+	// Track the tool call against the agent that made it.
+	if p.AgentID != "" && p.AgentID != "main" {
+		upsertAgent(p.AgentID, "", "", "→ "+p.ToolName+" "+truncate(string(p.Input), 50))
 	}
 
 	switch p.ToolName {

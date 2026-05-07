@@ -18,6 +18,7 @@ import (
 type sdkToolAdapter struct {
 	tool            sdk.Tool
 	host            *extension.Host
+	agentID         string
 	params          map[string]any
 	required        []string
 	providerOptions fantasy.ProviderOptions
@@ -25,10 +26,10 @@ type sdkToolAdapter struct {
 
 // sdkToolsToFantasy converts a slice of sdk.Tool values into []fantasy.AgentTool.
 // Tools that cannot be parsed are skipped with a warning logged via logFn.
-func sdkToolsToFantasy(tools []sdk.Tool, host *extension.Host, logFn func(int, string)) []fantasy.AgentTool {
+func sdkToolsToFantasy(tools []sdk.Tool, host *extension.Host, agentID string, logFn func(int, string)) []fantasy.AgentTool {
 	result := make([]fantasy.AgentTool, 0, len(tools))
 	for _, t := range tools {
-		adapted, err := newSDKToolAdapter(t, host)
+		adapted, err := newSDKToolAdapter(t, host, agentID)
 		if err != nil {
 			if logFn != nil {
 				logFn(2, fmt.Sprintf("harness: skip tool %q: %v", t.Name, err))
@@ -42,7 +43,7 @@ func sdkToolsToFantasy(tools []sdk.Tool, host *extension.Host, logFn func(int, s
 
 // newSDKToolAdapter builds an sdkToolAdapter from an sdk.Tool.
 // It parses the InputSchema JSON to extract properties and required fields.
-func newSDKToolAdapter(tool sdk.Tool, host *extension.Host) (*sdkToolAdapter, error) {
+func newSDKToolAdapter(tool sdk.Tool, host *extension.Host, agentID string) (*sdkToolAdapter, error) {
 	params, required, err := parseInputSchema(tool.InputSchema)
 	if err != nil {
 		return nil, fmt.Errorf("parse input_schema for %q: %w", tool.Name, err)
@@ -50,6 +51,7 @@ func newSDKToolAdapter(tool sdk.Tool, host *extension.Host) (*sdkToolAdapter, er
 	return &sdkToolAdapter{
 		tool:     tool,
 		host:     host,
+		agentID:  agentID,
 		params:   params,
 		required: required,
 	}, nil
@@ -104,7 +106,7 @@ func (a *sdkToolAdapter) Run(ctx context.Context, call fantasy.ToolCall) (fantas
 		return fantasy.NewTextErrorResponse("no extension host configured"), nil
 	}
 
-	result, err := a.host.ExecuteTool(ctx, call.ID, call.Name, json.RawMessage(call.Input))
+	result, err := a.host.ExecuteTool(ctx, a.agentID, call.ID, call.Name, json.RawMessage(call.Input))
 	if err != nil {
 		return fantasy.NewTextErrorResponse(fmt.Sprintf("tool execution failed: %v", err)), nil
 	}
@@ -127,7 +129,7 @@ func (a *sdkToolAdapter) SetProviderOptions(opts fantasy.ProviderOptions) {
 
 // BuildFantasyTools returns the current set of registered tools as []fantasy.AgentTool.
 // Returns nil if extHost is nil.
-func BuildFantasyTools(extHost *extension.Host, logFn func(int, string)) []fantasy.AgentTool {
+func BuildFantasyTools(extHost *extension.Host, agentID string, logFn func(int, string)) []fantasy.AgentTool {
 	if extHost == nil {
 		return nil
 	}
@@ -139,5 +141,5 @@ func BuildFantasyTools(extHost *extension.Host, logFn func(int, string)) []fanta
 	for i, info := range infos {
 		sdkTools[i] = info.Tool
 	}
-	return sdkToolsToFantasy(sdkTools, extHost, logFn)
+	return sdkToolsToFantasy(sdkTools, extHost, agentID, logFn)
 }
