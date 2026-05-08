@@ -1,0 +1,178 @@
+{
+  "name": "tasks",
+  "version": "1.0.0",
+  "description": "Task management for workflows",
+  "tools": [
+    {
+      "name": "tasklist_create",
+      "description": "Create a new task list and return its unique ID",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Name of the task list"
+          },
+          "description": {
+            "type": "string",
+            "description": "Description of the task list"
+          }
+        },
+        "required": ["name"]
+      }
+    },
+    {
+      "name": "tasks_create",
+      "description": "Create a new task in a task list",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "list_id": {
+            "type": "string",
+            "description": "Task list ID from tasklist_create"
+          },
+          "title": {
+            "type": "string",
+            "description": "Task title"
+          },
+          "description": {
+            "type": "string",
+            "description": "Task description"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "in_progress", "completed", "blocked"],
+            "description": "Task status"
+          },
+          "priority": {
+            "type": "string",
+            "enum": ["low", "medium", "high", "critical"],
+            "description": "Task priority"
+          },
+          "assignee": {
+            "type": "string",
+            "description": "Who is assigned to this task"
+          },
+          "depends_on": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of task IDs this task depends on"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Tags for categorization"
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Additional metadata as key-value pairs"
+          }
+        },
+        "required": ["list_id", "title"]
+      }
+    },
+    {
+      "name": "tasks_update",
+      "description": "Update an existing task",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "list_id": {
+            "type": "string",
+            "description": "Task list ID"
+          },
+          "task_id": {
+            "type": "string",
+            "description": "Task ID to update"
+          },
+          "title": {
+            "type": "string",
+            "description": "New task title"
+          },
+          "description": {
+            "type": "string",
+            "description": "New task description"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "in_progress", "completed", "blocked"],
+            "description": "New task status"
+          },
+          "priority": {
+            "type": "string",
+            "enum": ["low", "medium", "high", "critical"],
+            "description": "New task priority"
+          },
+          "assignee": {
+            "type": "string",
+            "description": "New assignee"
+          },
+          "depends_on": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "New list of task IDs this task depends on"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "New tags"
+          },
+          "metadata": {
+            "type": "object",
+            "description": "New metadata"
+          }
+        },
+        "required": ["list_id", "task_id"]
+      }
+    },
+    {
+      "name": "tasks_list",
+      "description": "List all tasks in a task list",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "list_id": {
+            "type": "string",
+            "description": "Task list ID"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pending", "in_progress", "completed", "blocked"],
+            "description": "Filter by status"
+          },
+          "assignee": {
+            "type": "string",
+            "description": "Filter by assignee"
+          }
+        },
+        "required": ["list_id"]
+      }
+    },
+    {
+      "name": "tasks_get",
+      "description": "Get a specific task by ID",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "list_id": {
+            "type": "string",
+            "description": "Task list ID"
+          },
+          "task_id": {
+            "type": "string",
+            "description": "Task ID"
+          }
+        },
+        "required": ["list_id", "task_id"]
+      }
+    }
+  ]
+}

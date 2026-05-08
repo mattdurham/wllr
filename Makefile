@@ -28,7 +28,7 @@
 #   readfile, writefile, exec, env, agents
 #
 # Installed extensions (loaded from ~/.wllr/extensions/ at runtime):
-#   context, skills
+#   context, skills, tasks
 
 DIST_DIR    := dist
 BINARY      := $(DIST_DIR)/wllr
@@ -56,11 +56,13 @@ extensions: $(DIST_DIR) $(BUILTINS)
 	cd extensions/exec      && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(BUILTINS)/exec.wasm .
 	cd extensions/env       && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(BUILTINS)/env.wasm .
 	cd extensions/agents    && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(BUILTINS)/agents.wasm .
-	mkdir -p $(EXT_DIR)/context $(EXT_DIR)/skills
+	mkdir -p $(EXT_DIR)/context $(EXT_DIR)/skills $(EXT_DIR)/tasks
 	cd extensions/context   && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(EXT_DIR)/context/context.wasm .
 	cp extensions/context/context.json $(EXT_DIR)/context/
 	cd extensions/skills    && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(EXT_DIR)/skills/skills.wasm .
 	cp extensions/skills/skills.json $(EXT_DIR)/skills/
+	cd extensions/tasks     && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(EXT_DIR)/tasks/tasks.wasm .
+	cp extensions/tasks/tasks.json $(EXT_DIR)/tasks/
 	@echo "Built all extensions"
 
 $(DIST_DIR):

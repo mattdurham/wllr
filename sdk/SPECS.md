@@ -1,5 +1,10 @@
 # bob/sdk — Interface Contracts and Behavioral Invariants
 
+Package `sdk` defines shared types for the bob coding harness and its WASM extensions.
+These types cross the host/WASM boundary via JSON; their wire format is stable across ABI versions.
+
+---
+
 ## ABIVersion
 
 - `ABIVersion = 1` (int, untyped constant)
@@ -10,27 +15,27 @@
 
 ## EventType Constants
 
-`EventType` is a `string` typedef. All values are stable across ABI versions — the host and extensions
-compare them as plain strings; no numeric mapping exists.
+`EventType` is a `string` typedef. All values are stable across ABI versions — the host and extensions compare them as plain strings; no numeric mapping exists.
 
 | Constant                      | Wire value                  | When dispatched                                              |
 |-------------------------------|-----------------------------|--------------------------------------------------------------|
-| `EventSessionStart`           | `"session_start"`           | A new Claude session begins                                   |
-| `EventBeforeAgentStart`       | `"before_agent_start"`      | An agent is about to start (prompt + system prompt available) |
+| `EventSessionStart`           | `"session_start"`           | A new session begins                                          |
+| `EventBeforeAgentStart`       | `"before_agent_start"`      | An agent is about to start (prompt available)                 |
 | `EventBeforeProviderRequest`  | `"before_provider_request"` | The host is about to call the LLM provider                   |
 | `EventAfterProviderResponse`  | `"after_provider_response"` | The LLM provider has returned a response                     |
-| `EventOnToolCall`             | `"on_tool_call"`            | The LLM has emitted a tool-call (dispatched by harness)      |
-| `EventOnToolResult`           | `"on_tool_result"`          | A tool result has been produced (dispatched by harness)      |
+| `EventOnToolCall`             | `"on_tool_call"`            | The LLM has emitted a tool-call (observation only)           |
+| `EventOnToolResult`           | `"on_tool_result"`          | A tool result has been produced (observation only)           |
 | `EventMessageStart`           | `"message_start"`           | A new message stream begins                                  |
 | `EventMessageEnd`             | `"message_end"`             | A message stream has completed                               |
 | `EventShutdown`               | `"shutdown"`                | The host is shutting down; extensions should flush state     |
-| `EventBeforeToolCall`         | `"before_tool_call"`        | Dispatched to extensions that implement a tool; extension must call `tool_result` |
+| `EventBeforeToolCall`         | `"before_tool_call"`        | Dispatched to the extension that implements a tool; extension MUST call `tool_result` |
 | `EventAfterToolCall`          | `"after_tool_call"`         | Dispatched after a tool execution completes                  |
+| `EventOnCommand`              | `"on_command"`              | User invoked a slash command registered by an extension      |
 
 **Invariants:**
 - The set of `EventType` string values must not change between ABI versions without a version bump.
 - An unknown `EventType` must be silently ignored by extensions (forward-compatibility).
-- There are exactly 11 defined event types.
+- There are exactly 12 defined event types.
 
 ---
 
@@ -44,7 +49,6 @@ compare them as plain strings; no numeric mapping exists.
 
 - `type` — required; one of the `EventType` string constants.
 - `payload` — a `json.RawMessage`; always valid JSON (object, array, or null). Never an empty byte slice.
-  The payload shape is determined by the `type` field and must match the corresponding payload struct.
 
 ### EventResponse
 
@@ -52,30 +56,23 @@ compare them as plain strings; no numeric mapping exists.
 { "cancel": true, "block": true, "error": "message" }
 ```
 
-All fields are `omitempty`. An empty `{}` response (or a nil response) is valid and means "no action".
+All fields are `omitempty`.
 
 | Field    | Type   | Meaning                                                            |
 |----------|--------|--------------------------------------------------------------------|
 | `cancel` | bool   | Request the host to cancel the current operation                   |
 | `block`  | bool   | Request the host to block/suppress the current output or action    |
-| `error`  | string | Report an extension error to the host; host decides how to surface |
-
-**Invariants:**
-- Extensions may set any combination of fields.
-- The host must inspect all three fields; they are not mutually exclusive.
-- `omitempty` means false booleans and empty strings are never serialized on the wire.
+| `error`  | string | Report an extension error to the host                              |
 
 ---
 
-## Payload Types (11 total)
-
-Each payload is deserialised from `Event.Payload` after matching on `Event.Type`.
+## Payload Types (12 total)
 
 ### SessionStartPayload (`EventSessionStart`)
 
-| Field    | Type   | Description               |
-|----------|--------|---------------------------|
-| `reason` | string | Why the session was started (e.g. `"new_session"`) |
+| Field    | Type   | Description                                          |
+|----------|--------|------------------------------------------------------|
+| `reason` | string | Why the session was started (e.g. `"new_session"`)   |
 
 ### BeforeAgentStartPayload (`EventBeforeAgentStart`)
 
@@ -93,63 +90,72 @@ Each payload is deserialised from `Event.Payload` after matching on `Event.Type`
 
 ### AfterProviderResponsePayload (`EventAfterProviderResponse`)
 
-| Field   | Type       | Description                  |
-|---------|------------|------------------------------|
-| `usage` | UsageStats | Token usage from this call   |
+| Field   | Type       | Description                |
+|---------|------------|----------------------------|
+| `usage` | UsageStats | Token usage from this call |
 
 ### OnToolCallPayload (`EventOnToolCall`)
 
-| Field         | Type            | Description                                |
-|---------------|-----------------|--------------------------------------------|
-| `tool_call_id`| string          | Unique identifier for this tool invocation |
-| `tool_name`   | string          | Name of the tool being called              |
-| `input`       | json.RawMessage | Raw JSON input arguments (never nil)       |
+| Field          | Type            | Description                                |
+|----------------|-----------------|--------------------------------------------|
+| `tool_call_id` | string          | Unique identifier for this tool invocation |
+| `tool_name`    | string          | Name of the tool being called              |
+| `input`        | json.RawMessage | Raw JSON input arguments                   |
 
 ### OnToolResultPayload (`EventOnToolResult`)
 
-| Field         | Type   | Description                                 |
-|---------------|--------|---------------------------------------------|
-| `tool_call_id`| string | Matches the corresponding `OnToolCallPayload` |
-| `result`      | string | Text result from the tool                  |
-| `is_error`    | bool   | True if the tool returned an error result   |
+| Field          | Type   | Description                                   |
+|----------------|--------|-----------------------------------------------|
+| `tool_call_id` | string | Matches the corresponding `OnToolCallPayload` |
+| `result`       | string | Text result from the tool                     |
+| `is_error`     | bool   | True if the tool returned an error result     |
 
 ### MessageStartPayload (`EventMessageStart`)
 
-| Field  | Type   | Description                         |
-|--------|--------|-------------------------------------|
-| `role` | string | Role of the message being started   |
+| Field  | Type   | Description                        |
+|--------|--------|------------------------------------|
+| `role` | string | Role of the message being started  |
 
 ### MessageEndPayload (`EventMessageEnd`)
 
-| Field     | Type   | Description                              |
-|-----------|--------|------------------------------------------|
-| `role`    | string | Role of the completed message            |
-| `content` | string | Full accumulated text content            |
+| Field     | Type   | Description                   |
+|-----------|--------|-------------------------------|
+| `role`    | string | Role of the completed message |
+| `content` | string | Full accumulated text content |
 
 ### ShutdownPayload (`EventShutdown`)
 
-| Field    | Type   | Description                      |
-|----------|--------|----------------------------------|
-| `reason` | string | Human-readable shutdown reason   |
+| Field    | Type   | Description                    |
+|----------|--------|--------------------------------|
+| `reason` | string | Human-readable shutdown reason |
 
 ### BeforeToolCallPayload (`EventBeforeToolCall`)
 
 | Field          | Type            | Description                                                     |
 |----------------|-----------------|-----------------------------------------------------------------|
+| `agent_id`     | string          | ID of the agent that issued the tool call                       |
 | `tool_call_id` | string          | Unique identifier for this tool invocation                      |
 | `tool_name`    | string          | Name of the tool to execute                                     |
 | `input`        | json.RawMessage | Raw JSON input arguments for the tool                           |
 
-**Invariant:** The extension receiving this event MUST call `tool_result` (via `host_call`) before returning from `_on_event` to unblock the host's `ExecuteTool` call. Not calling `tool_result` will cause the host to block until the context is cancelled.
+**Invariant:** The extension receiving `EventBeforeToolCall` MUST call `tool_result` (via `host_call`) before returning from `_on_event`. Not doing so blocks the host's `ExecuteTool` call until context cancellation.
 
 ### AfterToolCallPayload (`EventAfterToolCall`)
 
-| Field          | Type   | Description                                                      |
-|----------------|--------|------------------------------------------------------------------|
-| `tool_call_id` | string | Matches the corresponding `BeforeToolCallPayload`                |
-| `tool_name`    | string | Name of the tool that was executed                               |
-| `result`       | string | Text result of the tool execution                                |
-| `is_error`     | bool   | True if the tool returned an error result                        |
+| Field          | Type   | Description                                       |
+|----------------|--------|---------------------------------------------------|
+| `agent_id`     | string | ID of the agent that issued the tool call         |
+| `tool_call_id` | string | Matches the corresponding `BeforeToolCallPayload` |
+| `tool_name`    | string | Name of the tool that was executed                |
+| `result`       | string | Text result of the tool execution                 |
+| `is_error`     | bool   | True if the tool returned an error result         |
+
+### OnCommandPayload (`EventOnCommand`)
+
+| Field  | Type     | Description                                                    |
+|--------|----------|----------------------------------------------------------------|
+| `name` | string   | The command name (without leading `/`)                         |
+| `args` | []string | Arguments the user typed after the command name                |
 
 ---
 
@@ -179,11 +185,9 @@ Each payload is deserialised from `Event.Payload` after matching on `Event.Type`
 { "permissions": ["file_read", "file_write"] }
 ```
 
-| Field         | Type           | Description                                      |
-|---------------|----------------|--------------------------------------------------|
-| `permissions` | []Permission   | List of permissions the extension requires       |
-
-**Invariant:** The manifest file is optional. An extension without a manifest has no permissions (untrusted only). The manifest is loaded from `<wasmpath without .wasm>.json`.
+| Field         | Type           | Description                                |
+|---------------|----------------|--------------------------------------------|
+| `permissions` | []Permission   | List of permissions the extension requires |
 
 ---
 
@@ -191,14 +195,14 @@ Each payload is deserialised from `Event.Payload` after matching on `Event.Type`
 
 ### UsageStats
 
-| Field           | Type | Description          |
-|-----------------|------|----------------------|
-| `input_tokens`  | int  | Prompt tokens used   |
+| Field           | Type | Description            |
+|-----------------|------|------------------------|
+| `input_tokens`  | int  | Prompt tokens used     |
 | `output_tokens` | int  | Completion tokens used |
 
 ### Role Constants
 
-`Role` is a `string` typedef. Values are stable across ABI versions.
+`Role` is a `string` typedef.
 
 | Constant        | Wire value    |
 |-----------------|---------------|
@@ -209,27 +213,25 @@ Each payload is deserialised from `Event.Payload` after matching on `Event.Type`
 
 ### Message
 
-| Field     | Type   | Description                  |
-|-----------|--------|------------------------------|
-| `role`    | Role   | `"user"` or `"assistant"`    |
-| `content` | string | Text content of the message  |
+| Field     | Type   | Description                 |
+|-----------|--------|-----------------------------|
+| `role`    | Role   | `"user"` or `"assistant"`   |
+| `content` | string | Text content of the message |
 
 ### Tool
 
-| Field          | Type            | Description                                            |
-|----------------|-----------------|--------------------------------------------------------|
-| `name`         | string          | Tool identifier                                        |
-| `description`  | string          | Human-readable description                             |
+| Field          | Type            | Description                                                              |
+|----------------|-----------------|--------------------------------------------------------------------------|
+| `name`         | string          | Tool identifier                                                          |
+| `description`  | string          | Human-readable description                                               |
 | `input_schema` | json.RawMessage | JSON Schema object describing the tool's input; forwarded verbatim to the LLM provider |
+| `override`     | bool (omitempty) | When true, allows this registration to replace an existing tool with the same name |
 
 **Invariant:** `InputSchema` is preserved as raw bytes through marshal/unmarshal; the sdk never parses it.
 
 ---
 
 ## HostCallRequest / HostCallResponse Contract
-
-Extensions invoke host capabilities by encoding a `HostCallRequest` as JSON and calling the
-`host_call` WASM import; the host returns a `HostCallResponse` encoded as JSON.
 
 ### HostCallRequest
 
@@ -253,31 +255,65 @@ Extensions invoke host capabilities by encoding a `HostCallRequest` as JSON and 
 | `result` | json.RawMessage | Method-specific return value; omitted on error    |
 | `error`  | string          | Non-empty when the host encountered an error      |
 
-**Invariant:** Exactly one of `result` or `error` will be non-zero in a well-formed response.
-Extensions should check `error` before using `result`.
+**Invariant:** Exactly one of `result` or `error` will be non-zero in a well-formed response. Extensions should check `error` before using `result`.
 
 ---
 
-## host_call Method Constants (13 total)
+## host_call Method Constants (30 total)
 
-| Constant                  | Wire value             | Purpose                                                        |
-|---------------------------|------------------------|----------------------------------------------------------------|
-| `MethodSubscribe`         | `"subscribe"`          | Subscribe to one or more event types                           |
-| `MethodRegisterTool`      | `"register_tool"`      | Advertise a tool that the extension can handle                 |
+### Core methods
+
+| Constant                  | Wire value             | Purpose                                                       |
+|---------------------------|------------------------|---------------------------------------------------------------|
+| `MethodSubscribe`         | `"subscribe"`          | Subscribe to one or more event types                          |
+| `MethodRegisterTool`      | `"register_tool"`      | Advertise a tool the extension can handle                     |
 | `MethodRegisterCommand`   | `"register_command"`   | Register a slash command the extension provides               |
 | `MethodSendMessage`       | `"send_message"`       | Inject a message into the conversation                        |
-| `MethodSetStatus`         | `"set_status"`         | Update the extension's status string shown in the host UI     |
+| `MethodSetStatus`         | `"set_status"`         | Update the extension's status in the host UI                  |
 | `MethodNotify`            | `"notify"`             | Send a notification to the host/user                          |
 | `MethodToolResult`        | `"tool_result"`        | Return the result of a tool call the extension handled        |
 | `MethodStoreSet`          | `"store_set"`          | Persist a key-value pair in the host's extension store        |
 | `MethodStoreGet`          | `"store_get"`          | Retrieve a value from the host's extension store              |
 | `MethodAbort`             | `"abort"`              | Signal the host to abort the current agent operation          |
 | `MethodRequestPermission` | `"request_permission"` | Check whether the extension holds a given permission          |
-| `MethodBeforeToolCall`    | `"before_tool_call"`   | Sent by extensions to intercept a tool call before execution  |
-| `MethodAfterToolCall`     | `"after_tool_call"`    | Sent by extensions to observe a tool call after execution     |
+| `MethodGetEnv`            | `"get_env"`            | Read a host environment variable (no permission required)     |
+| `MethodConfigRead`        | `"config_read"`        | Read the calling extension's config group from the shared config file |
+| `MethodModal`             | `"modal"`              | Display text in a modal overlay window                        |
+| `MethodSetSystemPrompt`   | `"set_system_prompt"`  | Replace the base system prompt on all agents                  |
+| `MethodAppendSystemPrompt`| `"append_system_prompt"`| Append text to the existing base system prompt               |
+| `MethodExec`              | `"exec"`               | Execute a shell command on the host (requires PermExec)       |
+| `MethodBeforeToolCall`    | `"before_tool_call"`   | Intercept a tool call before execution (observation constant) |
+| `MethodAfterToolCall`     | `"after_tool_call"`    | Observe a tool result after execution (observation constant)  |
+
+### Agent management methods
+
+| Constant                  | Wire value              | Purpose                                       |
+|---------------------------|-------------------------|-----------------------------------------------|
+| `MethodAgentSpawn`        | `"agent_spawn"`         | Create and register a new sub-agent           |
+| `MethodAgentClose`        | `"agent_close"`         | Cancel and remove a sub-agent                 |
+| `MethodAgentSendMessage`  | `"agent_send_message"`  | Send a message to a named agent               |
+| `MethodAgentList`         | `"agent_list"`          | Return all live agent IDs and names           |
+| `MethodAgentTokenCount`   | `"agent_token_count"`   | Return total token count across all agents    |
+
+### Team management methods
+
+| Constant                  | Wire value              | Purpose                                       |
+|---------------------------|-------------------------|-----------------------------------------------|
+| `MethodTeamCreate`        | `"team_create"`         | Create a new named team                       |
+| `MethodTeamClose`         | `"team_close"`          | Cancel all members and remove the team        |
+| `MethodTeamAddMember`     | `"team_add_member"`     | Add an agent to a team                        |
+| `MethodTeamRemoveMember`  | `"team_remove_member"`  | Remove an agent from a team (no cancel)       |
+
+### MCP bridge methods
+
+| Constant         | Wire value    | Purpose                                            |
+|-----------------|---------------|----------------------------------------------------|
+| `MethodMCPSpawn` | `"mcp_spawn"` | Spawn an MCP server subprocess (requires PermExec) |
+| `MethodMCPClose` | `"mcp_close"` | Terminate an MCP server subprocess                 |
+| `MethodMCPSend`  | `"mcp_send"`  | Write JSON-RPC data to an MCP server's stdin       |
+| `MethodMCPRead`  | `"mcp_read"`  | Read a JSON-RPC response from an MCP server's stdout |
 
 **Invariant:** Method strings must not change between ABI versions without a version bump.
-There are exactly 13 defined method constants.
 
 ---
 
@@ -305,3 +341,5 @@ Returned as `int32` from the `host_call` WASM import (not the JSON layer).
 6. All `omitempty` fields in `EventResponse` and `HostCallRequest`/`HostCallResponse` are intentional; the wire format stays minimal.
 7. `ABIVersion = 1` is the sole ABI version; future versions increment this constant and may add new event types or methods.
 8. Error codes are `int32` and exist only at the WASM boundary; they do not appear in the JSON layer.
+9. `BeforeToolCallPayload` and `AfterToolCallPayload` both include `agent_id` to allow extensions to correlate tool calls with the originating agent.
+10. `OnCommandPayload` is the payload for `EventOnCommand`, dispatched when a user invokes an extension-registered slash command.

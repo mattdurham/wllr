@@ -1,4 +1,4 @@
-# extension — Specifications
+# extension — Interface Contracts and Behavioral Invariants
 
 Package `extension` implements a wazero-based WASM extension host for the Bob harness.
 Extensions are compiled WASM modules that communicate with the host via a JSON-over-linear-memory ABI.
@@ -26,7 +26,7 @@ The host registers a module named `"env"` that extensions may import. All four f
 
 | Import | Signature (WAT) | Semantics |
 |--------|-----------------|-----------|
-| `host_log` | `(level i32, ptr i32, len i32)` | Write a log message. `ptr`/`len` point to a UTF-8 string in WASM memory. `level`: 0=debug, 1=info, 2=warn, 3=error. |
+| `host_log` | `(level i32, ptr i32, len i32)` | Write a log message. `ptr`/`len` point to a UTF-8 string in WASM memory. `level`: 0=debug, 1=info, 2=warn, 3=error. Logged via slog with the extension's friendly display name (base filename without `.wasm`). |
 | `host_alloc` | `(size i32) -> i32` | Reserved for ABI v2. In ABI v1 this is a no-op that always returns 0. |
 | `host_free` | `(ptr i32)` | Reserved for ABI v2. In ABI v1 this is a no-op. |
 | `host_call` | `(req_ptr i32, req_len i32, resp_ptr_ptr i32, resp_len_ptr i32) -> i32` | Synchronous host RPC. `req_ptr`/`req_len` point to a JSON-encoded `sdk.HostCallRequest`. On success writes the response pointer and length into `resp_ptr_ptr` / `resp_len_ptr` (if both are non-zero) and returns 0 (`sdk.ErrOK`). Returns a non-zero error code on failure. |
@@ -42,15 +42,22 @@ NewHost
   └─ wazero.NewRuntime
   └─ wasi_snapshot_preview1.Instantiate   (WASI support for native Go WASM)
   └─ installEnvModule                     (registers "env" host bindings)
+  └─ h.dispatch = h.buildDispatch()       (builds method→handler map once)
 
 Host.Load(path)
   ├─ os.ReadFile
+  ├─ loadManifestPermissions              (reads <basename>.json for permissions)
   ├─ runtime.InstantiateWithConfig        (WithStartFunctions() — no auto _start/_main)
+  │   ├─ WithFSConfig: WithDirMount("/", "/")   (full filesystem read access)
+  │   └─ WithEnv: all host env vars passed through
   ├─ validateExports                      (abort + close if any export missing)
   ├─ Register ext in h.extensions         (before callInit so host_call works during _init)
   └─ callInit
        ├─ optional: _initialize()         (native Go WASM bootstrap, if exported)
        └─ _init() -> i32                  (non-zero return removes ext and fails load)
+
+Host.LoadBytes(ctx, name, data, trusted)
+  └─ Same as Load but skips manifest loading; trusted=true grants all permissions
 
 DispatchEvent loop  (called repeatedly by the harness)
   └─ see §4
@@ -71,12 +78,14 @@ Host.Close
 
 ## 4. DispatchEvent Contract
 
-`Host.DispatchEvent(ctx, evt)` iterates all loaded extensions in load order and calls `_on_event` on each that has subscribed to `evt.Type`.
+`Host.DispatchEvent(ctx, evt)`:
+1. Publishes `evt` to the `EventBus` (`h.Bus.Publish`) — fire-and-forget.
+2. Iterates all loaded extensions in load order and calls `_on_event` on each that has subscribed to `evt.Type`.
 
 **Rules:**
-1. Only extensions whose `subscriptions[evt.Type] == true` receive the call (guarded by `ext.subMu`).
-2. If `_alloc` returns 0 for the event buffer, `_on_event` is **NOT** called for that extension. An empty `sdk.EventResponse{}` is returned for that slot (and is silently dropped — no entry added to the responses slice because dispatch returns early before appending).
-3. If `_on_event` returns a WASM trap (error from wazero), it is logged at level 2 (warn) and dispatch continues to the next extension. The error is **not** propagated to the caller.
+1. Only extensions whose `subscriptions[evt.Type] == true` receive the WASM call (guarded by `ext.subMu`).
+2. If `_alloc` returns 0 for the event buffer, `_on_event` is **NOT** called for that extension.
+3. If `_on_event` returns a WASM trap (error from wazero), it is logged at warn level and dispatch continues to the next extension. The error is **not** propagated to the caller.
 4. Responses are collected in load order (same order as `h.extensions`).
 5. `DispatchEvent` itself only returns a non-nil error if `json.Marshal(evt)` fails; individual extension errors do not bubble up.
 
@@ -93,7 +102,131 @@ if respPtr != 0:
 
 ---
 
-## 5. Memory Protocol
+## 5. EventBus
+
+`EventBus` is the shared in-process event stream exposed on `Host.Bus`. All `DispatchEvent` calls publish to it in addition to calling WASM extensions.
+
+```go
+type EventBus struct { ... }
+
+func NewEventBus() *EventBus
+func (b *EventBus) Subscribe(eventType sdk.EventType, h Handler)
+func (b *EventBus) Unsubscribe(eventType sdk.EventType)
+func (b *EventBus) HasSubscribers(eventType sdk.EventType) bool
+func (b *EventBus) Publish(ctx context.Context, evt sdk.Event)
+```
+
+```go
+type Handler func(ctx context.Context, evt sdk.Event) error
+```
+
+**Invariant:** `Publish` is a no-op when no handlers are registered for `evt.Type`. The `HasSubscribers` check is O(1) via the separate `counts` map.
+
+**Invariant:** Handlers are invoked asynchronously in a single goroutine spawned by `Publish`. Errors returned by handlers are silently ignored (fire-and-forget).
+
+**Invariant:** `Subscribe` and `Unsubscribe` are thread-safe via `b.mu sync.RWMutex`. `Publish` copies the handler slice under `RLock` before dispatching, so handlers registered or removed after `Publish` is called are not affected by that invocation.
+
+---
+
+## 6. Dispatch Map (routeHostCall)
+
+`Host` uses a pre-built `dispatch map[string]func(...)` (constructed once in `NewHost` via `buildDispatch`) to route incoming `host_call` requests. `routeHostCall` performs a single map lookup and delegates to the matched handler. Unknown methods return `{Error: "unknown method: <name>"}`.
+
+The full set of dispatched methods is:
+
+| Method constant                | Handler                        |
+|-------------------------------|--------------------------------|
+| `MethodSubscribe`             | `handleSubscribe`              |
+| `MethodRegisterTool`          | `handleRegisterTool`           |
+| `MethodRegisterCommand`       | `handleRegisterCommand`        |
+| `MethodSendMessage`           | `handleSendMessage`            |
+| `MethodSetStatus`             | `handleSetStatus`              |
+| `MethodNotify`                | `handleNotify`                 |
+| `MethodToolResult`            | `handleToolResult`             |
+| `MethodStoreSet`              | `handleStoreSet`               |
+| `MethodStoreGet`              | `handleStoreGet`               |
+| `MethodAbort`                 | calls `OnAbort` directly       |
+| `MethodRequestPermission`     | `handleRequestPermission`      |
+| `MethodModal`                 | `handleModal`                  |
+| `MethodSetSystemPrompt`       | `handleSetSystemPrompt`        |
+| `MethodAppendSystemPrompt`    | `handleAppendSystemPrompt`     |
+| `MethodExec`                  | `handleExec`                   |
+| `MethodGetEnv`                | `handleGetEnv`                 |
+| `MethodConfigRead`            | `handleConfigRead`             |
+| `MethodAgentSpawn`            | `handleAgentSpawn`             |
+| `MethodAgentClose`            | `handleAgentClose`             |
+| `MethodAgentSendMessage`      | `handleAgentSendMessage`       |
+| `MethodAgentList`             | `handleAgentList`              |
+| `MethodAgentTokenCount`       | `handleAgentTokenCount`        |
+| `MethodTeamCreate`            | `handleTeamCreate`             |
+| `MethodTeamClose`             | `handleTeamClose`              |
+| `MethodTeamAddMember`         | `handleTeamAddMember`          |
+| `MethodTeamRemoveMember`      | `handleTeamRemoveMember`       |
+| `MethodMCPSpawn`              | `handleMCPSpawn`               |
+| `MethodMCPClose`              | `handleMCPClose`               |
+| `MethodMCPSend`               | `handleMCPSend`                |
+| `MethodMCPRead`               | `handleMCPRead`                |
+
+---
+
+## 7. Host Callback Fields
+
+`Host` exposes a set of function fields that the harness wires at startup. Each field is nil-checked before invocation; missing callbacks result in an error response.
+
+### Harness callbacks
+
+| Field                  | Signature                                            | Purpose                                                  |
+|-----------------------|------------------------------------------------------|----------------------------------------------------------|
+| `OnSendMessage`       | `func(msg sdk.Message)`                              | Inject a message into the conversation                   |
+| `OnSetStatus`         | `func(key, value string)`                            | Update a keyed status in the TUI status bar              |
+| `OnRegisterTool`      | `func(tool sdk.Tool) error`                          | Called when an extension registers a tool                |
+| `OnRegisterCommand`   | `func(name, desc string)`                            | Called when an extension registers a slash command       |
+| `OnNotify`            | `func(text string)`                                  | Show a notification in the chat view                     |
+| `OnAbort`             | `func()`                                             | Cancel the current agent turn                            |
+| `OnToolResult`        | `func(toolCallID, result string, isError bool)`      | Called when `tool_result` is received (all paths)        |
+| `OnAfterToolCall`     | `func(toolCallID, toolName, result string, isError bool)` | Called after `EventAfterToolCall` dispatch           |
+| `OnModal`             | `func(text string)`                                  | Display text in a modal overlay                          |
+| `OnSetSystemPrompt`   | `func(prompt string)`                                | Replace the base system prompt on all agents             |
+| `OnAppendSystemPrompt`| `func(text string)`                                  | Append to the base system prompt on all agents           |
+| `OnExec`              | `func(command, dir string) (string, error)`          | Execute a shell command (requires PermExec)              |
+| `OnGetEnv`            | `func(name string) (string, error)`                  | Read a host environment variable                         |
+| `OnConfigRead`        | `func(group string) (json.RawMessage, error)`        | Read config for the named extension group                |
+
+### Agent management callbacks
+
+| Field                  | Signature                                                    | Purpose                                         |
+|-----------------------|--------------------------------------------------------------|-------------------------------------------------|
+| `OnAgentSpawn`        | `func(id, name, systemPrompt, modelName string) error`       | Create and register a new sub-agent             |
+| `OnAgentClose`        | `func(id string) error`                                      | Cancel and remove a sub-agent                   |
+| `OnAgentSendMessage`  | `func(id, message string) error`                             | Send a message to a named agent                 |
+| `OnAgentList`         | `func() ([]AgentInfo, error)`                                | Return all live agent IDs and names             |
+| `OnAgentTokenCount`   | `func() int64`                                               | Return total token count across all agents      |
+
+### Team management callbacks
+
+| Field                  | Signature                                        | Purpose                                      |
+|-----------------------|--------------------------------------------------|----------------------------------------------|
+| `OnTeamCreate`        | `func(id, name string) error`                    | Create a new named team                      |
+| `OnTeamClose`         | `func(id string) error`                          | Cancel all members and remove the team       |
+| `OnTeamAddMember`     | `func(teamID, agentID string) error`             | Add an agent to a team                       |
+| `OnTeamRemoveMember`  | `func(teamID, agentID string) error`             | Remove an agent from a team (no cancel)      |
+
+### MCP bridge callbacks
+
+| Field          | Signature                                                      | Purpose                                      |
+|---------------|----------------------------------------------------------------|----------------------------------------------|
+| `OnMCPSpawn`  | `func(id, command string, args []string, env map[string]string) error` | Spawn an MCP server subprocess    |
+| `OnMCPClose`  | `func(id string) error`                                        | Terminate an MCP server subprocess           |
+| `OnMCPSend`   | `func(id string, data []byte) error`                           | Write JSON-RPC data to MCP stdin             |
+| `OnMCPRead`   | `func(id string) (json.RawMessage, error)`                     | Read a JSON-RPC response from MCP stdout     |
+
+**Invariant:** `OnMCPSpawn` requires the calling extension to hold `PermExec`. If the extension is nil or lacks `PermExec`, the call returns a permission-denied error.
+
+**Invariant:** `OnExec` requires the calling extension to hold `PermExec`. Executions by trusted extensions always pass the permission check.
+
+---
+
+## 8. Memory Protocol
 
 **Host → Extension (event delivery):**
 - Host calls `_alloc(n)` to request `n` bytes from the extension's allocator.
@@ -104,7 +237,7 @@ if respPtr != 0:
 **Extension → Host (response):**
 - The extension allocates its response buffer via its own `_alloc` and stores the JSON there.
 - `_on_event` returns the pointer.
-- The host reads the JSON using `readNullTerminatedOrJSON` (see §6), then calls `_free(respPtr)`.
+- The host reads the JSON using `readNullTerminatedOrJSON` (see §9), then calls `_free(respPtr)`.
 
 **Host → Extension (host_call response):**
 - When `host_call` needs to return a response, it calls the extension's `_alloc` to get a buffer in WASM memory.
@@ -115,7 +248,7 @@ if respPtr != 0:
 
 ---
 
-## 6. readNullTerminatedOrJSON
+## 9. readNullTerminatedOrJSON
 
 `readNullTerminatedOrJSON(mem, ptr)` reads up to 64 KB from WASM linear memory starting at `ptr` and finds the boundary of the first complete JSON object by tracking brace depth, respecting string literals and escape sequences.
 
@@ -123,7 +256,7 @@ if respPtr != 0:
 
 ---
 
-## 7. Subscription Race Safety
+## 10. Subscription Race Safety
 
 `Extension.subMu` is a `sync.RWMutex` that guards all reads and writes to `Extension.subscriptions`.
 
@@ -134,7 +267,7 @@ if respPtr != 0:
 
 ---
 
-## 8. Host.mu Guards
+## 11. Host.mu Guards
 
 `Host.mu` is a `sync.RWMutex` that guards:
 - `h.extensions` slice (append in `Load`, nil + replacement in `Reload`, iteration in `DispatchEvent`, removal in `removeExtension`)
@@ -145,7 +278,7 @@ if respPtr != 0:
 
 ---
 
-## 9. Store: Per-Extension, Not Shared
+## 12. Store: Per-Extension, Not Shared
 
 Each `Extension` has its own `*Store`. Stores are not shared between extensions.
 
@@ -157,25 +290,22 @@ Each `Extension` has its own `*Store`. Stores are not shared between extensions.
 
 ---
 
-## 10. Tool Registration: First Registration Wins (Override Supported)
+## 13. Tool Registration: First Registration Wins (Override Supported)
 
 `handleRegisterTool` uses `h.mu.Lock()` to atomically check-then-set `h.registeredTools[tool.Name]`.
 
 - If the name is not yet registered, it is added and `OnRegisterTool` is called.
 - If the name already exists and `tool.Override == false`, the method returns an error response (`"tool already registered: <name>"`).
 - If the name already exists and `tool.Override == true`, the existing entry is replaced and `OnRegisterTool` is called.
-- The `OnRegisterTool` callback is invoked for the first successful registration and for each successful override.
 - When `ext != nil` (i.e. a WASM extension is making the call), `h.toolOwners[tool.Name]` is set to `ext.name` on registration or override.
 
-**Invariant:** Duplicate tool names without `override: true` are rejected. With `override: true` the new registration replaces the old one.
-
-**Invariant:** `RegisteredToolInfo.OwnerName` is the `ext.name` of the last extension to successfully register the tool. It is empty if the tool was not registered via a WASM extension `host_call`.
+**Invariant:** Duplicate tool names without `override: true` are rejected.
 
 `Host.RegisteredTools()` returns a snapshot of `[]RegisteredToolInfo` pairing each tool with its owner name under `h.mu.RLock()`. `Host.GetRegisteredTools()` returns a `[]sdk.Tool` snapshot without ownership information (retained for backward compatibility).
 
 ---
 
-## 11. Permission Model
+## 14. Permission Model
 
 Each `Extension` carries:
 - `trusted bool` — set to `true` for extensions loaded via `Host.LoadBytes(ctx, name, data, true)`.
@@ -185,36 +315,58 @@ Each `Extension` carries:
 - Returns `true` if `ext.trusted`.
 - Returns `ext.permissions[p]` otherwise.
 
-**Invariant:** Trusted extensions always pass `HasPermission` for any permission value. Untrusted extensions pass only for permissions explicitly granted in their manifest.
+**Invariant:** Trusted extensions always pass `HasPermission` for any permission value.
 
 `Host.Load` loads the companion manifest (`<basename>.json`) alongside the WASM file and populates `ext.permissions` from `ExtensionManifest.Permissions`. Missing or malformed manifests are logged at warn level and result in zero permissions.
 
-`Host.LoadBytes(ctx, name, data, trusted)` skips manifest loading entirely. When `trusted=true` the extension bypasses all permission checks.
+`Host.LoadBytes(ctx, name, data, trusted)` skips manifest loading entirely.
 
-## 12. ExecuteTool: Synchronous Tool Dispatch
+---
 
-`Host.ExecuteTool(ctx, toolCallID, toolName, input)` provides synchronous tool execution from Fantasy's perspective:
+## 15. ExecuteTool: Synchronous Tool Dispatch
+
+`Host.ExecuteTool(ctx, agentID, toolCallID, toolName, input)` provides synchronous tool execution:
 
 1. Creates a `chan toolResult{1}` buffered channel keyed by `toolCallID` in `h.pendingTools`.
-2. Dispatches `EventBeforeToolCall` with `BeforeToolCallPayload` to subscribed extensions.
+2. Dispatches `EventBeforeToolCall` with `BeforeToolCallPayload{AgentID, ToolCallID, ToolName, Input}`.
 3. Blocks on `select { case result := <-ch: ...; case <-ctx.Done(): ... }`.
-4. After receiving the tool result from the channel, dispatches `EventAfterToolCall` to all subscribed extensions with `AfterToolCallPayload{ToolCallID, ToolName, Result, IsError}`. If `OnAfterToolCall` is set, it is called immediately after the event dispatch.
+4. On result: dispatches `EventAfterToolCall` with `AfterToolCallPayload{AgentID, ToolCallID, ToolName, Result, IsError}`, then calls `OnAfterToolCall` if set.
 
 **Invariants:**
-- The channel is registered in `pendingTools` **before** dispatching the event, so a synchronous extension call to `tool_result` within `_on_event` will succeed.
+- The channel is registered in `pendingTools` **before** dispatching the event.
+- `AgentID` is included in both `BeforeToolCallPayload` and `AfterToolCallPayload` so extensions can correlate tool calls with the originating agent.
 - On context cancellation, the pending entry is cleaned up before returning.
-- `handleToolResult` always calls `OnToolResult` in addition to signalling any pending channel (backward compatibility).
-- `EventAfterToolCall` is dispatched only on the success path (result received); it is **not** dispatched when `ctx` is cancelled.
-- `OnAfterToolCall(toolCallID, toolName, result, isError)` is invoked after `EventAfterToolCall` dispatch completes, if the callback is set.
+- `handleToolResult` always calls `OnToolResult` in addition to signalling any pending channel.
+- `EventAfterToolCall` is dispatched only on the success path; it is **not** dispatched when `ctx` is cancelled.
 
-## 13. Reload Semantics
+`Host.SendToolResult(toolCallID, result string, isError bool)` is the native Go path for tool results (used by the MCP bridge) — it bypasses the WASM host_call mechanism and delivers directly to the pending channel.
+
+---
+
+## 16. WASM Filesystem and Environment Passthrough
+
+When instantiating a WASM module, the host configures:
+- `WithFSConfig(wazero.NewFSConfig().WithDirMount("/", "/"))` — mounts the full host filesystem at `/` read/write.
+- All host environment variables are passed through via `WithEnv` (iterated from `os.Environ()`).
+
+**Invariant:** Every extension module receives the same filesystem mount and environment at load time. There is no per-extension filesystem isolation in ABI v1.
+
+---
+
+## 17. extensionDisplayName
+
+`extensionDisplayName(path string) string` returns the base filename without the `.wasm` suffix. This is the friendly name used in slog logs (`"extension"` attribute). The full path is used as the wazero module name (for uniqueness); the display name is for human-readable output only.
+
+---
+
+## 18. Reload Semantics
 
 `Host.Reload(ctx, paths)` performs a full replacement:
 
-1. Under `h.mu.Lock()`, the current `h.extensions` slice is captured, set to `nil`, `h.registeredTools` is reset to an empty map, and `h.toolOwners` is reset to an empty map.
-2. Each old extension's module is closed (errors logged at warn level).
-3. `Load(path)` is called for each new path; individual failures are logged but do not abort the reload.
+1. Under `h.mu.Lock()`, captures the current `h.extensions`, sets it to `nil`, resets `h.registeredTools` and `h.toolOwners` to empty maps.
+2. Closes each old extension's module (errors logged at warn level).
+3. Calls `Load(path)` for each new path; individual failures are logged but do not abort the reload.
 
 **Invariant:** After `Reload`, previously loaded modules are always closed regardless of whether reloading any new module succeeds.
 
-**Invariant:** `h.registeredTools` and `h.toolOwners` are both cleared on reload. Extensions re-register their tools during `_init` on the reload path.
+**Invariant:** `h.registeredTools` and `h.toolOwners` are both cleared on reload.

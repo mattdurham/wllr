@@ -1,137 +1,392 @@
 # harness — Interface Contracts and Behavioral Invariants
 
-## 1. Model Structure — Pool-Based Agent Runtime
+Package `harness` implements the bubbletea v2 TUI for the bob coding assistant. It owns the
+chat view, input area, status bar, autocomplete dropdown, modal overlay, extension dispatch
+wiring, and the token batching layer between the agent pool and the TUI event loop.
 
-`Model` no longer owns a `langModel` or manages streaming state directly. Instead it holds:
+---
+
+## 1. Model Structure
+
+`Model` is the root bubbletea v2 model. It holds:
 
 - `agentPool *agent.AgentPool` — the pool owning all live agents.
 - `mainAgentID string` — the ID of the primary agent the user interacts with.
+- `extHost *extension.Host` — the extension host for dispatching events and managing WASM extensions.
+- `chat ChatView` — the scrollable conversation viewport.
+- `input InputArea` — the multi-line textarea with command detection.
+- `statusBar StatusBar` — provider/model/token/status display.
+- `commands *Registry` — the registered slash commands.
+- `modalContent string` — non-empty when the modal overlay is open.
+- `modalScroll int` — scroll offset for the modal.
+- `suggestions []Command` — autocomplete candidates (non-empty when dropdown is visible).
+- `streaming bool` — true while an agent turn is in progress.
 
-Streaming state (`streaming bool`, `cancelStream`, `streamStart`) is **removed**. Turn lifecycle
-is managed by the pool; the TUI receives `TokenMsg` and `StreamDoneMsg` via pool callbacks.
+**Invariant:** `Model` is a value type (passed by value through bubbletea). All mutable shared state reaches the TUI via `prog.Send`; no goroutine mutates `Model` fields directly.
 
-## 2. SubmitMsg Handling
+---
 
-- `SubmitMsg` is **never dropped**. Every submit is accepted and forwarded to the pool.
-- On `SubmitMsg`:
-  1. User message is appended to `m.history` (synchronously).
-  2. User message is displayed in the chat view (synchronously).
-  3. `m.agentPool.Send(m.mainAgentID, msg.Content)` is called — starts a non-blocking goroutine.
-- If `agentPool` is nil (tests without a pool), the user message is still recorded in history/chat.
-  A notification is shown if `Send` returns an error.
+## 2. Constructor
 
-## 3. History Invariant
+```go
+func New(pool *agent.AgentPool, mainAgentID string, h *extension.Host) Model
+```
 
-- **User messages** are appended to `m.history` synchronously in the `SubmitMsg` handler.
-- **Assistant messages** are appended to `m.history` via `addAssistantMsgToHistoryMsg`, sent by the agent goroutine before `StreamDoneMsg`.
-- `clearMsg` resets `m.history` to `nil`.
-- History is not mutated concurrently — all mutations occur in the bubbletea event loop.
+- `pool` may be nil for tests that do not exercise agent interaction; SubmitMsg is accepted but not forwarded.
+- `mainAgentID` is the pool-registered ID of the primary agent.
+- `h` may be nil; extension callbacks are skipped when nil.
+- Reads `pool.ProviderName()` at construction to initialise the status bar.
+- Registers built-in commands (`/help`, `/clear`, `/reload`, `/model`) and a `/prompt` command (when pool is non-nil) that shows the accumulated base system prompt in a modal.
+- Wires `h.OnRegisterCommand` immediately (before `SetProgram`) so extensions that register commands during `_init` are captured.
 
-## 4. ctrl+c Behaviour
+---
 
-- `ctrl+c` **always returns `(m, tea.Quit)`** — there is no streaming guard.
-  To cancel an active agent turn, use `abortStreamMsg` (sent via the `OnAbort` extension callback
-  or double-Esc from the input area).
-- `ctrl+q` always returns `(m, tea.Quit)`.
+## 3. SetProgram
 
-## 5. abortStreamMsg Behaviour
+```go
+func (m *Model) SetProgram(p *tea.Program)
+```
 
-- `abortStreamMsg` calls `m.agentPool.Cancel(m.mainAgentID)` to cancel the active turn.
-- If `agentPool` is nil, the message is a no-op.
-- Returns `(m, nil)` — no bubbletea command is issued.
+Must be called after creating the bubbletea program and before calling `prog.Run()`. Not thread-safe. Wires all extension host callbacks and the main agent's token/done callbacks.
 
-## 6. AltScreen
+### Extension host callbacks wired in SetProgram
 
-- `View()` always enables AltScreen by setting `v.AltScreen = true` on the returned `tea.View`.
-- This is set on the `View` struct (bubbletea v2 API), not via a `tea.EnterAltScreen` program option.
+| Callback                 | Action                                                                 |
+|--------------------------|------------------------------------------------------------------------|
+| `OnSetStatus`            | `p.Send(StatusUpdateMsg{Key, Value})`                                  |
+| `OnNotify`               | `p.Send(NotifyMsg{Text})`                                              |
+| `OnSendMessage`          | `p.Send(SubmitMsg{Content})` or with compact display for skill XML     |
+| `OnAbort`                | `p.Send(abortStreamMsg{})`                                             |
+| `OnAfterToolCall`        | `p.Send(ToolCallDoneMsg{ID, IsError, Output})`                         |
+| `OnModal`                | `p.Send(ShowModalMsg{Text})`                                           |
+| `OnSetSystemPrompt`      | Calls `pool.SetBaseSystemPrompt(prompt)` (if pool non-nil)             |
+| `OnAppendSystemPrompt`   | Calls `pool.AppendBaseSystemPrompt(text)` (if pool non-nil)            |
+| `OnAgentSpawn`           | Creates agent in pool, wires batched token callback, wires tool/done   |
+| `OnAgentClose`           | Calls `pool.Close(id)`                                                 |
+| `OnAgentSendMessage`     | Calls `pool.Send(id, message)`                                         |
+| `OnAgentList`            | Returns `pool.ListAgents()` as `[]AgentInfo`                           |
+| `OnAgentTokenCount`      | Returns `pool.TokenCount()`                                            |
+| `OnTeamCreate`           | Calls `pool.CreateTeam(id)`                                            |
+| `OnTeamClose`            | Calls `pool.CloseTeam(ctx, id)`                                        |
+| `OnTeamAddMember`        | Calls `pool.GetTeam(teamID).AddMember(agentID)`                        |
+| `OnTeamRemoveMember`     | Calls `pool.GetTeam(teamID).RemoveMember(agentID)` (no error on nil)   |
+
+**Invariant:** `OnSetSystemPrompt` and `OnAppendSystemPrompt` both route through the `AgentPool`, which propagates the prompt to all current and future agents. They do NOT set the prompt on the extension host or the harness model itself.
+
+### Main agent callbacks wired in SetProgram
+
+- `SetOnToken`: a batched token callback (see §5).
+- `SetOnDone`: calls flush on the batcher, then `p.Send(StreamDoneMsg{Err})`.
+- `SetToolsFn`: returns `BuildFantasyTools(extHost, "main", logFn)`.
+- `SetOnToolCall`: `p.Send(ToolCallStartMsg{ID, ToolName, Input})`.
+
+Sub-agents spawned via `OnAgentSpawn` receive identical wiring except `agentID` is the spawned agent's ID.
+
+---
+
+## 4. Update Sub-Handlers
+
+`Model.Update(msg tea.Msg)` delegates to six ordered sub-handlers. Each returns `(Model, tea.Cmd, bool)`; the first handler to return `true` short-circuits the chain.
+
+| Sub-handler        | Messages handled                                                                  |
+|--------------------|-----------------------------------------------------------------------------------|
+| `updateWindow`     | `tea.WindowSizeMsg`, `ShowModalMsg`                                               |
+| `updateKeyPress`   | `tea.KeyPressMsg` — modal keys, dropdown navigation, Ctrl+C / Ctrl+Q, pgup/pgdown |
+| `updateStream`     | `TokenMsg`, `streamTickMsg`, `StreamDoneMsg`, `addAssistantMsgToHistoryMsg`       |
+| `updateTools`      | `ToolCallStartMsg`, `ToolCallDoneMsg`                                             |
+| `updateActions`    | `SubmitMsg`, `CommandMsg`, `clearMsg`, `setModelMsg`, `abortStreamMsg`, `dispatchOnCommandMsg` |
+| `updateExtension`  | `ExtensionEventResultMsg`, `ReloadMsg`, `NotifyMsg`, `StatusUpdateMsg`            |
+
+After all sub-handlers return false, remaining messages are forwarded to `m.input` (all messages) and `m.chat` (non-key messages only, to prevent viewport key bindings from stealing typed characters).
+
+---
+
+## 5. Token Batching (tokenBatcher)
+
+```go
+type tokenBatcher struct {
+    mu       sync.Mutex
+    buf      strings.Builder
+    lastSend time.Time
+    p        *tea.Program
+}
+const tokenBatchInterval = 30 * time.Millisecond
+```
+
+`makeBatchedOnToken(p)` returns `(onToken func(string), flush func())`. Tokens are coalesced and sent as a single `TokenMsg` at most every 30ms. `flush()` drains any buffered tail tokens immediately and must be called from `onDone`.
+
+**Invariant:** The batcher uses time-based coalescing with no goroutines or channels — it is safe to call `flush()` multiple times across turns without panics. Locking is purely `sync.Mutex` on the buffer.
+
+**Invariant:** Tokens emitted faster than 30ms are batched together; the TUI renders at most ~33 frames per second regardless of LLM streaming speed, preventing O(n²) viewport reflow work.
+
+---
+
+## 6. submitToAgent
+
+`submitToAgent(content, display string)` is called from the `SubmitMsg` handler:
+
+1. Adds `display` (or `content` if display is empty) to `m.chat` as a user message.
+2. Appends `sdk.Message{Role: RoleUser, Content: content}` to `m.history`.
+3. Sets `m.streaming = true`, records `m.streamStart`.
+4. Dispatches `EventBeforeAgentStart` and `EventBeforeProviderRequest` to extensions.
+5. Calls `pool.Send(mainAgentID, content)` (non-blocking).
+6. Fires an immediate `streamTickMsg` and a 100ms tick to start the animated "working." indicator.
+
+**Invariant:** `pool.Send` is non-blocking. The agent runs in a goroutine; results arrive via `TokenMsg` and `StreamDoneMsg`.
+
+---
 
 ## 7. ChatView
 
-- `AppendToken(token)`: concatenates `token` to `current`, calls `refreshContent()`, scrolls to bottom.
-- `FinalizeMessage()`: if `current == ""` it is a no-op; otherwise appends `chatMessage{role: RoleAssistant, content: current}` to `messages`, resets `current = ""`, calls `refreshContent()`.
-- `Clear()`: sets `messages = nil` and `current = ""`, calls `refreshContent()`.
-- `refreshContent()`: rebuilds the viewport content from `messages` followed by the in-progress `current` (if non-empty).
-- Message order in `messages` reflects insertion order (append-only).
+`ChatView` renders the conversation history in a scrollable viewport.
 
-## 8. InputArea
+### Fields
 
-- **Enter key** submits the trimmed content:
-  - Empty content → no-op.
-  - `/prefix` (starts with `/`) → parses as command: emits `CommandMsg{Name, Args}`.
-  - Plain text → emits `SubmitMsg{Content}`.
-  - In both cases the textarea is reset before emitting.
-- **Shift+Enter** inserts a newline (overriding the default Enter binding in the textarea).
-- **Esc key (first press):** resets the textarea (clears content), sets internal `lastWasEsc = true`. Does not emit any message.
-- **Esc key (second consecutive press):** resets the textarea, clears `lastWasEsc`, and emits `abortStreamMsg{}` to cancel any active stream.
-- **Any non-Esc keypress:** clears `lastWasEsc` (no abort will fire on the next Esc).
+| Field            | Purpose                                                                         |
+|-----------------|---------------------------------------------------------------------------------|
+| `current`       | Accumulates in-progress assistant text during streaming                         |
+| `lastDoneToolID`| Last completed tool call ID; reset by `FinalizeMessage`. Present but unused for routing (see §8) |
+| `histContent`   | Cached rendered HTML of all finalized messages; rebuilt only when `histDirty`   |
+| `histDirty`     | Set when `messages` changes; cleared after `refreshContent` rebuilds the cache  |
+| `messages`      | Append-only slice of finalized `chatMessage` entries                            |
+| `vp`            | The bubbles/viewport model                                                      |
 
-## 9. CommandRegistry
+### Key Methods
 
-- **Unknown command:** `Dispatch` returns a `tea.Cmd` that produces `NotifyMsg{Text: "unknown command: /<name>"}`.
+- `AppendToken(token)`: appends to `c.current`, calls `refreshContent()`, scrolls to bottom.
+- `FinalizeMessage()`: if `c.current == ""` is a no-op; otherwise seals current into messages and resets.
+- `AddUserMessage(content)`: appends user message, invalidates cache.
+- `AddToolCall(id, toolName, input)`: seals any in-progress text first, then appends a pending tool entry.
+- `UpdateToolCall(id, isError, output)`: marks the named tool call done; sets `lastDoneToolID = id`.
+- `Clear()`: resets messages, current, lastDoneToolID, and histContent.
+
+### histContent Cache
+
+`refreshContent()` maintains a two-level cache:
+1. `histContent` — the rendered string of all finalized messages. Rebuilt only when `histDirty` is true.
+2. The live viewport content — `histContent + renderMessage(current)` when streaming, otherwise just `histContent`.
+
+**Invariant:** `histContent` never includes `c.current`. On every token, only `c.current` changes, so only a string append is needed (not a full O(n) rebuild of all messages).
+
+### renderToolGroup is a no-op
+
+`renderToolGroup` is defined but intentionally empty — tool calls are completely hidden from the chat UI. Only the LLM's text responses (rendered as assistant boxes) are visible. Tool calls are stored in `messages` for internal state tracking but produce no output.
+
+**Invariant:** Tool call visibility: none. Tool activity is reflected only indirectly when the LLM generates text that follows a tool call.
+
+---
+
+## 8. Token Routing — All Tokens Go to c.current
+
+`AppendToken` always appends to `c.current` regardless of `lastDoneToolID`. The `lastDoneToolID` field is set by `UpdateToolCall` and reset by `FinalizeMessage` but is not used to route tokens to tool boxes.
+
+**Invariant:** All streaming text from the LLM appears in the in-progress assistant message box (`c.current`), never inside a tool call box. This is correct because the LLM response following a tool result is still the assistant's reply, not a property of the tool call.
+
+---
+
+## 9. Color Rules for Chat Messages
+
+| Message type          | Current turn                    | Historical turn              |
+|-----------------------|---------------------------------|------------------------------|
+| User message border   | Green (`#00AA00`)               | Grey (`#444444`)             |
+| User message text     | Soft green (`#CCFFCC`)          | Grey (`#555555`)             |
+| Assistant message border | Blue (`#89CFF0`)             | Grey (`#444444`)             |
+| Assistant message text | White (`#FFFFFF`)              | Grey (`#555555`)             |
+| System/notification   | Italic grey (`#555555`)         | (same)                       |
+| Tool call boxes       | Not rendered                    | Not rendered                 |
+
+"Current turn" means the message belongs to the most recent user turn (at or after `recentStart`, the last user message index).
+
+---
+
+## 10. renderUserMessage / renderAssistantMessage
+
+Both functions draw a rounded Unicode box:
+
+```
+╭──────────────────────────────╮
+│ content line                 │
+╰──────────────────────────────╯
+```
+
+- Minimum width: 14 characters.
+- Content is word-wrapped via `lipgloss.Wrap` to `width - 4` (accounting for borders and padding).
+- Lines longer than `contentWidth` are hard-truncated at the rune boundary.
+- Two blank lines (`\n\n`) follow each box to separate messages.
+
+---
+
+## 11. renderModal
+
+`renderModal(height int)` renders an 80%-width centered modal popup:
+
+- Width: `m.width * 8 / 10`, minimum 20.
+- Left padding: `(m.width - modalW) / 2` spaces.
+- Top border contains: `╭─ ↑↓ scroll · esc close ──────╮` (with scroll percentage when content overflows).
+- Content lines: `height - 2` (room for top + bottom border).
+- `modalScroll` offsets the visible window into the content lines.
+- Bottom border: `╰──────────────────────────────╯`.
+
+The caller (`View`) adds top and bottom blank-line margins to vertically center the modal in the chat area.
+
+**Invariant:** `modalScroll` is clamped to `[0, max(0, len(lines) - contentLines)]` on render.
+
+---
+
+## 12. renderInputBox
+
+`renderInputBox()` wraps the textarea in a white-bordered box with the status line embedded in the top border:
+
+```
+╭─ anthropic  claude-sonnet  tokens:1234  working....  1m 42s ────╮
+│ cursor line                                                       │
+╰───────────────────────────────────────────────────────────────────╯
+```
+
+- Always reads `m.agentPool.TokenCount()` live (so sub-agent tokens are reflected immediately).
+- Uses `lipgloss.Width` (not `len([]rune)`) for padding to correctly account for ANSI escape sequences in the textarea output.
+
+---
+
+## 13. Autocomplete (Slash Commands)
+
+### slashWordAt
+
+`slashWordAt(val string) int` finds the index of the last `/` that starts an incomplete command word — it must be at position 0 or preceded by a space, and there must be no space between it and the end of the string. Returns -1 if no such position exists.
+
+### updateSuggestions
+
+Called after every key event. Computes `slashWordAt(input.Value())`. If a slash word is found, filters `commands.List()` to entries whose names have the typed prefix. Updates `m.suggestions`.
+
+**Invariant:** When `slashWordAt` returns -1, the dropdown is closed (`closeSuggestions`). When it returns a valid index, all commands with matching prefix are shown.
+
+### Dropdown Layout
+
+- Maximum 8 entries visible at a time.
+- `dropdownOffset` tracks the first visible entry; adjusted when `suggestionIdx` moves out of the visible window.
+- Keyboard: Up/Down navigates; Tab completes the selected entry (replaces the slash word in the input); Enter dispatches the selected command; Esc closes.
+- Selected entry is highlighted with a blue background (`#1A4A8A`).
+- The dropdown renders between the chat area and the input box; its height is subtracted from `chatHeight()`.
+
+---
+
+## 14. InputArea
+
+`InputArea` wraps a `bubbles/textarea` with command detection.
+
+- **Enter**: submits trimmed content. Empty → no-op. `/word...` → `CommandMsg`. Plain text → `SubmitMsg`.
+- **Shift+Enter**: inserts a newline (overrides default Enter binding in textarea).
+- **Esc (first press)**: clears the textarea, sets `lastWasEsc = true`. No message emitted.
+- **Esc (second consecutive press)**: clears textarea, emits `abortStreamMsg{}`.
+- **Any other key**: clears `lastWasEsc`.
+
+---
+
+## 15. Key Handling: Modal Takes Priority
+
+When `m.modalContent != ""`, all key events are consumed by the modal handler:
+
+| Key        | Action                                  |
+|------------|-----------------------------------------|
+| esc/enter/q | Close modal (`modalContent = ""`)      |
+| up         | Scroll modal up one line                |
+| down       | Scroll modal down one line (clamped)    |
+
+No key is forwarded to the input area while the modal is open.
+
+---
+
+## 16. Key Handling: Ctrl+C
+
+- If `m.streaming == true`: calls `m.agentPool.Cancel(m.mainAgentID)`, sets status to "cancelling…". Does NOT quit.
+- If `m.streaming == false`: returns `tea.Quit`.
+- `Ctrl+Q` always quits regardless of streaming state.
+
+---
+
+## 17. CommandRegistry
+
+```go
+type Registry struct { commands map[string]Command }
+
+func (r *Registry) Register(cmd Command)
+func (r *Registry) Dispatch(name string, args []string) tea.Cmd
+func (r *Registry) List() []Command
+func (r *Registry) HelpText() string
+```
+
+- **Unknown command:** `Dispatch` returns a cmd that produces `NotifyMsg{Text: "unknown command: /<name>"}`.
 - **Duplicate registration:** silently overwrites the existing entry with the same name.
-- **`/help` handling:** intercepted in `Model.Update` before reaching `Registry.Dispatch` — displays `commands.HelpText()` as a notification in the chat. The `/help` command is also registered in the registry (returns a generic message), but the Model-level intercept takes precedence.
-- **`/clear`:** emits `clearMsg{}`.
-- **`/reload`:** emits `ReloadMsg{}`.
-- **`/model <name>`:** emits `setModelMsg{Model: name}`; with no args emits `NotifyMsg` with usage hint.
+- **`/help`:** intercepted in `updateActions` before reaching `Registry.Dispatch` — displays `commands.HelpText()` via `ShowModalMsg`.
 
-## 10. StatusBar
+Built-in commands registered at startup:
 
-- Statuses are stored in a `map[string]string` keyed by an arbitrary string key.
-- **"stream" key:** deleted from the map on `StreamDoneMsg` (success or `context.Canceled`); set to `"error"` on non-canceled errors.
-  The `streamTickMsg` tick and animated indicator are removed — the pool manages turn lifecycle.
-- `StatusUpdateMsg` sets or overwrites the value for `Key`.
-- Keys are rendered in sorted order.
+| Command   | Effect                                              |
+|-----------|-----------------------------------------------------|
+| `/help`   | Shows `ShowModalMsg{Text: commands.HelpText()}`     |
+| `/clear`  | Emits `clearMsg{}`                                  |
+| `/reload` | Emits `ReloadMsg{}`                                 |
+| `/model <name>` | Emits `setModelMsg{Model: name}`             |
+| `/prompt` | Shows accumulated base system prompt in a modal     |
 
-## 11. Extension Callbacks (SetProgram)
+---
 
-`SetProgram` wires four callbacks on `extHost`:
+## 18. StatusBar
 
-| Callback | Action |
-|---|---|
-| `OnSetStatus` | Sends `StatusUpdateMsg{Key, Value}` via `prog.Send` |
-| `OnNotify` | Sends `NotifyMsg{Text}` via `prog.Send` |
-| `OnSendMessage` | Sends `SubmitMsg{Content}` via `prog.Send` |
-| `OnAbort` | Sends `abortStreamMsg{}` via `prog.Send` |
+- `providerName`, `modelName`, `totalTokens` set at construction or via messages.
+- `statuses map[string]string` keyed by arbitrary string; rendered in sorted order.
+- `Line()` returns unstyled text; used in `renderInputBox` top border.
+- `View()` returns lipgloss-styled text; not currently used in the main view (status is embedded in the input box border).
+- Token count is updated live from `m.agentPool.TokenCount()` on every render; the status bar's own `totalTokens` field is also updated from `StreamDoneMsg`.
 
-`abortStreamMsg` causes `Model.Update` to invoke `m.agentPool.Cancel(m.mainAgentID)`, cancelling the active agent turn.
+---
 
-## 12. SetProgram Threading Contract
+## 19. Message Types
 
-- `SetProgram` **must be called before** `prog.Run()`.
-- It is **not thread-safe** — no synchronization is provided.
-- After `prog.Run()` starts, only `prog.Send` is safe to call from goroutines.
+| Type                         | Direction          | Purpose                                                         |
+|-----------------------------|--------------------|-----------------------------------------------------------------|
+| `TokenMsg{Token}`           | agent → TUI        | Streaming text delta                                            |
+| `StreamDoneMsg{Err, AgentID}` | agent → TUI      | Agent turn completed                                            |
+| `ExtensionEventResultMsg`   | async cmd → TUI    | Results from dispatching an event to extensions                 |
+| `ReloadMsg`                 | command → TUI      | Trigger hot-reload of all extensions                            |
+| `NotifyMsg{Text}`           | any → TUI          | Show notification in chat                                       |
+| `StatusUpdateMsg{Key,Value}`| extension → TUI    | Update keyed status in the status bar                           |
+| `SubmitMsg{Content,Display}`| input/ext → TUI    | Submit content to the agent; Display shown in chat if non-empty |
+| `CommandMsg{Name,Args}`     | input → TUI        | User typed a slash command                                      |
+| `ToolCallStartMsg{ID,...}`  | agent → TUI        | Agent dispatched a tool call                                    |
+| `ToolCallDoneMsg{ID,...}`   | OnAfterToolCall → TUI | Tool call completed                                          |
+| `ShowModalMsg{Text}`        | any → TUI          | Open the modal overlay                                          |
+| `abortStreamMsg`            | OnAbort/Esc → TUI  | Cancel the active agent turn                                    |
+| `dispatchOnCommandMsg`      | command → TUI      | Dispatch EventOnCommand for an extension-registered command     |
+| `streamTickMsg`             | internal timer     | Drive the "working." animated indicator                         |
 
-## 13. Agent Pool Contract (New Signature)
+---
 
-- `New(pool *agent.AgentPool, mainAgentID string, h *extension.Host) Model` is the sole constructor.
-- `pool` may be `nil` for tests that do not exercise agent interaction; SubmitMsg is accepted but
-  not forwarded to any agent.
-- `mainAgentID` is the pool-registered ID of the primary (user-facing) agent.
-- Language model and provider details are owned by the pool; `harness.New` does not receive them.
+## 20. BuildFantasyTools
 
-## 14. Token and Done Delivery via Pool Callbacks
+```go
+func BuildFantasyTools(extHost *extension.Host, agentID string, logFn func(int, string)) []fantasy.AgentTool
+```
 
-- `TokenMsg` and `StreamDoneMsg` arrive in the TUI via the agent's `SetOnToken` and `SetOnDone` callbacks, wired in `SetProgram` (for the main agent) or in `cmd/main.go`'s `OnAgentSpawn` handler (for sub-agents).
-- `TokenMsg{Token: text}` is sent via `prog.Send` for each non-empty text delta.
-- `StreamDoneMsg{Err: err}` is sent via `prog.Send` when the agent turn completes.
-- The harness itself does not launch goroutines — all async work is delegated to `agent.Agent.Submit`.
+Returns the current set of registered tools from `extHost.RegisteredTools()` as `[]fantasy.AgentTool`. Each tool is wrapped in an `sdkToolAdapter` that calls `extHost.ExecuteTool(ctx, agentID, ...)` when the fantasy agent invokes the tool.
 
-## 15. Tool Wiring (Delegated to Agent)
+**Invariant:** Returns nil if `extHost` is nil. Returns nil if no tools are registered.
 
-- Tool wiring is now handled by the `bob/agent` package via `SpawnOpts.Tools`.
-- The harness `tools.go` helpers (`buildFantasyTools`, `sdkToolAdapter`) remain for use by the
-  extension host, but the harness model no longer calls `buildFantasyTools` directly.
-- Extension-registered tools are passed to the main agent's `SpawnOpts` in `cmd/main.go`.
+**Invariant:** `agentID` is forwarded to `ExecuteTool`, which includes it in `BeforeToolCallPayload.AgentID` and `AfterToolCallPayload.AgentID`.
 
-## 19. Tool Call and Result Event Dispatching
+---
 
-- `OnToolCall` callback in `AgentStreamCall` dispatches `EventOnToolCall` with `OnToolCallPayload`.
-- `OnToolResult` callback in `AgentStreamCall` dispatches `EventOnToolResult` with `OnToolResultPayload`.
-- Both events use the same `toolCallID` so extensions can correlate call and result.
-- `dispatchToolCallEvent` and `dispatchToolResultEvent` in `tools.go` handle the JSON marshalling and event dispatch.
+## 21. View Layout
 
-## 20. SetLogFn
+```
+┌────────────────────────────────────┐
+│  chat viewport (scrollable)        │  height = m.height - inputAreaHeight - dropdownHeight
+│  [optional: suggestion dropdown]   │  dropdownHeight = min(8, len(suggestions)) + 2 borders (0 when hidden)
+│  [or: modal overlay (centered)]    │  height = chatHeight * 8/10, vertically centered
+├────────────────────────────────────┤
+│  input box (5 lines)               │  top border + 3 textarea lines + bottom border
+└────────────────────────────────────┘
+```
 
-- `SetLogFn(fn func(int, string))` sets the logger used for internal harness warnings (tool schema parse failures).
-- If `fn == nil`, warnings are silently dropped.
-- Must be called before `prog.Run()`. Not thread-safe.
+- `AltScreen = true` is set on every `tea.View` returned from `View()`.
+- The output is padded to exactly `m.height` lines to prevent old content bleeding through on resize.

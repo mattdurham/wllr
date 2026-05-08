@@ -34,7 +34,7 @@ Append-only design decision log. Never delete entries; add an `*Addendum (date):
 
 **Decision:** Token and completion notifications are delivered via per-agent `SetOnToken`/`SetOnDone` callbacks rather than a pool-level `OnToken`/`OnDone` hook.
 
-**Rationale:** Different agents may require different handling: the main agent's tokens go to the TUI chat window; sub-agent tokens may be logged or discarded. A pool-level hook would need to multiplex by agent ID, which effectively recreates per-agent routing in the caller. Keeping callbacks on the `Agent` struct is simpler, allows different policies per agent, and avoids centralizing routing logic in the pool. The harness wires the main agent's callbacks in `SetProgram`; sub-agent callbacks are wired in the `OnAgentSpawn` closure in `cmd/main.go`.
+**Rationale:** Different agents may require different handling: the main agent's tokens go to the TUI chat window; sub-agent tokens may be logged or discarded. A pool-level hook would need to multiplex by agent ID, which effectively recreates per-agent routing in the caller. Keeping callbacks on the `Agent` struct is simpler, allows different policies per agent, and avoids centralizing routing logic in the pool. The harness wires the main agent's callbacks in `SetProgram`; sub-agent callbacks are wired in the `OnAgentSpawn` closure in `model.go`.
 
 **Consequence:** Callers must wire callbacks before calling `Submit`. If `SetOnToken` is not called, tokens are silently discarded (the `if onToken != nil` check). This is intentional — not all callers need token streaming (e.g. batch-mode sub-agents).
 
@@ -58,14 +58,78 @@ Append-only design decision log. Never delete entries; add an `*Addendum (date):
 
 **Decision:** The provider display name is stored on `AgentPool` via `SetProviderName`/`ProviderName()` and read by `harness.New` at construction time, rather than passed as a separate parameter to `harness.New`.
 
-**Rationale:** After the model.go refactor (Task #27), `harness.New` takes `(pool, mainAgentID, h)` — removing the `langModel` and `provName` parameters. The status bar still needs a provider name. Storing it on the pool is natural: the pool already owns the provider (via `SetProvider`), and the name logically accompanies it. This avoids adding a fourth parameter to `harness.New` solely for display purposes, and keeps the display name co-located with the provider.
+**Rationale:** After the model.go refactor, `harness.New` takes `(pool, mainAgentID, h)` — removing the `langModel` and `provName` parameters. The status bar still needs a provider name. Storing it on the pool is natural: the pool already owns the provider (via `SetProvider`), and the name logically accompanies it. This avoids adding a fourth parameter to `harness.New` solely for display purposes, and keeps the display name co-located with the provider.
 
 **Consequence:** `cmd/main.go` must call `pool.SetProviderName(cfg.Provider)` before calling `harness.New`. The harness reads the name once at construction; runtime changes to the provider name are not reflected in the status bar without creating a new model.
 
 ---
 
-## 6. Global token counter on AgentPool
+## 6. Global Token Counter on AgentPool
+
 *Added: 2026-05-06*
-**Decision:** All agents share one atomic.Int64 token counter on the pool.
+
+**Decision:** All agents share one `atomic.Int64` token counter on the pool.
+
 **Rationale:** The TUI status bar shows total tokens across all active agents. A per-agent counter would require aggregation on every status bar refresh.
+
 **Consequence:** Counter reflects total tokens since pool creation, not per-session.
+
+---
+
+## 7. BaseSystemPrompt Propagated to All Agents on Set
+
+*Added: 2026-05-08*
+
+**Decision:** `SetBaseSystemPrompt` and `AppendBaseSystemPrompt` immediately propagate the new prompt to every currently-registered agent in the pool (under `p.mu.RLock()`), in addition to storing it for future spawns.
+
+**Rationale:** The context extension loads AGENTS.md and calls `set_system_prompt` after extensions have initialized, at which point agents may already be registered (the main agent is registered before extensions are loaded). Without propagation, the base prompt would only take effect for agents spawned after the call, leaving the main agent without the AGENTS.md content. Propagation under `RLock` is safe because `Agent.SetSystemPrompt` / `AppendSystemPrompt` use their own per-field mutex.
+
+**Consequence:** All agents always see the full accumulated base prompt from the point of the most recent `SetBaseSystemPrompt` / `AppendBaseSystemPrompt` call. Agents that were running a turn during the propagation will see the new prompt on their next turn.
+
+---
+
+## 8. modelName Field and contextWindowForModel — Why Per-Agent
+
+*Added: 2026-05-08*
+
+**Decision:** Each `Agent` stores a `modelName string` field, set from `pool.defaultModelName` at spawn time. `contextWindowForModel` maps model name substrings to known context window sizes and is called per-turn in `Submit`.
+
+**Rationale:** Different model families have very different context windows (128k vs 200k vs 1M tokens). A single hardcoded constant would either be too conservative (wasting compaction on large-context models) or too aggressive (skipping compaction on small-context models). The per-agent field allows sub-agents spawned with a different model to compact at the correct threshold. The substring-matching approach avoids maintaining an exhaustive model name registry while covering the most common cases.
+
+**Consequence:** Unknown model names fall back to `defaultContextWindow` (200,000). Extensions that spawn sub-agents with exotic model names should pass the model name explicitly; otherwise the fallback is used.
+
+---
+
+## 9. streamTurn Extracted for Complexity Reduction
+
+*Added: 2026-05-08*
+
+**Decision:** The core streaming loop (calling `fa.Stream`, collecting tokens, forwarding tool calls) is extracted from `Submit` into the unexported `streamTurn` helper.
+
+**Rationale:** `Submit` contains proactive compaction logic, reactive retry logic, history management, and the streaming call. Keeping all of this in one function pushes cyclomatic complexity above threshold and makes the retry path harder to read. Extracting `streamTurn` as a pure function (no state mutations) makes the retry pattern obvious: the same function is called with potentially different `history` slices on the proactive and retry paths.
+
+**Consequence:** `streamTurn` must not mutate `Agent` state directly. All history updates remain in `Submit`.
+
+---
+
+## 10. CancelAll — Batch Cancellation Pattern
+
+*Added: 2026-05-08*
+
+**Decision:** `AgentPool.CancelAll()` snapshots the agents slice under `RLock`, then calls `a.Cancel()` on each agent outside the lock.
+
+**Rationale:** Calling `Cancel()` while holding the pool lock would invert the intended lock order (`pool.mu` → `agent.cancelMu`). The same pattern already exists in `Close` (which releases `p.mu` before calling `a.Cancel()`). Snapshotting under `RLock` and releasing before calling Cancel is consistent and avoids deadlock.
+
+**Consequence:** Agents spawned between the snapshot and the Cancel calls will not be cancelled by that `CancelAll` invocation. This is acceptable because `CancelAll` is used for shutdown and Ctrl+C, where newly spawned agents are extremely unlikely.
+
+---
+
+## 11. Proactive vs. Reactive Compaction — Two-Phase Strategy
+
+*Added: 2026-05-08*
+
+**Decision:** Compaction uses a two-phase approach: proactive compaction (before the API call) triggers when estimated tokens exceed the window minus the output reserve; reactive trimming (after a 400 context-too-long error) trims to the most recent 20 messages and retries once.
+
+**Rationale:** Proactive compaction avoids the round-trip cost of a failed API call. However, the `chars/4` token estimate is intentionally approximate and may undercount; the reactive path handles cases where the estimate was too optimistic. The two phases together provide safety coverage without over-compacting on every turn. The reactive path is a blunt trim (not summarization) because the API already rejected the request — a second LLM call for summarization might itself hit the limit; trimming is guaranteed to reduce size.
+
+**Consequence:** In the worst case, one extra failed API call is made per compaction event on the reactive path. Context from messages older than the most recent 20 is lost permanently on the reactive path (no summary is generated).

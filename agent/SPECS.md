@@ -12,8 +12,9 @@ Package `agent` manages sub-agents and teams for the bob harness. Each `Agent` w
 - All mutations to `agents` and `teams` maps are performed under `p.mu.Lock()`.
 - All reads from `agents` and `teams` maps are performed under `p.mu.RLock()`.
 - The `tokenCount` field is updated atomically via `sync/atomic`.
-- The `providerName` field is read/written under `p.mu` (not a separate lock) to stay consistent with agent/team reads.
-- Individual `Agent` fields (inbox, cancel, history, onToken, onDone) carry their own per-field mutexes. Callers never need to hold pool-level locks when calling agent methods.
+- The `providerName` and `defaultModelName` fields are read/written under `p.mu`.
+- The `baseSystemPrompt` field has its own `baseSystemPromptMu sync.RWMutex`, separate from the main `mu`, because it can be updated independently without touching agent/team maps.
+- Individual `Agent` fields (inbox, cancel, history, onToken, onDone, onToolCall, toolsFn, systemPrompt) carry their own per-field mutexes. Callers never need to hold pool-level locks when calling agent methods.
 
 **Invariant:** No pool operation blocks on an in-progress agent turn. Pool operations that call `a.Cancel()` release `p.mu` before invoking Cancel to avoid lock ordering issues.
 
@@ -41,7 +42,7 @@ idle ──(Submit called)──▶ running ──(turn complete)──▶ idle
 
 ## 3. Message Queue (Inbox) Ordering
 
-`AppendInbox` enqueues messages for delivery before the next turn. `DrainInbox` atomically retrieves and clears all queued messages. `Submit` calls `DrainInbox` at the start of each turn and prepends inbox messages to the conversation history.
+`AppendInbox` enqueues messages for delivery before the next turn. `DrainInbox` atomically retrieves and clears all queued messages. `Submit` calls `DrainInbox` at the start of each turn and **prepends** inbox messages to the conversation history (inbox messages appear before prior history, making them visible as earlier prior context).
 
 **Invariant:** Inbox messages are delivered in FIFO order. Messages appended before `Submit` is called are guaranteed to be visible within that turn. Messages appended after `Submit` has called `DrainInbox` will appear in the next turn.
 
@@ -53,12 +54,11 @@ idle ──(Submit called)──▶ running ──(turn complete)──▶ idle
 
 `AgentPool.tokenCount` is an `atomic.Int64`. It is incremented by one per text token emitted by any agent in the pool.
 
-- `addTokens(n)` is called from agent goroutines via the pool pointer captured at spawn time.
+- `addTokens(n)` (unexported) is called from agent goroutines via the pool pointer captured at spawn time.
+- `AddTokens(n)` (exported) is the publicly accessible equivalent, exposed for testing.
 - `TokenCount()` returns the current snapshot and is non-blocking.
 
-**Invariant:** The counter is monotonically increasing and never resets within a pool's lifetime. No agent goroutine reads the counter; it is write-only from agent goroutines.
-
-**Invariant:** `AddTokens` is the exported equivalent of `addTokens` and increments by exactly `n`. Both use `atomic.Int64.Add`, which is atomic on all supported architectures.
+**Invariant:** The counter is monotonically increasing and never resets within a pool's lifetime.
 
 ---
 
@@ -77,8 +77,6 @@ A `Team` is a lightweight membership set — it does not own goroutines or resou
 
 **Invariant:** Team membership is guarded by `Team.mu` (separate from the pool-level `p.mu`). Reads and writes to `members` always hold `Team.mu` in the appropriate mode.
 
-**Invariant:** A team can only contain agent IDs that were valid at the time of `AddMember`. The team does not track agent lifecycle events; an agent closed after `AddMember` will produce `ErrAgentNotFound` from `pool.Close` during `Team.Close`, which is silently ignored.
-
 ---
 
 ## 6. Pool.Send vs. Pool.SendMessage
@@ -96,16 +94,109 @@ A `Team` is a lightweight membership set — it does not own goroutines or resou
 
 `Agent.Cancel()` cancels the active turn's context. It is a no-op if no turn is running. `AgentPool.Cancel(id)` is the pool-level equivalent.
 
+`AgentPool.CancelAll()` cancels the active turn of every agent in the pool. It takes a snapshot of agents under `RLock`, then calls `Cancel()` on each without holding the lock. This prevents lock contention during batch cancellation.
+
 **Invariant:** `Cancel` is idempotent. Calling `Cancel` on an agent with no active turn (including an agent that has already been closed via `pool.Close`) is a no-op. The stored cancel function is checked for nil before invocation.
 
 **Invariant:** `Cancel` does not remove the agent from the pool. The agent remains registered and may be re-submitted.
 
-**Invariant:** After `Cancel`, the agent's `onDone` callback is invoked with `context.Canceled` as the error. The conversation history records the partial assistant turn only if text was collected before cancellation.
+---
+
+## 8. System Prompt Hierarchy
+
+Each agent has a two-level system prompt:
+
+1. **Base prompt** (`a.systemPrompt`): set or appended via `SetSystemPrompt` / `AppendSystemPrompt`. Populated at spawn time from the pool's accumulated `baseSystemPrompt` (AGENTS.md, skills, etc.).
+2. **Agent-specific prompt** (`opts.SystemPrompt`): set in `SpawnOpts` at spawn time and never changes.
+
+On each `Submit` call, the resolved system prompt sent to the LLM is:
+- `base + "\n\n" + specific` when both are non-empty
+- `base` when only base is non-empty
+- `specific` when only specific is non-empty (including when base is empty)
+
+**Invariant:** `SetSystemPrompt` fully replaces the base prompt; `AppendSystemPrompt` appends with a `"\n\n"` separator. Neither modifies `opts.SystemPrompt`.
+
+### Pool-Level Base System Prompt
+
+`AgentPool` accumulates a base system prompt via `SetBaseSystemPrompt` and `AppendBaseSystemPrompt`. Changes are propagated immediately to all currently-registered agents by calling the corresponding method on each agent under `p.mu.RLock()`. Newly spawned agents inherit the current base prompt from the pool at spawn time.
+
+**Invariant:** After `SetBaseSystemPrompt(prompt)` returns, every agent currently in the pool has its individual `systemPrompt` field equal to `prompt`.
+
+**Invariant:** After `AppendBaseSystemPrompt(text)` returns, every agent currently in the pool has `text` appended to its individual `systemPrompt`.
 
 ---
 
-## 8. AgentPool.ProviderName
+## 9. Context Window and Compaction
+
+Each `Agent` stores a `modelName string` for context window lookup. On each `Submit` call, the agent uses `contextWindowForModel(a.modelName)` to determine the model's known input context limit:
+
+| Model pattern         | Context window  |
+|-----------------------|-----------------|
+| contains "claude"     | 200,000 tokens  |
+| contains "gpt-4o" or "gpt-4" | 128,000 tokens |
+| contains "gemini-1.5-pro" or "gemini-2" | 1,000,000 tokens |
+| contains "gemini"     | 128,000 tokens  |
+| default               | 200,000 tokens  |
+
+Token estimation uses the `chars/4` heuristic (`estimateTokens`, `estimateStr`).
+
+### Proactive Compaction
+
+Before each API call, `shouldCompact` checks whether the estimated context (history + system prompt + next message) exceeds `contextWindow - reserveTokens` (16,384 tokens reserved for output). If so, `compactHistory` is called first.
+
+`compactHistory`:
+1. Keeps the most recent `keepMessages` (20) messages verbatim.
+2. Asks the LLM to produce a structured summary of all older messages using `compactionSummaryPrompt`.
+3. Replaces the old messages with a single `sdk.RoleUser` summary message, then appends the kept recent messages.
+4. Updates `a.history` under `historyMu.Lock()` if compaction succeeds.
+5. If the LLM call fails or returns an empty summary, returns the original history unchanged.
+
+**Invariant:** If compaction fails, the original history is used unchanged and the turn proceeds normally.
+
+### Reactive Fallback
+
+After a turn, if the API returns a context-too-long error (`isContextTooLong`), the agent trims history to the most recent `keepMessages` (20) messages and retries the turn exactly once. This is the fallback path when proactive compaction was not triggered or not sufficient.
+
+**Invariant:** The reactive retry happens at most once per turn. If the retry also fails with a context error, the error is reported to `onDone` and the turn ends.
+
+### streamTurn Helper
+
+`streamTurn` is the internal helper extracted from `Submit` to keep cyclomatic complexity below threshold. It:
+1. Calls `fa.Stream` with history, content, and callbacks.
+2. Counts each text delta as one token via `pool.addTokens(1)`.
+3. Forwards text deltas to `onToken` (if set).
+4. Forwards tool calls to `onToolCall` (if set), skipping provider-executed tool calls (`toolCall.ProviderExecuted == true`).
+5. Returns the collected text and any error.
+
+---
+
+## 10. AgentPool.ProviderName
 
 `SetProviderName(name string)` stores a human-readable display string for the configured provider. `ProviderName()` reads it. Both are guarded by `p.mu`.
 
 **Invariant:** `ProviderName` returns the empty string if `SetProviderName` has not been called. The harness `New()` reads this value at construction time to initialize the status bar.
+
+---
+
+## 11. SpawnOpts
+
+```go
+type SpawnOpts struct {
+    SystemPrompt string
+    Tools        []fantasy.AgentTool
+}
+```
+
+- `SystemPrompt` is the agent-specific prompt appended after the base prompt on every turn.
+- `Tools` is the static tool list. If `SetToolsFn` is called on the agent, the dynamic function takes priority over `Tools`.
+
+---
+
+## 12. Error Variables
+
+| Error              | Returned by                    | Condition                                |
+|--------------------|-------------------------------|------------------------------------------|
+| `ErrAgentExists`   | `Spawn`                       | Agent ID already registered              |
+| `ErrAgentNotFound` | `Close`, `SendMessage`, `Send`, `Cancel`, `Team.AddMember` | Agent ID not in pool |
+| `ErrTeamExists`    | `CreateTeam`                  | Team ID already registered               |
+| `ErrTeamNotFound`  | `CloseTeam`                   | Team ID not in pool                      |
