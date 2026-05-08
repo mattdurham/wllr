@@ -255,50 +255,50 @@ func (m *Model) SetProgram(p *tea.Program) {
 	m.wireMainAgentCallbacks(p)
 }
 
-// makeBatchedOnToken returns an onToken callback that coalesces tokens into
-// batches sent at most every batchInterval. This prevents O(n²) re-renders
-// as the streaming response grows — instead of one render per token we get
-// at most ~33 renders per second regardless of LLM speed.
-func makeBatchedOnToken(p *tea.Program) (onToken func(string), stop func()) {
-	const batchInterval = 30 * time.Millisecond
-	var mu sync.Mutex
-	var buf strings.Builder
-	ticker := time.NewTicker(batchInterval)
-	done := make(chan struct{})
+// tokenBatcher coalesces tokens and sends them at most every batchInterval.
+// Uses time-based batching with no goroutines or channels — safe to call
+// flush() multiple times across agent turns without panics.
+type tokenBatcher struct {
+	mu       sync.Mutex
+	buf      strings.Builder
+	lastSend time.Time
+	p        *tea.Program
+}
 
-	go func() {
-		for {
-			select {
-			case <-ticker.C:
-				mu.Lock()
-				s := buf.String()
-				buf.Reset()
-				mu.Unlock()
-				if s != "" {
-					p.Send(TokenMsg{Token: s})
-				}
-			case <-done:
-				ticker.Stop()
-				// Flush any remaining tokens.
-				mu.Lock()
-				s := buf.String()
-				buf.Reset()
-				mu.Unlock()
-				if s != "" {
-					p.Send(TokenMsg{Token: s})
-				}
-				return
-			}
-		}
-	}()
+const tokenBatchInterval = 30 * time.Millisecond
 
-	return func(token string) {
-			mu.Lock()
-			buf.WriteString(token)
-			mu.Unlock()
-		}, func() {
-			close(done)
-		}
+func (b *tokenBatcher) onToken(token string) {
+	b.mu.Lock()
+	b.buf.WriteString(token)
+	now := time.Now()
+	if now.Sub(b.lastSend) >= tokenBatchInterval {
+		s := b.buf.String()
+		b.buf.Reset()
+		b.lastSend = now
+		b.mu.Unlock()
+		b.p.Send(TokenMsg{Token: s})
+		return
+	}
+	b.mu.Unlock()
+}
+
+func (b *tokenBatcher) flush() {
+	b.mu.Lock()
+	s := b.buf.String()
+	b.buf.Reset()
+	b.mu.Unlock()
+	if s != "" {
+		b.p.Send(TokenMsg{Token: s})
+	}
+}
+
+// makeBatchedOnToken returns an onToken callback and a flush function.
+// Tokens are coalesced into batches sent at most every 30ms, capping
+// render cycles to ~33/sec regardless of LLM speed (prevents O(n²) work).
+// flush() must be called from onDone to deliver any buffered tail tokens.
+func makeBatchedOnToken(p *tea.Program) (onToken func(string), flush func()) {
+	b := &tokenBatcher{p: p}
+	return b.onToken, b.flush
 }
 
 // wireMainAgentCallbacks sets the onToken, onDone, and toolsFn callbacks on the main agent.
