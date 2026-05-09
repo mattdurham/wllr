@@ -286,12 +286,7 @@ func (c *ChatView) refreshContent() {
 		var sb strings.Builder
 		sb.WriteString(c.histContent)
 		if c.activityName != "" {
-			renderToolCall(&sb, chatMessage{
-				toolName:  c.activityName,
-				toolInput: c.activityInput,
-				toolDone:  c.activityDone,
-				toolError: c.activityError,
-			}, c.width, false)
+			renderActivityBox(&sb, c.activityName, c.activityInput, c.activityDone, c.activityError, c.width)
 		}
 		if c.current != "" {
 			renderMessage(&sb, chatMessage{role: sdk.RoleAssistant, content: c.current}, c.width, false)
@@ -402,6 +397,106 @@ func renderUserMessage(sb *strings.Builder, content string, width int, old bool)
 // chat. Only the LLM's text responses (rendered as assistant messages) are
 // visible. Tool calls happen silently in the background.
 func renderToolGroup(_ *strings.Builder, _ []chatMessage, _ int, _ bool) {}
+
+// renderActivityBox draws a full bordered box for the live activity indicator.
+// It always shows 4 content lines derived from the tool's JSON input so the
+// user can see what the agent is doing without the box collapsing to one line.
+func renderActivityBox(sb *strings.Builder, name, input string, done, isError bool, width int) {
+	border := toolBorderStyle
+	var dot string
+	if !done {
+		dot = toolPendingStyle.Render("◌")
+	} else if isError {
+		dot = toolErrorStyle.Render("●")
+	} else {
+		dot = toolSuccessStyle.Render("●")
+	}
+
+	if width < 14 {
+		width = 14
+	}
+	innerWidth := width - 2
+	contentWidth := innerWidth - 2 // "│ " + content + " │"
+	if contentWidth < 1 {
+		contentWidth = 1
+	}
+
+	// Top: ╭─ ◌  toolname ─────────╮
+	labelRunes := 2 + 1 + 2 + len([]rune(name))
+	fillLen := innerWidth - labelRunes
+	if fillLen < 0 {
+		fillLen = 0
+	}
+	top := border.Render("╭─ ") + dot + border.Render("  "+name+strings.Repeat("─", fillLen)+"╮")
+	sb.WriteString(top + "\n")
+
+	// 4 content lines from the tool input.
+	lines := toolInputLines(input, 4, contentWidth)
+	for _, line := range lines {
+		runes := []rune(line)
+		if len(runes) > contentWidth {
+			runes = runes[:contentWidth]
+		}
+		padding := strings.Repeat(" ", contentWidth-len(runes))
+		sb.WriteString(border.Render("│"))
+		sb.WriteString(" " + asstTextStyle.Render(string(runes)) + padding + " ")
+		sb.WriteString(border.Render("│") + "\n")
+	}
+
+	sb.WriteString(border.Render("╰"+strings.Repeat("─", innerWidth)+"╯") + "\n\n")
+}
+
+// toolInputLines parses the JSON tool input and returns up to maxLines of
+// "key: value" strings suitable for display inside the activity box.
+// Lines are padded to maxLines with empty strings.
+func toolInputLines(input string, maxLines, width int) []string {
+	var lines []string
+
+	var m map[string]json.RawMessage
+	if json.Unmarshal([]byte(input), &m) == nil {
+		// Emit high-value keys first, then whatever remains.
+		priority := []string{"command", "path", "name", "message", "query", "text", "url", "content"}
+		seen := make(map[string]bool, len(m))
+		for _, key := range priority {
+			if len(lines) >= maxLines {
+				break
+			}
+			v, ok := m[key]
+			if !ok {
+				continue
+			}
+			seen[key] = true
+			var s string
+			if json.Unmarshal(v, &s) != nil {
+				continue
+			}
+			line := key + ": " + s
+			if r := []rune(line); len(r) > width {
+				line = string(r[:width-1]) + "…"
+			}
+			lines = append(lines, line)
+		}
+		for key, v := range m {
+			if len(lines) >= maxLines || seen[key] {
+				continue
+			}
+			var s string
+			if json.Unmarshal(v, &s) != nil {
+				continue
+			}
+			line := key + ": " + s
+			if r := []rune(line); len(r) > width {
+				line = string(r[:width-1]) + "…"
+			}
+			lines = append(lines, line)
+		}
+	}
+
+	for len(lines) < maxLines {
+		lines = append(lines, "")
+	}
+	return lines
+}
 
 func renderToolCall(sb *strings.Builder, m chatMessage, width int, old bool) {
 	border := toolBorderStyle
