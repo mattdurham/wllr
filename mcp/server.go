@@ -191,9 +191,15 @@ func (s *Server) call(ctx context.Context, method string, params interface{}, re
 		return fmt.Errorf("marshal request: %w", err)
 	}
 
-	s.mu.Lock()
-	_, err = s.stdin.Write(append(data, '\n'))
-	s.mu.Unlock()
+	err = func() (writeErr error) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.stdin == nil {
+			return fmt.Errorf("server not started")
+		}
+		_, writeErr = s.stdin.Write(append(data, '\n'))
+		return
+	}()
 	if err != nil {
 		return fmt.Errorf("write request: %w", err)
 	}
