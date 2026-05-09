@@ -20,7 +20,7 @@ type Config struct {
 	// ExtensionsDir is the directory scanned for .wasm extension files (BOB_EXTENSIONS_DIR).
 	ExtensionsDir string
 
-	// Model is the default LLM model to use (BOB_MODEL, default: claude-sonnet-4-5).
+	// Model is the default LLM model to use (BOB_MODEL, default: claude-sonnet-4-6).
 	Model string
 
 	// Provider is the LLM provider name (BOB_PROVIDER, default: anthropic).
@@ -33,7 +33,7 @@ type Config struct {
 //  1. Environment variables
 //
 // Defaults:
-//   - WLLR_MODEL: claude-sonnet-4-5
+//   - WLLR_MODEL: claude-sonnet-4-6
 //   - WLLR_PROVIDER: anthropic
 //
 // Returns an error if the active provider's API key is empty.
@@ -48,7 +48,7 @@ func LoadConfig() (*Config, error) {
 	}
 
 	if cfg.Model == "" {
-		cfg.Model = "claude-sonnet-4-5"
+		cfg.Model = "claude-sonnet-4-6"
 	}
 	if cfg.Provider == "" {
 		cfg.Provider = "anthropic"
