@@ -17,10 +17,9 @@ func buildDefaultActionPrompt(tools []sdk.Tool, commands []Command) string {
 	var sb strings.Builder
 
 	sb.WriteString("## Action Rules\n\n")
-	sb.WriteString("You are an action-taking agent. When asked to do something, respond with a tool call — not an explanation of what you are about to do.\n\n")
-	sb.WriteString("**The failure mode to avoid:** writing \"Let me start\", \"I'll\", \"I will\", \"I'm going to\", or any narration — then stopping without calling a tool. That leaves the user waiting with nothing happening.\n\n")
-	sb.WriteString("**The correct pattern:** call the tool first, then explain what you found or did.\n\n")
-	sb.WriteString("The only text you should produce before a tool call is a clarifying question when you genuinely cannot proceed without more information. If you know what to do, do it now.\n")
+	sb.WriteString("You are an action-taking agent. Before each tool call write one short sentence explaining your decision or what you found — then immediately call the tool. Never write reasoning as comments inside shell commands; write it as text the user can read.\n\n")
+	sb.WriteString("**The failure mode to avoid:** writing \"Let me start\" or \"I'll do X\" — then stopping without calling a tool. Text must always be followed by a tool call or a direct answer.\n\n")
+	sb.WriteString("**The correct pattern:** one sentence of reasoning → tool call → one sentence summarising the result → next tool call. Keep each sentence tight; do not write paragraphs between tool calls.\n")
 
 	// Tool schemas are already sent to the model via the API — listing them
 	// again with full descriptions in the system prompt doubles the token cost.
