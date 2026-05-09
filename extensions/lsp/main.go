@@ -11,117 +11,40 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"unsafe"
 )
 
-// ─── WASM ABI ────────────────────────────────────────────────────────────────
+func init() {
+	RegisterTool(
+		"lsp_detect",
+		"Detect installed LSP servers on the system",
+		json.RawMessage(`{"type":"object","properties":{}}`),
+	)
+	RegisterTool(
+		"lsp_start",
+		"Check whether an LSP server is available for a language and return the command to start it",
+		json.RawMessage(`{"type":"object","properties":{"language":{"type":"string","description":"Language name (go, python, rust, typescript, etc.)"},"file":{"type":"string","description":"File path to auto-detect language from (optional)"}},"required":[]}`),
+	)
+	RegisterTool(
+		"lsp_diagnostics",
+		"Run a language-specific diagnostic check on a file (e.g. go vet, pylint)",
+		json.RawMessage(`{"type":"object","properties":{"file":{"type":"string","description":"File path to check"}},"required":["file"]}`),
+	)
 
-//go:wasmimport env host_log
-func hostLog(level, ptr, length uint32)
+	OnToolCall(func(callID, toolName string, input json.RawMessage) (string, bool) {
+		var m map[string]any
+		_ = json.Unmarshal(input, &m)
 
-//go:wasmimport env host_call
-func hostCall(reqPtr, reqLen, respPtrPtr, respLenPtr uint32) uint32
-
-var pinned = map[uintptr][]byte{}
-
-//go:wasmexport _alloc
-func extensionAlloc(size int32) int32 {
-	if size <= 0 {
-		return 0
-	}
-	buf := make([]byte, size)
-	ptr := uintptr(unsafe.Pointer(&buf[0]))
-	pinned[ptr] = buf
-	return int32(ptr)
-}
-
-//go:wasmexport _free
-func extensionFree(ptr int32) {
-	delete(pinned, uintptr(ptr))
-}
-
-//go:wasmexport _init
-func extensionInit() int32 {
-	hostCallJSON("subscribe", map[string]string{"event": "before_tool_call"})
-
-	tools := []struct {
-		name   string
-		desc   string
-		schema string
-	}{
-		{
-			"lsp_detect",
-			"Detect installed LSP servers on the system",
-			`{"type":"object","properties":{}}`,
-		},
-		{
-			"lsp_start",
-			"Check whether an LSP server is available for a language and return the command to start it",
-			`{"type":"object","properties":{"language":{"type":"string","description":"Language name (go, python, rust, typescript, etc.)"},"file":{"type":"string","description":"File path to auto-detect language from (optional)"}},"required":[]}`,
-		},
-		{
-			"lsp_diagnostics",
-			"Run a language-specific diagnostic check on a file (e.g. go vet, pylint)",
-			`{"type":"object","properties":{"file":{"type":"string","description":"File path to check"}},"required":["file"]}`,
-		},
-	}
-
-	for _, t := range tools {
-		hostCallJSON("register_tool", map[string]any{
-			"name":         t.name,
-			"description":  t.desc,
-			"input_schema": json.RawMessage(t.schema),
-		})
-	}
-	return 0
-}
-
-//go:wasmexport _on_event
-func extensionOnEvent(ptr, length int32) int32 {
-	data := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(ptr))), length)
-	var evt struct {
-		Type    string          `json:"type"`
-		Payload json.RawMessage `json:"payload"`
-	}
-	if err := json.Unmarshal(data, &evt); err != nil {
-		return 0
-	}
-	if evt.Type != "before_tool_call" {
-		return 0
-	}
-
-	var p struct {
-		ToolCallID string          `json:"tool_call_id"`
-		ToolName   string          `json:"tool_name"`
-		Input      json.RawMessage `json:"input"`
-	}
-	if err := json.Unmarshal(evt.Payload, &p); err != nil {
-		return 0
-	}
-
-	var input map[string]any
-	_ = json.Unmarshal(p.Input, &input)
-
-	var result string
-	var isError bool
-
-	switch p.ToolName {
-	case "lsp_detect":
-		result = detectServers()
-	case "lsp_start":
-		result, isError = startServer(input)
-	case "lsp_diagnostics":
-		result, isError = runDiagnostics(input)
-	default:
-		return 0 // not our tool
-	}
-
-	hostCallJSON("tool_result", map[string]any{
-		"tool_call_id": p.ToolCallID,
-		"result":       result,
-		"is_error":     isError,
+		switch toolName {
+		case "lsp_detect":
+			return detectServers(), false
+		case "lsp_start":
+			return startServer(m)
+		case "lsp_diagnostics":
+			return runDiagnostics(m)
+		default:
+			return "", false
+		}
 	})
-	return 0
 }
 
 // ─── Tool implementations ─────────────────────────────────────────────────────
@@ -252,34 +175,9 @@ func detectLanguage(filename string) string {
 	return extToLang[strings.ToLower(filepath.Ext(filename))]
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
 func stringVal(m map[string]any, key string) string {
 	v, _ := m[key].(string)
 	return v
-}
-
-func hostCallJSON(method string, params any) {
-	type request struct {
-		Method string `json:"method"`
-		Params any    `json:"params,omitempty"`
-	}
-	reqBytes, err := json.Marshal(request{Method: method, Params: params})
-	if err != nil {
-		return
-	}
-	buf := make([]byte, len(reqBytes))
-	copy(buf, reqBytes)
-	ptr := uintptr(unsafe.Pointer(&buf[0]))
-	var respPtr, respLen uint32
-	hostCall(
-		uint32(ptr), uint32(len(buf)),
-		uint32(uintptr(unsafe.Pointer(&respPtr))),
-		uint32(uintptr(unsafe.Pointer(&respLen))),
-	)
-	if respPtr != 0 {
-		delete(pinned, uintptr(respPtr))
-	}
 }
 
 func main() {}

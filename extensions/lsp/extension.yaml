@@ -1,0 +1,3 @@
+name: lsp
+enabled: true
+wasm: lsp.wasm

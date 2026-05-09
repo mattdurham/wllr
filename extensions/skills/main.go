@@ -20,29 +20,34 @@ import (
 	"unsafe"
 )
 
-//go:wasmimport env host_log
-func hostLog(level, ptr, length uint32)
+// ─── Local host_call for runtime calls (register_command, send_message) ───────
+// These need to be fired at event-handler time, not during _init, so we
+// can't use the SDK's deferred RegisterCommand. We use a local import alias.
 
 //go:wasmimport env host_call
-func hostCall(reqPtr, reqLen, respPtrPtr, respLenPtr uint32) uint32
+func _skillsHostCall(reqPtr, reqLen, respPtrPtr, respLenPtr uint32) uint32
 
-var pinned = map[uintptr][]byte{}
-
-//go:wasmexport _alloc
-func extensionAlloc(size int32) int32 {
-	if size <= 0 {
-		return 0
+func skillsCall(method string, params any) {
+	type request struct {
+		Method string `json:"method"`
+		Params any    `json:"params,omitempty"`
 	}
-	buf := make([]byte, size)
+	reqBytes, err := json.Marshal(request{Method: method, Params: params})
+	if err != nil {
+		return
+	}
+	buf := make([]byte, len(reqBytes))
+	copy(buf, reqBytes)
 	ptr := uintptr(unsafe.Pointer(&buf[0]))
-	pinned[ptr] = buf
-	return int32(ptr)
+	var respPtr, respLen uint32
+	_skillsHostCall(
+		uint32(ptr), uint32(len(buf)),
+		uint32(uintptr(unsafe.Pointer(&respPtr))),
+		uint32(uintptr(unsafe.Pointer(&respLen))),
+	)
 }
 
-//go:wasmexport _free
-func extensionFree(ptr int32) {
-	delete(pinned, uintptr(ptr))
-}
+// ─── Skill state ──────────────────────────────────────────────────────────────
 
 // skillMeta holds the parsed frontmatter metadata for a skill.
 type skillMeta struct {
@@ -58,66 +63,63 @@ type skillEntry struct {
 	filePath string // absolute path to the SKILL.md file
 }
 
-// skills maps skill directory name to its loaded entry.
+// skills maps skill name to its loaded entry.
 var skills map[string]skillEntry
 
-//go:wasmexport _init
-func extensionInit() int32 {
-	skills = make(map[string]skillEntry)
+// ─── Init ─────────────────────────────────────────────────────────────────────
 
-	if rc := hostCallJSON("subscribe", map[string]string{"event": "session_start"}); rc != 0 {
-		return rc
-	}
-	if rc := hostCallJSON("subscribe", map[string]string{"event": "on_command"}); rc != 0 {
-		return rc
-	}
-
-	// Register list_skills tool.
-	if rc := registerTool(
+func init() {
+	RegisterTool(
 		"list_skills",
 		"List all loaded skills with their metadata",
-		`{"type":"object","properties":{}}`,
-	); rc != 0 {
-		return rc
-	}
-
-	// Register get_skill tool.
-	if rc := registerTool(
+		json.RawMessage(`{"type":"object","properties":{}}`),
+	)
+	RegisterTool(
 		"get_skill",
 		"Get the body content of a named skill (frontmatter stripped)",
-		`{"type":"object","properties":{"name":{"type":"string","description":"Skill name (directory name)"}},"required":["name"]}`,
-	); rc != 0 {
-		return rc
-	}
+		json.RawMessage(`{"type":"object","properties":{"name":{"type":"string","description":"Skill name (directory name)"}},"required":["name"]}`),
+	)
 
-	return 0
+	OnToolCall(func(callID, toolName string, input json.RawMessage) (string, bool) {
+		switch toolName {
+		case "list_skills":
+			return handleListSkills()
+		case "get_skill":
+			return handleGetSkill(input)
+		default:
+			return "", false
+		}
+	})
+
+	OnSessionStart(onSessionStart)
+
+	// All on_command events are funnelled here; we dispatch to /skills or
+	// a loaded skill by name.
+	OnCommand("skills", onSkillsCommand)
+	_sdkOn("on_command", func(payload json.RawMessage) {
+		var p struct {
+			Name string   `json:"name"`
+			Args []string `json:"args"`
+		}
+		if err := json.Unmarshal(payload, &p); err != nil || p.Name == "skills" {
+			return
+		}
+		entry, ok := skills[p.Name]
+		if !ok {
+			return
+		}
+		activateSkill(entry)
+	})
 }
 
-//go:wasmexport _on_event
-func extensionOnEvent(ptr, length int32) int32 {
-	data := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(ptr))), length)
-	var evt struct {
-		Type    string          `json:"type"`
-		Payload json.RawMessage `json:"payload"`
-	}
-	if err := json.Unmarshal(data, &evt); err != nil {
-		return 0
-	}
-	switch evt.Type {
-	case "session_start":
-		onSessionStart()
-	case "on_command":
-		onCommand(evt.Payload)
-	case "before_tool_call":
-		onBeforeToolCall(evt.Payload)
-	}
-	return 0
-}
+// ─── Event handlers ───────────────────────────────────────────────────────────
 
 func onSessionStart() {
+	skills = make(map[string]skillEntry)
+
 	home, err := os.UserHomeDir()
 	if err != nil {
-		logMsg(2, "skills: could not determine home directory: "+err.Error())
+		Logf(2, "skills: could not determine home directory: %v", err)
 		return
 	}
 
@@ -151,9 +153,7 @@ func onSessionStart() {
 			}
 		}
 
-		meta := skillMeta{
-			Name: cmdName,
-		}
+		meta := skillMeta{Name: cmdName}
 		if fm != nil {
 			if v := fm["description"]; v != "" {
 				meta.Description = v
@@ -169,29 +169,27 @@ func onSessionStart() {
 		skills[cmdName] = skillEntry{meta: meta, body: body, filePath: skillPath}
 
 		// Only register user-invocable skills as slash commands.
+		// These are runtime registrations (not during _init), so we call the
+		// host directly rather than using the SDK's deferred RegisterCommand.
 		if fm != nil && fm["user-invocable"] == "true" {
-			type cmdParams struct {
-				Name        string `json:"name"`
-				Description string `json:"description"`
-			}
-			hostCallJSON("register_command", cmdParams{Name: cmdName, Description: meta.Description})
+			skillsCall("register_command", map[string]string{
+				"name":        cmdName,
+				"description": meta.Description,
+			})
 		}
 
-		logMsg(1, "skills: loaded skill "+cmdName)
+		Logf(1, "skills: loaded skill %s", cmdName)
 		loaded++
 	}
 
-	// Register /skills command after loading so OnRegisterCommand is wired.
-	type cmdParams struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-	}
-	hostCallJSON("register_command", cmdParams{Name: "skills", Description: "List loaded skills"})
+	// Register /skills command after loading.
+	skillsCall("register_command", map[string]string{
+		"name":        "skills",
+		"description": "List loaded skills",
+	})
 
 	if loaded > 0 {
-		logMsg(1, "skills: loaded "+itoa(loaded)+" skill(s)")
-		// Append skill listing to system prompt so the LLM knows skills exist
-		// and can proactively use them (matching pi's formatSkillsForPrompt).
+		Logf(1, "skills: loaded %d skill(s)", loaded)
 		appendSkillsToPrompt()
 	}
 }
@@ -216,52 +214,30 @@ func appendSkillsToPrompt() {
 		text += "\n  </skill>"
 	}
 	text += "\n</available_skills>"
-
-	type params struct {
-		Text string `json:"text"`
-	}
-	hostCallJSON("append_system_prompt", params{Text: text})
+	AppendSystemPrompt(text)
 }
 
-func onCommand(raw json.RawMessage) {
-	var payload struct {
-		Name string   `json:"name"`
-		Args []string `json:"args"`
-	}
-	if err := json.Unmarshal(raw, &payload); err != nil {
+func onSkillsCommand(_ []string) {
+	if len(skills) == 0 {
+		Modal("No skills loaded.\n\nAdd SKILL.md files to ~/.wllr/skills/<name>/")
 		return
 	}
-
-	// /skills lists all loaded skill names and descriptions.
-	if payload.Name == "skills" {
-		if len(skills) == 0 {
-			hostCallJSON(
-				"modal",
-				map[string]string{"text": "No skills loaded.\n\nAdd SKILL.md files to ~/.wllr/skills/<name>/"},
-			)
-			return
+	var lines []string
+	for _, entry := range skills {
+		line := "/" + entry.meta.Name
+		if entry.meta.Description != "" {
+			line += "\n  " + entry.meta.Description
 		}
-		var lines []string
-		for _, entry := range skills {
-			line := "/" + entry.meta.Name
-			if entry.meta.Description != "" {
-				line += "\n  " + entry.meta.Description
-			}
-			lines = append(lines, line)
-		}
-		text := "Skills\n" + strings.Repeat("─", 40) + "\n\n"
-		for _, l := range lines {
-			text += l + "\n\n"
-		}
-		hostCallJSON("modal", map[string]string{"text": strings.TrimRight(text, "\n")})
-		return
+		lines = append(lines, line)
 	}
-
-	entry, ok := skills[payload.Name]
-	if !ok {
-		return
+	text := "Skills\n" + strings.Repeat("─", 40) + "\n\n"
+	for _, l := range lines {
+		text += l + "\n\n"
 	}
+	Modal(strings.TrimRight(text, "\n"))
+}
 
+func activateSkill(entry skillEntry) {
 	// Inject the skill as a user message using the pi Agent Skills XML format:
 	//   <skill name="..." location="...">
 	//   [content]
@@ -276,82 +252,39 @@ func onCommand(raw json.RawMessage) {
 		Role    string `json:"role"`
 		Content string `json:"content"`
 	}
-	hostCallJSON("send_message", msgParams{Role: "user", Content: skillMsg})
-	logMsg(1, "skills: activated skill "+payload.Name)
+	skillsCall("send_message", msgParams{Role: "user", Content: skillMsg})
+	Logf(1, "skills: activated skill %s", entry.meta.Name)
 }
 
-type beforeToolCallPayload struct {
-	ToolCallID string          `json:"tool_call_id"`
-	ToolName   string          `json:"tool_name"`
-	Input      json.RawMessage `json:"input"`
-}
+// ─── Tool handlers ────────────────────────────────────────────────────────────
 
-func onBeforeToolCall(raw json.RawMessage) {
-	var p beforeToolCallPayload
-	if err := json.Unmarshal(raw, &p); err != nil {
-		return
-	}
-	switch p.ToolName {
-	case "list_skills":
-		handleListSkills(p)
-	case "get_skill":
-		handleGetSkill(p)
-	}
-}
-
-func handleListSkills(p beforeToolCallPayload) {
+func handleListSkills() (string, bool) {
 	metas := make([]skillMeta, 0, len(skills))
 	for _, entry := range skills {
 		metas = append(metas, entry.meta)
 	}
 	out, err := json.Marshal(metas)
 	if err != nil {
-		sendToolResult(p.ToolCallID, "list_skills: marshal error", true)
-		return
+		return "list_skills: marshal error", true
 	}
-	sendToolResult(p.ToolCallID, string(out), false)
+	return string(out), false
 }
 
-func handleGetSkill(p beforeToolCallPayload) {
-	var input struct {
+func handleGetSkill(input json.RawMessage) (string, bool) {
+	var req struct {
 		Name string `json:"name"`
 	}
-	if err := json.Unmarshal(p.Input, &input); err != nil || input.Name == "" {
-		sendToolResult(p.ToolCallID, "get_skill: name is required", true)
-		return
+	if err := json.Unmarshal(input, &req); err != nil || req.Name == "" {
+		return "get_skill: name is required", true
 	}
-	entry, ok := skills[input.Name]
+	entry, ok := skills[req.Name]
 	if !ok {
-		sendToolResult(p.ToolCallID, "get_skill: skill not found: "+input.Name, true)
-		return
+		return "get_skill: skill not found: " + req.Name, true
 	}
-	sendToolResult(p.ToolCallID, entry.body, false)
+	return entry.body, false
 }
 
-func registerTool(name, desc, inputSchema string) int32 {
-	type toolParams struct {
-		Name        string          `json:"name"`
-		Description string          `json:"description"`
-		InputSchema json.RawMessage `json:"input_schema"`
-	}
-	rc := hostCallJSON("register_tool", toolParams{
-		Name:        name,
-		Description: desc,
-		InputSchema: json.RawMessage(inputSchema),
-	})
-	if rc != 0 {
-		return rc
-	}
-	return hostCallJSON("subscribe", map[string]string{"event": "before_tool_call"})
-}
-
-func sendToolResult(toolCallID, result string, isError bool) {
-	hostCallJSON("tool_result", map[string]any{
-		"tool_call_id": toolCallID,
-		"result":       result,
-		"is_error":     isError,
-	})
-}
+// ─── Frontmatter parsing ──────────────────────────────────────────────────────
 
 // parseFrontmatter parses a SKILL.md file and returns the frontmatter fields
 // as a map[string]string plus the body text (everything after the closing ---).
@@ -403,50 +336,6 @@ func parseFrontmatterFields(text string) map[string]string {
 		fields[key] = val
 	}
 	return fields
-}
-
-func logMsg(level int, msg string) {
-	b := []byte(msg)
-	if len(b) == 0 {
-		return
-	}
-	hostLog(uint32(level), uint32(uintptr(unsafe.Pointer(&b[0]))), uint32(len(b)))
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	buf := make([]byte, 0, 10)
-	for n > 0 {
-		buf = append([]byte{byte('0' + n%10)}, buf...)
-		n /= 10
-	}
-	return string(buf)
-}
-
-func hostCallJSON(method string, params any) int32 {
-	type request struct {
-		Method string `json:"method"`
-		Params any    `json:"params,omitempty"`
-	}
-	reqBytes, err := json.Marshal(request{Method: method, Params: params})
-	if err != nil {
-		return 1
-	}
-	reqBuf := make([]byte, len(reqBytes))
-	copy(reqBuf, reqBytes)
-	reqPtr := uintptr(unsafe.Pointer(&reqBuf[0]))
-	var respPtr, respLen uint32
-	rc := hostCall(
-		uint32(reqPtr), uint32(len(reqBuf)),
-		uint32(uintptr(unsafe.Pointer(&respPtr))),
-		uint32(uintptr(unsafe.Pointer(&respLen))),
-	)
-	if respPtr != 0 {
-		delete(pinned, uintptr(respPtr))
-	}
-	return int32(rc)
 }
 
 func main() {}
