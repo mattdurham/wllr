@@ -33,6 +33,11 @@ type Extension struct {
 
 	subMu sync.RWMutex
 
+	// callMu serializes calls into the WASM module. WASM linear memory is
+	// shared within a module instance, so concurrent _on_event or host_call
+	// invocations race on the module's globals (pinned map, handler maps).
+	callMu sync.Mutex
+
 	// trusted is true for built-in extensions loaded via LoadBytes with trusted=true.
 	// Trusted extensions bypass permission checks.
 	trusted bool
@@ -1178,7 +1183,12 @@ func (h *Host) DispatchEvent(ctx context.Context, evt sdk.Event) ([]sdk.EventRes
 }
 
 // dispatchToExtension calls _on_event on a single extension.
+// callMu serializes concurrent invocations — WASM linear memory is shared
+// within the module instance, so parallel calls race on global SDK state.
 func (h *Host) dispatchToExtension(ctx context.Context, ext *Extension, evtJSON []byte) (sdk.EventResponse, error) {
+	ext.callMu.Lock()
+	defer ext.callMu.Unlock()
+
 	mod := ext.module
 	mem := mod.Memory()
 	if mem == nil {
