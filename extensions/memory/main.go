@@ -68,6 +68,7 @@ func isInstalled(goos string) bool {
 
 // install downloads and installs the engram binary for the given OS/arch.
 // It returns an error message on failure, or "" on success.
+// Callers are responsible for updating the status bar before and after calling.
 func install(goos, goarch string) string {
 	asset, ok := assetName(goos, goarch)
 	if !ok {
@@ -80,8 +81,6 @@ func install(goos, goarch string) string {
 	if goos == "windows" {
 		bin += ".exe"
 	}
-
-	SetStatus("engram", "installing…")
 
 	// Ensure the bin directory exists.
 	if _, err := Exec(fmt.Sprintf("mkdir -p %s", shellQuote(dir)), ""); err != nil {
@@ -195,7 +194,9 @@ func init() {
 		if err != nil {
 			return fmt.Sprintf(`{"error":%q}`, err.Error()), true
 		}
+		SetStatus("engram", "installing…")
 		if errMsg := install(goos, goarch); errMsg != "" {
+			SetStatus("engram", "install failed")
 			return fmt.Sprintf(`{"error":%q}`, errMsg), true
 		}
 		bin := expandHome(engramBin)
