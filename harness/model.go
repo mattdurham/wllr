@@ -820,6 +820,7 @@ func (m Model) submitToAgent(content, display string) (tea.Model, tea.Cmd) {
 
 		// Submit to the main agent. The agent runs its turn in a goroutine and
 		// calls onToken/onDone (wired in SetProgram) to deliver results back.
+		slog.Info("stream start", "prompt_len", len(content))
 		if err := pool.Send(mainAgentID, content); err != nil {
 			return StreamDoneMsg{Err: fmt.Errorf("submit to agent: %w", err)}
 		}
