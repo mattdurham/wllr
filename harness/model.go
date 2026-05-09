@@ -548,7 +548,7 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 		return m, tea.Batch(cmds...), true
 
 	case StreamDoneMsg:
-		cmds := make([]tea.Cmd, 0, 1)
+		cmds := make([]tea.Cmd, 0, 2)
 		m.streaming = false
 		if m.agentPool != nil {
 			m.statusBar.totalTokens = int(m.agentPool.TokenCount())
@@ -559,8 +559,13 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 		} else {
 			delete(m.statusBar.statuses, "stream")
 		}
+		// Capture response before FinalizeMessage clears c.current.
+		responseContent := m.chat.current
 		m.chat.FinalizeMessage()
 		cmds = append(cmds, m.cmdDispatchAfterProviderResponse())
+		if responseContent != "" {
+			cmds = append(cmds, m.cmdDispatchMessageEnd(string(sdk.RoleAssistant), responseContent))
+		}
 		return m, tea.Batch(cmds...), true
 
 	case addAssistantMsgToHistoryMsg:
@@ -756,6 +761,22 @@ func (m Model) submitToAgent(content, display string) (tea.Model, tea.Cmd) {
 	immediateTick := func() tea.Msg { return streamTickMsg{} }
 	tick := tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return streamTickMsg{} })
 	return m, tea.Batch(cmd, immediateTick, tick)
+}
+
+// cmdDispatchMessageEnd fires EventMessageEnd with the given role and content.
+// Called after streaming completes so extensions (e.g. history) can record
+// the assistant response.
+func (m Model) cmdDispatchMessageEnd(role, content string) tea.Cmd {
+	if m.extHost == nil {
+		return nil
+	}
+	extHost := m.extHost
+	return func() tea.Msg {
+		payload, _ := json.Marshal(sdk.MessageEndPayload{Role: role, Content: content})
+		evt := sdk.Event{Type: sdk.EventMessageEnd, Payload: payload}
+		results, err := extHost.DispatchEvent(context.Background(), evt)
+		return ExtensionEventResultMsg{Results: results, Err: err}
+	}
 }
 
 func (m Model) cmdDispatchAfterProviderResponse() tea.Cmd {
