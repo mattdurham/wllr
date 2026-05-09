@@ -712,9 +712,16 @@ func (m Model) updateExtension(msg tea.Msg) (Model, tea.Cmd, bool) {
 		m.updateSuggestions()
 		// Append the default action prompt after all session_start handlers have run,
 		// so the tool and command lists reflect everything registered at startup.
+		// Prepend the action prompt before AGENTS.md content so the directive
+		// comes first in the system prompt — buried-at-the-end guidance is ignored.
 		if m.agentPool != nil && m.extHost != nil {
-			prompt := buildDefaultActionPrompt(m.extHost.GetRegisteredTools(), m.commands.List())
-			m.agentPool.AppendBaseSystemPrompt(prompt)
+			action := buildDefaultActionPrompt(m.extHost.GetRegisteredTools(), m.commands.List())
+			existing := m.agentPool.BaseSystemPrompt()
+			if existing == "" {
+				m.agentPool.SetBaseSystemPrompt(action)
+			} else {
+				m.agentPool.SetBaseSystemPrompt(action + "\n\n" + existing)
+			}
 		}
 		return m, nil, true
 
