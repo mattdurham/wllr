@@ -627,6 +627,16 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 		}
 		// Capture response before FinalizeMessage clears c.current.
 		responseContent := m.chat.current
+		if msg.Err == nil {
+			preview := responseContent
+			if r := []rune(preview); len(r) > 150 {
+				preview = string(r[:150]) + "…"
+			}
+			if preview == "" {
+				preview = "(no text — tool calls only)"
+			}
+			slog.Info("stream response", "text", preview)
+		}
 		m.chat.FinalizeMessage()
 		cmds = append(cmds, m.cmdDispatchAfterProviderResponse())
 		if responseContent != "" {
@@ -826,7 +836,11 @@ func (m Model) submitToAgent(content, display string) (tea.Model, tea.Cmd) {
 
 		// Submit to the main agent. The agent runs its turn in a goroutine and
 		// calls onToken/onDone (wired in SetProgram) to deliver results back.
-		slog.Info("stream start", "prompt_len", len(content), "history_msgs", len(m.history), "system_prompt_len", len(pool.BaseSystemPrompt()))
+		prompt := content
+		if r := []rune(prompt); len(r) > 120 {
+			prompt = string(r[:120]) + "…"
+		}
+		slog.Info("stream start", "prompt", prompt, "history_msgs", len(m.history), "system_prompt_len", len(pool.BaseSystemPrompt()))
 		if err := pool.Send(mainAgentID, content); err != nil {
 			return StreamDoneMsg{Err: fmt.Errorf("submit to agent: %w", err)}
 		}
