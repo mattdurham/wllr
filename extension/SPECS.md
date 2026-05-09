@@ -359,6 +359,19 @@ When instantiating a WASM module, the host configures:
 
 ---
 
+## 19. ABI Documentation Invariant
+
+`docs/extensions.md` is the authoritative public reference for the WASM extension author API. It must be kept in sync with the code.
+
+**Invariant:** Any change to the host↔extension ABI — adding, removing, or modifying a `host_call` method, lifecycle event, event payload field, required WASM export, or permission type — must be reflected in `docs/extensions.md` in the same commit.
+
+Files that trigger this requirement when modified:
+- `extension/host.go` — `host_call` dispatch map and method implementations
+- `sdk/types.go` — event types, payload structs, permission constants
+- Any file that adds or removes constants under `sdk.Method*` or `sdk.Event*`
+
+---
+
 ## 18. Reload Semantics
 
 `Host.Reload(ctx, paths)` performs a full replacement:
