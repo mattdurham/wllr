@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -423,6 +424,9 @@ func (h *Host) buildDispatch() map[string]func(ctx context.Context, ext *Extensi
 		},
 		sdk.MethodMCPRead: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleMCPRead(req)
+		},
+		sdk.MethodGetOS: func(_ context.Context, _ *Extension, _ sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleGetOS()
 		},
 	}
 }
@@ -1428,4 +1432,12 @@ func moduleNameFromPath(path string) string {
 // the base filename without the .wasm suffix.
 func extensionDisplayName(path string) string {
 	return strings.TrimSuffix(filepath.Base(path), ".wasm")
+}
+
+func (h *Host) handleGetOS() sdk.HostCallResponse {
+	result, _ := json.Marshal(map[string]string{
+		"os":   runtime.GOOS,
+		"arch": runtime.GOARCH,
+	})
+	return sdk.HostCallResponse{Result: result}
 }

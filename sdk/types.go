@@ -204,6 +204,10 @@ const (
 	MethodRequestPermission = "request_permission"
 	// MethodGetEnv reads environment variables from the host. Requires PermFileRead (env is read-only).
 	MethodGetEnv = "get_env"
+	// MethodGetOS returns the host operating system and architecture strings.
+	// Returns {"os": "darwin", "arch": "arm64"} (GOOS/GOARCH values).
+	// No permission required.
+	MethodGetOS = "get_os"
 	// MethodConfigRead reads the calling extension's config group from the shared config file.
 	// No params — the group is determined by the extension's registered name.
 	MethodConfigRead = "config_read"

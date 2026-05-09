@@ -325,7 +325,16 @@ Each `Extension` carries:
 
 ## 15. ExecuteTool: Synchronous Tool Dispatch
 
-`Host.ExecuteTool(ctx, agentID, toolCallID, toolName, input)` provides synchronous tool execution:
+`Host.ExecuteTool(ctx, agentID, toolCallID, toolName, input)` provides synchronous tool execution.
+
+**Native tool fast path (checked first):**
+
+1. Acquires `nativeToolsMu.RLock()` and looks up `toolName` in `nativeTools`.
+2. If found, calls the native function directly (no WASM dispatch, no `pendingTools` channel).
+3. Dispatches `EventAfterToolCall` so WASM extensions that observe results stay informed.
+4. Calls `OnAfterToolCall` if set, then returns.
+
+**WASM dispatch path (when no native handler is registered):**
 
 1. Creates a `chan toolResult{1}` buffered channel keyed by `toolCallID` in `h.pendingTools`.
 2. Dispatches `EventBeforeToolCall` with `BeforeToolCallPayload{AgentID, ToolCallID, ToolName, Input}`.
@@ -333,11 +342,16 @@ Each `Extension` carries:
 4. On result: dispatches `EventAfterToolCall` with `AfterToolCallPayload{AgentID, ToolCallID, ToolName, Result, IsError}`, then calls `OnAfterToolCall` if set.
 
 **Invariants:**
-- The channel is registered in `pendingTools` **before** dispatching the event.
+- Native tools are checked before WASM; a tool registered via `RegisterNativeTool` is never dispatched through WASM.
+- `EventBeforeToolCall` is **not** dispatched for native tools (no interception needed for trusted built-ins).
+- `EventAfterToolCall` **is** dispatched for both native and WASM tools so extensions that observe results work uniformly.
+- The WASM channel is registered in `pendingTools` **before** dispatching the event.
 - `AgentID` is included in both `BeforeToolCallPayload` and `AfterToolCallPayload` so extensions can correlate tool calls with the originating agent.
-- On context cancellation, the pending entry is cleaned up before returning.
+- On context cancellation (WASM path), the pending entry is cleaned up before returning.
 - `handleToolResult` always calls `OnToolResult` in addition to signalling any pending channel.
-- `EventAfterToolCall` is dispatched only on the success path; it is **not** dispatched when `ctx` is cancelled.
+- `EventAfterToolCall` is dispatched only on the success path; it is **not** dispatched when `ctx` is cancelled (WASM path).
+
+`Host.RegisterNativeTool(tool sdk.Tool, fn func(ctx, input) (string, bool))` registers a tool schema in `registeredTools` (so the LLM sees it) and stores the handler in `nativeTools` under `nativeToolsMu`. Calls `OnRegisterTool` if set.
 
 `Host.SendToolResult(toolCallID, result string, isError bool)` is the native Go path for tool results (used by the MCP bridge) — it bypasses the WASM host_call mechanism and delivers directly to the pending channel.
 

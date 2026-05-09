@@ -25,10 +25,11 @@
 #   make precommit        — run build and all quality checks (REQUIRED before commit)
 #
 # Built-in extensions (embedded in the binary):
-#   readfile, writefile, exec, env, agents, history
+#   agents, history
+#   (read_file, write_file, exec, get_env are native Go — no WASM build needed)
 #
 # Installed extensions (loaded from ~/.wllr/extensions/ at runtime):
-#   context, skills, tasks, lsp
+#   context, skills, tasks, lsp, memory
 
 DIST_DIR    := dist
 BINARY      := $(DIST_DIR)/wllr
@@ -51,10 +52,6 @@ build: extensions $(DIST_DIR)
 # Built-ins go to cmd/builtins/ (embedded in the binary).
 # Optional extensions are installed to ~/.wllr/extensions/<name>/.
 extensions: $(DIST_DIR) $(BUILTINS)
-	cd extensions/readfile  && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(BUILTINS)/readfile.wasm .
-	cd extensions/writefile && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(BUILTINS)/writefile.wasm .
-	cd extensions/exec      && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(BUILTINS)/exec.wasm .
-	cd extensions/env       && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(BUILTINS)/env.wasm .
 	cd extensions/agents    && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(BUILTINS)/agents.wasm .
 	cd extensions/history   && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(BUILTINS)/history.wasm .
 	mkdir -p $(EXT_DIR)/context $(EXT_DIR)/skills $(EXT_DIR)/tasks $(EXT_DIR)/lsp
@@ -66,6 +63,9 @@ extensions: $(DIST_DIR) $(BUILTINS)
 	cp extensions/tasks/tasks.json $(EXT_DIR)/tasks/
 	cd extensions/lsp       && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(EXT_DIR)/lsp/lsp.wasm .
 	cp extensions/lsp/extension.yaml $(EXT_DIR)/lsp/
+	mkdir -p $(EXT_DIR)/memory
+	cd extensions/memory  && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(EXT_DIR)/memory/memory.wasm .
+	cp extensions/memory/extension.yaml $(EXT_DIR)/memory/
 	@echo "Built all extensions"
 
 $(DIST_DIR):
@@ -281,4 +281,5 @@ precommit:
 
 clean:
 	rm -rf $(DIST_DIR)
-	rm -f $(BUILTINS)/readfile.wasm $(BUILTINS)/writefile.wasm $(BUILTINS)/exec.wasm $(BUILTINS)/env.wasm $(BUILTINS)/agents.wasm
+	rm -f $(BUILTINS)/agents.wasm $(BUILTINS)/history.wasm
+	rm -rf $(EXT_DIR)/memory

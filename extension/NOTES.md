@@ -207,3 +207,15 @@ Append-only design decision log. Never delete entries; add an `*Addendum (date):
 **Rationale:** Extensions such as `readfile`, `writefile`, and `exec` need to access the host filesystem. Rather than maintaining a per-extension allowlist of paths (which would require a new manifest field and host-side path-prefix enforcement), all extensions receive the full mount. Permission checks (`PermFileRead`, `PermFileWrite`, `PermExec`) at the host_call layer provide access control at the operation level; the WASM module itself cannot call host functions without going through `host_call`. Environment variables are passed through so extensions can read `HOME`, `PATH`, config directories, and API keys without a separate `get_env` call for each.
 
 **Consequence:** There is no filesystem isolation between WASM extension code paths. An extension with `PermExec` could use the `exec` host_call to read or write any file. Trust is enforced at the permission and trusted/untrusted boundary, not at the filesystem level.
+
+---
+
+## 18. Native Tool Fast Path — Stateless Tools Bypass WASM
+
+*Added: 2026-05-09*
+
+**Decision:** `Host` gains a `nativeTools map[string]func(ctx, input) (string, bool)` alongside a dedicated `nativeToolsMu sync.RWMutex`. `ExecuteTool` checks this map first, before creating a `pendingTools` channel or dispatching `EventBeforeToolCall`. The four stateless I/O tools (`read_file`, `write_file`, `exec`, `get_env`) are registered as native functions in `cmd/main.go` and their WASM extension counterparts (`readfile.wasm`, `writefile.wasm`, `exec.wasm`, `env.wasm`) are removed from the build.
+
+**Rationale:** Stateless tools (file I/O, exec, env) have no state in WASM linear memory; they only delegate to host OS calls. Running them through WASM adds: (a) two full WASM dispatch round-trips (`_alloc` + `_on_event`), (b) serialization through the `host_call` JSON protocol, and (c) contention on `Extension.callMu` which serializes all calls into each WASM module. There is no correctness benefit from going through WASM for these tools — they do not subscribe to events, hold extension state, or require isolation. Registering them as native functions in `ExecuteTool` eliminates all of that overhead. `EventAfterToolCall` is still fired so WASM extensions that observe tool results (e.g. the `history` extension) continue to work.
+
+**Consequence:** `RegisterNativeTool` must be called before the harness processes any tool call. Native tools bypass `EventBeforeToolCall` — WASM extensions cannot intercept or short-circuit them. If interception is needed in the future the tool must be moved back to WASM (or a native interception hook added). The `nativeToolsMu` is separate from `h.mu` to avoid lock ordering issues between tool registration and the existing extension/tool registration paths.
