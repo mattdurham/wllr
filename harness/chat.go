@@ -398,9 +398,9 @@ func renderUserMessage(sb *strings.Builder, content string, width int, old bool)
 // visible. Tool calls happen silently in the background.
 func renderToolGroup(_ *strings.Builder, _ []chatMessage, _ int, _ bool) {}
 
-// renderActivityBox draws a full bordered box for the live activity indicator.
-// It always shows 4 content lines derived from the tool's JSON input so the
-// user can see what the agent is doing without the box collapsing to one line.
+// renderActivityBox draws a bordered box for the live activity indicator.
+// It renders up to 4 content lines from the tool's JSON input, collapsing
+// to fewer lines when the input has fewer meaningful fields.
 func renderActivityBox(sb *strings.Builder, name, input string, done, isError bool, width int) {
 	border := toolBorderStyle
 	var dot string
@@ -448,7 +448,7 @@ func renderActivityBox(sb *strings.Builder, name, input string, done, isError bo
 
 // toolInputLines parses the JSON tool input and returns up to maxLines of
 // "key: value" strings suitable for display inside the activity box.
-// Lines are padded to maxLines with empty strings.
+// Only non-empty lines are returned — no padding.
 func toolInputLines(input string, maxLines, width int) []string {
 	var lines []string
 
@@ -492,9 +492,6 @@ func toolInputLines(input string, maxLines, width int) []string {
 		}
 	}
 
-	for len(lines) < maxLines {
-		lines = append(lines, "")
-	}
 	return lines
 }
 
