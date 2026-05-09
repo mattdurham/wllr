@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -612,10 +613,16 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 		if m.agentPool != nil {
 			m.statusBar.totalTokens = int(m.agentPool.TokenCount())
 		}
-		if msg.Err != nil && !errors.Is(msg.Err, context.Canceled) {
-			m.chat.AddNotification(fmt.Sprintf("Error: %v", msg.Err))
-			m.statusBar.statuses["stream"] = "error"
+		if msg.Err != nil {
+			if errors.Is(msg.Err, context.Canceled) {
+				slog.Info("stream cancelled by user")
+			} else {
+				slog.Error("stream error", "err", msg.Err)
+				m.chat.AddNotification(fmt.Sprintf("Error: %v", msg.Err))
+				m.statusBar.statuses["stream"] = "error"
+			}
 		} else {
+			slog.Info("stream done", "tokens", m.agentPool.TokenCount())
 			delete(m.statusBar.statuses, "stream")
 		}
 		// Capture response before FinalizeMessage clears c.current.
