@@ -347,6 +347,8 @@ func (m Model) Init() tea.Cmd {
 }
 
 // cmdDispatchSessionStart sends EventSessionStart to all extensions asynchronously.
+// It returns sessionStartDoneMsg (not ExtensionEventResultMsg) so the harness can
+// inject the default action prompt after all session_start handlers have run.
 func (m Model) cmdDispatchSessionStart() tea.Cmd {
 	if m.extHost == nil {
 		return nil
@@ -356,7 +358,7 @@ func (m Model) cmdDispatchSessionStart() tea.Cmd {
 		payload, _ := json.Marshal(sdk.SessionStartPayload{Reason: "new_session"})
 		evt := sdk.Event{Type: sdk.EventSessionStart, Payload: payload}
 		results, err := extHost.DispatchEvent(context.Background(), evt)
-		return ExtensionEventResultMsg{Results: results, Err: err}
+		return sessionStartDoneMsg{Results: results, Err: err}
 	}
 }
 
@@ -637,6 +639,21 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 // Returns (model, cmd, true) when the message was handled.
 func (m Model) updateExtension(msg tea.Msg) (Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
+	case sessionStartDoneMsg:
+		for _, r := range msg.Results {
+			if r.Error != "" {
+				m.chat.AddNotification(fmt.Sprintf("Extension error: %s", r.Error))
+			}
+		}
+		m.updateSuggestions()
+		// Append the default action prompt after all session_start handlers have run,
+		// so the tool and command lists reflect everything registered at startup.
+		if m.agentPool != nil && m.extHost != nil {
+			prompt := buildDefaultActionPrompt(m.extHost.GetRegisteredTools(), m.commands.List())
+			m.agentPool.AppendBaseSystemPrompt(prompt)
+		}
+		return m, nil, true
+
 	case ExtensionEventResultMsg:
 		for _, r := range msg.Results {
 			if r.Error != "" {

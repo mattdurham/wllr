@@ -75,3 +75,12 @@ type dispatchOnCommandMsg struct {
 
 // streamTickMsg fires periodically while streaming to update the working indicator.
 type streamTickMsg struct{}
+
+// sessionStartDoneMsg is returned after EventSessionStart has been dispatched to
+// all extensions. It is distinct from ExtensionEventResultMsg so the harness can
+// inject the default action prompt exactly once, after all session_start handlers
+// have had a chance to register tools and commands.
+type sessionStartDoneMsg struct {
+	Results []sdk.EventResponse
+	Err     error
+}

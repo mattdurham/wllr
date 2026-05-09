@@ -95,7 +95,7 @@ Sub-agents spawned via `OnAgentSpawn` receive identical wiring except `agentID` 
 | `updateStream`     | `TokenMsg`, `streamTickMsg`, `StreamDoneMsg`, `addAssistantMsgToHistoryMsg`       |
 | `updateTools`      | `ToolCallStartMsg`, `ToolCallDoneMsg`                                             |
 | `updateActions`    | `SubmitMsg`, `CommandMsg`, `clearMsg`, `setModelMsg`, `abortStreamMsg`, `dispatchOnCommandMsg` |
-| `updateExtension`  | `ExtensionEventResultMsg`, `ReloadMsg`, `NotifyMsg`, `StatusUpdateMsg`            |
+| `updateExtension`  | `sessionStartDoneMsg`, `ExtensionEventResultMsg`, `ReloadMsg`, `NotifyMsg`, `StatusUpdateMsg` |
 
 After all sub-handlers return false, remaining messages are forwarded to `m.input` (all messages) and `m.chat` (non-key messages only, to prevent viewport key bindings from stealing typed characters).
 
@@ -347,7 +347,8 @@ Built-in commands registered at startup:
 |-----------------------------|--------------------|-----------------------------------------------------------------|
 | `TokenMsg{Token}`           | agent → TUI        | Streaming text delta                                            |
 | `StreamDoneMsg{Err, AgentID}` | agent → TUI      | Agent turn completed                                            |
-| `ExtensionEventResultMsg`   | async cmd → TUI    | Results from dispatching an event to extensions                 |
+| `sessionStartDoneMsg`       | async cmd → TUI    | session_start dispatch complete; triggers default prompt injection |
+| `ExtensionEventResultMsg`   | async cmd → TUI    | Results from dispatching non-session_start events to extensions |
 | `ReloadMsg`                 | command → TUI      | Trigger hot-reload of all extensions                            |
 | `NotifyMsg{Text}`           | any → TUI          | Show notification in chat                                       |
 | `StatusUpdateMsg{Key,Value}`| extension → TUI    | Update keyed status in the status bar                           |
@@ -362,7 +363,41 @@ Built-in commands registered at startup:
 
 ---
 
-## 20. BuildFantasyTools
+## 20. buildDefaultActionPrompt
+
+```go
+func buildDefaultActionPrompt(tools []sdk.Tool, commands []Command) string
+```
+
+Called once from `updateExtension` when `sessionStartDoneMsg` arrives — after all `session_start` extension handlers have run and all tool/command registrations are complete.
+
+Produces a markdown section injected via `pool.AppendBaseSystemPrompt`:
+
+```
+## Capabilities
+
+Act immediately on user requests using your tools. Read files, run commands, edit code — don't describe what you plan to do, just do it.
+
+### Tools
+
+- **tool_name** — description
+...
+
+### Slash commands
+
+- **/command** — description
+...
+```
+
+**Invariant:** Tools are sorted alphabetically before rendering. Commands appear in the order returned by `Registry.List()` (sorted by name). Empty descriptions are replaced with `"(no description)"`.
+
+**Invariant:** If `tools` is empty, the Tools section is omitted. If `commands` is empty, the Slash commands section is omitted.
+
+**Invariant:** Called at most once per session (from `sessionStartDoneMsg`). Subsequent tool/command registrations (e.g. from hot-reload) do not re-inject the prompt.
+
+---
+
+## 21. BuildFantasyTools
 
 ```go
 func BuildFantasyTools(extHost *extension.Host, agentID string, logFn func(int, string)) []fantasy.AgentTool
@@ -376,7 +411,7 @@ Returns the current set of registered tools from `extHost.RegisteredTools()` as 
 
 ---
 
-## 21. View Layout
+## 22. View Layout
 
 ```
 ┌────────────────────────────────────┐

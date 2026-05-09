@@ -176,6 +176,18 @@ Append-only design decision log. Never delete entries; add an `*Addendum (date):
 
 ---
 
+## 16. sessionStartDoneMsg — Default Action Prompt Injection
+
+*Added: 2026-05-09*
+
+**Decision:** `cmdDispatchSessionStart` returns `sessionStartDoneMsg` (not `ExtensionEventResultMsg`). When `sessionStartDoneMsg` arrives in `updateExtension`, the harness builds a default action prompt from the current registered tools and commands and appends it to the pool's base system prompt via `buildDefaultActionPrompt`.
+
+**Rationale:** Without a built-in system prompt, the agent has no baseline instruction to use its tools proactively — it defaults to describing what it would do rather than doing it. Pi solves this with a hardcoded system prompt in code. Wllr's equivalent is to inject it dynamically after `session_start` completes, so the list accurately reflects every tool and command registered by extensions during `_init` and `session_start`. Using a distinct message type (not the generic `ExtensionEventResultMsg`) ensures the injection happens exactly once per session, not on every command dispatch result.
+
+**Consequence:** The default action prompt is always appended after whatever AGENTS.md and extension-injected content precede it. Extensions that call `set_system_prompt` (full replace) during `session_start` will have the default prompt appended after their content. Tool and command registrations that happen after `session_start` (e.g. dynamic registration mid-session) are not reflected in the injected prompt — the prompt is a point-in-time snapshot.
+
+---
+
 ## 15. dispatchOnCommandMsg — Extension-Registered Commands
 
 *Added: 2026-05-08*
