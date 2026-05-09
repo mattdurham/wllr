@@ -17,7 +17,8 @@ func buildDefaultActionPrompt(tools []sdk.Tool, commands []Command) string {
 	var sb strings.Builder
 
 	sb.WriteString("## Capabilities\n\n")
-	sb.WriteString("Act immediately on user requests using your tools. Read files, run commands, edit code — don't describe what you plan to do, just do it.\n")
+	sb.WriteString("Act immediately on user requests using your tools. Read files, run commands, edit code — don't describe what you plan to do, just do it.\n\n")
+	sb.WriteString("You must always be doing one of two things: working (using a tool) or asking a clarifying question. Never pause silently. If you are unsure what to do next, ask. If you know what to do, do it.\n")
 
 	if len(tools) > 0 {
 		sorted := make([]sdk.Tool, len(tools))
