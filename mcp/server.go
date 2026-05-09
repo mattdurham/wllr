@@ -297,12 +297,3 @@ func (s *Server) Close() error {
 	return nil
 }
 
-// Name returns the server name.
-func (s *Server) Name() string {
-	return s.name
-}
-
-// Info returns server info from the initialize handshake.
-func (s *Server) Info() ServerInfo {
-	return s.info
-}
