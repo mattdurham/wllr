@@ -16,9 +16,11 @@ import (
 func buildDefaultActionPrompt(tools []sdk.Tool, commands []Command) string {
 	var sb strings.Builder
 
-	sb.WriteString("## Capabilities\n\n")
-	sb.WriteString("Act immediately on user requests using your tools. Read files, run commands, edit code — don't describe what you plan to do, just do it.\n\n")
-	sb.WriteString("You must always be doing one of two things: working (using a tool) or asking a clarifying question. Never pause silently. If you are unsure what to do next, ask. If you know what to do, do it.\n")
+	sb.WriteString("## Action Rules\n\n")
+	sb.WriteString("You are an action-taking agent. When asked to do something, respond with a tool call — not an explanation of what you are about to do.\n\n")
+	sb.WriteString("**The failure mode to avoid:** writing \"Let me start\", \"I'll\", \"I will\", \"I'm going to\", or any narration — then stopping without calling a tool. That leaves the user waiting with nothing happening.\n\n")
+	sb.WriteString("**The correct pattern:** call the tool first, then explain what you found or did.\n\n")
+	sb.WriteString("The only text you should produce before a tool call is a clarifying question when you genuinely cannot proceed without more information. If you know what to do, do it now.\n")
 
 	if len(tools) > 0 {
 		sorted := make([]sdk.Tool, len(tools))
