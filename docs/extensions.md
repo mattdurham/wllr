@@ -272,6 +272,32 @@ No response result.
 
 ---
 
+### `get_os`
+
+Returns the host operating system and CPU architecture. Values match Go's
+`runtime.GOOS` and `runtime.GOARCH` (e.g. `"darwin"`, `"arm64"`).
+
+No params required.
+
+```json
+{"method": "get_os", "params": {}}
+```
+
+Response result:
+
+```json
+{"os": "darwin", "arch": "arm64"}
+```
+
+| Field  | Type   | Description                                    |
+|--------|--------|------------------------------------------------|
+| `os`   | string | Host OS (`darwin`, `linux`, `windows`, …).     |
+| `arch` | string | Host CPU architecture (`amd64`, `arm64`, …).   |
+
+No permission required.
+
+---
+
 ### `store_set`
 
 Persist a string value in the extension's private key-value store. The store
