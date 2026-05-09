@@ -43,6 +43,14 @@ type ChatView struct {
 	width       int
 	height      int
 	histDirty   bool
+
+	// activityName tracks the tool currently running during this turn.
+	// Each new tool call replaces the previous value. Cleared by FinalizeMessage.
+	// Rendered as a single live box between histContent and c.current.
+	activityName  string
+	activityInput string // raw JSON input for the active tool
+	activityDone  bool
+	activityError bool
 }
 
 var (
@@ -97,10 +105,26 @@ func (c *ChatView) AppendToken(token string) {
 // FinalizeMessage seals the in-progress message and resets tool routing.
 func (c *ChatView) FinalizeMessage() {
 	c.lastDoneToolID = ""
+	hadActivity := c.activityName != ""
+	c.activityName = ""
+	c.activityInput = ""
+	c.activityDone = false
+	c.activityError = false
 	if c.current == "" {
+		if hadActivity {
+			// Activity box was visible; refresh to remove it from the display.
+			c.refreshContent()
+			c.vp.GotoBottom()
+		}
 		return
 	}
-	c.messages = append(c.messages, chatMessage{role: sdk.RoleAssistant, content: c.current})
+	// Merge into the previous assistant message if one is the last entry,
+	// so consecutive AI responses appear as one box instead of many.
+	if n := len(c.messages); n > 0 && c.messages[n-1].role == sdk.RoleAssistant {
+		c.messages[n-1].content += "\n\n" + c.current
+	} else {
+		c.messages = append(c.messages, chatMessage{role: sdk.RoleAssistant, content: c.current})
+	}
 	c.current = ""
 	c.invalidateHistory()
 	c.refreshContent()
@@ -123,14 +147,23 @@ func (c *ChatView) AddNotification(text string) {
 	c.vp.GotoBottom()
 }
 
-// AddToolCall appends a pending tool call entry to the chat history.
+// AddToolCall updates the live activity box and records the tool call.
 // Any in-progress streaming text is sealed first so it appears before the box.
+// Each call replaces the previous activity entry — only the current tool is shown.
 func (c *ChatView) AddToolCall(id, toolName, input string) {
 	if c.current != "" {
-		c.messages = append(c.messages, chatMessage{role: sdk.RoleAssistant, content: c.current})
+		if n := len(c.messages); n > 0 && c.messages[n-1].role == sdk.RoleAssistant {
+			c.messages[n-1].content += "\n\n" + c.current
+		} else {
+			c.messages = append(c.messages, chatMessage{role: sdk.RoleAssistant, content: c.current})
+		}
 		c.current = ""
 	}
 	c.lastDoneToolID = ""
+	c.activityName = toolName
+	c.activityInput = input
+	c.activityDone = false
+	c.activityError = false
 	c.messages = append(c.messages, chatMessage{
 		role:      roleToolMessage,
 		toolID:    id,
@@ -142,8 +175,7 @@ func (c *ChatView) AddToolCall(id, toolName, input string) {
 	c.vp.GotoBottom()
 }
 
-// UpdateToolCall marks an existing tool call as done and begins routing
-// subsequent tokens into its box.
+// UpdateToolCall marks an existing tool call as done and updates the activity box status.
 func (c *ChatView) UpdateToolCall(id string, isError bool, output string) {
 	for i := range c.messages {
 		if c.messages[i].role == roleToolMessage && c.messages[i].toolID == id {
@@ -154,7 +186,10 @@ func (c *ChatView) UpdateToolCall(id string, isError bool, output string) {
 		}
 	}
 	c.lastDoneToolID = id
-	c.invalidateHistory()
+	if c.activityName != "" {
+		c.activityDone = true
+		c.activityError = isError
+	}
 	c.refreshContent()
 	c.vp.GotoBottom()
 }
@@ -164,6 +199,10 @@ func (c *ChatView) Clear() {
 	c.messages = nil
 	c.current = ""
 	c.lastDoneToolID = ""
+	c.activityName = ""
+	c.activityInput = ""
+	c.activityDone = false
+	c.activityError = false
 	c.histContent = ""
 	c.histDirty = false
 	c.refreshContent()
@@ -243,10 +282,20 @@ func (c *ChatView) refreshContent() {
 		c.histDirty = false
 	}
 
-	if c.current != "" {
+	if c.activityName != "" || c.current != "" {
 		var sb strings.Builder
 		sb.WriteString(c.histContent)
-		renderMessage(&sb, chatMessage{role: sdk.RoleAssistant, content: c.current}, c.width, false)
+		if c.activityName != "" {
+			renderToolCall(&sb, chatMessage{
+				toolName:  c.activityName,
+				toolInput: c.activityInput,
+				toolDone:  c.activityDone,
+				toolError: c.activityError,
+			}, c.width, false)
+		}
+		if c.current != "" {
+			renderMessage(&sb, chatMessage{role: sdk.RoleAssistant, content: c.current}, c.width, false)
+		}
 		c.vp.SetContent(sb.String())
 	} else {
 		c.vp.SetContent(c.histContent)

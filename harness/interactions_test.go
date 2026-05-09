@@ -69,8 +69,8 @@ func TestModel_EscEsc_DuringStream_GeneratesAbort(t *testing.T) {
 
 // ─── ToolCallStartMsg ────────────────────────────────────────────────────────
 
-func TestModel_ToolCallStartMsg_NotVisibleInChat(t *testing.T) {
-	// Tool calls are tracked internally but not rendered in the chat.
+func TestModel_ToolCallStartMsg_VisibleInActivityBox(t *testing.T) {
+	// Tool calls are shown in a live activity box that updates with each call.
 	m := newTestModel()
 	m.width = 80
 	m.height = 40
@@ -84,10 +84,10 @@ func TestModel_ToolCallStartMsg_NotVisibleInChat(t *testing.T) {
 	m = next.(Model)
 
 	content := m.chat.vp.View()
-	if strings.Contains(content, "exec") || strings.Contains(content, "↳") {
-		t.Error("tool call should not be visible in chat")
+	if !strings.Contains(content, "exec") {
+		t.Error("tool call should be visible in activity box")
 	}
-	// But it should be tracked internally
+	// Should also be tracked internally
 	if m.chat.MessageCount() == 0 {
 		t.Error("tool call should be stored in message list for internal tracking")
 	}
