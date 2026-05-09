@@ -14,100 +14,36 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unsafe"
 )
 
-// ─── WASM ABI ────────────────────────────────────────────────────────────────
+func init() {
+	RegisterCommand("history", "Browse and restore previous conversation sessions")
 
-//go:wasmimport env host_log
-func hostLog(level, ptr, length uint32)
+	OnSessionStart(handleSessionStart)
 
-//go:wasmimport env host_call
-func hostCall(reqPtr, reqLen, respPtrPtr, respLenPtr uint32) uint32
-
-var pinned = map[uintptr][]byte{}
-
-//go:wasmexport _alloc
-func extensionAlloc(size int32) int32 {
-	if size <= 0 {
-		return 0
-	}
-	buf := make([]byte, size)
-	ptr := uintptr(unsafe.Pointer(&buf[0]))
-	pinned[ptr] = buf
-	return int32(ptr)
-}
-
-//go:wasmexport _free
-func extensionFree(ptr int32) {
-	delete(pinned, uintptr(ptr))
-}
-
-//go:wasmexport _init
-func extensionInit() int32 {
-	hostCallJSON("subscribe", map[string]string{"event": "session_start"})
-	hostCallJSON("subscribe", map[string]string{"event": "before_agent_start"})
-	hostCallJSON("subscribe", map[string]string{"event": "message_end"})
-	hostCallJSON("subscribe", map[string]string{"event": "on_command"})
-	hostCallJSON("register_command", map[string]string{
-		"name":        "history",
-		"description": "Browse and restore previous conversation sessions",
+	OnBeforeAgentStart(func(prompt string) {
+		recordMessage("user", prompt)
 	})
-	return 0
-}
 
-//go:wasmexport _on_event
-func extensionOnEvent(ptr, length int32) int32 {
-	data := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(ptr))), length)
-	var evt struct {
-		Type    string          `json:"type"`
-		Payload json.RawMessage `json:"payload"`
-	}
-	if err := json.Unmarshal(data, &evt); err != nil {
-		return 0
-	}
-	switch evt.Type {
-	case "session_start":
-		handleSessionStart()
+	OnMessageEnd(func(role, content string) {
+		if role == "assistant" {
+			recordMessage("assistant", content)
+		}
+	})
 
-	case "before_agent_start":
-		var p struct {
-			Prompt string `json:"prompt"`
+	OnCommand("history", func(_ []string) {
+		handleHistoryCommand()
+	})
+	OnCommand("history:session_selected", func(args []string) {
+		if len(args) > 0 {
+			handleSessionSelected(args[0])
 		}
-		if json.Unmarshal(evt.Payload, &p) == nil && p.Prompt != "" {
-			recordMessage("user", p.Prompt)
+	})
+	OnCommand("history:message_selected", func(args []string) {
+		if len(args) > 0 {
+			handleMessageSelected(args[0])
 		}
-
-	case "message_end":
-		var p struct {
-			Role    string `json:"role"`
-			Content string `json:"content"`
-		}
-		if json.Unmarshal(evt.Payload, &p) == nil && p.Role == "assistant" && p.Content != "" {
-			recordMessage("assistant", p.Content)
-		}
-
-	case "on_command":
-		var p struct {
-			Name string   `json:"name"`
-			Args []string `json:"args"`
-		}
-		if json.Unmarshal(evt.Payload, &p) == nil {
-			switch p.Name {
-			case "history":
-				handleHistoryCommand()
-			case "history:session_selected":
-				if len(p.Args) > 0 {
-					handleSessionSelected(p.Args[0])
-				}
-			case "history:message_selected":
-				if len(p.Args) > 0 {
-					handleMessageSelected(p.Args[0])
-				}
-			}
-		}
-	}
-	return 0
+	})
 }
 
 // ─── Session state ────────────────────────────────────────────────────────────
@@ -146,7 +82,7 @@ func handleSessionStart() {
 
 	sessDir := filepath.Join(home, ".wllr", "sessions", sanitizePath(cwd))
 	if err := os.MkdirAll(sessDir, 0o755); err != nil {
-		logf(2, "history: mkdir %s: %v", sessDir, err)
+		Logf(2, "history: mkdir %s: %v", sessDir, err)
 		return
 	}
 
@@ -162,7 +98,7 @@ func handleSessionStart() {
 		Timestamp: ts.Format(time.RFC3339Nano),
 		CWD:       cwd,
 	})
-	logf(1, "history: session started → %s", currentFile)
+	Logf(1, "history: session started → %s", currentFile)
 }
 
 func recordMessage(role, content string) {
@@ -184,9 +120,7 @@ func recordMessage(role, content string) {
 func handleHistoryCommand() {
 	sessions, err := listSessions()
 	if err != nil || len(sessions) == 0 {
-		hostCallJSON("modal", map[string]string{
-			"text": "No previous sessions found.\n\nStart a conversation to create your first session.",
-		})
+		Modal("No previous sessions found.\n\nStart a conversation to create your first session.")
 		return
 	}
 
@@ -194,15 +128,15 @@ func handleHistoryCommand() {
 	if len(sessions) < limit {
 		limit = len(sessions)
 	}
-	items := make([]pickerItem, 0, limit)
+	items := make([]PickerItem, 0, limit)
 	for _, s := range sessions[:limit] {
-		items = append(items, pickerItem{
+		items = append(items, PickerItem{
 			ID:       s.path,
 			Label:    s.timestamp,
 			Sublabel: s.preview,
 		})
 	}
-	showPicker("Select a session  (↑↓ · enter · esc)", items, "history:session_selected")
+	ShowPicker("Select a session  (↑↓ · enter · esc)", items, "history:session_selected")
 }
 
 // ─── Session selected → message picker ───────────────────────────────────────
@@ -211,11 +145,11 @@ func handleSessionSelected(path string) {
 	pendingSessionPath = path
 	msgs, err := loadMessages(path)
 	if err != nil || len(msgs) == 0 {
-		hostCallJSON("modal", map[string]string{"text": "Could not load session messages."})
+		Modal("Could not load session messages.")
 		return
 	}
 
-	items := make([]pickerItem, 0, len(msgs))
+	items := make([]PickerItem, 0, len(msgs))
 	for i, m := range msgs {
 		label := "user"
 		if m.role == "assistant" {
@@ -225,13 +159,13 @@ func handleSessionSelected(path string) {
 		if r := []rune(preview); len(r) > 70 {
 			preview = string(r[:70]) + "…"
 		}
-		items = append(items, pickerItem{
+		items = append(items, PickerItem{
 			ID:       fmt.Sprintf("%d", i),
 			Label:    fmt.Sprintf("[%s]", label),
 			Sublabel: preview,
 		})
 	}
-	showPicker("Roll back to this point (loads all messages up to here)", items, "history:message_selected")
+	ShowPicker("Roll back to this point (loads all messages up to here)", items, "history:message_selected")
 }
 
 // ─── Message selected → reset agent history ──────────────────────────────────
@@ -245,7 +179,7 @@ func handleMessageSelected(idxStr string) {
 
 	msgs, err := loadMessages(pendingSessionPath)
 	if err != nil || len(msgs) == 0 {
-		hostCallJSON("modal", map[string]string{"text": "Could not load session messages."})
+		Modal("Could not load session messages.")
 		return
 	}
 	if idx < 0 || idx >= len(msgs) {
@@ -253,15 +187,11 @@ func handleMessageSelected(idxStr string) {
 	}
 
 	selected := msgs[:idx+1]
-	type wireMsg struct {
-		Role    string `json:"role"`
-		Content string `json:"content"`
-	}
-	wire := make([]wireMsg, len(selected))
+	wire := make([]Message, len(selected))
 	for i, m := range selected {
-		wire[i] = wireMsg{Role: m.role, Content: m.content}
+		wire[i] = Message{Role: m.role, Content: m.content}
 	}
-	hostCallJSON("agent_reset_history", map[string]any{"messages": wire})
+	AgentResetHistory(wire)
 	pendingSessionPath = ""
 }
 
@@ -374,7 +304,7 @@ func appendJSONL(path string, v any) {
 	}
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
-		logf(2, "history: open %s: %v", path, err)
+		Logf(2, "history: open %s: %v", path, err)
 		return
 	}
 	defer f.Close()
@@ -387,56 +317,6 @@ func sanitizePath(p string) string {
 		return "--"
 	}
 	return strings.NewReplacer("/", "--", " ", "_").Replace(strings.TrimPrefix(p, "/"))
-}
-
-func logf(level int, format string, args ...any) {
-	msg := fmt.Sprintf(format, args...)
-	b := []byte(msg)
-	if len(b) == 0 {
-		return
-	}
-	hostLog(uint32(level), uint32(uintptr(unsafe.Pointer(&b[0]))), uint32(len(b)))
-}
-
-// ─── Picker wire type ─────────────────────────────────────────────────────────
-
-type pickerItem struct {
-	ID       string `json:"id"`
-	Label    string `json:"label"`
-	Sublabel string `json:"sublabel,omitempty"`
-}
-
-func showPicker(title string, items []pickerItem, callback string) {
-	hostCallJSON("show_picker", map[string]any{
-		"title":    title,
-		"items":    items,
-		"callback": callback,
-	})
-}
-
-// ─── host_call helper ─────────────────────────────────────────────────────────
-
-func hostCallJSON(method string, params any) {
-	type request struct {
-		Method string `json:"method"`
-		Params any    `json:"params,omitempty"`
-	}
-	reqBytes, err := json.Marshal(request{Method: method, Params: params})
-	if err != nil {
-		return
-	}
-	buf := make([]byte, len(reqBytes))
-	copy(buf, reqBytes)
-	ptr := uintptr(unsafe.Pointer(&buf[0]))
-	var respPtr, respLen uint32
-	hostCall(
-		uint32(ptr), uint32(len(buf)),
-		uint32(uintptr(unsafe.Pointer(&respPtr))),
-		uint32(uintptr(unsafe.Pointer(&respLen))),
-	)
-	if respPtr != 0 {
-		delete(pinned, uintptr(respPtr))
-	}
 }
 
 func main() {}

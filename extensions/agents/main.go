@@ -11,13 +11,41 @@ import (
 	"unsafe"
 )
 
-//go:wasmimport env host_log
-func hostLog(level, ptr, length uint32)
+// ─── Local host_call for agent/team methods not wrapped by the SDK ────────────
 
 //go:wasmimport env host_call
-func hostCall(reqPtr, reqLen, respPtrPtr, respLenPtr uint32) uint32
+func _agentsHostCall(reqPtr, reqLen, respPtrPtr, respLenPtr uint32) uint32
 
-var pinned = map[uintptr][]byte{}
+// agentCall fires a host_call and returns the raw response bytes, or "".
+func agentCall(method string, params any) string {
+	type request struct {
+		Method string `json:"method"`
+		Params any    `json:"params,omitempty"`
+	}
+	reqBytes, err := json.Marshal(request{Method: method, Params: params})
+	if err != nil {
+		return ""
+	}
+	buf := make([]byte, len(reqBytes))
+	copy(buf, reqBytes)
+	ptr := uintptr(unsafe.Pointer(&buf[0]))
+
+	var respPtr, respLen uint32
+	_agentsHostCall(
+		uint32(ptr), uint32(len(buf)),
+		uint32(uintptr(unsafe.Pointer(&respPtr))),
+		uint32(uintptr(unsafe.Pointer(&respLen))),
+	)
+	if respPtr == 0 || respLen == 0 {
+		return ""
+	}
+	resp := make([]byte, respLen)
+	mem := (*[1 << 28]byte)(unsafe.Pointer(uintptr(respPtr)))
+	copy(resp, mem[:respLen])
+	return string(resp)
+}
+
+// ─── Agent registry ───────────────────────────────────────────────────────────
 
 // agentRecord tracks a running sub-agent's status for the /agents modal.
 type agentRecord struct {
@@ -65,113 +93,60 @@ func removeAgent(id string) {
 	agentRecords = out
 }
 
-//go:wasmexport _alloc
-func extensionAlloc(size int32) int32 {
-	if size <= 0 {
-		return 0
-	}
-	buf := make([]byte, size)
-	ptr := uintptr(unsafe.Pointer(&buf[0]))
-	pinned[ptr] = buf
-	return int32(ptr)
-}
+// ─── Init ─────────────────────────────────────────────────────────────────────
 
-//go:wasmexport _free
-func extensionFree(ptr int32) {
-	delete(pinned, uintptr(ptr))
-}
-
-//go:wasmexport _init
-func extensionInit() int32 {
-	tools := []struct {
-		name   string
-		desc   string
-		schema string
-	}{
-		{
-			"create_agent",
-			"Create a new agent with a name, system prompt, and optional model",
-			`{"type":"object","properties":{"name":{"type":"string","description":"Agent name"},"system_prompt":{"type":"string","description":"System prompt for the agent"},"prompt":{"type":"string","description":"Initial prompt to send"},"model":{"type":"string","description":"Model name (optional)"}},"required":["name","system_prompt","prompt"]}`,
-		},
-		{
-			"shutdown_agent",
-			"Shut down and remove a running agent",
-			`{"type":"object","properties":{"agent_id":{"type":"string","description":"ID of the agent to shut down"}},"required":["agent_id"]}`,
-		},
-		{
-			"list_agents",
-			"List all running agents",
-			`{"type":"object","properties":{}}`,
-		},
-		{
-			"create_team",
-			"Create a new team",
-			`{"type":"object","properties":{"name":{"type":"string","description":"Team name"}},"required":["name"]}`,
-		},
-		{
-			"add_to_team",
-			"Add an agent to a team",
-			`{"type":"object","properties":{"team_id":{"type":"string","description":"Team ID"},"agent_id":{"type":"string","description":"Agent ID"}},"required":["team_id","agent_id"]}`,
-		},
-		{
-			"get_team",
-			"Get information about a team",
-			`{"type":"object","properties":{"team_id":{"type":"string","description":"Team ID"}},"required":["team_id"]}`,
-		},
-		{
-			"shutdown_team",
-			"Shut down a team and all its members",
-			`{"type":"object","properties":{"team_id":{"type":"string","description":"Team ID"}},"required":["team_id"]}`,
-		},
-		{
-			"send_message",
-			"Send a message to an agent",
-			`{"type":"object","properties":{"agent_id":{"type":"string","description":"Agent ID"},"message":{"type":"string","description":"Message text"}},"required":["agent_id","message"]}`,
-		},
-	}
-
-	for _, t := range tools {
-		if rc := registerTool(t.name, t.desc, t.schema); rc != 0 {
-			return rc
-		}
-	}
-	if rc := hostCallJSON("subscribe", map[string]string{"event": "session_start"}); rc != 0 {
-		return rc
-	}
-	if rc := hostCallJSON("subscribe", map[string]string{"event": "on_command"}); rc != 0 {
-		return rc
-	}
-	type cmdParams struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-	}
-	return hostCallJSON(
-		"register_command",
-		cmdParams{Name: "agents", Description: "Show running sub-agents and their status"},
+func init() {
+	RegisterTool(
+		"create_agent",
+		"Create a new agent with a name, system prompt, and optional model",
+		json.RawMessage(`{"type":"object","properties":{"name":{"type":"string","description":"Agent name"},"system_prompt":{"type":"string","description":"System prompt for the agent"},"prompt":{"type":"string","description":"Initial prompt to send"},"model":{"type":"string","description":"Model name (optional)"}},"required":["name","system_prompt","prompt"]}`),
 	)
+	RegisterTool(
+		"shutdown_agent",
+		"Shut down and remove a running agent",
+		json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string","description":"ID of the agent to shut down"}},"required":["agent_id"]}`),
+	)
+	RegisterTool(
+		"list_agents",
+		"List all running agents",
+		json.RawMessage(`{"type":"object","properties":{}}`),
+	)
+	RegisterTool(
+		"create_team",
+		"Create a new team",
+		json.RawMessage(`{"type":"object","properties":{"name":{"type":"string","description":"Team name"}},"required":["name"]}`),
+	)
+	RegisterTool(
+		"add_to_team",
+		"Add an agent to a team",
+		json.RawMessage(`{"type":"object","properties":{"team_id":{"type":"string","description":"Team ID"},"agent_id":{"type":"string","description":"Agent ID"}},"required":["team_id","agent_id"]}`),
+	)
+	RegisterTool(
+		"get_team",
+		"Get information about a team",
+		json.RawMessage(`{"type":"object","properties":{"team_id":{"type":"string","description":"Team ID"}},"required":["team_id"]}`),
+	)
+	RegisterTool(
+		"shutdown_team",
+		"Shut down a team and all its members",
+		json.RawMessage(`{"type":"object","properties":{"team_id":{"type":"string","description":"Team ID"}},"required":["team_id"]}`),
+	)
+	RegisterTool(
+		"send_message",
+		"Send a message to an agent",
+		json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string","description":"Agent ID"},"message":{"type":"string","description":"Message text"}},"required":["agent_id","message"]}`),
+	)
+
+	RegisterCommand("agents", "Show running sub-agents and their status")
+
+	OnSessionStart(onSessionStart)
+	OnCommand("agents", onAgentsCommand)
+
+	// Use the raw before_tool_call event so we get the AgentID field too.
+	OnBeforeToolCall(onBeforeToolCall)
 }
 
-//go:wasmexport _on_event
-func extensionOnEvent(ptr, length int32) int32 {
-	data := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(ptr))), length)
-
-	var evt struct {
-		Type    string          `json:"type"`
-		Payload json.RawMessage `json:"payload"`
-	}
-	if err := json.Unmarshal(data, &evt); err != nil {
-		return 0
-	}
-	switch evt.Type {
-	case "session_start":
-		onSessionStart()
-	case "on_command":
-		onCommand(evt.Payload)
-	case "before_tool_call":
-		onBeforeToolCall(evt.Payload)
-	}
-	return 0
-}
+// ─── Event handlers ───────────────────────────────────────────────────────────
 
 func onSessionStart() {
 	guidance := `
@@ -196,10 +171,31 @@ Use these tools to spawn sub-agents and coordinate work across teams.
 Teams group agents for broadcast coordination:
 create_team / add_to_team / shutdown_team`
 
-	type params struct {
-		Text string `json:"text"`
+	AppendSystemPrompt(guidance)
+}
+
+func onAgentsCommand(_ []string) {
+	if len(agentRecords) == 0 {
+		Modal("No sub-agents running.")
+		return
 	}
-	hostCallJSON("append_system_prompt", params{Text: guidance})
+
+	text := "Sub-agents\n" + strings.Repeat("─", 40) + "\n\n"
+	for _, r := range agentRecords {
+		text += r.id
+		if r.name != "" && r.name != r.id {
+			text += "  (" + r.name + ")"
+		}
+		text += "\n"
+		if r.task != "" {
+			text += "  Task: " + r.task + "\n"
+		}
+		if r.lastUpdate != "" {
+			text += "  Last: " + r.lastUpdate + "\n"
+		}
+		text += "\n"
+	}
+	Modal(strings.TrimRight(text, "\n"))
 }
 
 type beforeToolCallPayload struct {
@@ -209,9 +205,9 @@ type beforeToolCallPayload struct {
 	Input      json.RawMessage `json:"input"`
 }
 
-func onBeforeToolCall(raw json.RawMessage) {
+func onBeforeToolCall(payload json.RawMessage) {
 	var p beforeToolCallPayload
-	if err := json.Unmarshal(raw, &p); err != nil {
+	if err := json.Unmarshal(payload, &p); err != nil {
 		return
 	}
 
@@ -240,6 +236,8 @@ func onBeforeToolCall(raw json.RawMessage) {
 	}
 }
 
+// ─── Tool handlers ────────────────────────────────────────────────────────────
+
 func handleCreateAgent(p beforeToolCallPayload) {
 	var input struct {
 		Name         string `json:"name"`
@@ -248,11 +246,10 @@ func handleCreateAgent(p beforeToolCallPayload) {
 		Model        string `json:"model"`
 	}
 	if err := json.Unmarshal(p.Input, &input); err != nil || input.Name == "" {
-		sendToolResult(p.ToolCallID, "create_agent: name and system_prompt are required", true)
+		ToolResult(p.ToolCallID, "create_agent: name and system_prompt are required", true)
 		return
 	}
 
-	// Generate a deterministic ID from the name (host may override).
 	agentID := "agent-" + input.Name
 
 	type spawnParams struct {
@@ -261,7 +258,7 @@ func handleCreateAgent(p beforeToolCallPayload) {
 		SystemPrompt string `json:"system_prompt"`
 		ModelName    string `json:"model_name"`
 	}
-	result := hostCallWithResponse("agent_spawn", spawnParams{
+	result := agentCall("agent_spawn", spawnParams{
 		ID:           agentID,
 		Name:         input.Name,
 		SystemPrompt: input.SystemPrompt,
@@ -275,22 +272,21 @@ func handleCreateAgent(p beforeToolCallPayload) {
 		_ = json.Unmarshal([]byte(result), &resp)
 	}
 	if resp.Error != "" {
-		sendToolResult(p.ToolCallID, "create_agent: "+resp.Error, true)
+		ToolResult(p.ToolCallID, "create_agent: "+resp.Error, true)
 		return
 	}
 
-	// If an initial prompt was provided, send it.
 	if input.Prompt != "" {
 		type msgParams struct {
 			ID      string `json:"id"`
 			Message string `json:"message"`
 		}
-		hostCallWithResponse("agent_send_message", msgParams{ID: agentID, Message: input.Prompt})
+		agentCall("agent_send_message", msgParams{ID: agentID, Message: input.Prompt})
 	}
 
 	upsertAgent(agentID, input.Name, truncate(input.Prompt, 80), "")
 	out, _ := json.Marshal(map[string]string{"agent_id": agentID, "status": "created"})
-	sendToolResult(p.ToolCallID, string(out), false)
+	ToolResult(p.ToolCallID, string(out), false)
 }
 
 func handleShutdownAgent(p beforeToolCallPayload) {
@@ -298,14 +294,14 @@ func handleShutdownAgent(p beforeToolCallPayload) {
 		AgentID string `json:"agent_id"`
 	}
 	if err := json.Unmarshal(p.Input, &input); err != nil || input.AgentID == "" {
-		sendToolResult(p.ToolCallID, "shutdown_agent: agent_id is required", true)
+		ToolResult(p.ToolCallID, "shutdown_agent: agent_id is required", true)
 		return
 	}
 
 	type closeParams struct {
 		ID string `json:"id"`
 	}
-	result := hostCallWithResponse("agent_close", closeParams{ID: input.AgentID})
+	result := agentCall("agent_close", closeParams{ID: input.AgentID})
 
 	var resp struct {
 		Error string `json:"error,omitempty"`
@@ -314,20 +310,20 @@ func handleShutdownAgent(p beforeToolCallPayload) {
 		_ = json.Unmarshal([]byte(result), &resp)
 	}
 	if resp.Error != "" {
-		sendToolResult(p.ToolCallID, "shutdown_agent: "+resp.Error, true)
+		ToolResult(p.ToolCallID, "shutdown_agent: "+resp.Error, true)
 		return
 	}
 	removeAgent(input.AgentID)
-	sendToolResult(p.ToolCallID, `{"status":"closed"}`, false)
+	ToolResult(p.ToolCallID, `{"status":"closed"}`, false)
 }
 
 func handleListAgents(p beforeToolCallPayload) {
-	result := hostCallWithResponse("agent_list", map[string]string{})
+	result := agentCall("agent_list", map[string]string{})
 	if result == "" {
-		sendToolResult(p.ToolCallID, `{"agents":[]}`, false)
+		ToolResult(p.ToolCallID, `{"agents":[]}`, false)
 		return
 	}
-	sendToolResult(p.ToolCallID, result, false)
+	ToolResult(p.ToolCallID, result, false)
 }
 
 func handleCreateTeam(p beforeToolCallPayload) {
@@ -335,7 +331,7 @@ func handleCreateTeam(p beforeToolCallPayload) {
 		Name string `json:"name"`
 	}
 	if err := json.Unmarshal(p.Input, &input); err != nil || input.Name == "" {
-		sendToolResult(p.ToolCallID, "create_team: name is required", true)
+		ToolResult(p.ToolCallID, "create_team: name is required", true)
 		return
 	}
 
@@ -345,7 +341,7 @@ func handleCreateTeam(p beforeToolCallPayload) {
 		ID   string `json:"id"`
 		Name string `json:"name"`
 	}
-	result := hostCallWithResponse("team_create", createParams{ID: teamID, Name: input.Name})
+	result := agentCall("team_create", createParams{ID: teamID, Name: input.Name})
 
 	var resp struct {
 		Error string `json:"error,omitempty"`
@@ -354,12 +350,12 @@ func handleCreateTeam(p beforeToolCallPayload) {
 		_ = json.Unmarshal([]byte(result), &resp)
 	}
 	if resp.Error != "" {
-		sendToolResult(p.ToolCallID, "create_team: "+resp.Error, true)
+		ToolResult(p.ToolCallID, "create_team: "+resp.Error, true)
 		return
 	}
 
 	out, _ := json.Marshal(map[string]string{"team_id": teamID, "status": "created"})
-	sendToolResult(p.ToolCallID, string(out), false)
+	ToolResult(p.ToolCallID, string(out), false)
 }
 
 func handleAddToTeam(p beforeToolCallPayload) {
@@ -368,7 +364,7 @@ func handleAddToTeam(p beforeToolCallPayload) {
 		AgentID string `json:"agent_id"`
 	}
 	if err := json.Unmarshal(p.Input, &input); err != nil || input.TeamID == "" || input.AgentID == "" {
-		sendToolResult(p.ToolCallID, "add_to_team: team_id and agent_id are required", true)
+		ToolResult(p.ToolCallID, "add_to_team: team_id and agent_id are required", true)
 		return
 	}
 
@@ -376,7 +372,7 @@ func handleAddToTeam(p beforeToolCallPayload) {
 		TeamID  string `json:"team_id"`
 		AgentID string `json:"agent_id"`
 	}
-	result := hostCallWithResponse("team_add_member", addParams{TeamID: input.TeamID, AgentID: input.AgentID})
+	result := agentCall("team_add_member", addParams{TeamID: input.TeamID, AgentID: input.AgentID})
 
 	var resp struct {
 		Error string `json:"error,omitempty"`
@@ -385,10 +381,10 @@ func handleAddToTeam(p beforeToolCallPayload) {
 		_ = json.Unmarshal([]byte(result), &resp)
 	}
 	if resp.Error != "" {
-		sendToolResult(p.ToolCallID, "add_to_team: "+resp.Error, true)
+		ToolResult(p.ToolCallID, "add_to_team: "+resp.Error, true)
 		return
 	}
-	sendToolResult(p.ToolCallID, `{"status":"added"}`, false)
+	ToolResult(p.ToolCallID, `{"status":"added"}`, false)
 }
 
 func handleGetTeam(p beforeToolCallPayload) {
@@ -396,17 +392,17 @@ func handleGetTeam(p beforeToolCallPayload) {
 		TeamID string `json:"team_id"`
 	}
 	if err := json.Unmarshal(p.Input, &input); err != nil || input.TeamID == "" {
-		sendToolResult(p.ToolCallID, "get_team: team_id is required", true)
+		ToolResult(p.ToolCallID, "get_team: team_id is required", true)
 		return
 	}
 	// Return available info. The host doesn't have a dedicated get_team method yet;
 	// we return what we know from the agent list.
-	result := hostCallWithResponse("agent_list", map[string]string{})
+	result := agentCall("agent_list", map[string]string{})
 	if result == "" {
 		result = `{"agents":[]}`
 	}
 	out, _ := json.Marshal(map[string]string{"team_id": input.TeamID, "members": result})
-	sendToolResult(p.ToolCallID, string(out), false)
+	ToolResult(p.ToolCallID, string(out), false)
 }
 
 func handleShutdownTeam(p beforeToolCallPayload) {
@@ -414,14 +410,14 @@ func handleShutdownTeam(p beforeToolCallPayload) {
 		TeamID string `json:"team_id"`
 	}
 	if err := json.Unmarshal(p.Input, &input); err != nil || input.TeamID == "" {
-		sendToolResult(p.ToolCallID, "shutdown_team: team_id is required", true)
+		ToolResult(p.ToolCallID, "shutdown_team: team_id is required", true)
 		return
 	}
 
 	type closeParams struct {
 		ID string `json:"id"`
 	}
-	result := hostCallWithResponse("team_close", closeParams{ID: input.TeamID})
+	result := agentCall("team_close", closeParams{ID: input.TeamID})
 
 	var resp struct {
 		Error string `json:"error,omitempty"`
@@ -430,10 +426,10 @@ func handleShutdownTeam(p beforeToolCallPayload) {
 		_ = json.Unmarshal([]byte(result), &resp)
 	}
 	if resp.Error != "" {
-		sendToolResult(p.ToolCallID, "shutdown_team: "+resp.Error, true)
+		ToolResult(p.ToolCallID, "shutdown_team: "+resp.Error, true)
 		return
 	}
-	sendToolResult(p.ToolCallID, `{"status":"closed"}`, false)
+	ToolResult(p.ToolCallID, `{"status":"closed"}`, false)
 }
 
 func handleSendMessage(p beforeToolCallPayload) {
@@ -442,7 +438,7 @@ func handleSendMessage(p beforeToolCallPayload) {
 		Message string `json:"message"`
 	}
 	if err := json.Unmarshal(p.Input, &input); err != nil || input.AgentID == "" {
-		sendToolResult(p.ToolCallID, "send_message: agent_id and message are required", true)
+		ToolResult(p.ToolCallID, "send_message: agent_id and message are required", true)
 		return
 	}
 
@@ -450,7 +446,7 @@ func handleSendMessage(p beforeToolCallPayload) {
 		ID      string `json:"id"`
 		Message string `json:"message"`
 	}
-	result := hostCallWithResponse("agent_send_message", msgParams{ID: input.AgentID, Message: input.Message})
+	result := agentCall("agent_send_message", msgParams{ID: input.AgentID, Message: input.Message})
 
 	var resp struct {
 		Error string `json:"error,omitempty"`
@@ -459,123 +455,11 @@ func handleSendMessage(p beforeToolCallPayload) {
 		_ = json.Unmarshal([]byte(result), &resp)
 	}
 	if resp.Error != "" {
-		sendToolResult(p.ToolCallID, "send_message: "+resp.Error, true)
+		ToolResult(p.ToolCallID, "send_message: "+resp.Error, true)
 		return
 	}
 	upsertAgent(input.AgentID, "", "", "← "+truncate(input.Message, 60))
-	sendToolResult(p.ToolCallID, `{"status":"sent"}`, false)
-}
-
-func onCommand(raw json.RawMessage) {
-	var payload struct {
-		Name string `json:"name"`
-	}
-	if err := json.Unmarshal(raw, &payload); err != nil || payload.Name != "agents" {
-		return
-	}
-
-	if len(agentRecords) == 0 {
-		hostCallJSON("modal", map[string]string{"text": "No sub-agents running."})
-		return
-	}
-
-	text := "Sub-agents\n" + strings.Repeat("─", 40) + "\n\n"
-	for _, r := range agentRecords {
-		text += r.id
-		if r.name != "" && r.name != r.id {
-			text += "  (" + r.name + ")"
-		}
-		text += "\n"
-		if r.task != "" {
-			text += "  Task: " + r.task + "\n"
-		}
-		if r.lastUpdate != "" {
-			text += "  Last: " + r.lastUpdate + "\n"
-		}
-		text += "\n"
-	}
-	hostCallJSON("modal", map[string]string{"text": strings.TrimRight(text, "\n")})
-}
-
-func registerTool(name, desc, inputSchema string) int32 {
-	type toolParams struct {
-		Name        string          `json:"name"`
-		Description string          `json:"description"`
-		InputSchema json.RawMessage `json:"input_schema"`
-	}
-	rc := hostCallJSON(
-		"register_tool",
-		toolParams{Name: name, Description: desc, InputSchema: json.RawMessage(inputSchema)},
-	)
-	if rc != 0 {
-		return rc
-	}
-	return hostCallJSON("subscribe", map[string]string{"event": "before_tool_call"})
-}
-
-func sendToolResult(toolCallID, result string, isError bool) {
-	hostCallJSON("tool_result", map[string]any{"tool_call_id": toolCallID, "result": result, "is_error": isError})
-}
-
-func hostCallWithResponse(method string, params any) string {
-	type request struct {
-		Method string `json:"method"`
-		Params any    `json:"params,omitempty"`
-	}
-	reqBytes, err := json.Marshal(request{Method: method, Params: params})
-	if err != nil {
-		return ""
-	}
-	reqBuf := make([]byte, len(reqBytes))
-	copy(reqBuf, reqBytes)
-	reqPtr := uintptr(unsafe.Pointer(&reqBuf[0]))
-
-	var respPtr, respLen uint32
-	hostCall(
-		uint32(reqPtr), uint32(len(reqBuf)),
-		uint32(uintptr(unsafe.Pointer(&respPtr))),
-		uint32(uintptr(unsafe.Pointer(&respLen))),
-	)
-	if respPtr == 0 || respLen == 0 {
-		return ""
-	}
-	resp := make([]byte, respLen)
-	mem := (*[1 << 28]byte)(unsafe.Pointer(uintptr(respPtr)))
-	copy(resp, mem[:respLen])
-	delete(pinned, uintptr(respPtr))
-	return string(resp)
-}
-
-func hostCallJSON(method string, params any) int32 {
-	type request struct {
-		Method string `json:"method"`
-		Params any    `json:"params,omitempty"`
-	}
-	reqBytes, err := json.Marshal(request{Method: method, Params: params})
-	if err != nil {
-		return 1
-	}
-	reqBuf := make([]byte, len(reqBytes))
-	copy(reqBuf, reqBytes)
-	reqPtr := uintptr(unsafe.Pointer(&reqBuf[0]))
-	var respPtr, respLen uint32
-	rc := hostCall(
-		uint32(reqPtr), uint32(len(reqBuf)),
-		uint32(uintptr(unsafe.Pointer(&respPtr))),
-		uint32(uintptr(unsafe.Pointer(&respLen))),
-	)
-	if respPtr != 0 {
-		delete(pinned, uintptr(respPtr))
-	}
-	return int32(rc)
-}
-
-func logMsg(level int, msg string) {
-	b := []byte(msg)
-	if len(b) == 0 {
-		return
-	}
-	hostLog(uint32(level), uint32(uintptr(unsafe.Pointer(&b[0]))), uint32(len(b)))
+	ToolResult(p.ToolCallID, `{"status":"sent"}`, false)
 }
 
 func main() {}
