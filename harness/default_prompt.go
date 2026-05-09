@@ -22,19 +22,19 @@ func buildDefaultActionPrompt(tools []sdk.Tool, commands []Command) string {
 	sb.WriteString("**The correct pattern:** call the tool first, then explain what you found or did.\n\n")
 	sb.WriteString("The only text you should produce before a tool call is a clarifying question when you genuinely cannot proceed without more information. If you know what to do, do it now.\n")
 
+	// Tool schemas are already sent to the model via the API — listing them
+	// again with full descriptions in the system prompt doubles the token cost.
+	// Just name them so the model knows what's available.
 	if len(tools) > 0 {
 		sorted := make([]sdk.Tool, len(tools))
 		copy(sorted, tools)
 		sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
 
-		sb.WriteString("\n### Tools\n\n")
-		for _, t := range sorted {
-			desc := t.Description
-			if desc == "" {
-				desc = "(no description)"
-			}
-			fmt.Fprintf(&sb, "- **%s** — %s\n", t.Name, desc)
+		names := make([]string, len(sorted))
+		for i, t := range sorted {
+			names[i] = t.Name
 		}
+		fmt.Fprintf(&sb, "\nAvailable tools: %s\n", strings.Join(names, ", "))
 	}
 
 	if len(commands) > 0 {
