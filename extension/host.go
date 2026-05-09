@@ -85,6 +85,11 @@ type Host struct {
 
 	pendingTools map[string]chan toolResult
 
+	// nativeTools holds Go-native tool handlers registered via RegisterNativeTool.
+	// These are checked before WASM dispatch in ExecuteTool.
+	nativeTools   map[string]func(ctx context.Context, input json.RawMessage) (string, bool)
+	nativeToolsMu sync.RWMutex
+
 	// Callbacks set by the harness.
 	OnSendMessage        func(msg sdk.Message)
 	OnSetStatus          func(key, value string)
@@ -162,6 +167,7 @@ func NewHost(logger *slog.Logger) *Host {
 		registeredTools: make(map[string]sdk.Tool),
 		toolOwners:      make(map[string]string),
 		pendingTools:    make(map[string]chan toolResult),
+		nativeTools:     make(map[string]func(ctx context.Context, input json.RawMessage) (string, bool)),
 		Bus:             NewEventBus(),
 	}
 	h.dispatch = h.buildDispatch()
@@ -1047,6 +1053,26 @@ func loadManifestPermissions(wasmPath string, logger *slog.Logger) []sdk.Permiss
 	return manifest.Permissions
 }
 
+// RegisterNativeTool registers a Go-native tool handler that is invoked directly
+// in ExecuteTool without WASM dispatch. The tool schema is also registered so the
+// LLM sees it alongside WASM-backed tools.
+//
+// fn receives the raw JSON input and returns (result string, isError bool).
+// Native tools still fire EventAfterToolCall so WASM extensions can observe results.
+func (h *Host) RegisterNativeTool(tool sdk.Tool, fn func(ctx context.Context, input json.RawMessage) (string, bool)) {
+	h.nativeToolsMu.Lock()
+	h.nativeTools[tool.Name] = fn
+	h.nativeToolsMu.Unlock()
+
+	h.mu.Lock()
+	h.registeredTools[tool.Name] = tool
+	h.mu.Unlock()
+
+	if h.OnRegisterTool != nil {
+		_ = h.OnRegisterTool(tool)
+	}
+}
+
 // ExecuteTool dispatches a tool call to subscribed extensions and blocks until
 // an extension returns the result via the tool_result host_call method.
 // It dispatches EventBeforeToolCall so extensions may intercept the call.
@@ -1056,6 +1082,47 @@ func (h *Host) ExecuteTool(
 	agentID, toolCallID, toolName string,
 	input json.RawMessage,
 ) (toolResult, error) {
+	// Check native handler first — no WASM dispatch needed.
+	h.nativeToolsMu.RLock()
+	nativeFn, isNative := h.nativeTools[toolName]
+	h.nativeToolsMu.RUnlock()
+
+	if isNative {
+		// Fire before_tool_call so extensions can intercept or cancel native tools.
+		beforePayload, _ := json.Marshal(sdk.BeforeToolCallPayload{
+			AgentID:    agentID,
+			ToolCallID: toolCallID,
+			ToolName:   toolName,
+			Input:      input,
+		})
+		beforeEvt := sdk.Event{Type: sdk.EventBeforeToolCall, Payload: beforePayload}
+		responses, _ := h.DispatchEvent(ctx, beforeEvt)
+		for _, r := range responses {
+			if r.Cancel {
+				return toolResult{Result: "tool call cancelled by extension", IsError: true}, nil
+			}
+		}
+
+		result, isError := nativeFn(ctx, input)
+		tr := toolResult{Result: result, IsError: isError}
+
+		// Fire after_tool_call so extensions can observe results.
+		afterPayload, _ := json.Marshal(sdk.AfterToolCallPayload{
+			AgentID:    agentID,
+			ToolCallID: toolCallID,
+			ToolName:   toolName,
+			Result:     result,
+			IsError:    isError,
+		})
+		afterEvt := sdk.Event{Type: sdk.EventAfterToolCall, Payload: afterPayload}
+		_, _ = h.DispatchEvent(ctx, afterEvt)
+
+		if h.OnAfterToolCall != nil {
+			h.OnAfterToolCall(toolCallID, toolName, result, isError)
+		}
+		return tr, nil
+	}
+
 	ch := make(chan toolResult, 1)
 
 	h.pendingMu.Lock()
