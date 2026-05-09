@@ -20,22 +20,14 @@ import (
 	"github.com/mattdurham/wllr/extension"
 	"github.com/mattdurham/wllr/harness"
 	"github.com/mattdurham/wllr/mcp"
+	"github.com/mattdurham/wllr/sdk"
 )
 
 // Built-in extension WASM modules embedded at compile time.
 // These are trusted extensions that receive all permissions automatically.
 //
-//go:embed builtins/readfile.wasm
-var readfileWASM []byte
-
-//go:embed builtins/writefile.wasm
-var writefileWASM []byte
-
-//go:embed builtins/exec.wasm
-var execWASM []byte
-
-//go:embed builtins/env.wasm
-var envWASM []byte
+// read_file, write_file, exec, and get_env are now native Go tools registered
+// directly on the Host via RegisterNativeTool — no WASM needed for stateless I/O.
 
 //go:embed builtins/agents.wasm
 var agentsWASM []byte
@@ -147,15 +139,98 @@ func main() {
 	// session_start handlers call register_command.
 	m := harness.New(pool, "main", h)
 
-	// Load built-in trusted extensions first.
+	// Register stateless tools as native Go functions — bypasses WASM entirely.
+	h.RegisterNativeTool(sdk.Tool{
+		Name:        "read_file",
+		Description: "Read the contents of a file from the filesystem",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Absolute or relative path of the file to read"}},"required":["path"]}`),
+	}, func(_ context.Context, input json.RawMessage) (string, bool) {
+		var in struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal(input, &in); err != nil || in.Path == "" {
+			return "path is required", true
+		}
+		content, err := os.ReadFile(in.Path)
+		if err != nil {
+			return "read_file: " + err.Error(), true
+		}
+		return string(content), false
+	})
+
+	h.RegisterNativeTool(sdk.Tool{
+		Name:        "write_file",
+		Description: "Write content to a file on the filesystem",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Path of the file to write"},"content":{"type":"string","description":"Content to write to the file"}},"required":["path","content"]}`),
+	}, func(_ context.Context, input json.RawMessage) (string, bool) {
+		var in struct {
+			Path    string `json:"path"`
+			Content string `json:"content"`
+		}
+		if err := json.Unmarshal(input, &in); err != nil || in.Path == "" {
+			return "path is required", true
+		}
+		if err := os.MkdirAll(filepath.Dir(in.Path), 0o755); err != nil {
+			return "write_file: " + err.Error(), true
+		}
+		if err := os.WriteFile(in.Path, []byte(in.Content), 0o644); err != nil {
+			return "write_file: " + err.Error(), true
+		}
+		return fmt.Sprintf("written %d bytes to %s", len(in.Content), in.Path), false
+	})
+
+	h.RegisterNativeTool(sdk.Tool{
+		Name:        "exec",
+		Description: "Execute a shell command on the host system",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute"},"dir":{"type":"string","description":"Working directory (optional, defaults to current)"}},"required":["command"]}`),
+	}, func(ctx context.Context, input json.RawMessage) (string, bool) {
+		var in struct {
+			Command string `json:"command"`
+			Dir     string `json:"dir"`
+		}
+		if err := json.Unmarshal(input, &in); err != nil || in.Command == "" {
+			return "command is required", true
+		}
+		cmd := exec.CommandContext(ctx, "sh", "-c", in.Command)
+		if in.Dir != "" {
+			cmd.Dir = in.Dir
+		}
+		out, err := cmd.CombinedOutput()
+		output := string(out)
+		if err != nil {
+			if ctx.Err() != nil {
+				return "exec cancelled", true
+			}
+			if output == "" {
+				return err.Error(), true
+			}
+			return output + "\nerror: " + err.Error(), true
+		}
+		return output, false
+	})
+
+	h.RegisterNativeTool(sdk.Tool{
+		Name:        "get_env",
+		Description: "Read environment variables from the host system",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"name":{"type":"string","description":"Specific env var name to look up (optional — omit to get all)"}}}`),
+	}, func(_ context.Context, input json.RawMessage) (string, bool) {
+		var in struct {
+			Name string `json:"name"`
+		}
+		_ = json.Unmarshal(input, &in) // best-effort; empty in.Name means "return all"
+		if in.Name != "" {
+			return os.Getenv(in.Name), false
+		}
+		vars := os.Environ()
+		data, _ := json.Marshal(vars)
+		return string(data), false
+	})
+
+	// Load built-in trusted WASM extensions.
 	builtins := []struct {
 		name string
 		data []byte
 	}{
-		{"readfile", readfileWASM},
-		{"writefile", writefileWASM},
-		{"exec", execWASM},
-		{"env", envWASM},
 		{"agents", agentsWASM},
 		{"history", historyWASM},
 	}
