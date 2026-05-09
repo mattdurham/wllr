@@ -1,13 +1,11 @@
 module github.com/mattdurham/wllr
 
-go 1.26.2
-
-replace charm.land/fantasy => /Users/mdurham/source/fantasy
+go 1.26.3
 
 require (
 	charm.land/bubbles/v2 v2.1.0
 	charm.land/bubbletea/v2 v2.0.6
-	charm.land/fantasy v0.0.0-00010101000000-000000000000
+	charm.land/fantasy v0.23.1
 	charm.land/lipgloss/v2 v2.0.3
 	github.com/tetratelabs/wazero v1.11.0
 )
