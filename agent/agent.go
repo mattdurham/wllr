@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"charm.land/fantasy"
 	"github.com/mattdurham/wllr/sdk"
@@ -176,8 +177,8 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 		priorHistory = combined
 	}
 
-	// Create a child context and store its cancel.
-	childCtx, cancel := context.WithCancel(ctx)
+	// Create a child context with a timeout so hung API requests don't block forever.
+	childCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	a.cancelMu.Lock()
 	a.cancel = cancel
 	a.cancelMu.Unlock()
