@@ -90,6 +90,11 @@ type Host struct {
 	OnToolResult         func(toolCallID, result string, isError bool)
 	OnAfterToolCall      func(toolCallID, toolName, result string, isError bool)
 	OnModal              func(text string)
+	// OnShowPicker opens the interactive picker overlay in the TUI.
+	// After the user selects an item the harness fires EventOnCommand{name: callback, args: [id]}.
+	OnShowPicker func(title string, items []sdk.ShowPickerItem, callback string)
+	// OnAgentResetHistory replaces the main agent's history and rebuilds the chat view.
+	OnAgentResetHistory  func(messages []sdk.Message) error
 	OnSetSystemPrompt    func(prompt string)
 	OnAppendSystemPrompt func(text string)
 	OnExec               func(command, dir string) (string, error)
@@ -389,6 +394,12 @@ func (h *Host) buildDispatch() map[string]func(ctx context.Context, ext *Extensi
 		},
 		sdk.MethodTeamRemoveMember: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleTeamRemoveMember(req)
+		},
+		sdk.MethodShowPicker: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleShowPicker(req)
+		},
+		sdk.MethodAgentResetHistory: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleAgentResetHistory(req)
 		},
 		sdk.MethodMCPSpawn: func(_ context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleMCPSpawn(ext, req)
@@ -810,6 +821,32 @@ func (h *Host) handleTeamRemoveMember(req sdk.HostCallRequest) sdk.HostCallRespo
 		return sdk.HostCallResponse{Error: fmt.Sprintf("team_remove_member: %v", err)}
 	}
 	if err := h.OnTeamRemoveMember(params.TeamID, params.AgentID); err != nil {
+		return sdk.HostCallResponse{Error: err.Error()}
+	}
+	return sdk.HostCallResponse{}
+}
+
+func (h *Host) handleShowPicker(req sdk.HostCallRequest) sdk.HostCallResponse {
+	if h.OnShowPicker == nil {
+		return sdk.HostCallResponse{Error: "show_picker: not supported by host"}
+	}
+	var params sdk.ShowPickerParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return sdk.HostCallResponse{Error: fmt.Sprintf("show_picker: %v", err)}
+	}
+	h.OnShowPicker(params.Title, params.Items, params.Callback)
+	return sdk.HostCallResponse{}
+}
+
+func (h *Host) handleAgentResetHistory(req sdk.HostCallRequest) sdk.HostCallResponse {
+	if h.OnAgentResetHistory == nil {
+		return sdk.HostCallResponse{Error: "agent_reset_history: not supported by host"}
+	}
+	var params sdk.AgentResetHistoryParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return sdk.HostCallResponse{Error: fmt.Sprintf("agent_reset_history: %v", err)}
+	}
+	if err := h.OnAgentResetHistory(params.Messages); err != nil {
 		return sdk.HostCallResponse{Error: err.Error()}
 	}
 	return sdk.HostCallResponse{}

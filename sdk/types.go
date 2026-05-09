@@ -240,4 +240,30 @@ const (
 	MethodMCPClose = "mcp_close"
 	MethodMCPSend  = "mcp_send"
 	MethodMCPRead  = "mcp_read"
+
+	// MethodShowPicker opens an interactive TUI list picker. After the user
+	// selects an item the harness fires EventOnCommand{name: callback, args: [id]}.
+	MethodShowPicker = "show_picker"
+	// MethodAgentResetHistory replaces the main agent's conversation history
+	// and rebuilds the chat view from the supplied messages.
+	MethodAgentResetHistory = "agent_reset_history"
 )
+
+// ShowPickerItem is one entry displayed in the interactive picker overlay.
+type ShowPickerItem struct {
+	ID       string `json:"id"`
+	Label    string `json:"label"`
+	Sublabel string `json:"sublabel,omitempty"`
+}
+
+// ShowPickerParams is the params blob for the show_picker host_call.
+type ShowPickerParams struct {
+	Title    string           `json:"title"`
+	Items    []ShowPickerItem `json:"items"`
+	Callback string           `json:"callback"`
+}
+
+// AgentResetHistoryParams is the params blob for the agent_reset_history host_call.
+type AgentResetHistoryParams struct {
+	Messages []Message `json:"messages"`
+}

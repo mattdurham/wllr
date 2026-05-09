@@ -275,6 +275,23 @@ func (p *AgentPool) Send(id string, content string) error {
 	return nil
 }
 
+// SetAgentHistory replaces the conversation history of the named agent.
+// Returns ErrAgentNotFound if id is unknown.
+func (p *AgentPool) SetAgentHistory(id string, history []sdk.Message) error {
+	p.mu.RLock()
+	a, exists := p.agents[id]
+	p.mu.RUnlock()
+	if !exists {
+		return ErrAgentNotFound
+	}
+	replacement := make([]sdk.Message, len(history))
+	copy(replacement, history)
+	a.historyMu.Lock()
+	a.history = replacement
+	a.historyMu.Unlock()
+	return nil
+}
+
 // Cancel cancels the active turn of the named agent.
 // Returns ErrAgentNotFound if id is unknown. No-op if no turn is running.
 func (p *AgentPool) Cancel(id string) error {

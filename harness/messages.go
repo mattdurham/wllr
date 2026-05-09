@@ -76,6 +76,19 @@ type dispatchOnCommandMsg struct {
 // streamTickMsg fires periodically while streaming to update the working indicator.
 type streamTickMsg struct{}
 
+// ShowPickerMsg asks the TUI to open the interactive picker overlay.
+type ShowPickerMsg struct {
+	Title    string
+	Items    []sdk.ShowPickerItem
+	Callback string
+}
+
+// ResetHistoryMsg asks the TUI to replace the main agent's history and
+// rebuild the chat view from the supplied messages.
+type ResetHistoryMsg struct {
+	Messages []sdk.Message
+}
+
 // sessionStartDoneMsg is returned after EventSessionStart has been dispatched to
 // all extensions. It is distinct from ExtensionEventResultMsg so the harness can
 // inject the default action prompt exactly once, after all session_start handlers

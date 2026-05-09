@@ -55,6 +55,8 @@ type Model struct {
 
 	width, height int
 
+	picker         PickerView
+
 	suggestionIdx  int
 	dropdownOffset int // first visible suggestion index
 
@@ -155,6 +157,21 @@ func (m *Model) SetProgram(p *tea.Program) {
 		}
 		m.extHost.OnModal = func(text string) {
 			p.Send(ShowModalMsg{Text: text})
+		}
+		m.extHost.OnShowPicker = func(title string, items []sdk.ShowPickerItem, callback string) {
+			p.Send(ShowPickerMsg{Title: title, Items: items, Callback: callback})
+		}
+		poolRef := m.agentPool
+		mainID := m.mainAgentID
+		m.extHost.OnAgentResetHistory = func(messages []sdk.Message) error {
+			if poolRef == nil {
+				return fmt.Errorf("no agent pool")
+			}
+			if err := poolRef.SetAgentHistory(mainID, messages); err != nil {
+				return err
+			}
+			p.Send(ResetHistoryMsg{Messages: messages})
+			return nil
 		}
 
 		// Wire agent and team management — all agent-pool operations belong in
@@ -411,12 +428,33 @@ func (m Model) updateWindow(msg tea.Msg) (Model, tea.Cmd, bool) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.chat.SetSize(msg.Width, m.chatHeight())
+		m.picker.SetSize(msg.Width, m.chatHeight())
 		m.input.SetWidth(msg.Width - 4)
 		m.statusBar.SetWidth(msg.Width)
 		return m, nil, true
 	case ShowModalMsg:
 		m.modalContent = msg.Text
 		m.modalScroll = 0
+		return m, nil, true
+	case ShowPickerMsg:
+		m.picker.Open(msg.Title, msg.Items, msg.Callback)
+		m.picker.SetSize(m.width, m.chatHeight())
+		return m, nil, true
+	case ResetHistoryMsg:
+		m.history = make([]sdk.Message, len(msg.Messages))
+		copy(m.history, msg.Messages)
+		m.chat.Clear()
+		for _, sm := range msg.Messages {
+			switch sm.Role {
+			case sdk.RoleUser:
+				m.chat.AddUserMessage(sm.Content)
+			case sdk.RoleAssistant:
+				m.chat.AppendToken(sm.Content)
+				m.chat.FinalizeMessage()
+			}
+		}
+		m.picker.Close()
+		m.chat.AddNotification("History restored — conversation loaded from selected point.")
 		return m, nil, true
 	}
 	return m, nil, false
@@ -428,6 +466,27 @@ func (m Model) updateKeyPress(msg tea.Msg) (Model, tea.Cmd, bool) {
 	kp, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return m, nil, false
+	}
+
+	// Picker consumes all keys while active.
+	if m.picker.IsActive() {
+		callback := m.picker.Callback
+		selected, id, cancelled := m.picker.HandleKey(kp)
+		if cancelled {
+			m.picker.Close()
+			return m, nil, true
+		}
+		if selected {
+			m.picker.Close()
+			extHost := m.extHost
+			return m, func() tea.Msg {
+				payload, _ := json.Marshal(sdk.OnCommandPayload{Name: callback, Args: []string{id}})
+				evt := sdk.Event{Type: sdk.EventOnCommand, Payload: payload}
+				results, err := extHost.DispatchEvent(context.Background(), evt)
+				return ExtensionEventResultMsg{Results: results, Err: err}
+			}, true
+		}
+		return m, nil, true
 	}
 
 	// Modal consumes all keys; esc/enter/q close it.
@@ -955,7 +1014,9 @@ func (m Model) View() tea.View {
 	inputBox := m.renderInputBox()
 
 	var sb strings.Builder
-	if m.modalContent != "" {
+	if m.picker.IsActive() {
+		sb.WriteString(strings.TrimRight(m.picker.View(), "\n") + "\n")
+	} else if m.modalContent != "" {
 		chatH := m.height - inputAreaHeight
 		if chatH < 5 {
 			chatH = 5
