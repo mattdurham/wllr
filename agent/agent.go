@@ -205,6 +205,13 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 
 	go func() {
 		defer cancel()
+		defer func() {
+			if r := recover(); r != nil {
+				if onDone != nil {
+					onDone(fmt.Errorf("agent %s: panic: %v", a.id, r))
+				}
+			}
+		}()
 
 		if lm == nil {
 			if onDone != nil {

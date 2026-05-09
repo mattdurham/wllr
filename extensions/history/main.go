@@ -7,6 +7,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -86,8 +88,10 @@ func handleSessionStart() {
 		return
 	}
 
+	// Use crypto/rand for the ID so filenames are unique even if time.Now()
+	// returns a fixed value in the WASM runtime.
+	id := randomID()
 	ts := time.Now()
-	id := fmt.Sprintf("%d", ts.UnixNano())
 	fname := ts.Format("2006-01-02T15-04-05") + "_" + id + ".jsonl"
 	currentFile = filepath.Join(sessDir, fname)
 	entryCount = 0
@@ -99,6 +103,15 @@ func handleSessionStart() {
 		CWD:       cwd,
 	})
 	Logf(1, "history: session started → %s", currentFile)
+}
+
+func randomID() string {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback: use time nanoseconds if rand fails.
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
+	return hex.EncodeToString(b)
 }
 
 func recordMessage(role, content string) {
@@ -244,6 +257,14 @@ func listSessions() ([]sessionInfo, error) {
 }
 
 func peekSession(path string) (sessionInfo, error) {
+	// Use file modification time for the display timestamp — the header
+	// timestamp comes from time.Now() inside WASM which may be incorrect.
+	info, err := os.Stat(path)
+	if err != nil {
+		return sessionInfo{}, err
+	}
+	ts := info.ModTime().Format("2006-01-02 15:04")
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return sessionInfo{}, err
@@ -253,18 +274,10 @@ func peekSession(path string) (sessionInfo, error) {
 		return sessionInfo{}, fmt.Errorf("empty")
 	}
 
-	ts := "unknown"
-	var hdr sessionHeader
-	if json.Unmarshal([]byte(lines[0]), &hdr) == nil && hdr.Timestamp != "" {
-		if t, err2 := time.Parse(time.RFC3339Nano, hdr.Timestamp); err2 == nil {
-			ts = t.Format("2006-01-02 15:04")
-		}
-	}
-
 	preview := "(empty)"
 	for _, line := range lines[1:] {
 		var m messageEntry
-		if json.Unmarshal([]byte(line), &m) == nil && m.Role == "user" && m.Content != "" {
+		if json.Unmarshal([]byte(line), &m) == nil && m.Type == "message" && m.Role == "user" && m.Content != "" {
 			r := []rune(m.Content)
 			if len(r) > 70 {
 				preview = string(r[:70]) + "…"

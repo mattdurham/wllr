@@ -91,7 +91,15 @@ func main() {
 	// In TUI mode stderr is suppressed (it bleeds into alt-screen).
 	// In --exec mode stderr stays on so the user can see output.
 	tuiMode := *execPrompt == ""
-	slog.SetDefault(slog.New(newTeeHandler(os.Stderr, !tuiMode)))
+	var logHandler slog.Handler = newTeeHandler(os.Stderr, !tuiMode)
+	if tuiMode {
+		// Also write to ~/.wllr/wllr.log so errors are visible after the fact.
+		if lf, err := openLogFile(); err == nil {
+			logHandler = newTeeHandler(lf, true)
+			defer lf.Close()
+		}
+	}
+	slog.SetDefault(slog.New(logHandler))
 
 	// Create agent pool and spawn the main agent.
 	pool := agent.NewPool()
