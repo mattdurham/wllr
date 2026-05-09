@@ -646,7 +646,11 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 func (m Model) updateTools(msg tea.Msg) (Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case ToolCallStartMsg:
-		slog.Info("tool call start", "tool", msg.ToolName, "id", msg.ID)
+		preview := msg.Input
+		if r := []rune(preview); len(r) > 120 {
+			preview = string(r[:120]) + "…"
+		}
+		slog.Info("tool call start", "tool", msg.ToolName, "id", msg.ID, "input", preview)
 		m.chat.AddToolCall(msg.ID, msg.ToolName, msg.Input)
 		return m, nil, true
 	case ToolCallDoneMsg:

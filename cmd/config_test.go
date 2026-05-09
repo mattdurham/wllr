@@ -41,8 +41,8 @@ func TestLoadConfig_ModelDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfig returned error: %v", err)
 	}
-	if cfg.Model != "claude-sonnet-4-5" {
-		t.Errorf("Model = %q, want %q", cfg.Model, "claude-sonnet-4-5")
+	if cfg.Model != "claude-sonnet-4-6" {
+		t.Errorf("Model = %q, want %q", cfg.Model, "claude-sonnet-4-6")
 	}
 }
 
