@@ -110,7 +110,9 @@ deadcode:
 	@echo "    Building main to anchor public APIs..."
 	@go build -o /dev/null ./cmd/
 	@echo "    Running deadcode tool..."
-	@output=$$(deadcode -test ./...); \
+	@# Filter excludes internal/memory (compiled as WASM extension) and testutil (test-only helpers).
+	@# Both are unreachable from the main binary by design.
+	@output=$$(deadcode -test ./... | grep -v -e 'internal/memory' -e 'testutil/'); \
 	if [ -n "$$output" ]; then \
 		echo "❌ Deadcode found:"; \
 		echo "$$output"; \

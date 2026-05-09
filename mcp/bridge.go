@@ -2,7 +2,6 @@ package mcp
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -182,17 +181,4 @@ func (b *Bridge) Close() error {
 	}
 
 	return nil
-}
-
-// ToolHandler returns a function that can be used as an extension tool handler.
-func (b *Bridge) ToolHandler() func(ctx context.Context, name string, args json.RawMessage) (string, error) {
-	return func(ctx context.Context, name string, args json.RawMessage) (string, error) {
-		var argsMap map[string]interface{}
-		if len(args) > 0 {
-			if err := json.Unmarshal(args, &argsMap); err != nil {
-				return "", fmt.Errorf("unmarshal args: %w", err)
-			}
-		}
-		return b.CallTool(ctx, name, argsMap)
-	}
 }

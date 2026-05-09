@@ -7,42 +7,6 @@ import (
 	"time"
 )
 
-// fakeProgram records TokenMsgs sent to it via Send.
-type fakeProgram struct {
-	mu     sync.Mutex
-	tokens []string
-}
-
-func (f *fakeProgram) Send(msg interface{}) {
-	if tm, ok := msg.(TokenMsg); ok {
-		f.mu.Lock()
-		f.tokens = append(f.tokens, tm.Token)
-		f.mu.Unlock()
-	}
-}
-
-func (f *fakeProgram) collected() string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return strings.Join(f.tokens, "")
-}
-
-func (f *fakeProgram) sendCount() int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return len(f.tokens)
-}
-
-// wrapForBatcher wraps fakeProgram so makeBatchedOnToken can use it.
-// makeBatchedOnToken calls p.Send(TokenMsg{...}) directly on a *tea.Program,
-// but we test the tokenBatcher struct directly to avoid the dependency.
-func newBatcher(fp *fakeProgram) *tokenBatcher {
-	return &tokenBatcher{
-		p: nil, // not used in direct testing
-		// We override the send logic below by calling methods directly.
-	}
-}
-
 // ─── tokenBatcher unit tests ─────────────────────────────────────────────────
 
 func TestTokenBatcher_FlushSendsBuffered(t *testing.T) {
