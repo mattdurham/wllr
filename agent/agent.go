@@ -317,13 +317,16 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 			collectedText, err = streamTurn(childCtx, fa, history, content, pool, onToken, onToolCall)
 		}
 
-		// Append the user message and assistant reply to history.
-		a.historyMu.Lock()
-		a.history = append(a.history, sdk.Message{Role: sdk.RoleUser, Content: content})
+		// Only record the turn in history when it produced a response.
+		// Appending the user message without a following assistant message leaves
+		// history in an invalid state that causes the next turn to be rejected
+		// (providers require messages to alternate user/assistant).
 		if collectedText != "" {
+			a.historyMu.Lock()
+			a.history = append(a.history, sdk.Message{Role: sdk.RoleUser, Content: content})
 			a.history = append(a.history, sdk.Message{Role: sdk.RoleAssistant, Content: collectedText})
+			a.historyMu.Unlock()
 		}
-		a.historyMu.Unlock()
 
 		if onDone != nil {
 			onDone(err)

@@ -74,9 +74,10 @@ func shouldCompact(history []sdk.Message, systemPrompt, nextMessage string, cont
 
 // findCutPoint returns the index into history such that history[idx:] fits within
 // keepTokens (using the chars/4 heuristic). The cut always lands on a RoleUser
-// message so the kept slice begins a valid turn. If the entire history fits within
-// the budget, returns 0 (no cut needed). If no user-message boundary exists at or
-// after the bust point, returns 0 (skip compaction entirely — safe fallback).
+// message so the kept slice begins a valid turn. Returns:
+//   - 0: everything fits within the budget (no cut needed)
+//   - j>0: cut before index j, which is guaranteed to be a RoleUser message
+//   - -1: budget is exceeded but no valid user boundary exists (skip compaction)
 func findCutPoint(history []sdk.Message, keepTokens int64) int {
 	if keepTokens <= 0 {
 		keepTokens = defaultKeepRecentTokens
@@ -89,11 +90,11 @@ func findCutPoint(history []sdk.Message, keepTokens int64) int {
 			// starting at i itself (the bust point may be a user message).
 			for j := i; j < len(history); j++ {
 				if history[j].Role == sdk.RoleUser {
-					return j
+					return j // j==0 means cut at the very start (valid, distinct from "fits")
 				}
 			}
-			// No user boundary found — skip compaction entirely.
-			return 0
+			// No user boundary found — caller must skip compaction.
+			return -1
 		}
 	}
 	// Everything fits in budget.
@@ -192,9 +193,10 @@ func compactHistory(
 	}
 
 	// Find the token-budget cut point within rest.
+	// 0 = fits, j>0 = cut before j, -1 = no valid boundary (skip).
 	cutIdx := findCutPoint(rest, keepRecentTokens)
-	if cutIdx == 0 {
-		// Everything fits — no compaction needed.
+	if cutIdx == 0 || cutIdx == -1 {
+		// Everything fits, or no valid user boundary exists — skip compaction.
 		return history, "", nil
 	}
 
