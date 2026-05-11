@@ -90,13 +90,24 @@ Keep each section concise. Preserve exact file paths, function names, and error 
 // compactHistory summarizes the oldest messages using the LLM and returns a
 // compacted history: one summary message followed by the most recent messages.
 // If summarisation fails, returns the original history unchanged.
+//
+// The first message is always kept verbatim — it contains the user's original
+// task and must not be lost to summarization.
 func compactHistory(ctx context.Context, lm fantasy.LanguageModel, history []sdk.Message) ([]sdk.Message, error) {
 	if len(history) <= keepMessages {
 		return history, nil
 	}
 
-	toSummarize := history[:len(history)-keepMessages]
-	toKeep := history[len(history)-keepMessages:]
+	// Always preserve the first message (original task) outside the summary.
+	anchor := history[:1]
+	rest := history[1:]
+
+	if len(rest) <= keepMessages {
+		return history, nil
+	}
+
+	toSummarize := rest[:len(rest)-keepMessages]
+	toKeep := rest[len(rest)-keepMessages:]
 
 	// Build a compact representation of the messages to summarize.
 	var src strings.Builder
@@ -128,10 +139,12 @@ func compactHistory(ctx context.Context, lm fantasy.LanguageModel, history []sdk
 		return history, fmt.Errorf("compaction: empty summary")
 	}
 
-	// Replace the old messages with a single summary entry.
+	// Replace the old messages with a single summary entry, keeping the
+	// original first message (the user's task) at the front.
 	summaryMsg := sdk.Message{
 		Role:    sdk.RoleUser,
 		Content: "[Previous conversation summary — " + fmt.Sprintf("%d messages compacted", len(toSummarize)) + "]\n\n" + summary.String(),
 	}
-	return append([]sdk.Message{summaryMsg}, toKeep...), nil
+	compacted := append([]sdk.Message{summaryMsg}, toKeep...)
+	return append(anchor, compacted...), nil
 }
