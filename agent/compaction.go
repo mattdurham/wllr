@@ -20,10 +20,21 @@ const (
 	keepMessages = 20
 )
 
-// contextWindowForModel returns a conservative default context window.
-// Model-name heuristics are fragile and go stale — prefer setting
-// WLLR_CONTEXT_WINDOW explicitly or configuring the pool via SetContextWindow.
-func contextWindowForModel(_ string) int64 {
+// contextWindowForModel returns the context window for a model from the
+// generated table, defaulting to 1M for unknown models.
+func contextWindowForModel(modelName string) int64 {
+	lower := strings.ToLower(modelName)
+	// Exact match first.
+	if w, ok := modelContextWindows[lower]; ok {
+		return w
+	}
+	// Substring match for versioned aliases (e.g. "claude-sonnet-4-6" matches
+	// "claude-sonnet-4-6-20250514").
+	for id, w := range modelContextWindows {
+		if strings.Contains(lower, id) || strings.Contains(id, lower) {
+			return w
+		}
+	}
 	return defaultContextWindow
 }
 
