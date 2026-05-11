@@ -176,6 +176,7 @@ func (p *AgentPool) Spawn(id string, lm fantasy.LanguageModel, opts SpawnOpts) (
 	}
 	a := &Agent{
 		id:        id,
+		name:      opts.Name,
 		lm:        lm,
 		opts:      opts,
 		pool:      p,

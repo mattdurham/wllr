@@ -1362,3 +1362,91 @@ func TestHost_HandleTeamList_ReturnsTeams(t *testing.T) {
 		t.Errorf("teams: got %v, want [t1 t2]", teams)
 	}
 }
+
+// --- Bug fix tests ---
+
+func TestHost_HandleTeamCreate_ReturnsTeamID(t *testing.T) {
+	// Bug 4 fix: handleTeamCreate must return {"team_id":"...","status":"created"}
+	// not an empty response.
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer h.Close(ctx)
+
+	h.OnTeamCreate = func(id, name string) error { return nil }
+
+	path := writeWASM(t, "minimal.wasm", minimalWASM)
+	if err := h.Load(ctx, path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	ext := h.extensions[0]
+
+	resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+		Method: sdk.MethodTeamCreate,
+		Params: []byte(`{"id":"team-xyz","name":"my team"}`),
+	})
+	if resp.Error != "" {
+		t.Fatalf("team_create: %s", resp.Error)
+	}
+
+	var result map[string]string
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("unmarshal response: %v (raw: %s)", err, resp.Result)
+	}
+	if result["team_id"] != "team-xyz" {
+		t.Errorf("team_id: got %q, want %q", result["team_id"], "team-xyz")
+	}
+	if result["status"] != "created" {
+		t.Errorf("status: got %q, want %q", result["status"], "created")
+	}
+}
+
+func TestHost_HandleAgentRun_CallbackInvoked(t *testing.T) {
+	// Bug 3 fix: agent_run host_call must invoke OnAgentRun with the correct agent ID.
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer h.Close(ctx)
+
+	var calledWith string
+	h.OnAgentRun = func(id string) error {
+		calledWith = id
+		return nil
+	}
+
+	path := writeWASM(t, "minimal.wasm", minimalWASM)
+	if err := h.Load(ctx, path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	ext := h.extensions[0]
+
+	resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+		Method: sdk.MethodAgentRun,
+		Params: []byte(`{"id":"worker-1"}`),
+	})
+	if resp.Error != "" {
+		t.Fatalf("agent_run: %s", resp.Error)
+	}
+	if calledWith != "worker-1" {
+		t.Errorf("OnAgentRun called with %q, want %q", calledWith, "worker-1")
+	}
+}
+
+func TestHost_HandleAgentRun_NilCallback_ReturnsError(t *testing.T) {
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer h.Close(ctx)
+
+	// OnAgentRun not set — should return a clear error, not panic.
+	path := writeWASM(t, "minimal.wasm", minimalWASM)
+	if err := h.Load(ctx, path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	ext := h.extensions[0]
+
+	resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+		Method: sdk.MethodAgentRun,
+		Params: []byte(`{"id":"agent-x"}`),
+	})
+	if resp.Error == "" {
+		t.Fatal("expected error when OnAgentRun is nil, got empty")
+	}
+}
