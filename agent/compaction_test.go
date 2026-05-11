@@ -195,15 +195,20 @@ func TestCompactHistory_LongHistory_ReturnsSummaryPlusRecent(t *testing.T) {
 		t.Fatalf("compactHistory: %v", err)
 	}
 
-	// Result should be 1 summary + keepMessages recent messages.
-	expected := 1 + keepMessages
+	// Result should be anchor (first msg) + 1 summary + keepMessages recent messages.
+	expected := 1 + 1 + keepMessages
 	if len(result) != expected {
 		t.Errorf("expected %d messages, got %d", expected, len(result))
 	}
 
-	// First message should contain the summary.
-	if !strings.Contains(result[0].Content, "summary") {
-		t.Errorf("first message should contain summary text, got: %q", result[0].Content)
+	// First message is the preserved anchor (original task).
+	if result[0].Content != "message content here" {
+		t.Errorf("first message should be the anchor, got: %q", result[0].Content)
+	}
+
+	// Second message should contain the summary.
+	if !strings.Contains(result[1].Content, "summary") {
+		t.Errorf("second message should contain summary text, got: %q", result[1].Content)
 	}
 }
 
