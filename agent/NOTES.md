@@ -198,3 +198,24 @@ has at least 90% of its window available for the system prompt, the summary, and
 medium-length messages). On smaller models the 10% value may coincide with
 `defaultKeepRecentTokens`. The `defaultKeepRecentTokens` constant is retained for callers
 that invoke `compactHistory` directly and pass `keepRecentTokens=0`.
+
+---
+
+## 15. AgentPool.ListTeams and GetTeamMembers — Pool-Level Team Introspection
+
+*Added: 2026-05-11*
+
+**Decision:** `AgentPool.ListTeams()` and `AgentPool.GetTeamMembers(teamID)` are added as
+pool-level convenience methods for enumerating teams and their membership.
+
+**Rationale:** The agents WASM extension exposes a `get_team` tool that the LLM calls to
+inspect team state. Without a dedicated `GetTeamMembers` pool method, the host could only
+return all agents (wrong) or nothing at all. `ListTeams` mirrors `ListAgents` and enables
+the `team_list` host call, allowing the LLM to discover active teams. Both methods take a
+read lock and snapshot under that lock, consistent with all other read methods on the pool.
+
+`GetTeamMembers` returns `ErrTeamNotFound` when the team does not exist, consistent with
+the existing error variable semantics (`ErrAgentNotFound`, `ErrTeamNotFound`).
+
+**Consequence:** These methods expose team membership at a point in time — membership may
+change between the read and subsequent action. Callers must tolerate TOCTOU gaps.

@@ -258,6 +258,8 @@ func TestMethodAgentTeamConstants(t *testing.T) {
 		{sdk.MethodTeamClose, "team_close"},
 		{sdk.MethodTeamAddMember, "team_add_member"},
 		{sdk.MethodTeamRemoveMember, "team_remove_member"},
+		{sdk.MethodTeamGetInfo, "team_get_info"},
+		{sdk.MethodTeamList, "team_list"},
 	} {
 		if tc.name != tc.want {
 			t.Errorf("constant value mismatch: got %q, want %q", tc.name, tc.want)

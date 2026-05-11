@@ -321,21 +321,28 @@ func handleCreateAgent(p beforeToolCallPayload) {
 
 	agentID := "agent-" + input.Name
 
+	// Pass the initial prompt directly to agent_spawn as initial_prompt.
+	// The host calls pool.Send after spawning, starting the first turn immediately.
+	// Using agent_send_message here would only queue to the inbox with no turn
+	// started, leaving the agent permanently idle.
 	type spawnParams struct {
-		ID           string `json:"id"`
-		Name         string `json:"name"`
-		SystemPrompt string `json:"system_prompt"`
-		ModelName    string `json:"model_name"`
+		ID            string `json:"id"`
+		Name          string `json:"name"`
+		SystemPrompt  string `json:"system_prompt"`
+		ModelName     string `json:"model_name"`
+		InitialPrompt string `json:"initial_prompt"`
 	}
 	result := agentCall("agent_spawn", spawnParams{
-		ID:           agentID,
-		Name:         input.Name,
-		SystemPrompt: input.SystemPrompt,
-		ModelName:    input.Model,
+		ID:            agentID,
+		Name:          input.Name,
+		SystemPrompt:  input.SystemPrompt,
+		ModelName:     input.Model,
+		InitialPrompt: input.Prompt,
 	})
 
 	var resp struct {
-		Error string `json:"error,omitempty"`
+		Error   string `json:"error,omitempty"`
+		AgentID string `json:"agent_id,omitempty"`
 	}
 	if result != "" {
 		_ = json.Unmarshal([]byte(result), &resp)
@@ -343,14 +350,6 @@ func handleCreateAgent(p beforeToolCallPayload) {
 	if resp.Error != "" {
 		ToolResult(p.ToolCallID, "create_agent: "+resp.Error, true)
 		return
-	}
-
-	if input.Prompt != "" {
-		type msgParams struct {
-			ID      string `json:"id"`
-			Message string `json:"message"`
-		}
-		agentCall("agent_send_message", msgParams{ID: agentID, Message: input.Prompt})
 	}
 
 	upsertAgent(agentID, input.Name, truncate(input.Prompt, 80), "")
@@ -464,14 +463,22 @@ func handleGetTeam(p beforeToolCallPayload) {
 		ToolResult(p.ToolCallID, "get_team: team_id is required", true)
 		return
 	}
-	// Return available info. The host doesn't have a dedicated get_team method yet;
-	// we return what we know from the agent list.
-	result := agentCall("agent_list", map[string]string{})
-	if result == "" {
-		result = `{"agents":[]}`
+	type teamInfoParams struct {
+		TeamID string `json:"team_id"`
 	}
-	out, _ := json.Marshal(map[string]string{"team_id": input.TeamID, "members": result})
-	ToolResult(p.ToolCallID, string(out), false)
+	result := agentCall("team_get_info", teamInfoParams{TeamID: input.TeamID})
+	if result == "" {
+		ToolResult(p.ToolCallID, "get_team: host returned no response", true)
+		return
+	}
+	var resp struct {
+		Error string `json:"error,omitempty"`
+	}
+	if err := json.Unmarshal([]byte(result), &resp); err == nil && resp.Error != "" {
+		ToolResult(p.ToolCallID, "get_team: "+resp.Error, true)
+		return
+	}
+	ToolResult(p.ToolCallID, result, false)
 }
 
 func handleShutdownTeam(p beforeToolCallPayload) {

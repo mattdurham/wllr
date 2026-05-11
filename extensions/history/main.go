@@ -152,10 +152,63 @@ func handleHistoryCommand() {
 	ShowPicker("Select a session  (↑↓ · enter · esc)", items, "history:session_selected")
 }
 
-// ─── Session selected → message picker ───────────────────────────────────────
+// ─── Session selected → show conversation transcript ─────────────────────────
 
 func handleSessionSelected(path string) {
 	pendingSessionPath = path
+	msgs, err := loadMessages(path)
+	if err != nil || len(msgs) == 0 {
+		Modal("Could not load session messages.")
+		return
+	}
+
+	// Build a readable conversation transcript for the modal.
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Session: %s  (%d messages)\n", conversationTimestamp(path), len(msgs)))
+	sb.WriteString(strings.Repeat("─", 60) + "\n\n")
+	for _, m := range msgs {
+		if m.role == "user" {
+			sb.WriteString("You:\n")
+		} else {
+			sb.WriteString("Assistant:\n")
+		}
+		content := m.content
+		// Truncate very long messages (e.g. file contents) to keep modal readable.
+		if r := []rune(content); len(r) > 800 {
+			content = string(r[:800]) + "\n…[truncated]"
+		}
+		sb.WriteString(content)
+		sb.WriteString("\n\n")
+	}
+	sb.WriteString(strings.Repeat("─", 60) + "\n")
+	sb.WriteString("Press esc to close · /history rollback to restore this session")
+	Modal(sb.String())
+}
+
+// conversationTimestamp reads the session header timestamp from the JSONL file.
+func conversationTimestamp(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "unknown"
+	}
+	lines := strings.SplitN(strings.TrimSpace(string(data)), "\n", 2)
+	if len(lines) == 0 {
+		return "unknown"
+	}
+	var hdr sessionHeader
+	if err := json.Unmarshal([]byte(lines[0]), &hdr); err != nil || hdr.Timestamp == "" {
+		return "unknown"
+	}
+	t, err := time.Parse(time.RFC3339Nano, hdr.Timestamp)
+	if err != nil {
+		return "unknown"
+	}
+	return t.Format("2006-01-02 15:04")
+}
+
+// ─── Rollback picker (separate command) ──────────────────────────────────────
+
+func handleRollbackSession(path string) {
 	msgs, err := loadMessages(path)
 	if err != nil || len(msgs) == 0 {
 		Modal("Could not load session messages.")

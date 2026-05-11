@@ -2,10 +2,7 @@
 
 package main
 
-import (
-	"encoding/json"
-	"os"
-)
+import "encoding/json"
 
 func init() {
 	RegisterTool(
@@ -23,11 +20,11 @@ func init() {
 		if err := json.Unmarshal(input, &in); err != nil || in.Path == "" {
 			return "path is required", true
 		}
-		content, err := os.ReadFile(in.Path)
+		content, err := ReadFile(in.Path)
 		if err != nil {
 			return "read_file: " + err.Error(), true
 		}
-		return string(content), false
+		return content, false
 	})
 }
 

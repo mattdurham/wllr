@@ -400,3 +400,90 @@ func TestAgentPool_CloseTeam_UnknownID_ReturnsError(t *testing.T) {
 		t.Errorf("expected ErrTeamNotFound, got %v", err)
 	}
 }
+
+func TestAgentPool_ListTeams(t *testing.T) {
+	pool := agent.NewPool()
+
+	ids := pool.ListTeams()
+	if len(ids) != 0 {
+		t.Errorf("ListTeams on empty pool: got %v, want []", ids)
+	}
+
+	if _, err := pool.CreateTeam("team-a"); err != nil {
+		t.Fatalf("CreateTeam team-a: %v", err)
+	}
+	if _, err := pool.CreateTeam("team-b"); err != nil {
+		t.Fatalf("CreateTeam team-b: %v", err)
+	}
+
+	ids = pool.ListTeams()
+	if len(ids) != 2 {
+		t.Errorf("ListTeams: expected 2 teams, got %d: %v", len(ids), ids)
+	}
+}
+
+func TestAgentPool_GetTeamMembers(t *testing.T) {
+	pool := agent.NewPool()
+	lm := newMockLM()
+
+	// Spawn two agents and create a team with both.
+	if _, err := pool.Spawn("m1", lm, agent.SpawnOpts{}); err != nil {
+		t.Fatalf("Spawn m1: %v", err)
+	}
+	if _, err := pool.Spawn("m2", lm, agent.SpawnOpts{}); err != nil {
+		t.Fatalf("Spawn m2: %v", err)
+	}
+
+	team, err := pool.CreateTeam("myteam")
+	if err != nil {
+		t.Fatalf("CreateTeam: %v", err)
+	}
+	if err := team.AddMember("m1"); err != nil {
+		t.Fatalf("AddMember m1: %v", err)
+	}
+	if err := team.AddMember("m2"); err != nil {
+		t.Fatalf("AddMember m2: %v", err)
+	}
+
+	members, err := pool.GetTeamMembers("myteam")
+	if err != nil {
+		t.Fatalf("GetTeamMembers: %v", err)
+	}
+	if len(members) != 2 {
+		t.Errorf("GetTeamMembers: expected 2, got %d: %v", len(members), members)
+	}
+}
+
+func TestAgentPool_GetTeamMembers_UnknownTeam_ReturnsError(t *testing.T) {
+	pool := agent.NewPool()
+	_, err := pool.GetTeamMembers("nonexistent")
+	if err == nil {
+		t.Fatal("expected error for GetTeamMembers with unknown team, got nil")
+	}
+	if err != agent.ErrTeamNotFound {
+		t.Errorf("expected ErrTeamNotFound, got %v", err)
+	}
+}
+
+func TestAgentPool_ListTeams_AfterCloseTeam(t *testing.T) {
+	pool := agent.NewPool()
+
+	if _, err := pool.CreateTeam("gone"); err != nil {
+		t.Fatalf("CreateTeam: %v", err)
+	}
+	if _, err := pool.CreateTeam("stay"); err != nil {
+		t.Fatalf("CreateTeam: %v", err)
+	}
+
+	if err := pool.CloseTeam(context.Background(), "gone"); err != nil {
+		t.Fatalf("CloseTeam: %v", err)
+	}
+
+	ids := pool.ListTeams()
+	if len(ids) != 1 {
+		t.Errorf("ListTeams after CloseTeam: expected 1, got %d: %v", len(ids), ids)
+	}
+	if ids[0] != "stay" {
+		t.Errorf("ListTeams: got %q, want %q", ids[0], "stay")
+	}
+}
