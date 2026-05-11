@@ -274,8 +274,8 @@ type ShowPickerItem struct {
 // ShowPickerParams is the params blob for the show_picker host_call.
 type ShowPickerParams struct {
 	Title    string           `json:"title"`
-	Items    []ShowPickerItem `json:"items"`
 	Callback string           `json:"callback"`
+	Items    []ShowPickerItem `json:"items"`
 }
 
 // AgentResetHistoryParams is the params blob for the agent_reset_history host_call.
@@ -287,15 +287,15 @@ type AgentResetHistoryParams struct {
 // It gives extensions a read-only snapshot of the current status bar state
 // so they can compose a fully custom status line.
 type StatusInfo struct {
-	// Tokens is the total token count across all agents in the current session.
-	Tokens int `json:"tokens"`
-	// Working is true while the LLM is streaming a response.
-	Working bool `json:"working"`
+	// Statuses is the current set of keyed status values set via set_status.
+	// The "_override" key is excluded — use set_status_line to manage it.
+	Statuses map[string]string `json:"statuses"`
 	// Provider is the active provider name (e.g. "anthropic").
 	Provider string `json:"provider"`
 	// Model is the active model name (e.g. "claude-opus-4-5").
 	Model string `json:"model"`
-	// Statuses is the current set of keyed status values set via set_status.
-	// The "_override" key is excluded — use set_status_line to manage it.
-	Statuses map[string]string `json:"statuses"`
+	// Tokens is the total token count across all agents in the current session.
+	Tokens int `json:"tokens"`
+	// Working is true while the LLM is streaming a response.
+	Working bool `json:"working"`
 }

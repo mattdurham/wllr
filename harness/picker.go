@@ -14,15 +14,15 @@ var (
 	pickerBorderStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#89CFF0"))
 	pickerSelectedStyle = lipgloss.NewStyle().Background(lipgloss.Color("#1A4A8A")).Foreground(lipgloss.Color("#FFFFFF"))
 	pickerLabelStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
-	pickerSubStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
 	pickerTitleStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#89CFF0"))
 )
 
 // PickerView is a fullscreen overlay list picker shown instead of the chat.
 type PickerView struct {
 	Title    string
-	Items    []sdk.ShowPickerItem
 	Callback string
+
+	Items []sdk.ShowPickerItem
 
 	selectedIdx  int
 	scrollOffset int
@@ -168,7 +168,7 @@ func (p *PickerView) View() string {
 		// Pad to contentWidth.
 		lr := []rune(line)
 		if len(lr) < contentWidth {
-			line = line + strings.Repeat(" ", contentWidth-len(lr))
+			line += strings.Repeat(" ", contentWidth-len(lr))
 		}
 
 		if selected {

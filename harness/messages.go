@@ -79,8 +79,8 @@ type streamTickMsg struct{}
 // ShowPickerMsg asks the TUI to open the interactive picker overlay.
 type ShowPickerMsg struct {
 	Title    string
-	Items    []sdk.ShowPickerItem
 	Callback string
+	Items    []sdk.ShowPickerItem
 }
 
 // ResetHistoryMsg asks the TUI to replace the main agent's history and
@@ -94,6 +94,6 @@ type ResetHistoryMsg struct {
 // inject the default action prompt exactly once, after all session_start handlers
 // have had a chance to register tools and commands.
 type sessionStartDoneMsg struct {
-	Results []sdk.EventResponse
 	Err     error
+	Results []sdk.EventResponse
 }

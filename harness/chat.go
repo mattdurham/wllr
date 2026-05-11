@@ -18,14 +18,6 @@ const roleToolMessage = "tool"
 type chatMessage struct {
 	role    sdk.Role
 	content string
-	// populated when role == "tool"
-	toolID       string
-	toolName     string
-	toolInput    string
-	toolOutput   string // raw tool result (kept for logging; not rendered)
-	toolResponse string // LLM response text that follows the tool call
-	toolDone     bool
-	toolError    bool
 }
 
 // ChatView renders the conversation history in a scrollable viewport.
@@ -38,17 +30,18 @@ type ChatView struct {
 	// histContent caches the rendered historical messages.
 	// Rebuilt only when messages change, not on every streaming token.
 	histContent string
-	messages    []chatMessage
-	vp          viewport.Model
-	width       int
-	height      int
-	histDirty   bool
 
 	// activityName tracks the tool currently running during this turn.
 	// Each new tool call replaces the previous value. Cleared by FinalizeMessage.
 	// Rendered as a single live box between histContent and c.current.
 	activityName  string
 	activityInput string // raw JSON input for the active tool
+	messages      []chatMessage
+	vp            viewport.Model
+	width         int
+	height        int
+	histDirty     bool
+
 	activityDone  bool
 	activityError bool
 
@@ -59,22 +52,12 @@ type ChatView struct {
 }
 
 var (
-	// Assistant box: blue border, white text.
-	asstBorderStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#89CFF0"))
-	asstBorderOldStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#444444"))
-	asstTextStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
-	asstTextOldStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
-
-	systemStyle        = lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("#555555"))
-	userBorderStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#00AA00"))
-	userBorderOldStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#444444"))
-	oldTextStyle       = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
-	toolBorderStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
-	toolBorderOldStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
-	toolDotOldStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
-	toolSuccessStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#00AA00"))
-	toolErrorStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#CC3333"))
-	toolPendingStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
+	asstTextStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
+	systemStyle      = lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("#555555"))
+	toolBorderStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
+	toolSuccessStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00AA00"))
+	toolErrorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#CC3333"))
+	toolPendingStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
 )
 
 // NewChatView creates a ChatView with the given dimensions.
@@ -179,7 +162,6 @@ func (c *ChatView) UpdateToolCall(id string, isError bool, output string) {
 	c.refreshContent()
 	c.vp.GotoBottom()
 }
-
 
 // Clear resets the chat history.
 func (c *ChatView) Clear() {
@@ -448,4 +430,3 @@ func toolInputLines(input string, maxLines, width int) []string {
 
 	return lines
 }
-

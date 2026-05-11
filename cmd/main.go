@@ -13,14 +13,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	fantasy "charm.land/fantasy"
-	fantasyanthropicprovider "charm.land/fantasy/providers/anthropic"
-	fantasygoogleprovider "charm.land/fantasy/providers/google"
-	fantasyopenapiprovider "charm.land/fantasy/providers/openai"
 	"github.com/mattdurham/wllr/agent"
 	"github.com/mattdurham/wllr/extension"
 	"github.com/mattdurham/wllr/harness"
 	"github.com/mattdurham/wllr/mcp"
-	"github.com/mattdurham/wllr/sdk"
 )
 
 // Built-in extension WASM modules embedded at compile time.
@@ -47,36 +43,9 @@ func main() {
 
 	ctx := context.Background()
 
-	// Build fantasy provider based on configured provider name.
-	var fantasyProv fantasy.Provider
-	var provErr error
-
-	switch cfg.Provider {
-	case "anthropic":
-		fantasyProv, provErr = fantasyanthropicprovider.New(
-			fantasyanthropicprovider.WithAPIKey(cfg.AnthropicAPIKey),
-		)
-	case "openai":
-		fantasyProv, provErr = fantasyopenapiprovider.New(
-			fantasyopenapiprovider.WithAPIKey(cfg.OpenAIAPIKey),
-		)
-	case "gemini":
-		fantasyProv, provErr = fantasygoogleprovider.New(
-			fantasygoogleprovider.WithGeminiAPIKey(cfg.GeminiAPIKey),
-		)
-	default:
-		fmt.Fprintf(os.Stderr, "wllr: unknown provider %q\n", cfg.Provider)
-		os.Exit(1)
-	}
-
-	if provErr != nil {
-		fmt.Fprintf(os.Stderr, "wllr: create provider: %v\n", provErr)
-		os.Exit(1)
-	}
-
-	langModel, provErr := fantasyProv.LanguageModel(ctx, cfg.Model)
-	if provErr != nil {
-		fmt.Fprintf(os.Stderr, "wllr: get language model %q from provider %q: %v\n", cfg.Model, cfg.Provider, provErr)
+	fantasyProv, langModel, err := buildProvider(ctx, cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "wllr: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -88,7 +57,11 @@ func main() {
 		// Also write to ~/.wllr/wllr.log so errors are visible after the fact.
 		if lf, err := openLogFile(); err == nil {
 			logHandler = newTeeHandler(lf, true)
-			defer lf.Close()
+			defer func() {
+				if closeErr := lf.Close(); closeErr != nil {
+					slog.Warn("wllr: close log file", "error", closeErr)
+				}
+			}()
 		}
 	}
 	slog.SetDefault(slog.New(logHandler))
@@ -143,91 +116,7 @@ func main() {
 	m := harness.New(pool, "main", h)
 
 	// Register stateless tools as native Go functions — bypasses WASM entirely.
-	h.RegisterNativeTool(sdk.Tool{
-		Name:        "read_file",
-		Description: "Read the contents of a file from the filesystem",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Absolute or relative path of the file to read"}},"required":["path"]}`),
-	}, func(_ context.Context, input json.RawMessage) (string, bool) {
-		var in struct {
-			Path string `json:"path"`
-		}
-		if err := json.Unmarshal(input, &in); err != nil || in.Path == "" {
-			return "path is required", true
-		}
-		content, err := os.ReadFile(in.Path)
-		if err != nil {
-			return "read_file: " + err.Error(), true
-		}
-		return string(content), false
-	})
-
-	h.RegisterNativeTool(sdk.Tool{
-		Name:        "write_file",
-		Description: "Write content to a file on the filesystem",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Path of the file to write"},"content":{"type":"string","description":"Content to write to the file"}},"required":["path","content"]}`),
-	}, func(_ context.Context, input json.RawMessage) (string, bool) {
-		var in struct {
-			Path    string `json:"path"`
-			Content string `json:"content"`
-		}
-		if err := json.Unmarshal(input, &in); err != nil || in.Path == "" {
-			return "path is required", true
-		}
-		if err := os.MkdirAll(filepath.Dir(in.Path), 0o755); err != nil {
-			return "write_file: " + err.Error(), true
-		}
-		if err := os.WriteFile(in.Path, []byte(in.Content), 0o644); err != nil {
-			return "write_file: " + err.Error(), true
-		}
-		return fmt.Sprintf("written %d bytes to %s", len(in.Content), in.Path), false
-	})
-
-	h.RegisterNativeTool(sdk.Tool{
-		Name:        "exec",
-		Description: "Execute a shell command on the host system",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute"},"dir":{"type":"string","description":"Working directory (optional, defaults to current)"}},"required":["command"]}`),
-	}, func(ctx context.Context, input json.RawMessage) (string, bool) {
-		var in struct {
-			Command string `json:"command"`
-			Dir     string `json:"dir"`
-		}
-		if err := json.Unmarshal(input, &in); err != nil || in.Command == "" {
-			return "command is required", true
-		}
-		cmd := exec.CommandContext(ctx, "sh", "-c", in.Command)
-		if in.Dir != "" {
-			cmd.Dir = in.Dir
-		}
-		out, err := cmd.CombinedOutput()
-		output := string(out)
-		if err != nil {
-			if ctx.Err() != nil {
-				return "exec cancelled", true
-			}
-			if output == "" {
-				return err.Error(), true
-			}
-			return output + "\nerror: " + err.Error(), true
-		}
-		return output, false
-	})
-
-	h.RegisterNativeTool(sdk.Tool{
-		Name:        "get_env",
-		Description: "Read environment variables from the host system",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"name":{"type":"string","description":"Specific env var name to look up (optional — omit to get all)"}}}`),
-	}, func(_ context.Context, input json.RawMessage) (string, bool) {
-		var in struct {
-			Name string `json:"name"`
-		}
-		_ = json.Unmarshal(input, &in) // best-effort; empty in.Name means "return all"
-		if in.Name != "" {
-			return os.Getenv(in.Name), false
-		}
-		vars := os.Environ()
-		data, _ := json.Marshal(vars)
-		return string(data), false
-	})
+	registerNativeTools(h)
 
 	// Load built-in trusted WASM extensions.
 	builtins := []struct {
