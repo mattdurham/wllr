@@ -155,18 +155,20 @@ func onSessionStart() {
 ### Tool reference
 
 **create_agent(name, system_prompt, prompt, model?)**
-Spawn a sub-agent. Returns an agent_id. The agent starts immediately and
-its response streams back into this session automatically.
+Spawn a sub-agent and send its first task. The agent starts immediately.
+Its output does NOT appear in your chat — it works silently in the background.
 - name: short label shown in /agents status (e.g. "researcher", "coder-1")
-- system_prompt: the agent's role and constraints — be specific and focused
-- prompt: the first task to send
+- system_prompt: the agent's role, constraints, and output format — be explicit
+- prompt: the first task. Tell the agent to call send_message back to you with results.
 - model: optional; defaults to the current session model
 
 **send_message(agent_id, message)**
-Queue a message into an agent's inbox. The message is delivered at the
-start of the agent's next turn — it does NOT start an immediate new turn.
-Use this to hand information to an agent or receive a report back.
-The agent must be given a new task (via its next turn) to act on the message.
+Queue a message into an agent's inbox. Delivered at the start of that
+agent's next turn — does NOT start an immediate turn.
+- To ask a sub-agent for results: send_message(id, "Report your findings")
+  then call create_agent or any tool to trigger that agent's next turn.
+- Sub-agents reporting back to you: they call send_message(your_id, result),
+  which queues into your inbox and appears in your context next turn.
 
 **shutdown_agent(agent_id)**
 Stop an agent and free its resources. Always shut down agents when their
@@ -210,27 +212,33 @@ Include: role, output format, constraints, what NOT to do.
 
 ### Receiving results
 
-Sub-agent responses stream back into this session automatically — there
-is no inbox to poll. After calling create_agent or send_message, continue
-your own reasoning. The agent's output appears as it streams in.
+Sub-agent output does NOT stream into your chat. Agents work silently.
+Results reach you in two ways:
 
-To act on a result, send_message with a follow-up after the agent
-responds. To get a final summary before shutting down:
-  send_message(id, "Summarise your findings in 3 bullet points.")
-  shutdown_agent(id)
+1. **Agent reports back**: tell the agent in its system_prompt or initial
+   prompt to call send_message back to you when done. The message queues
+   in your inbox and appears in your context on your next turn.
+
+2. **You ask for a summary**: send_message(id, "Summarise your findings"),
+   then trigger the agent's next turn by calling create_agent or any other
+   tool. The agent processes your queued message and calls send_message
+   back with results.
+
+Pattern to collect results and shut down:
+  send_message(id, "Give me your 3 key findings, then stop.")
+  shutdown_agent(id)  ← after you see the findings in context
 
 ---
 
 ### Parallel work pattern
 
 To run two tasks simultaneously:
-  create_agent("researcher", "...", "Research X")  → id-1
-  create_agent("coder", "...", "Implement Y")       → id-2
-  (both run concurrently; their output streams back as they work)
-  send_message(id-1, "Done? Give me the summary.")
-  send_message(id-2, "Done? Show me the final file.")
+  create_agent("researcher", "...", "Research X, then send_message me the findings")  → id-1
+  create_agent("coder", "...", "Implement Y, then send_message me the result")        → id-2
+  (both run; they send_message their results back to your inbox when done)
   shutdown_agent(id-1)
-  shutdown_agent(id-2)`
+  shutdown_agent(id-2)
+  (on your next turn, inbox has both results in context)`
 
 	AppendSystemPrompt(guidance)
 }
