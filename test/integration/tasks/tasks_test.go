@@ -1,3 +1,5 @@
+//go:build integration
+
 package tasks_test
 
 import (
