@@ -3,7 +3,7 @@ package harness
 // NOTE: Any changes to this file must be reflected in the corresponding SPECS.md or NOTES.md.
 
 import (
-	"encoding/json"
+	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/viewport"
@@ -20,6 +20,14 @@ type chatMessage struct {
 	content string
 }
 
+// ToolLogEntry records one tool call during the current agent turn.
+type ToolLogEntry struct {
+	Name    string
+	Preview string // toolInputPreview result
+	Done    bool
+	IsError bool
+}
+
 // ChatView renders the conversation history in a scrollable viewport.
 type ChatView struct {
 	current string // current in-progress assistant message
@@ -31,19 +39,14 @@ type ChatView struct {
 	// Rebuilt only when messages change, not on every streaming token.
 	histContent string
 
-	// activityName tracks the tool currently running during this turn.
-	// Each new tool call replaces the previous value. Cleared by FinalizeMessage.
-	// Rendered as a single live box between histContent and c.current.
-	activityName  string
-	activityInput string // raw JSON input for the active tool
-	messages      []chatMessage
-	vp            viewport.Model
-	width         int
-	height        int
-	histDirty     bool
-
-	activityDone  bool
-	activityError bool
+	// toolLog records tool calls for the current turn. Cleared by FinalizeMessage.
+	// Shown on demand via /tools command or ctrl+t — not rendered inline.
+	toolLog  []ToolLogEntry
+	messages []chatMessage
+	vp       viewport.Model
+	width    int
+	height   int
+	histDirty bool
 
 	// afterTool is true after a tool call completes and before the next token
 	// arrives. The first new token after a tool gets "\n\n" prepended so all
@@ -52,12 +55,7 @@ type ChatView struct {
 }
 
 var (
-	asstTextStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
-	systemStyle      = lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("#555555"))
-	toolBorderStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
-	toolSuccessStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#00AA00"))
-	toolErrorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#CC3333"))
-	toolPendingStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
+	systemStyle = lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("#555555"))
 )
 
 // NewChatView creates a ChatView with the given dimensions.
@@ -97,18 +95,9 @@ func (c *ChatView) AppendToken(token string) {
 // FinalizeMessage seals the in-progress message and resets tool routing.
 func (c *ChatView) FinalizeMessage() {
 	c.lastDoneToolID = ""
-	hadActivity := c.activityName != ""
-	c.activityName = ""
-	c.activityInput = ""
-	c.activityDone = false
-	c.activityError = false
+	c.toolLog = nil
 	c.afterTool = false
 	if c.current == "" {
-		if hadActivity {
-			// Activity box was visible; refresh to remove it from the display.
-			c.refreshContent()
-			c.vp.GotoBottom()
-		}
 		return
 	}
 	// All text from the turn is already in c.current (including pre- and
@@ -136,31 +125,27 @@ func (c *ChatView) AddNotification(text string) {
 	c.vp.GotoBottom()
 }
 
-// AddToolCall updates the live activity box. Text already in c.current stays
+// AddToolCall records the tool call in the log. Text already in c.current stays
 // there — all turn text remains in one block. After the tool completes, the
 // next token gets "\n\n" prepended via the afterTool flag so segments separate
 // cleanly without creating multiple boxes.
 func (c *ChatView) AddToolCall(id, toolName, input string) {
 	c.lastDoneToolID = ""
-	c.activityName = toolName
-	c.activityInput = input
-	c.activityDone = false
-	c.activityError = false
-	c.refreshContent()
-	c.vp.GotoBottom()
+	c.toolLog = append(c.toolLog, ToolLogEntry{Name: toolName, Preview: toolInputPreview(input)})
 }
 
-// UpdateToolCall marks the current activity box as done and sets afterTool so
+// UpdateToolCall marks the last pending tool log entry as done and sets afterTool so
 // the next streaming token starts a new paragraph within c.current.
 func (c *ChatView) UpdateToolCall(id string, isError bool, output string) {
 	c.lastDoneToolID = id
-	if c.activityName != "" {
-		c.activityDone = true
-		c.activityError = isError
-		c.afterTool = true
+	for i := len(c.toolLog) - 1; i >= 0; i-- {
+		if !c.toolLog[i].Done {
+			c.toolLog[i].Done = true
+			c.toolLog[i].IsError = isError
+			break
+		}
 	}
-	c.refreshContent()
-	c.vp.GotoBottom()
+	c.afterTool = true
 }
 
 // Clear resets the chat history.
@@ -168,10 +153,7 @@ func (c *ChatView) Clear() {
 	c.messages = nil
 	c.current = ""
 	c.lastDoneToolID = ""
-	c.activityName = ""
-	c.activityInput = ""
-	c.activityDone = false
-	c.activityError = false
+	c.toolLog = nil
 	c.afterTool = false
 	c.histContent = ""
 	c.histDirty = false
@@ -252,15 +234,10 @@ func (c *ChatView) refreshContent() {
 		c.histDirty = false
 	}
 
-	if c.activityName != "" || c.current != "" {
+	if c.current != "" {
 		var sb strings.Builder
 		sb.WriteString(c.histContent)
-		if c.activityName != "" {
-			renderActivityBox(&sb, c.activityName, c.activityInput, c.activityDone, c.activityError, c.width)
-		}
-		if c.current != "" {
-			renderMessage(&sb, chatMessage{role: sdk.RoleAssistant, content: c.current}, c.width, false)
-		}
+		renderMessage(&sb, chatMessage{role: sdk.RoleAssistant, content: c.current}, c.width, false)
 		c.vp.SetContent(sb.String())
 	} else {
 		c.vp.SetContent(c.histContent)
@@ -334,99 +311,67 @@ func renderUserMessage(sb *strings.Builder, content string, width int, old bool)
 // visible. Tool calls happen silently in the background.
 func renderToolGroup(_ *strings.Builder, _ []chatMessage, _ int, _ bool) {}
 
-// renderActivityBox draws a bordered box for the live activity indicator.
-// It renders up to 4 content lines from the tool's JSON input, collapsing
-// to fewer lines when the input has fewer meaningful fields.
-func renderActivityBox(sb *strings.Builder, name, input string, done, isError bool, width int) {
-	border := toolBorderStyle
-	var dot string
-	if !done {
-		dot = toolPendingStyle.Render("◌")
-	} else if isError {
-		dot = toolErrorStyle.Render("●")
-	} else {
-		dot = toolSuccessStyle.Render("●")
-	}
-
-	if width < 14 {
-		width = 14
-	}
-	innerWidth := width - 2
-	contentWidth := innerWidth - 2 // "│ " + content + " │"
-	if contentWidth < 1 {
-		contentWidth = 1
-	}
-
-	// Top: ╭─ ◌  toolname ─────────╮
-	labelRunes := 2 + 1 + 2 + len([]rune(name))
-	fillLen := innerWidth - labelRunes
-	if fillLen < 0 {
-		fillLen = 0
-	}
-	top := border.Render("╭─ ") + dot + border.Render("  "+name+strings.Repeat("─", fillLen)+"╮")
-	sb.WriteString(top + "\n")
-
-	// 4 content lines from the tool input.
-	lines := toolInputLines(input, 4, contentWidth)
-	for _, line := range lines {
-		runes := []rune(line)
-		if len(runes) > contentWidth {
-			runes = runes[:contentWidth]
+// toolInputPreview returns a single-line summary of the tool's JSON input,
+// suitable for compact display in the modal tool log.
+// Returns empty string if input cannot be parsed or yields nothing useful.
+func toolInputPreview(input string) string {
+	priority := []string{"command", "path", "name", "message", "query", "text", "url", "content"}
+	// Inline JSON parsing to avoid importing encoding/json at package level.
+	// Use a simple string search for the first high-value key.
+	for _, key := range priority {
+		needle := `"` + key + `"`
+		idx := strings.Index(input, needle)
+		if idx < 0 {
+			continue
 		}
-		padding := strings.Repeat(" ", contentWidth-len(runes))
-		sb.WriteString(border.Render("│"))
-		sb.WriteString(" " + asstTextStyle.Render(string(runes)) + padding + " ")
-		sb.WriteString(border.Render("│") + "\n")
+		// Find the colon after the key.
+		rest := input[idx+len(needle):]
+		colon := strings.Index(rest, ":")
+		if colon < 0 {
+			continue
+		}
+		rest = strings.TrimSpace(rest[colon+1:])
+		if len(rest) == 0 {
+			continue
+		}
+		// Unquote simple string values.
+		if rest[0] == '"' {
+			end := strings.Index(rest[1:], `"`)
+			if end >= 0 {
+				val := rest[1 : end+1]
+				preview := key + ": " + val
+				if r := []rune(preview); len(r) > 80 {
+					preview = string(r[:79]) + "…"
+				}
+				return preview
+			}
+		}
+		break
 	}
-
-	sb.WriteString(border.Render("╰"+strings.Repeat("─", innerWidth)+"╯") + "\n\n")
+	return ""
 }
 
-// toolInputLines parses the JSON tool input and returns up to maxLines of
-// "key: value" strings suitable for display inside the activity box.
-// Only non-empty lines are returned — no padding.
-func toolInputLines(input string, maxLines, width int) []string {
-	var lines []string
-
-	var m map[string]json.RawMessage
-	if json.Unmarshal([]byte(input), &m) == nil {
-		// Emit high-value keys first, then whatever remains.
-		priority := []string{"command", "path", "name", "message", "query", "text", "url", "content"}
-		seen := make(map[string]bool, len(m))
-		for _, key := range priority {
-			if len(lines) >= maxLines {
-				break
-			}
-			v, ok := m[key]
-			if !ok {
-				continue
-			}
-			seen[key] = true
-			var s string
-			if json.Unmarshal(v, &s) != nil {
-				continue
-			}
-			line := key + ": " + s
-			if r := []rune(line); len(r) > width {
-				line = string(r[:width-1]) + "…"
-			}
-			lines = append(lines, line)
+// ToolLogModal returns a formatted string for display in the modal overlay.
+// Returns a message indicating no tools were called if the log is empty.
+func (c *ChatView) ToolLogModal() string {
+	if len(c.toolLog) == 0 {
+		return "No tools called this turn."
+	}
+	var sb strings.Builder
+	sb.WriteString("Tool calls this turn:\n\n")
+	for i, e := range c.toolLog {
+		var status string
+		if !e.Done {
+			status = "◌ running"
+		} else if e.IsError {
+			status = "● error"
+		} else {
+			status = "● done"
 		}
-		for key, v := range m {
-			if len(lines) >= maxLines || seen[key] {
-				continue
-			}
-			var s string
-			if json.Unmarshal(v, &s) != nil {
-				continue
-			}
-			line := key + ": " + s
-			if r := []rune(line); len(r) > width {
-				line = string(r[:width-1]) + "…"
-			}
-			lines = append(lines, line)
+		sb.WriteString(fmt.Sprintf("%d. %s  %s\n", i+1, e.Name, status))
+		if e.Preview != "" {
+			sb.WriteString(fmt.Sprintf("   %s\n", e.Preview))
 		}
 	}
-
-	return lines
+	return strings.TrimRight(sb.String(), "\n")
 }

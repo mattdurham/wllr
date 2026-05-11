@@ -108,10 +108,19 @@ func registerBuiltins(r *Registry) {
 			}
 		},
 	})
+
+	r.Register(Command{
+		Name: "tools",
+		Desc: "Show tool calls from the current agent turn",
+		Handler: func(_ []string) tea.Cmd {
+			return func() tea.Msg { return showToolsMsg{} }
+		},
+	})
 }
 
 // Internal message types used by built-in command handlers.
 type (
-	clearMsg    struct{}
-	setModelMsg struct{ Model string }
+	clearMsg     struct{}
+	setModelMsg  struct{ Model string }
+	showToolsMsg struct{}
 )
