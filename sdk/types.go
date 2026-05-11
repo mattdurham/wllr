@@ -251,6 +251,17 @@ const (
 	// MethodAgentResetHistory replaces the main agent's conversation history
 	// and rebuilds the chat view from the supplied messages.
 	MethodAgentResetHistory = "agent_reset_history"
+
+	// MethodGetStatusInfo returns the current status bar data so extensions can
+	// build a custom status line. Returns StatusInfo JSON.
+	// No permission required — this is read-only observability.
+	MethodGetStatusInfo = "get_status_info"
+
+	// MethodSetStatusLine replaces the entire status bar text with a custom
+	// string for this session. Pass an empty string to revert to the default
+	// auto-generated line.
+	// No permission required.
+	MethodSetStatusLine = "set_status_line"
 )
 
 // ShowPickerItem is one entry displayed in the interactive picker overlay.
@@ -270,4 +281,21 @@ type ShowPickerParams struct {
 // AgentResetHistoryParams is the params blob for the agent_reset_history host_call.
 type AgentResetHistoryParams struct {
 	Messages []Message `json:"messages"`
+}
+
+// StatusInfo is returned by the get_status_info host_call.
+// It gives extensions a read-only snapshot of the current status bar state
+// so they can compose a fully custom status line.
+type StatusInfo struct {
+	// Tokens is the total token count across all agents in the current session.
+	Tokens int `json:"tokens"`
+	// Working is true while the LLM is streaming a response.
+	Working bool `json:"working"`
+	// Provider is the active provider name (e.g. "anthropic").
+	Provider string `json:"provider"`
+	// Model is the active model name (e.g. "claude-opus-4-5").
+	Model string `json:"model"`
+	// Statuses is the current set of keyed status values set via set_status.
+	// The "_override" key is excluded — use set_status_line to manage it.
+	Statuses map[string]string `json:"statuses"`
 }

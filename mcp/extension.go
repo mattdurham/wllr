@@ -45,11 +45,11 @@ func (e *Extension) Start(ctx context.Context) error {
 	return nil
 }
 
-// registerTool registers a tool with the host using OnRegisterTool callback.
+// registerTool registers a tool schema with the host so the LLM sees it.
+// Dispatch is handled by the MCP bridge's EventBus subscription, not by
+// a native handler — so RegisterToolSchema is used rather than RegisterNativeTool.
 func (e *Extension) registerTool(tool sdk.Tool) error {
-	if e.host.OnRegisterTool != nil {
-		return e.host.OnRegisterTool(tool)
-	}
+	e.host.RegisterToolSchema(tool)
 	return nil
 }
 

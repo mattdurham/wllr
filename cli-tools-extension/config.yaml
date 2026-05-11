@@ -1,0 +1,73 @@
+tools:
+  - name: engram
+    description: Store and retrieve memories using engram memory system
+    command: engram
+    schema:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: ["store", "recall", "search"]
+          description: Action to perform
+        content:
+          type: string
+          description: Content to store or search query
+        tags:
+          type: string
+          description: Comma-separated tags for the memory
+      required: ["action"]
+    
+  - name: ripgrep
+    description: Fast recursive text search using ripgrep
+    command: rg
+    schema:
+      type: object
+      properties:
+        pattern:
+          type: string
+          description: Pattern to search for
+        path:
+          type: string
+          description: Path to search in (default current directory)
+        case_sensitive:
+          type: boolean
+          description: Whether search is case sensitive
+        file_type:
+          type: string
+          description: Filter by file type (e.g. 'go', 'py', 'rs')
+      required: ["pattern"]
+    
+  - name: fd
+    description: Fast file finder using fd
+    command: fd
+    schema:
+      type: object
+      properties:
+        pattern:
+          type: string
+          description: Pattern to search for in filenames
+        path:
+          type: string
+          description: Path to search in (default current directory)
+        type:
+          type: string
+          enum: ["f", "d", "l"]
+          description: Filter by type - f=file, d=directory, l=symlink
+        extension:
+          type: string
+          description: Filter by file extension
+      required: ["pattern"]
+
+  - name: jq
+    description: Process JSON using jq
+    command: jq
+    schema:
+      type: object
+      properties:
+        filter:
+          type: string
+          description: jq filter expression
+        input:
+          type: string
+          description: JSON input to process
+      required: ["filter", "input"]

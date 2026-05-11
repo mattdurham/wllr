@@ -138,6 +138,9 @@ func (m *Model) SetProgram(p *tea.Program) {
 		m.extHost.OnSetStatus = func(k, v string) {
 			p.Send(StatusUpdateMsg{Key: k, Value: v})
 		}
+		m.extHost.OnGetStatusInfo = func() sdk.StatusInfo {
+			return m.statusBar.StatusInfo(m.streaming)
+		}
 		m.extHost.OnNotify = func(text string) {
 			p.Send(NotifyMsg{Text: text})
 		}

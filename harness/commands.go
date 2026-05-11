@@ -60,8 +60,6 @@ func (r *Registry) HelpText() string {
 }
 
 // registerBuiltins installs the built-in commands into r.
-// model is a pointer so handlers can close over the model's state changes
-// (they return Cmds that emit Msgs, so the model pointer itself isn't mutated).
 func registerBuiltins(r *Registry) {
 	r.Register(Command{
 		Name: "help",
@@ -97,6 +95,17 @@ func registerBuiltins(r *Registry) {
 				return func() tea.Msg { return NotifyMsg{Text: "Usage: /model <name>"} }
 			}
 			return func() tea.Msg { return setModelMsg{Model: args[0]} }
+		},
+	})
+
+	r.Register(Command{
+		Name: "status",
+		Desc: "Override the status line (/status my text) or clear it (/status)",
+		Handler: func(args []string) tea.Cmd {
+			text := strings.Join(args, " ")
+			return func() tea.Msg {
+				return StatusUpdateMsg{Key: "_override", Value: text}
+			}
 		},
 	})
 }
