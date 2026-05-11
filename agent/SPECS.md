@@ -128,30 +128,57 @@ On each `Submit` call, the resolved system prompt sent to the LLM is:
 
 ## 9. Context Window and Compaction
 
-Each `Agent` stores a `modelName string` for context window lookup. On each `Submit` call, the agent uses `contextWindowForModel(a.modelName)` to determine the model's known input context limit:
-
-| Model pattern         | Context window  |
-|-----------------------|-----------------|
-| contains "claude"     | 200,000 tokens  |
-| contains "gpt-4o" or "gpt-4" | 128,000 tokens |
-| contains "gemini-1.5-pro" or "gemini-2" | 1,000,000 tokens |
-| contains "gemini"     | 128,000 tokens  |
-| default               | 200,000 tokens  |
+Each `Agent` stores a `modelName string` for context window lookup. On each `Submit` call, the agent uses `contextWindowForModel(a.modelName)` to determine the model's known input context limit.
 
 Token estimation uses the `chars/4` heuristic (`estimateTokens`, `estimateStr`).
+`contextWindowForModel` currently returns `defaultContextWindow` (1,000,000) for all model
+names. Explicit overrides are set via `pool.SetContextWindow`.
 
 ### Proactive Compaction
 
-Before each API call, `shouldCompact` checks whether the estimated context (history + system prompt + next message) exceeds `contextWindow - reserveTokens` (16,384 tokens reserved for output). If so, `compactHistory` is called first.
+Before each API call, `shouldCompact` checks whether the estimated context (history + system
+prompt + next message) exceeds `contextWindow - reserveTokens` (16,384 tokens reserved for
+output). If so, `compactHistory` is called first.
 
-`compactHistory`:
-1. Keeps the most recent `keepMessages` (20) messages verbatim.
-2. Asks the LLM to produce a structured summary of all older messages using `compactionSummaryPrompt`.
-3. Replaces the old messages with a single `sdk.RoleUser` summary message, then appends the kept recent messages.
-4. Updates `a.history` under `historyMu.Lock()` if compaction succeeds.
-5. If the LLM call fails or returns an empty summary, returns the original history unchanged.
+`compactHistory(ctx, lm, history, priorSummary string, keepRecentTokens int64)`:
+1. Applies a token-budget walk via `findCutPoint(rest, keepRecentTokens)` (default 20,000
+   tokens) to determine how many recent messages to keep verbatim. `keepRecentTokens=0` uses
+   the default.
+2. `findCutPoint` walks backwards from the newest message, accumulating `len(content)/4`
+   tokens per message. When the budget is exhausted, it snaps forward (starting at the
+   bust point itself) to the nearest `RoleUser` message boundary, ensuring the kept slice
+   always begins with a user message. Returns 0 when the entire history fits in the budget
+   (no compaction needed), or when no user boundary exists after the bust point (skip
+   compaction rather than produce a malformed kept slice).
+3. Asks the LLM to produce a structured summary of all older messages using
+   `compactionSummaryPrompt`. When `priorSummary` is non-empty, the prompt is prefixed with
+   the prior summary so the model produces an incremental update.
+4. Scans the to-be-compacted messages for absolute file paths via `extractFilePaths` and
+   appends a "Files referenced in compacted span" list to the summary message.
+5. Replaces the old messages with a single `sdk.RoleUser` summary message, then appends
+   the kept recent messages. Returns `(compactedHistory, summaryText, error)`.
+6. Updates `a.history` and `a.lastSummary` under their respective mutexes if compaction
+   succeeds.
+7. If the LLM call fails or returns an empty summary, returns the original history and an
+   empty summary string.
 
-**Invariant:** If compaction fails, the original history is used unchanged and the turn proceeds normally.
+**Invariant:** If compaction fails, the original history is used unchanged and the turn
+proceeds normally.
+
+**Invariant:** The cut point always lands on a `RoleUser` message boundary. The kept slice
+never starts with an `RoleAssistant` message.
+
+### Iterative Summary
+
+`Agent` stores `lastSummary string` (protected by `lastSummaryMu sync.RWMutex`). On each
+`Submit` call, `lastSummary` is read before the goroutine launches and passed to
+`compactHistory` as `priorSummary`. When compaction produces a non-empty summary,
+`lastSummary` is updated under `lastSummaryMu.Lock()`.
+
+**Invariant:** The first compaction (`lastSummary == ""`) behaves identically to a
+standalone compaction.
+**Invariant:** `lastSummary` is only written inside the `Submit` goroutine, immediately
+after a successful `compactHistory` call, under `lastSummaryMu.Lock()`.
 
 ### Reactive Fallback
 

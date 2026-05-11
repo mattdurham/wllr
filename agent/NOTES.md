@@ -96,7 +96,7 @@ Append-only design decision log. Never delete entries; add an `*Addendum (date):
 
 **Rationale:** Different model families have very different context windows (128k vs 200k vs 1M tokens). A single hardcoded constant would either be too conservative (wasting compaction on large-context models) or too aggressive (skipping compaction on small-context models). The per-agent field allows sub-agents spawned with a different model to compact at the correct threshold. The substring-matching approach avoids maintaining an exhaustive model name registry while covering the most common cases.
 
-**Consequence:** Unknown model names fall back to `defaultContextWindow` (200,000). Extensions that spawn sub-agents with exotic model names should pass the model name explicitly; otherwise the fallback is used.
+**Consequence:** Unknown model names fall back to `defaultContextWindow` (1,000,000). Extensions that spawn sub-agents with exotic model names should pass the model name explicitly; otherwise the fallback is used.
 
 ---
 
@@ -133,3 +133,45 @@ Append-only design decision log. Never delete entries; add an `*Addendum (date):
 **Rationale:** Proactive compaction avoids the round-trip cost of a failed API call. However, the `chars/4` token estimate is intentionally approximate and may undercount; the reactive path handles cases where the estimate was too optimistic. The two phases together provide safety coverage without over-compacting on every turn. The reactive path is a blunt trim (not summarization) because the API already rejected the request — a second LLM call for summarization might itself hit the limit; trimming is guaranteed to reduce size.
 
 **Consequence:** In the worst case, one extra failed API call is made per compaction event on the reactive path. Context from messages older than the most recent 20 is lost permanently on the reactive path (no summary is generated).
+
+---
+
+## 12. Token-Budget Cut Point — Why Not keepMessages=20
+
+*Added: 2026-05-11*
+
+**Decision:** Replace the fixed `keepMessages=20` message count in `compactHistory` with a
+token-budget walk (`findCutPoint`) using `defaultKeepRecentTokens=20_000` tokens.
+
+**Rationale:** A fixed message count is insensitive to message length. A 20-message window
+could contain 100 tokens (trivial) or 100,000 tokens (dangerously close to the context
+limit). A token budget ensures the kept span is proportionally sized regardless of message
+verbosity. The `chars/4` heuristic is deliberately approximate; the budget is sized (20k)
+to be well within any current model's window post-compaction. The snap-to-user-boundary
+rule (never cut between a user→assistant pair) preserves the invariant that the kept slice
+always begins with a user message, which all LLM APIs require.
+
+**Consequence:** `keepMessages=20` is retained only for the reactive fallback (blunt trim
+after a 400 context-too-long error), where speed and guaranteed size reduction take
+priority over summarization quality.
+
+---
+
+## 13. Iterative Compaction Summary — Why Store on Agent Not Return to Caller
+
+*Added: 2026-05-11*
+
+**Decision:** The compaction summary string is stored on `Agent.lastSummary` (with its own
+`sync.RWMutex`) rather than returned to the pool or passed through a callback.
+
+**Rationale:** The summary is per-conversation-session state — it belongs on `Agent`, which
+already owns `history`. Returning it to the pool or through a callback would require the
+pool or harness to track per-agent state that it doesn't otherwise need. Reading
+`lastSummary` before launching the `Submit` goroutine (as a local `priorSummary`) ensures
+a consistent snapshot even if `Submit` is called again concurrently (though SPECS.md
+Section 2 forbids concurrent Submit calls). The `lastSummaryMu` prevents data races on the
+field itself.
+
+**Consequence:** `lastSummary` is reset to "" if the agent is re-used across unrelated
+tasks. Callers that want to preserve summary context across sessions must persist it
+externally (out of scope).
