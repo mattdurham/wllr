@@ -62,6 +62,12 @@ type Agent struct {
 
 	// history is the conversation history for this agent (all completed turns).
 	historyMu sync.Mutex
+
+	// lastSummary is the most recent compaction summary text. Passed to
+	// compactHistory as priorSummary on subsequent compaction calls so the model
+	// can build an incremental summary. Protected by lastSummaryMu.
+	lastSummary   string
+	lastSummaryMu sync.RWMutex
 }
 
 // SetOnToken sets the callback invoked for each text delta during streaming.
@@ -200,6 +206,12 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 	onToolCall := a.onToolCallFn
 	a.onToolCallMu.RUnlock()
 
+	// Capture last summary for iterative compaction (read before goroutine launch
+	// so the goroutine uses a consistent snapshot).
+	a.lastSummaryMu.RLock()
+	priorSummary := a.lastSummary
+	a.lastSummaryMu.RUnlock()
+
 	pool := a.pool
 	lm := a.lm
 	opts := a.opts
@@ -268,12 +280,17 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 			if onToken != nil {
 				onToken("[Compacting context…]\n\n")
 			}
-			compacted, cerr := compactHistory(childCtx, lm, history)
+			compacted, summaryText, cerr := compactHistory(childCtx, lm, history, priorSummary, 0)
 			if cerr == nil {
 				history = compacted
 				a.historyMu.Lock()
 				a.history = compacted
 				a.historyMu.Unlock()
+				if summaryText != "" {
+					a.lastSummaryMu.Lock()
+					a.lastSummary = summaryText
+					a.lastSummaryMu.Unlock()
+				}
 			}
 		}
 

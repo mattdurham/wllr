@@ -16,10 +16,11 @@ import (
 
 // ---- contextWindowForModel ----
 
-func TestContextWindowForModel_AlwaysReturnsDefault(t *testing.T) {
-	// contextWindowForModel no longer uses model-name heuristics — it always
-	// returns defaultContextWindow. Explicit overrides go through the pool
-	// (SetContextWindow) or WLLR_CONTEXT_WINDOW env var.
+func TestContextWindowForModel_KnownModels_ReturnDefault(t *testing.T) {
+	// contextWindowForModel looks up the model in the generated table (exact then
+	// substring match). All currently-mapped models happen to return 1_000_000
+	// which equals defaultContextWindow, so known and unknown names both return
+	// defaultContextWindow today.
 	for _, model := range []string{"claude-sonnet-4-6", "gpt-4o", "gemini-2.0", "", "unknown"} {
 		got := contextWindowForModel(model)
 		if got != defaultContextWindow {
@@ -39,8 +40,8 @@ func TestEstimateTokens_Empty(t *testing.T) {
 
 func TestEstimateTokens_CharsOver4(t *testing.T) {
 	msgs := []sdk.Message{
-		{Role: sdk.RoleUser, Content: "abcdefgh"}, // 8 chars → 2 tokens
-		{Role: sdk.RoleAssistant, Content: "1234"},  // 4 chars → 1 token
+		{Role: sdk.RoleUser, Content: "abcdefgh"},  // 8 chars → 2 tokens
+		{Role: sdk.RoleAssistant, Content: "1234"}, // 4 chars → 1 token
 	}
 	got := estimateTokens(msgs)
 	if got != 3 {
@@ -87,7 +88,7 @@ func TestShouldCompact_AboveThreshold_ReturnsTrue(t *testing.T) {
 }
 
 func TestShouldCompact_ZeroWindow_UsesDefault(t *testing.T) {
-	// passing 0 should fall back to defaultContextWindow (200_000), not panic.
+	// passing 0 should fall back to defaultContextWindow (1_000_000), not panic.
 	history := []sdk.Message{
 		{Role: sdk.RoleUser, Content: "tiny"},
 	}
@@ -112,16 +113,19 @@ func TestShouldCompact_NegativeWindow_UsesDefault(t *testing.T) {
 
 func TestCompactHistory_ShortHistory_ReturnsUnchanged(t *testing.T) {
 	lm := &compactTestLM{response: "summary text"}
+	// 20 messages × 100 tokens each = 2,000 tokens < 20,000 budget → no compaction.
+	// Use 400-char content so token estimation is non-zero (400/4 = 100 tokens).
+	msg := strings.Repeat("x", 400)
 	history := make([]sdk.Message, keepMessages) // exactly at threshold
 	for i := range history {
-		history[i] = sdk.Message{Role: sdk.RoleUser, Content: "msg"}
+		history[i] = sdk.Message{Role: sdk.RoleUser, Content: msg}
 	}
 
-	result, err := compactHistory(context.Background(), lm, history)
+	result, _, err := compactHistory(context.Background(), lm, history, "", 0)
 	if err != nil {
 		t.Fatalf("compactHistory: %v", err)
 	}
-	// Should be returned unchanged (not enough messages to compact).
+	// Should be returned unchanged — total tokens (2,000) fit within budget (20,000).
 	if len(result) != len(history) {
 		t.Errorf("expected %d messages, got %d", len(history), len(result))
 	}
@@ -130,26 +134,35 @@ func TestCompactHistory_ShortHistory_ReturnsUnchanged(t *testing.T) {
 func TestCompactHistory_LongHistory_ReturnsSummaryPlusRecent(t *testing.T) {
 	lm := &compactTestLM{response: "This is the summary of the conversation."}
 
-	// Create more messages than keepMessages.
-	totalMsgs := keepMessages + 5
-	history := make([]sdk.Message, totalMsgs)
+	// Each message is 400 chars → 100 tokens; 212 messages × 100 = 21,200 tokens > 20,000.
+	// The token budget walk keeps the last ~200 tokens (2 messages), so many messages are compacted.
+	msg := strings.Repeat("x", 400)
+	history := make([]sdk.Message, 212)
 	for i := range history {
-		history[i] = sdk.Message{Role: sdk.RoleUser, Content: "message content here"}
+		if i%2 == 0 {
+			history[i] = sdk.Message{Role: sdk.RoleUser, Content: msg}
+		} else {
+			history[i] = sdk.Message{Role: sdk.RoleAssistant, Content: msg}
+		}
 	}
+	// Override the first message to be identifiable as the anchor.
+	history[0] = sdk.Message{Role: sdk.RoleUser, Content: "anchor message"}
 
-	result, err := compactHistory(context.Background(), lm, history)
+	result, _, err := compactHistory(context.Background(), lm, history, "", 0)
 	if err != nil {
 		t.Fatalf("compactHistory: %v", err)
 	}
 
-	// Result should be anchor (first msg) + 1 summary + keepMessages recent messages.
-	expected := 1 + 1 + keepMessages
-	if len(result) != expected {
-		t.Errorf("expected %d messages, got %d", expected, len(result))
+	// Result should be: anchor + summary + recent messages (fewer than total).
+	if len(result) >= len(history) {
+		t.Errorf("expected fewer messages after compaction, got %d (same as input %d)", len(result), len(history))
+	}
+	if len(result) < 3 {
+		t.Errorf("expected at least 3 messages (anchor + summary + 1 recent), got %d", len(result))
 	}
 
 	// First message is the preserved anchor (original task).
-	if result[0].Content != "message content here" {
+	if result[0].Content != "anchor message" {
 		t.Errorf("first message should be the anchor, got: %q", result[0].Content)
 	}
 
@@ -163,13 +176,18 @@ func TestCompactHistory_EmptySummary_ReturnsOriginal(t *testing.T) {
 	// LM that returns empty — compactHistory should return original.
 	lm := &compactTestLM{response: ""}
 
-	totalMsgs := keepMessages + 5
-	history := make([]sdk.Message, totalMsgs)
+	// Use large enough messages to trigger token-based compaction.
+	msg := strings.Repeat("x", 400) // 100 tokens each
+	history := make([]sdk.Message, 212)
 	for i := range history {
-		history[i] = sdk.Message{Role: sdk.RoleUser, Content: "msg"}
+		if i%2 == 0 {
+			history[i] = sdk.Message{Role: sdk.RoleUser, Content: msg}
+		} else {
+			history[i] = sdk.Message{Role: sdk.RoleAssistant, Content: msg}
+		}
 	}
 
-	result, err := compactHistory(context.Background(), lm, history)
+	result, _, err := compactHistory(context.Background(), lm, history, "", 0)
 	// Should error and return original.
 	if err == nil {
 		t.Error("expected error for empty summary")
@@ -209,5 +227,236 @@ func (c *compactTestLM) GenerateObject(_ context.Context, _ fantasy.ObjectCall) 
 }
 
 func (c *compactTestLM) StreamObject(_ context.Context, _ fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
+	return nil, nil
+}
+
+// ---- findCutPoint ----
+
+func TestFindCutPoint_SmallHistory_ReturnsZero(t *testing.T) {
+	history := []sdk.Message{
+		{Role: sdk.RoleUser, Content: "hello"},
+		{Role: sdk.RoleAssistant, Content: "world"},
+		{Role: sdk.RoleUser, Content: "next"},
+	}
+	got := findCutPoint(history, 20_000)
+	if got != 0 {
+		t.Errorf("findCutPoint small history = %d, want 0", got)
+	}
+}
+
+func TestFindCutPoint_SnapToUserBoundary(t *testing.T) {
+	// Build: user0, asst0, user1, asst1, user2, asst2
+	// Each message is 400 chars → 100 tokens.
+	// Budget = 250 tokens → fits exactly 2.5 messages from the end.
+	// Walking back: asst2 (100), user2 (100), asst1 (50 remaining → bust).
+	// Snap to user2 (index 4). Cut point = 4 → keep history[4:].
+	msg := strings.Repeat("x", 400) // 100 tokens each
+	history := []sdk.Message{
+		{Role: sdk.RoleUser, Content: msg},      // 0
+		{Role: sdk.RoleAssistant, Content: msg}, // 1
+		{Role: sdk.RoleUser, Content: msg},      // 2
+		{Role: sdk.RoleAssistant, Content: msg}, // 3
+		{Role: sdk.RoleUser, Content: msg},      // 4
+		{Role: sdk.RoleAssistant, Content: msg}, // 5
+	}
+	got := findCutPoint(history, 250)
+	if got != 4 {
+		t.Errorf("findCutPoint snap-to-user = %d, want 4", got)
+	}
+}
+
+func TestFindCutPoint_AllFitInBudget_ReturnsZero(t *testing.T) {
+	history := []sdk.Message{
+		{Role: sdk.RoleUser, Content: "a"},
+		{Role: sdk.RoleAssistant, Content: "b"},
+		{Role: sdk.RoleUser, Content: "c"},
+	}
+	got := findCutPoint(history, 1_000_000)
+	if got != 0 {
+		t.Errorf("findCutPoint huge budget = %d, want 0", got)
+	}
+}
+
+func TestFindCutPoint_NoUserBoundaryFound_ReturnsFallback(t *testing.T) {
+	// Pathological: all assistant messages, budget = 1 token.
+	// No user boundary exists anywhere — findCutPoint must return 0 (skip compaction)
+	// so the caller never produces a history slice starting with an assistant message.
+	history := []sdk.Message{
+		{Role: sdk.RoleAssistant, Content: strings.Repeat("x", 400)},
+		{Role: sdk.RoleAssistant, Content: strings.Repeat("x", 400)},
+		{Role: sdk.RoleAssistant, Content: strings.Repeat("x", 400)},
+	}
+	got := findCutPoint(history, 1)
+	if got != 0 {
+		t.Errorf("findCutPoint no-user-boundary fallback = %d, want 0", got)
+	}
+	// Verify the returned index does not point to an assistant message (invariant).
+	if got < len(history) && got > 0 && history[got].Role != sdk.RoleUser {
+		t.Errorf("findCutPoint fallback: history[%d].Role = %s, want user", got, history[got].Role)
+	}
+}
+
+// ---- extractFilePaths ----
+
+func TestExtractFilePaths_AbsolutePaths(t *testing.T) {
+	msgs := []sdk.Message{
+		{Role: sdk.RoleAssistant, Content: `read_file /home/user/project/main.go`},
+		{Role: sdk.RoleUser, Content: `wrote /tmp/output.txt to disk`},
+	}
+	got := extractFilePaths(msgs)
+	want := map[string]bool{
+		"/home/user/project/main.go": true,
+		"/tmp/output.txt":            true,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("extractFilePaths count = %d, want %d; got %v", len(got), len(want), got)
+	}
+	for _, p := range got {
+		if !want[p] {
+			t.Errorf("unexpected path %q", p)
+		}
+	}
+}
+
+func TestExtractFilePaths_Deduplication(t *testing.T) {
+	msgs := []sdk.Message{
+		{Role: sdk.RoleAssistant, Content: `/home/user/main.go read`},
+		{Role: sdk.RoleAssistant, Content: `/home/user/main.go written`},
+	}
+	got := extractFilePaths(msgs)
+	if len(got) != 1 {
+		t.Errorf("extractFilePaths dedup = %d paths, want 1; got %v", len(got), got)
+	}
+}
+
+func TestExtractFilePaths_NoMatches_ReturnsEmpty(t *testing.T) {
+	msgs := []sdk.Message{
+		{Role: sdk.RoleUser, Content: "hello world, no file here"},
+	}
+	got := extractFilePaths(msgs)
+	if len(got) != 0 {
+		t.Errorf("extractFilePaths empty = %v, want []", got)
+	}
+}
+
+// ---- compactHistory with priorSummary and summaryText ----
+
+func TestCompactHistory_WithPriorSummary_IncludesPriorInPrompt(t *testing.T) {
+	var capturedPrompt string
+	lm := &captureLM{onPrompt: func(s string) { capturedPrompt = s }}
+
+	// Each message is 400 chars → 100 tokens; 212 messages × 100 = 21,200 tokens > 20,000.
+	msg := strings.Repeat("x", 400)
+	history := make([]sdk.Message, 212)
+	for i := range history {
+		if i%2 == 0 {
+			history[i] = sdk.Message{Role: sdk.RoleUser, Content: msg}
+		} else {
+			history[i] = sdk.Message{Role: sdk.RoleAssistant, Content: msg}
+		}
+	}
+
+	priorSummary := "## Goal\nPrior work summary."
+	_, summaryOut, err := compactHistory(context.Background(), lm, history, priorSummary, 0)
+	if err != nil {
+		t.Fatalf("compactHistory: %v", err)
+	}
+	if !strings.Contains(capturedPrompt, priorSummary) {
+		t.Errorf("prompt does not contain prior summary; prompt = %q", capturedPrompt[:min(200, len(capturedPrompt))])
+	}
+	if summaryOut == "" {
+		t.Error("expected non-empty summaryOut")
+	}
+}
+
+func TestCompactHistory_ReturnsSummaryString(t *testing.T) {
+	lm := &compactTestLM{response: "This is the summary text."}
+	msg := strings.Repeat("x", 400)
+	history := make([]sdk.Message, 212)
+	for i := range history {
+		if i%2 == 0 {
+			history[i] = sdk.Message{Role: sdk.RoleUser, Content: msg}
+		} else {
+			history[i] = sdk.Message{Role: sdk.RoleAssistant, Content: msg}
+		}
+	}
+	_, summaryText, err := compactHistory(context.Background(), lm, history, "", 0)
+	if err != nil {
+		t.Fatalf("compactHistory: %v", err)
+	}
+	if summaryText != "This is the summary text." {
+		t.Errorf("summaryText = %q, want %q", summaryText, "This is the summary text.")
+	}
+}
+
+func TestCompactHistory_FilePathsAppendedToSummaryMessage(t *testing.T) {
+	lm := &compactTestLM{response: "summary"}
+	msg := strings.Repeat("x", 400)
+	history := make([]sdk.Message, 212)
+	for i := range history {
+		if i%2 == 0 {
+			history[i] = sdk.Message{Role: sdk.RoleUser, Content: msg}
+		} else {
+			history[i] = sdk.Message{Role: sdk.RoleAssistant, Content: msg}
+		}
+	}
+	// Inject a file path into one of the messages that will be summarized.
+	history[2] = sdk.Message{Role: sdk.RoleAssistant, Content: "read_file /home/user/project/foo.go result: ok"}
+
+	result, _, err := compactHistory(context.Background(), lm, history, "", 0)
+	if err != nil {
+		t.Fatalf("compactHistory: %v", err)
+	}
+	// The summary message is result[1] (index 0 is anchor).
+	summaryMsg := result[1].Content
+	if !strings.Contains(summaryMsg, "/home/user/project/foo.go") {
+		t.Errorf("summary message does not list file path; content = %q", summaryMsg[:min(200, len(summaryMsg))])
+	}
+}
+
+// captureLM records the prompt passed to Stream.
+type captureLM struct {
+	onPrompt func(string)
+	response string
+}
+
+func (c *captureLM) Model() string    { return "capture-test" }
+func (c *captureLM) Provider() string { return "test" }
+
+func (c *captureLM) Stream(_ context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
+	if c.onPrompt != nil {
+		var sb strings.Builder
+		for _, m := range call.Prompt {
+			for _, p := range m.Content {
+				if tp, ok := p.(fantasy.TextPart); ok {
+					sb.WriteString(tp.Text)
+				}
+			}
+		}
+		c.onPrompt(sb.String())
+	}
+	resp := c.response
+	if resp == "" {
+		resp = "LM summary output"
+	}
+	return func(yield func(fantasy.StreamPart) bool) {
+		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, Delta: resp})
+		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop})
+	}, nil
+}
+
+func (c *captureLM) Generate(_ context.Context, _ fantasy.Call) (*fantasy.Response, error) {
+	resp := c.response
+	if resp == "" {
+		resp = "LM summary output"
+	}
+	return &fantasy.Response{Content: fantasy.ResponseContent{fantasy.TextContent{Text: resp}}, FinishReason: fantasy.FinishReasonStop}, nil
+}
+
+func (c *captureLM) GenerateObject(_ context.Context, _ fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
+	return nil, nil
+}
+
+func (c *captureLM) StreamObject(_ context.Context, _ fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
 	return nil, nil
 }
