@@ -10,13 +10,13 @@ package agent
 // modelContextWindows maps exact model IDs to their input context window.
 // contextWindowForModel does a substring match against this table.
 var modelContextWindows = map[string]int64{
-	"claude-haiku-4-5-20251001": 1000000,
-	"claude-opus-4-1-20250805": 1000000,
-	"claude-opus-4-20250514": 1000000,
-	"claude-opus-4-5-20251101": 1000000,
-	"claude-opus-4-6": 1000000,
-	"claude-opus-4-7": 1000000,
-	"claude-sonnet-4-20250514": 1000000,
+	"claude-haiku-4-5-20251001":  1000000,
+	"claude-opus-4-1-20250805":   1000000,
+	"claude-opus-4-20250514":     1000000,
+	"claude-opus-4-5-20251101":   1000000,
+	"claude-opus-4-6":            1000000,
+	"claude-opus-4-7":            1000000,
+	"claude-sonnet-4-20250514":   1000000,
 	"claude-sonnet-4-5-20250929": 1000000,
-	"claude-sonnet-4-6": 1000000,
+	"claude-sonnet-4-6":          1000000,
 }

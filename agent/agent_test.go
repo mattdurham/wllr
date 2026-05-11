@@ -12,9 +12,6 @@ import (
 	"github.com/mattdurham/wllr/sdk"
 )
 
-// errNilLM is returned by the nilLM stub.
-var errNilLM = errors.New("nil lm: no model configured")
-
 func sdkMsg(content string) sdk.Message {
 	return sdk.Message{Role: sdk.RoleUser, Content: content}
 }
@@ -251,9 +248,11 @@ func (t *tokenStreamLM) Stream(ctx context.Context, _ fantasy.Call) (fantasy.Str
 func (t *tokenStreamLM) Generate(_ context.Context, _ fantasy.Call) (*fantasy.Response, error) {
 	return &fantasy.Response{}, nil
 }
+
 func (t *tokenStreamLM) GenerateObject(_ context.Context, _ fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
 	return nil, nil
 }
+
 func (t *tokenStreamLM) StreamObject(_ context.Context, _ fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
 	return nil, nil
 }
@@ -268,12 +267,15 @@ func (e *errStreamLM) Stream(_ context.Context, _ fantasy.Call) (fantasy.StreamR
 		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeError, Error: errors.New("stream error")})
 	}, nil
 }
+
 func (e *errStreamLM) Generate(_ context.Context, _ fantasy.Call) (*fantasy.Response, error) {
 	return nil, errors.New("generate error")
 }
+
 func (e *errStreamLM) GenerateObject(_ context.Context, _ fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
 	return nil, nil
 }
+
 func (e *errStreamLM) StreamObject(_ context.Context, _ fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
 	return nil, nil
 }
@@ -288,12 +290,15 @@ func (s *slowLM) Stream(ctx context.Context, _ fantasy.Call) (fantasy.StreamResp
 		<-ctx.Done()
 	}, nil
 }
+
 func (s *slowLM) Generate(_ context.Context, _ fantasy.Call) (*fantasy.Response, error) {
 	return &fantasy.Response{}, nil
 }
+
 func (s *slowLM) GenerateObject(_ context.Context, _ fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
 	return nil, nil
 }
+
 func (s *slowLM) StreamObject(_ context.Context, _ fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
 	return nil, nil
 }

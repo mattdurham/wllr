@@ -88,19 +88,18 @@ type Host struct {
 
 	// nativeTools holds Go-native tool handlers registered via RegisterNativeTool.
 	// These are checked before WASM dispatch in ExecuteTool.
-	nativeTools   map[string]func(ctx context.Context, input json.RawMessage) (string, bool)
-	nativeToolsMu sync.RWMutex
+	nativeTools map[string]func(ctx context.Context, input json.RawMessage) (string, bool)
 
 	// Callbacks set by the harness.
-	OnSendMessage        func(msg sdk.Message)
-	OnSetStatus          func(key, value string)
-	OnRegisterTool       func(tool sdk.Tool) error
-	OnRegisterCommand    func(name string, desc string)
-	OnNotify             func(text string)
-	OnAbort              func()
-	OnToolResult         func(toolCallID, result string, isError bool)
-	OnAfterToolCall      func(toolCallID, toolName, result string, isError bool)
-	OnModal              func(text string)
+	OnSendMessage     func(msg sdk.Message)
+	OnSetStatus       func(key, value string)
+	OnRegisterTool    func(tool sdk.Tool) error
+	OnRegisterCommand func(name string, desc string)
+	OnNotify          func(text string)
+	OnAbort           func()
+	OnToolResult      func(toolCallID, result string, isError bool)
+	OnAfterToolCall   func(toolCallID, toolName, result string, isError bool)
+	OnModal           func(text string)
 	// OnShowPicker opens the interactive picker overlay in the TUI.
 	// After the user selects an item the harness fires EventOnCommand{name: callback, args: [id]}.
 	OnShowPicker func(title string, items []sdk.ShowPickerItem, callback string)
@@ -144,9 +143,11 @@ type Host struct {
 	// OnMCPSend writes JSON-RPC data to an MCP server's stdin.
 	OnMCPSend func(id string, data []byte) error
 	// OnMCPRead reads a JSON-RPC response from an MCP server's stdout.
-	OnMCPRead  func(id string) (json.RawMessage, error)
-	extensions []*Extension
-	mu         sync.RWMutex
+	OnMCPRead     func(id string) (json.RawMessage, error)
+	extensions    []*Extension
+	nativeToolsMu sync.RWMutex
+
+	mu sync.RWMutex
 
 	// pendingTools holds channels waiting for tool_result responses.
 	// Keyed by toolCallID.
@@ -883,10 +884,10 @@ func (h *Host) handleMCPSpawn(ext *Extension, req sdk.HostCallRequest) sdk.HostC
 		return sdk.HostCallResponse{Error: "mcp_spawn: not supported by host"}
 	}
 	var params struct {
+		Env     map[string]string `json:"env"`
 		ID      string            `json:"id"`
 		Command string            `json:"command"`
 		Args    []string          `json:"args"`
-		Env     map[string]string `json:"env"`
 	}
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("mcp_spawn: %v", err)}

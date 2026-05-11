@@ -21,13 +21,13 @@ type StatusBar struct {
 	statuses     map[string]string
 	providerName string
 	modelName    string
-	totalTokens  int
-	width        int
 
 	// overrideLine, when non-empty, replaces the entire auto-generated line.
 	// Set via StatusUpdateMsg{Key: "_override", Value: "..."}.
 	// Cleared by StatusUpdateMsg{Key: "_override", Value: ""}.
 	overrideLine string
+	totalTokens  int
+	width        int
 }
 
 var statusBarStyle = lipgloss.NewStyle().

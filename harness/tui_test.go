@@ -1,6 +1,6 @@
 package harness
 
-// tui_test.go tests keyboard interactions and TUI-specific behaviours of the
+// tui_test.go tests keyboard interactions and TUI-specific behaviors of the
 // harness Model. Tests drive the model directly via callUpdate (same technique
 // as model_test.go) — no real terminal or program required.
 

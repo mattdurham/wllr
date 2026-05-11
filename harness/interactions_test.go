@@ -1,6 +1,6 @@
 package harness
 
-// Interaction tests covering model message handling and chat view behaviours
+// Interaction tests covering model message handling and chat view behaviors
 // not yet covered by tui_test.go or chat_render_test.go.
 
 import (
@@ -49,11 +49,8 @@ func TestModel_EscEsc_DuringStream_GeneratesAbort(t *testing.T) {
 	m.streaming = true
 
 	// First esc: sets lastWasEsc in input area
-	next1, cmd1 := m.Update(keyMsg(tea.KeyEscape, 0))
+	next1, _ := m.Update(keyMsg(tea.KeyEscape, 0))
 	m = next1.(Model)
-	if cmd1 != nil {
-		// First esc may produce a nil cmd — that's fine
-	}
 
 	// Second esc: should generate abortStreamMsg via the input Cmd
 	_, cmd2 := m.Update(keyMsg(tea.KeyEscape, 0))

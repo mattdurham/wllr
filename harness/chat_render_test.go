@@ -100,8 +100,8 @@ func TestChatRender_ToolCalls_NotRendered(t *testing.T) {
 	// Tool calls are completely hidden — only LLM text responses are shown.
 	msgs := []chatMessage{
 		{role: sdk.RoleUser, content: "do something"},
-		{role: "tool", toolID: "t1", toolName: "exec", toolInput: `{"command":"ls"}`, toolDone: true},
-		{role: "tool", toolID: "t2", toolName: "read_file", toolInput: `{"path":"/tmp"}`, toolDone: true},
+		{role: "tool", content: `exec: {"command":"ls"}`},
+		{role: "tool", content: `read_file: {"path":"/tmp"}`},
 	}
 	out := renderChat(t, 80, 20, msgs)
 	if strings.Contains(out, "↳") || strings.Contains(out, "exec") || strings.Contains(out, "read_file") {

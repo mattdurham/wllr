@@ -32,8 +32,13 @@ type Agent struct {
 	id           string
 	modelName    string // for context window lookup
 	systemPrompt string
-	opts         SpawnOpts
-	inbox        []sdk.Message
+
+	// lastSummary is the most recent compaction summary text. Passed to
+	// compactHistory as priorSummary on subsequent compaction calls so the model
+	// can build an incremental summary. Protected by lastSummaryMu.
+	lastSummary string
+	opts        SpawnOpts
+	inbox       []sdk.Message
 
 	history []sdk.Message
 
@@ -53,6 +58,8 @@ type Agent struct {
 	// systemPrompt overrides opts.SystemPrompt when non-empty.
 	// Set via SetSystemPrompt; safe to call before the first Submit.
 	systemPromptMu sync.RWMutex
+
+	lastSummaryMu sync.RWMutex
 
 	// inbox holds messages injected between turns via AppendInbox.
 	inboxMu sync.Mutex
@@ -200,6 +207,12 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 	onToolCall := a.onToolCallFn
 	a.onToolCallMu.RUnlock()
 
+	// Capture last summary for iterative compaction (read before goroutine launch
+	// so the goroutine uses a consistent snapshot).
+	a.lastSummaryMu.RLock()
+	priorSummary := a.lastSummary
+	a.lastSummaryMu.RUnlock()
+
 	pool := a.pool
 	lm := a.lm
 	opts := a.opts
@@ -268,12 +281,23 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 			if onToken != nil {
 				onToken("[Compacting context…]\n\n")
 			}
-			compacted, cerr := compactHistory(childCtx, lm, history)
+			// Keep 10% of the model's context window as recent history.
+			// This scales correctly: a 1M-token model keeps 100k, a 200k model keeps 20k.
+			keepRecent := contextWindow / 10
+			if keepRecent <= 0 {
+				keepRecent = defaultKeepRecentTokens
+			}
+			compacted, summaryText, cerr := compactHistory(childCtx, lm, history, priorSummary, keepRecent)
 			if cerr == nil {
 				history = compacted
 				a.historyMu.Lock()
 				a.history = compacted
 				a.historyMu.Unlock()
+				if summaryText != "" {
+					a.lastSummaryMu.Lock()
+					a.lastSummary = summaryText
+					a.lastSummaryMu.Unlock()
+				}
 			}
 		}
 
@@ -293,13 +317,16 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 			collectedText, err = streamTurn(childCtx, fa, history, content, pool, onToken, onToolCall)
 		}
 
-		// Append the user message and assistant reply to history.
-		a.historyMu.Lock()
-		a.history = append(a.history, sdk.Message{Role: sdk.RoleUser, Content: content})
+		// Only record the turn in history when it produced a response.
+		// Appending the user message without a following assistant message leaves
+		// history in an invalid state that causes the next turn to be rejected
+		// (providers require messages to alternate user/assistant).
 		if collectedText != "" {
+			a.historyMu.Lock()
+			a.history = append(a.history, sdk.Message{Role: sdk.RoleUser, Content: content})
 			a.history = append(a.history, sdk.Message{Role: sdk.RoleAssistant, Content: collectedText})
+			a.historyMu.Unlock()
 		}
-		a.historyMu.Unlock()
 
 		if onDone != nil {
 			onDone(err)
