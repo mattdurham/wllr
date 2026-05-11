@@ -716,6 +716,7 @@ func TestHost_RegisteredTools_WithOwner(t *testing.T) {
 	}
 	if found == nil {
 		t.Fatal("expected owned_tool in RegisteredTools output")
+		return
 	}
 	if found.OwnerName != ext.name {
 		t.Errorf("OwnerName: got %q, want %q", found.OwnerName, ext.name)

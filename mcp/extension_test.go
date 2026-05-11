@@ -17,9 +17,11 @@ func TestExtension_NewExtension(t *testing.T) {
 	ext := NewExtension(host)
 	if ext == nil {
 		t.Fatal("NewExtension returned nil")
+		return
 	}
 	if ext.bridge == nil {
 		t.Fatal("bridge is nil")
+		return
 	}
 	if ext.host == nil {
 		t.Fatal("host is nil")

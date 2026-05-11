@@ -16,13 +16,13 @@ func setupTasksExtension(t *testing.T) (*extension.Host, func()) {
 	t.Helper()
 
 	host := extension.NewHost(nil)
-	
+
 	// Load tasks extension
 	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Fatal(err)
 	}
-	
+
 	wasmPath := filepath.Join(home, ".wllr", "extensions", "tasks", "tasks.wasm")
 	if _, err := os.Stat(wasmPath); os.IsNotExist(err) {
 		t.Skip("tasks.wasm not found - run 'make extensions' first")

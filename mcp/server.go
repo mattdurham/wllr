@@ -302,4 +302,3 @@ func (s *Server) Close() error {
 	slog.Info("mcp: server stopped", "name", s.name)
 	return nil
 }
-
