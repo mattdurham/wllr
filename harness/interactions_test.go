@@ -87,9 +87,9 @@ func TestModel_ToolCallStartMsg_VisibleInActivityBox(t *testing.T) {
 	if !strings.Contains(content, "exec") {
 		t.Error("tool call should be visible in activity box")
 	}
-	// Should also be tracked internally
-	if m.chat.MessageCount() == 0 {
-		t.Error("tool call should be stored in message list for internal tracking")
+	// Tool calls are shown via the activity box, not stored in message list.
+	if m.chat.activityName != "exec" {
+		t.Errorf("activity box should show exec, got %q", m.chat.activityName)
 	}
 }
 
@@ -103,7 +103,7 @@ func TestModel_ToolCallDoneMsg_UpdatesToolBox(t *testing.T) {
 
 	// Add a pending tool call first
 	m.chat.AddToolCall("call-1", "exec", `{"command":"ls"}`)
-	if m.chat.messages[0].toolDone {
+	if m.chat.activityDone {
 		t.Fatal("tool call should start as pending")
 	}
 
@@ -111,8 +111,8 @@ func TestModel_ToolCallDoneMsg_UpdatesToolBox(t *testing.T) {
 	next, _ := m.Update(ToolCallDoneMsg{ID: "call-1", IsError: false, Output: "file.txt"})
 	m = next.(Model)
 
-	if !m.chat.messages[0].toolDone {
-		t.Error("ToolCallDoneMsg should mark the tool call as done")
+	if !m.chat.activityDone {
+		t.Error("ToolCallDoneMsg should mark the activity as done")
 	}
 }
 
@@ -123,8 +123,8 @@ func TestModel_ToolCallDoneMsg_ErrorFlag(t *testing.T) {
 	next, _ := m.Update(ToolCallDoneMsg{ID: "call-1", IsError: true, Output: "permission denied"})
 	m = next.(Model)
 
-	if !m.chat.messages[0].toolError {
-		t.Error("ToolCallDoneMsg with IsError=true should set toolError on the message")
+	if !m.chat.activityError {
+		t.Error("ToolCallDoneMsg with IsError=true should set activityError")
 	}
 }
 
@@ -141,12 +141,9 @@ func TestChatView_AppendToken_AlwaysGoesToCurrent(t *testing.T) {
 	c.AppendToken("hello")
 	c.AppendToken(" world")
 
-	// Tokens should always go to c.current, never to toolResponse.
+	// Tokens should always go to c.current.
 	if c.current != "hello world" {
 		t.Errorf("tokens should go to c.current, got %q", c.current)
-	}
-	if c.messages[1].toolResponse != "" {
-		t.Errorf("toolResponse should be empty with new routing, got %q", c.messages[1].toolResponse)
 	}
 }
 
