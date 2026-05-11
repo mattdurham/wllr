@@ -182,6 +182,12 @@ test:
 	@go test -v -race -timeout=10m $(PACKAGES)
 	@echo "==> All tests passed!"
 
+# Run integration tests (requires ANTHROPIC_API_KEY)
+test-integration:
+	@echo "==> Running integration tests (requires ANTHROPIC_API_KEY)..."
+	@go test -tags integration -v -timeout=120s ./test/integration/...
+	@echo "==> Integration tests passed!"
+
 # Run full CI pipeline locally
 ci:
 	@echo "🔄 Running CI pipeline locally..."

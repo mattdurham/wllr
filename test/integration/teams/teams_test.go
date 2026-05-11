@@ -1,8 +1,10 @@
+//go:build integration
+
 // Integration tests for agent team communication using real LLM calls.
 // Agents are given actual tools (exec, write_file, read_file) and real tasks.
-// Skipped automatically when ANTHROPIC_API_KEY is not set.
+// Requires ANTHROPIC_API_KEY — fails if not set.
 //
-// Run: ANTHROPIC_API_KEY=sk-ant-... go test ./test/integration/teams/ -v -timeout 120s
+// Run: ANTHROPIC_API_KEY=sk-ant-... go test -tags integration ./test/integration/teams/ -v -timeout 120s
 package teams_test
 
 import (
@@ -37,7 +39,7 @@ func newEnv(t *testing.T) *testEnv {
 	t.Helper()
 	apiKey := os.Getenv("ANTHROPIC_API_KEY")
 	if apiKey == "" {
-		t.Skip("ANTHROPIC_API_KEY not set — skipping live integration test")
+		t.Fatal("ANTHROPIC_API_KEY must be set to run integration tests")
 	}
 
 	prov, err := fantasyanthropicprovider.New(fantasyanthropicprovider.WithAPIKey(apiKey))
