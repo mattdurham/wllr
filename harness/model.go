@@ -232,15 +232,9 @@ func (m *Model) SetProgram(p *tea.Program) {
 			if pool == nil {
 				return fmt.Errorf("no agent pool")
 			}
-			// Queue to inbox rather than starting an immediate turn.
-			// pool.Send would call agent.Submit directly, causing competing
-			// concurrent turns. AppendInbox delivers on the agent's next Submit.
-			a := pool.Get(id)
-			if a == nil {
-				return fmt.Errorf("agent %q not found", id)
-			}
-			a.AppendInbox(sdk.Message{Role: sdk.RoleUser, Content: message})
-			return nil
+			// pool.Send calls agent.Submit in a goroutine — non-blocking and safe.
+			// This wakes the target agent immediately to process the message.
+			return pool.Send(id, message)
 		}
 		m.extHost.OnAgentList = func() ([]extension.AgentInfo, error) {
 			if pool == nil {

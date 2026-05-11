@@ -1280,3 +1280,85 @@ func TestHost_HandleTeamList_NilCallback_ReturnsError(t *testing.T) {
 		t.Fatal("expected error when callback not set")
 	}
 }
+
+func TestHost_HandleTeamGetInfo_ReturnsMembers(t *testing.T) {
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer h.Close(ctx)
+
+	h.OnTeamGetInfo = func(teamID string) ([]string, error) {
+		return []string{"a1", "a2"}, nil
+	}
+
+	path := writeWASM(t, "minimal.wasm", minimalWASM)
+	if err := h.Load(ctx, path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	ext := h.extensions[0]
+
+	resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+		Method: sdk.MethodTeamGetInfo,
+		Params: []byte(`{"team_id":"t1"}`),
+	})
+	if resp.Error != "" {
+		t.Fatalf("team_get_info: %s", resp.Error)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	members, ok := result["members"].([]any)
+	if !ok {
+		t.Fatalf("members field not a list: %v", result["members"])
+	}
+	if len(members) != 2 {
+		t.Fatalf("expected 2 members, got %d", len(members))
+	}
+	ids := map[string]bool{}
+	for _, m := range members {
+		ids[m.(string)] = true
+	}
+	if !ids["a1"] || !ids["a2"] {
+		t.Errorf("members: got %v, want [a1 a2]", members)
+	}
+}
+
+func TestHost_HandleTeamList_ReturnsTeams(t *testing.T) {
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer h.Close(ctx)
+
+	h.OnTeamList = func() ([]string, error) {
+		return []string{"t1", "t2"}, nil
+	}
+
+	path := writeWASM(t, "minimal.wasm", minimalWASM)
+	if err := h.Load(ctx, path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	ext := h.extensions[0]
+
+	resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+		Method: sdk.MethodTeamList,
+	})
+	if resp.Error != "" {
+		t.Fatalf("team_list: %s", resp.Error)
+	}
+
+	var result map[string][]string
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	teams := result["teams"]
+	if len(teams) != 2 {
+		t.Fatalf("expected 2 teams, got %d: %v", len(teams), teams)
+	}
+	ids := map[string]bool{}
+	for _, id := range teams {
+		ids[id] = true
+	}
+	if !ids["t1"] || !ids["t2"] {
+		t.Errorf("teams: got %v, want [t1 t2]", teams)
+	}
+}
