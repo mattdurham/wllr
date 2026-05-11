@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -276,7 +277,7 @@ func httpPost(url string, headers map[string]string, body []byte) (int, []byte, 
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
-	resp, err := http.DefaultClient.Do(req) //nolint:gosec // URL is from user config; SSRF is intentional
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req) //nolint:gosec // URL is from user config; SSRF is intentional
 	if err != nil {
 		return 0, nil, err
 	}
