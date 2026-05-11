@@ -240,9 +240,9 @@ const (
 	MethodAgentClose       = "agent_close"
 	MethodAgentSendMessage = "agent_send_message"
 	// MethodAgentRun triggers an immediate turn for an existing agent.
-	MethodAgentRun = "agent_run"
-	MethodAgentList        = "agent_list"
-	MethodAgentTokenCount  = "agent_token_count"
+	MethodAgentRun        = "agent_run"
+	MethodAgentList       = "agent_list"
+	MethodAgentTokenCount = "agent_token_count"
 
 	// Team management host_call methods.
 	MethodTeamCreate       = "team_create"

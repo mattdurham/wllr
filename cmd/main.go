@@ -1,15 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"log/slog"
-	"os"
-	"bytes"
 	"net/http"
+	"os"
 	"os/exec"
 	"path/filepath"
 
@@ -124,13 +124,15 @@ func main() {
 		for k, v := range headers {
 			req.Header.Set(k, v)
 		}
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := http.DefaultClient.Do(req) //nolint:gosec // URL is from user config; SSRF is intentional
 		if err != nil {
 			return 0, nil, err
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		var buf bytes.Buffer
-		buf.ReadFrom(resp.Body)
+		if _, err := buf.ReadFrom(resp.Body); err != nil {
+			return resp.StatusCode, nil, err
+		}
 		return resp.StatusCode, buf.Bytes(), nil
 	}
 	h.OnConfigRead = loadConfigGroup

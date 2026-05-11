@@ -414,7 +414,6 @@ func TestHarnessModel_OnAgentSendMessage_TriggersAgentTurn(t *testing.T) {
 
 // --- Bug 3: OnAgentRun wires to pool.Send ---
 
-
 // --- Bug 3: OnAgentRun wires to pool.Send ---
 
 func TestHarnessModel_OnAgentRun_TriggersPoolSend(t *testing.T) {
