@@ -131,19 +131,21 @@ func TestModel_ToolCallDoneMsg_ErrorFlag(t *testing.T) {
 // ─── Token routing to toolResponse ───────────────────────────────────────────
 
 func TestChatView_AppendToken_AlwaysGoesToCurrent(t *testing.T) {
-	// Tokens always go to c.current regardless of tool state so the LLM
-	// response is never fragmented across multiple boxes.
+	// All text — before and after tool calls — accumulates in c.current so the
+	// entire turn renders as one box. A \n\n separator is inserted after a tool.
 	c := NewChatView(80, 20)
 	c.AddUserMessage("run it")
+	c.AppendToken("pre-tool text")
 	c.AddToolCall("t1", "exec", `{"command":"ls"}`)
 	c.UpdateToolCall("t1", false, "")
 
 	c.AppendToken("hello")
 	c.AppendToken(" world")
 
-	// Tokens should always go to c.current.
-	if c.current != "hello world" {
-		t.Errorf("tokens should go to c.current, got %q", c.current)
+	// Pre-tool text stays in c.current; post-tool text appended with \n\n separator.
+	want := "pre-tool text\n\nhello world"
+	if c.current != want {
+		t.Errorf("c.current = %q, want %q", c.current, want)
 	}
 }
 
@@ -162,18 +164,18 @@ func TestChatView_FinalizeMessage_ResetslastDoneToolID(t *testing.T) {
 
 // ─── AddToolCall seals c.current ─────────────────────────────────────────────
 
-func TestChatView_AddToolCall_SealsCurrentText(t *testing.T) {
+func TestChatView_AddToolCall_PreservesCurrentText(t *testing.T) {
 	c := NewChatView(80, 20)
 	c.AddUserMessage("question")
 	c.AppendToken("Thinking... ")
 	c.AppendToken("let me check")
 
-	// c.current has partial text — AddToolCall should seal it
+	// c.current has partial text — AddToolCall should NOT seal it; it stays
+	// in c.current so the whole turn renders as one box.
 	c.AddToolCall("t1", "exec", `{"command":"ls"}`)
 
-	// c.current should be empty now, and the text should be in a message
-	if c.current != "" {
-		t.Errorf("c.current should be empty after AddToolCall, got %q", c.current)
+	if c.current != "Thinking... let me check" {
+		t.Errorf("c.current should still hold pre-tool text, got %q", c.current)
 	}
 	found := false
 	for _, m := range c.messages {
@@ -182,8 +184,8 @@ func TestChatView_AddToolCall_SealsCurrentText(t *testing.T) {
 			break
 		}
 	}
-	if !found {
-		t.Error("partial text should be sealed as assistant message before tool call")
+	if found {
+		t.Error("pre-tool text should stay in c.current, not be sealed into messages yet")
 	}
 }
 

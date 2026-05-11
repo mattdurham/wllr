@@ -51,6 +51,11 @@ type ChatView struct {
 	activityInput string // raw JSON input for the active tool
 	activityDone  bool
 	activityError bool
+
+	// afterTool is true after a tool call completes and before the next token
+	// arrives. The first new token after a tool gets "\n\n" prepended so all
+	// text within one turn flows as one block in c.current.
+	afterTool bool
 }
 
 var (
@@ -97,6 +102,10 @@ func (c *ChatView) SetSize(width, height int) {
 // All tokens go to c.current regardless of tool state so the response is never
 // fragmented across multiple boxes when the LLM interleaves text and tool calls.
 func (c *ChatView) AppendToken(token string) {
+	if c.afterTool {
+		c.current += "\n\n"
+		c.afterTool = false
+	}
 	c.current += token
 	c.refreshContent()
 	c.vp.GotoBottom()
@@ -110,6 +119,7 @@ func (c *ChatView) FinalizeMessage() {
 	c.activityInput = ""
 	c.activityDone = false
 	c.activityError = false
+	c.afterTool = false
 	if c.current == "" {
 		if hadActivity {
 			// Activity box was visible; refresh to remove it from the display.
@@ -118,13 +128,9 @@ func (c *ChatView) FinalizeMessage() {
 		}
 		return
 	}
-	// Merge into the previous assistant message if one is the last entry,
-	// so consecutive AI responses appear as one box instead of many.
-	if n := len(c.messages); n > 0 && c.messages[n-1].role == sdk.RoleAssistant {
-		c.messages[n-1].content += "\n\n" + c.current
-	} else {
-		c.messages = append(c.messages, chatMessage{role: sdk.RoleAssistant, content: c.current})
-	}
+	// All text from the turn is already in c.current (including pre- and
+	// post-tool-call text, joined by \n\n via afterTool). Seal it as one message.
+	c.messages = append(c.messages, chatMessage{role: sdk.RoleAssistant, content: c.current})
 	c.current = ""
 	c.invalidateHistory()
 	c.refreshContent()
@@ -147,23 +153,11 @@ func (c *ChatView) AddNotification(text string) {
 	c.vp.GotoBottom()
 }
 
-// AddToolCall updates the live activity box and merges any in-progress text
-// into the current assistant block. Tool calls are not stored in c.messages
-// (they are not rendered) so consecutive assistant text segments merge into
-// one box without interruption.
+// AddToolCall updates the live activity box. Text already in c.current stays
+// there — all turn text remains in one block. After the tool completes, the
+// next token gets "\n\n" prepended via the afterTool flag so segments separate
+// cleanly without creating multiple boxes.
 func (c *ChatView) AddToolCall(id, toolName, input string) {
-	if c.current != "" {
-		// Merge into the last assistant message so all text from this turn
-		// stays in one blue box, even when tool calls happen in between.
-		if n := len(c.messages); n > 0 && c.messages[n-1].role == sdk.RoleAssistant {
-			c.messages[n-1].content += "\n\n" + c.current
-			c.invalidateHistory()
-		} else {
-			c.messages = append(c.messages, chatMessage{role: sdk.RoleAssistant, content: c.current})
-			c.invalidateHistory()
-		}
-		c.current = ""
-	}
 	c.lastDoneToolID = ""
 	c.activityName = toolName
 	c.activityInput = input
@@ -173,16 +167,19 @@ func (c *ChatView) AddToolCall(id, toolName, input string) {
 	c.vp.GotoBottom()
 }
 
-// UpdateToolCall marks the current activity box as done.
+// UpdateToolCall marks the current activity box as done and sets afterTool so
+// the next streaming token starts a new paragraph within c.current.
 func (c *ChatView) UpdateToolCall(id string, isError bool, output string) {
 	c.lastDoneToolID = id
 	if c.activityName != "" {
 		c.activityDone = true
 		c.activityError = isError
+		c.afterTool = true
 	}
 	c.refreshContent()
 	c.vp.GotoBottom()
 }
+
 
 // Clear resets the chat history.
 func (c *ChatView) Clear() {
@@ -193,6 +190,7 @@ func (c *ChatView) Clear() {
 	c.activityInput = ""
 	c.activityDone = false
 	c.activityError = false
+	c.afterTool = false
 	c.histContent = ""
 	c.histDirty = false
 	c.refreshContent()
@@ -313,36 +311,19 @@ func renderAssistantMessage(sb *strings.Builder, content string, width int, old 
 	if width < 14 {
 		width = 14
 	}
-	innerWidth := width - 2
-	contentWidth := innerWidth - 2
-	if contentWidth < 1 {
-		contentWidth = 1
-	}
-
-	border := asstBorderStyle
-	text := asstTextStyle
+	borderColor := lipgloss.Color("#89CFF0")
+	textColor := lipgloss.Color("#FFFFFF")
 	if old {
-		border = asstBorderOldStyle
-		text = asstTextOldStyle
+		borderColor = lipgloss.Color("#444444")
+		textColor = lipgloss.Color("#555555")
 	}
-
-	sb.WriteString(border.Render("╭" + strings.Repeat("─", innerWidth) + "╮"))
-	sb.WriteString("\n")
-
-	wrapped := lipgloss.Wrap(content, contentWidth, "")
-	for _, line := range strings.Split(strings.TrimRight(wrapped, "\n"), "\n") {
-		runes := []rune(line)
-		if len(runes) > contentWidth {
-			runes = runes[:contentWidth]
-		}
-		padding := strings.Repeat(" ", contentWidth-len(runes))
-		sb.WriteString(border.Render("│"))
-		sb.WriteString(" " + text.Render(string(runes)) + padding + " ")
-		sb.WriteString(border.Render("│"))
-		sb.WriteString("\n")
-	}
-
-	sb.WriteString(border.Render("╰" + strings.Repeat("─", innerWidth) + "╯"))
+	style := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(borderColor).
+		Foreground(textColor).
+		Padding(0, 1).
+		Width(width - 2) // -2 for left+right border chars
+	sb.WriteString(style.Render(content))
 	sb.WriteString("\n\n")
 }
 
@@ -350,36 +331,19 @@ func renderUserMessage(sb *strings.Builder, content string, width int, old bool)
 	if width < 14 {
 		width = 14
 	}
-	innerWidth := width - 2
-	contentWidth := innerWidth - 2
-	if contentWidth < 1 {
-		contentWidth = 1
-	}
-
-	border := userBorderStyle
-	text := lipgloss.NewStyle().Foreground(lipgloss.Color("#CCFFCC")) // soft green tint
+	borderColor := lipgloss.Color("#00AA00")
+	textColor := lipgloss.Color("#CCFFCC")
 	if old {
-		border = userBorderOldStyle
-		text = oldTextStyle
+		borderColor = lipgloss.Color("#444444")
+		textColor = lipgloss.Color("#555555")
 	}
-
-	sb.WriteString(border.Render("╭" + strings.Repeat("─", innerWidth) + "╮"))
-	sb.WriteString("\n")
-
-	wrapped := lipgloss.Wrap(content, contentWidth, "")
-	for _, line := range strings.Split(strings.TrimRight(wrapped, "\n"), "\n") {
-		runes := []rune(line)
-		if len(runes) > contentWidth {
-			runes = runes[:contentWidth]
-		}
-		padding := strings.Repeat(" ", contentWidth-len(runes))
-		sb.WriteString(border.Render("│"))
-		sb.WriteString(" " + text.Render(string(runes)) + padding + " ")
-		sb.WriteString(border.Render("│"))
-		sb.WriteString("\n")
-	}
-
-	sb.WriteString(border.Render("╰" + strings.Repeat("─", innerWidth) + "╯"))
+	style := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(borderColor).
+		Foreground(textColor).
+		Padding(0, 1).
+		Width(width - 2)
+	sb.WriteString(style.Render(content))
 	sb.WriteString("\n\n")
 }
 
