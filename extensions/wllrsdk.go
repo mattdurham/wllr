@@ -288,6 +288,50 @@ func Exec(command, dir string) (output string, err error) {
 	return r.Output, nil
 }
 
+// ReadFile reads the contents of a file on the host filesystem.
+// Requires the file_read permission in the extension manifest.
+func ReadFile(path string) (string, error) {
+	raw := _sdkCallResult("read_file", map[string]string{"path": path})
+	if raw == nil {
+		return "", fmt.Errorf("read_file: no response")
+	}
+	var r struct {
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return "", err
+	}
+	return r.Content, nil
+}
+
+// WriteFile writes content to a file on the host filesystem.
+// Parent directories are created automatically.
+// Requires the file_write permission in the extension manifest.
+func WriteFile(path, content string) error {
+	if _sdkCallResult("write_file", map[string]string{"path": path, "content": content}) == nil {
+		return fmt.Errorf("write_file: failed")
+	}
+	return nil
+}
+
+// HTTPPost makes an HTTP POST request via the host.
+// headers may be nil. Returns (statusCode, responseBody, error).
+// Requires the network_write permission in the extension manifest.
+func HTTPPost(url string, headers map[string]string, body []byte) (int, string, error) {
+	raw := _sdkCallResult("http_post", map[string]any{"url": url, "headers": headers, "body": body})
+	if raw == nil {
+		return 0, "", fmt.Errorf("http_post: no response")
+	}
+	var r struct {
+		Status int    `json:"status"`
+		Body   string `json:"body"`
+	}
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return 0, "", err
+	}
+	return r.Status, r.Body, nil
+}
+
 // GetEnv returns the value of an environment variable.
 // Pass an empty name to get all variables as a JSON array.
 func GetEnv(name string) (string, error) {
