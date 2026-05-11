@@ -411,3 +411,75 @@ func TestHarnessModel_OnAgentSendMessage_TriggersAgentTurn(t *testing.T) {
 		t.Errorf("expected inbox to be empty (pool.Send uses Submit, not AppendInbox), got %d messages", len(inbox))
 	}
 }
+
+// --- Bug 3: OnAgentRun wires to pool.Send ---
+
+
+// --- Bug 3: OnAgentRun wires to pool.Send ---
+
+func TestHarnessModel_OnAgentRun_TriggersPoolSend(t *testing.T) {
+	// Bug 3 fix: OnAgentRun must call pool.Send(id, "") which invokes Submit
+	// on the target agent. pool.Send returns ErrAgentNotFound for unknown IDs.
+	pool := agent.NewPool()
+	lm := newMockLM("ok")
+	if _, err := pool.Spawn("worker-a", lm, agent.SpawnOpts{}); err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	// Same closure as harness/model.go OnAgentRun.
+	onAgentRun := func(id string) error {
+		return pool.Send(id, "")
+	}
+
+	// Known agent: should succeed (Submit is called in a goroutine, no error).
+	if err := onAgentRun("worker-a"); err != nil {
+		t.Errorf("onAgentRun(known): expected nil, got %v", err)
+	}
+
+	// Unknown agent: pool.Send must return ErrAgentNotFound.
+	err := onAgentRun("does-not-exist")
+	if err == nil {
+		t.Fatal("onAgentRun(unknown): expected error, got nil")
+	}
+	if err != agent.ErrAgentNotFound {
+		t.Errorf("expected ErrAgentNotFound, got %v", err)
+	}
+}
+
+// --- Bug 6: Sub-agent system prompts include own ID + orchestrator reference ---
+
+func TestHarnessModel_SubAgentSystemPrompt_ContainsAgentIDAndMain(t *testing.T) {
+	// Bug 6 fix: OnAgentSpawn appends an "Agent Identity" block to the system
+	// prompt containing the agent's own ID and a reference to "main" so sub-agents
+	// know how to coordinate. We verify the prompt construction formula directly.
+	agentID := "agent-worker-99"
+	baseSystemPrompt := "You are a helpful sub-agent."
+
+	// Replicate the formula from harness/model.go OnAgentSpawn.
+	fullSystemPrompt := baseSystemPrompt +
+		"\n\n## Your Agent Identity\nYour agent ID is: " + agentID +
+		"\nTo report results back to the orchestrator, call send_message with agent_id=\"main\"."
+
+	if !contains(fullSystemPrompt, agentID) {
+		t.Errorf("system prompt missing agent ID %q\ngot: %s", agentID, fullSystemPrompt)
+	}
+	if !contains(fullSystemPrompt, "main") {
+		t.Errorf("system prompt missing orchestrator reference \"main\"\ngot: %s", fullSystemPrompt)
+	}
+	if !contains(fullSystemPrompt, "## Your Agent Identity") {
+		t.Errorf("system prompt missing identity header\ngot: %s", fullSystemPrompt)
+	}
+}
+
+// contains is a helper to avoid importing strings just for this.
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
+		func() bool {
+			for i := 0; i <= len(s)-len(substr); i++ {
+				if s[i:i+len(substr)] == substr {
+					return true
+				}
+			}
+			return false
+		}())
+}

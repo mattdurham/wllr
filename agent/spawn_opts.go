@@ -8,4 +8,6 @@ type SpawnOpts struct {
 	SystemPrompt string
 	// Tools are the tools available to the agent.
 	Tools []fantasy.AgentTool
+	// Name is the human-readable display name for the agent.
+	Name string
 }

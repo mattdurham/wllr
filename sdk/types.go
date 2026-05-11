@@ -239,6 +239,8 @@ const (
 	MethodAgentSpawn       = "agent_spawn"
 	MethodAgentClose       = "agent_close"
 	MethodAgentSendMessage = "agent_send_message"
+	// MethodAgentRun triggers an immediate turn for an existing agent.
+	MethodAgentRun = "agent_run"
 	MethodAgentList        = "agent_list"
 	MethodAgentTokenCount  = "agent_token_count"
 

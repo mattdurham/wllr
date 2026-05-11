@@ -124,6 +124,8 @@ type Host struct {
 	OnAgentClose func(id string) error
 	// OnAgentSendMessage queues a plain-text message into a named agent's inbox.
 	OnAgentSendMessage func(id, message string) error
+	// OnAgentRun triggers an immediate turn for an existing agent.
+	OnAgentRun func(id string) error
 	// OnAgentList returns a snapshot of all live agents.
 	OnAgentList func() ([]AgentInfo, error)
 	// OnAgentTokenCount returns the total token count across all agents.
@@ -409,6 +411,9 @@ func (h *Host) buildDispatch() map[string]func(ctx context.Context, ext *Extensi
 		},
 		sdk.MethodAgentSendMessage: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleAgentSendMessage(req)
+		},
+		sdk.MethodAgentRun: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleAgentRun(req)
 		},
 		sdk.MethodAgentList: func(_ context.Context, _ *Extension, _ sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleAgentList()
@@ -861,6 +866,21 @@ func (h *Host) handleAgentSendMessage(req sdk.HostCallRequest) sdk.HostCallRespo
 	}
 	return sdk.HostCallResponse{}
 }
+func (h *Host) handleAgentRun(req sdk.HostCallRequest) sdk.HostCallResponse {
+	if h.OnAgentRun == nil {
+		return sdk.HostCallResponse{Error: "agent_run: not supported by host"}
+	}
+	var params struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return sdk.HostCallResponse{Error: fmt.Sprintf("agent_run: %v", err)}
+	}
+	if err := h.OnAgentRun(params.ID); err != nil {
+		return sdk.HostCallResponse{Error: err.Error()}
+	}
+	return sdk.HostCallResponse{}
+}
 
 func (h *Host) handleAgentList() sdk.HostCallResponse {
 	if h.OnAgentList == nil {
@@ -897,7 +917,8 @@ func (h *Host) handleTeamCreate(req sdk.HostCallRequest) sdk.HostCallResponse {
 	if err := h.OnTeamCreate(params.ID, params.Name); err != nil {
 		return sdk.HostCallResponse{Error: err.Error()}
 	}
-	return sdk.HostCallResponse{}
+	result, _ := json.Marshal(map[string]string{"team_id": params.ID, "status": "created"})
+	return sdk.HostCallResponse{Result: result}
 }
 
 func (h *Host) handleTeamClose(req sdk.HostCallRequest) sdk.HostCallResponse {
