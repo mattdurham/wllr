@@ -13,8 +13,8 @@ type Task struct {
 	ID           string   `json:"id"`
 	Title        string   `json:"title"`
 	Description  string   `json:"description"`
-	Status       string   `json:"status"`       // pending, in_progress, completed, blocked
-	Priority     string   `json:"priority"`     // low, medium, high, critical
+	Status       string   `json:"status"`   // pending, in_progress, completed, blocked
+	Priority     string   `json:"priority"` // low, medium, high, critical
 	Tags         []string `json:"tags"`
 	Dependencies []string `json:"dependencies"` // Task IDs this task depends on
 	CreatedAt    int64    `json:"created_at"`
