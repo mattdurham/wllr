@@ -32,8 +32,13 @@ type Agent struct {
 	id           string
 	modelName    string // for context window lookup
 	systemPrompt string
-	opts         SpawnOpts
-	inbox        []sdk.Message
+
+	// lastSummary is the most recent compaction summary text. Passed to
+	// compactHistory as priorSummary on subsequent compaction calls so the model
+	// can build an incremental summary. Protected by lastSummaryMu.
+	lastSummary string
+	opts        SpawnOpts
+	inbox       []sdk.Message
 
 	history []sdk.Message
 
@@ -54,6 +59,8 @@ type Agent struct {
 	// Set via SetSystemPrompt; safe to call before the first Submit.
 	systemPromptMu sync.RWMutex
 
+	lastSummaryMu sync.RWMutex
+
 	// inbox holds messages injected between turns via AppendInbox.
 	inboxMu sync.Mutex
 
@@ -62,12 +69,6 @@ type Agent struct {
 
 	// history is the conversation history for this agent (all completed turns).
 	historyMu sync.Mutex
-
-	// lastSummary is the most recent compaction summary text. Passed to
-	// compactHistory as priorSummary on subsequent compaction calls so the model
-	// can build an incremental summary. Protected by lastSummaryMu.
-	lastSummary   string
-	lastSummaryMu sync.RWMutex
 }
 
 // SetOnToken sets the callback invoked for each text delta during streaming.
