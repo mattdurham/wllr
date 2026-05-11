@@ -193,9 +193,15 @@ func (m *Model) SetProgram(p *tea.Program) {
 			if err != nil {
 				return fmt.Errorf("spawn agent %q: %w", id, err)
 			}
-			subOnToken, subStop := makeBatchedOnToken(p)
-			a.SetOnToken(subOnToken)
-			a.SetOnDone(func(e error) { subStop(); p.Send(StreamDoneMsg{Err: e}) })
+			// Sub-agent tokens are NOT routed to the main chat — only the
+			// orchestrating agent's output is shown. Sub-agents report results
+			// via send_message which queues to the orchestrator's inbox.
+			a.SetOnToken(func(_ string) {})
+			a.SetOnDone(func(e error) {
+				if e != nil {
+					slog.Info("sub-agent turn error", "agent", id, "err", e)
+				}
+			})
 			// Give sub-agents identical wiring to the main agent.
 			agentID := id
 			extHostRef := m.extHost
@@ -218,7 +224,15 @@ func (m *Model) SetProgram(p *tea.Program) {
 			if pool == nil {
 				return fmt.Errorf("no agent pool")
 			}
-			return pool.Send(id, message)
+			// Queue to inbox rather than starting an immediate turn.
+			// pool.Send would call agent.Submit directly, causing competing
+			// concurrent turns. AppendInbox delivers on the agent's next Submit.
+			a := pool.Get(id)
+			if a == nil {
+				return fmt.Errorf("agent %q not found", id)
+			}
+			a.AppendInbox(sdk.Message{Role: sdk.RoleUser, Content: message})
+			return nil
 		}
 		m.extHost.OnAgentList = func() ([]extension.AgentInfo, error) {
 			if pool == nil {

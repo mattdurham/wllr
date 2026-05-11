@@ -163,9 +163,10 @@ its response streams back into this session automatically.
 - model: optional; defaults to the current session model
 
 **send_message(agent_id, message)**
-Send a follow-up to a running agent. Each call adds to that agent's
-conversation history so context accumulates across messages. Use this to
-hand the agent new information, correct its course, or ask for a summary.
+Queue a message into an agent's inbox. The message is delivered at the
+start of the agent's next turn — it does NOT start an immediate new turn.
+Use this to hand information to an agent or receive a report back.
+The agent must be given a new task (via its next turn) to act on the message.
 
 **shutdown_agent(agent_id)**
 Stop an agent and free its resources. Always shut down agents when their
