@@ -281,7 +281,13 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 			if onToken != nil {
 				onToken("[Compacting context…]\n\n")
 			}
-			compacted, summaryText, cerr := compactHistory(childCtx, lm, history, priorSummary, 0)
+			// Keep 10% of the model's context window as recent history.
+			// This scales correctly: a 1M-token model keeps 100k, a 200k model keeps 20k.
+			keepRecent := contextWindow / 10
+			if keepRecent <= 0 {
+				keepRecent = defaultKeepRecentTokens
+			}
+			compacted, summaryText, cerr := compactHistory(childCtx, lm, history, priorSummary, keepRecent)
 			if cerr == nil {
 				history = compacted
 				a.historyMu.Lock()
