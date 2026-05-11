@@ -19,7 +19,8 @@ import (
 )
 
 func init() {
-	RegisterCommand("history", "Browse and restore previous conversation sessions")
+	RegisterCommand("history", "Browse previous conversations")
+	RegisterCommand("history:rollback", "Pick a previous session to roll back to")
 
 	OnSessionStart(handleSessionStart)
 
@@ -39,6 +40,32 @@ func init() {
 	OnCommand("history:session_selected", func(args []string) {
 		if len(args) > 0 {
 			handleSessionSelected(args[0])
+		}
+	})
+	// /history rollback — opens the session picker then the message picker for rollback.
+	OnCommand("history:rollback", func(_ []string) {
+		sessions, err := listSessions()
+		if err != nil || len(sessions) == 0 {
+			Modal("No previous sessions found.")
+			return
+		}
+		limit := 20
+		if len(sessions) < limit {
+			limit = len(sessions)
+		}
+		items := make([]PickerItem, 0, limit)
+		for _, s := range sessions[:limit] {
+			items = append(items, PickerItem{
+				ID:       s.path,
+				Label:    s.timestamp,
+				Sublabel: s.preview,
+			})
+		}
+		ShowPicker("Select a session to roll back to", items, "history:rollback_session_selected")
+	})
+	OnCommand("history:rollback_session_selected", func(args []string) {
+		if len(args) > 0 {
+			handleRollbackSession(args[0])
 		}
 	})
 	OnCommand("history:message_selected", func(args []string) {
