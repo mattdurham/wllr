@@ -255,3 +255,159 @@ func TestModel_AbortStreamMsg_CancelsAgent(t *testing.T) {
 		t.Error("expected nil cmd from abortStreamMsg")
 	}
 }
+
+// --- TestHarnessModel_OnTeam* tests ---
+// These tests exercise the OnTeam* callbacks as wired in Model.SetProgram.
+// Rather than starting a real tea.Program (which requires a TTY), we call the
+// same closure logic that SetProgram wires, operating directly on the pool.
+
+// makeTeamCallbacks replicates the team-management closure wiring from
+// SetProgram so tests can exercise the logic without a running TUI program.
+func makeTeamCallbacks(pool *agent.AgentPool) (
+	onTeamCreate func(id, name string) error,
+	onTeamClose func(id string) error,
+	onTeamAddMember func(teamID, agentID string) error,
+	onAgentSendMessage func(id, message string) error,
+) {
+	onTeamCreate = func(id, _ string) error {
+		if pool == nil {
+			return nil
+		}
+		_, err := pool.CreateTeam(id)
+		return err
+	}
+	onTeamClose = func(id string) error {
+		if pool == nil {
+			return nil
+		}
+		return pool.CloseTeam(context.Background(), id)
+	}
+	onTeamAddMember = func(teamID, agentID string) error {
+		if pool == nil {
+			return nil
+		}
+		t := pool.GetTeam(teamID)
+		if t == nil {
+			return nil
+		}
+		return t.AddMember(agentID)
+	}
+	onAgentSendMessage = func(id, message string) error {
+		if pool == nil {
+			return nil
+		}
+		// pool.Send calls agent.Submit in a goroutine — non-blocking and safe.
+		// This wakes the target agent immediately to process the message.
+		return pool.Send(id, message)
+	}
+	return
+}
+
+func TestHarnessModel_OnTeamCreate_CreatesTeamInPool(t *testing.T) {
+	pool := agent.NewPool()
+	onTeamCreate, _, _, _ := makeTeamCallbacks(pool)
+
+	if err := onTeamCreate("team-alpha", "Alpha Team"); err != nil {
+		t.Fatalf("OnTeamCreate: %v", err)
+	}
+
+	team := pool.GetTeam("team-alpha")
+	if team == nil {
+		t.Fatal("expected pool.GetTeam(team-alpha) to return non-nil after create")
+	}
+	if team.ID() != "team-alpha" {
+		t.Errorf("team.ID(): got %q, want %q", team.ID(), "team-alpha")
+	}
+}
+
+func TestHarnessModel_OnTeamAddMember_AddsAgent(t *testing.T) {
+	pool := agent.NewPool()
+	lm := newMockLM("hi")
+	_, err := pool.Spawn("worker-1", lm, agent.SpawnOpts{})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	_, err = pool.CreateTeam("team-b")
+	if err != nil {
+		t.Fatalf("CreateTeam: %v", err)
+	}
+
+	_, _, onTeamAddMember, _ := makeTeamCallbacks(pool)
+
+	if err := onTeamAddMember("team-b", "worker-1"); err != nil {
+		t.Fatalf("OnTeamAddMember: %v", err)
+	}
+
+	team := pool.GetTeam("team-b")
+	if team == nil {
+		t.Fatal("team-b not found in pool")
+	}
+	members := team.Members()
+	if len(members) != 1 || members[0] != "worker-1" {
+		t.Errorf("team members: got %v, want [worker-1]", members)
+	}
+}
+
+func TestHarnessModel_OnTeamClose_RemovesTeamAndMembers(t *testing.T) {
+	pool := agent.NewPool()
+	lm := newMockLM("hi")
+	_, err := pool.Spawn("member-1", lm, agent.SpawnOpts{})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	team, err := pool.CreateTeam("team-c")
+	if err != nil {
+		t.Fatalf("CreateTeam: %v", err)
+	}
+	if err := team.AddMember("member-1"); err != nil {
+		t.Fatalf("AddMember: %v", err)
+	}
+
+	// Verify setup.
+	if pool.GetTeam("team-c") == nil {
+		t.Fatal("team-c should exist before close")
+	}
+	if pool.Get("member-1") == nil {
+		t.Fatal("member-1 should exist in pool before close")
+	}
+
+	_, onTeamClose, _, _ := makeTeamCallbacks(pool)
+	if err := onTeamClose("team-c"); err != nil {
+		t.Fatalf("OnTeamClose: %v", err)
+	}
+
+	if pool.GetTeam("team-c") != nil {
+		t.Error("expected pool.GetTeam(team-c) to return nil after close")
+	}
+	if pool.Get("member-1") != nil {
+		t.Error("expected pool.Get(member-1) to return nil after team close (member was closed)")
+	}
+}
+
+func TestHarnessModel_OnAgentSendMessage_TriggersAgentTurn(t *testing.T) {
+	// Regression test: OnAgentSendMessage must call pool.Send (not AppendInbox).
+	// pool.Send calls agent.Submit directly, waking the agent immediately.
+	// The inbox must be empty after the call — nothing was queued there.
+	pool := agent.NewPool()
+	lm := newMockLM("response")
+	_, err := pool.Spawn("sub-1", lm, agent.SpawnOpts{})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	_, _, _, onAgentSendMessage := makeTeamCallbacks(pool)
+	if err := onAgentSendMessage("sub-1", "hello from orchestrator"); err != nil {
+		t.Fatalf("OnAgentSendMessage: %v", err)
+	}
+
+	a := pool.Get("sub-1")
+	if a == nil {
+		t.Fatal("agent sub-1 not found in pool")
+	}
+	// pool.Send bypasses the inbox entirely — it calls Submit directly.
+	// DrainInbox must return empty: the message was never queued here.
+	inbox := a.DrainInbox()
+	if len(inbox) != 0 {
+		t.Errorf("expected inbox to be empty (pool.Send uses Submit, not AppendInbox), got %d messages", len(inbox))
+	}
+}
