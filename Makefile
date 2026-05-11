@@ -39,7 +39,7 @@ EXT_DIR     := $(HOME)/.wllr/extensions
 # Package list - lazy evaluation
 PACKAGES = $(shell go list -e -f '{{if .GoFiles}}{{.ImportPath}}{{end}}' ./...)
 
-.PHONY: all build extensions clean lint test format precommit ci install-tools nilaway betteralign betteralign-fix gofumpt-check gofumpt golines-check golines format-all deadcode staticcheck
+.PHONY: all build extensions clean lint test format precommit ci install-tools nilaway betteralign betteralign-fix gofumpt-check gofumpt golines-check golines format-all deadcode staticcheck generate-models
 
 all: extensions build
 
@@ -280,6 +280,12 @@ precommit:
 	@echo ""
 	@echo "✅ All pre-commit checks passed!"
 	@echo "✅ Ready to commit"
+
+# Generate agent/models.generated.go from Anthropic API
+generate-models:
+	@echo "==> Generating model context window table..."
+	@ANTHROPIC_API_KEY=$${ANTHROPIC_API_KEY} go run scripts/generate-models.go
+	@echo "==> Done — commit agent/models.generated.go"
 
 clean:
 	rm -rf $(DIST_DIR)
