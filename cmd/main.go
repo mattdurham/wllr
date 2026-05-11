@@ -100,11 +100,6 @@ func main() {
 	pool.SetDefaultModelName(cfg.Model)
 	if cfg.ContextWindow > 0 {
 		pool.SetContextWindow(cfg.ContextWindow)
-	} else {
-		// Ask the provider for the model's context window.
-		if cw := contextWindowFromProvider(fantasyProv, cfg.Model); cw > 0 {
-			pool.SetContextWindow(cw)
-		}
 	}
 
 	if _, spawnErr := pool.Spawn("main", langModel, agent.SpawnOpts{}); spawnErr != nil {
