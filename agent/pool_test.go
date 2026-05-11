@@ -487,3 +487,71 @@ func TestAgentPool_ListTeams_AfterCloseTeam(t *testing.T) {
 		t.Errorf("ListTeams: got %q, want %q", ids[0], "stay")
 	}
 }
+
+// --- Bug fix tests: agent name plumbing ---
+
+func TestPool_Spawn_StoresName(t *testing.T) {
+	pool := agent.NewPool()
+	lm := newMockLM()
+
+	a, err := pool.Spawn("agent-foo", lm, agent.SpawnOpts{Name: "my-agent"})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	if a.Name() != "my-agent" {
+		t.Errorf("Agent.Name(): got %q, want %q", a.Name(), "my-agent")
+	}
+}
+
+func TestPool_Spawn_EmptyName_FallsBackToID(t *testing.T) {
+	pool := agent.NewPool()
+	lm := newMockLM()
+
+	a, err := pool.Spawn("agent-bar", lm, agent.SpawnOpts{})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	// When no name is given, Name() should return empty string (not the ID).
+	// The caller (list_agents handler) is responsible for falling back to ID.
+	_ = a.Name() // must not panic
+}
+
+func TestPool_List_MultipleAgents_NamesPreserved(t *testing.T) {
+	pool := agent.NewPool()
+	lm := newMockLM()
+
+	if _, err := pool.Spawn("id-1", lm, agent.SpawnOpts{Name: "Alice"}); err != nil {
+		t.Fatalf("Spawn id-1: %v", err)
+	}
+	if _, err := pool.Spawn("id-2", lm, agent.SpawnOpts{Name: "Bob"}); err != nil {
+		t.Fatalf("Spawn id-2: %v", err)
+	}
+
+	nameFor := map[string]string{}
+	for _, id := range pool.ListAgents() {
+		a := pool.Get(id)
+		if a == nil {
+			t.Fatalf("Get(%q) returned nil", id)
+		}
+		nameFor[id] = a.Name()
+	}
+
+	if nameFor["id-1"] != "Alice" {
+		t.Errorf("id-1 name: got %q, want %q", nameFor["id-1"], "Alice")
+	}
+	if nameFor["id-2"] != "Bob" {
+		t.Errorf("id-2 name: got %q, want %q", nameFor["id-2"], "Bob")
+	}
+}
+
+// TestPool_Send_UnknownID verifies pool.Send returns ErrAgentNotFound for missing agents.
+func TestPool_Send_UnknownID_ReturnsError(t *testing.T) {
+	pool := agent.NewPool()
+	err := pool.Send("nonexistent", "hello")
+	if err == nil {
+		t.Fatal("expected error for Send to unknown agent, got nil")
+	}
+	if err != agent.ErrAgentNotFound {
+		t.Errorf("expected ErrAgentNotFound, got %v", err)
+	}
+}

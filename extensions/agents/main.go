@@ -163,12 +163,11 @@ Its output does NOT appear in your chat — it works silently in the background.
 - model: optional; defaults to the current session model
 
 **send_message(agent_id, message)**
-Queue a message into an agent's inbox. Delivered at the start of that
-agent's next turn — does NOT start an immediate turn.
-- To ask a sub-agent for results: send_message(id, "Report your findings")
-  then call create_agent or any tool to trigger that agent's next turn.
+Send a message to an agent and trigger its next turn immediately. The agent
+will process all queued inbox messages at the start of that turn.
 - Sub-agents reporting back to you: they call send_message(your_id, result),
   which queues into your inbox and appears in your context next turn.
+- Sub-agents reporting back to the orchestrator: call send_message("main", result) — the main agent ID is always "main".
 
 **shutdown_agent(agent_id)**
 Stop an agent and free its resources. Always shut down agents when their
@@ -490,6 +489,9 @@ func handleShutdownTeam(p beforeToolCallPayload) {
 		return
 	}
 
+	// Get member IDs BEFORE closing so we can clean up agentRecords.
+	memberIDs := getTeamMembers(input.TeamID)
+
 	type closeParams struct {
 		ID string `json:"id"`
 	}
@@ -505,7 +507,29 @@ func handleShutdownTeam(p beforeToolCallPayload) {
 		ToolResult(p.ToolCallID, "shutdown_team: "+resp.Error, true)
 		return
 	}
+
+	// Clean up WASM-side records for all team members.
+	for _, id := range memberIDs {
+		removeAgent(id)
+	}
+
 	ToolResult(p.ToolCallID, `{"status":"closed"}`, false)
+}
+
+// getTeamMembers calls team_get_info and returns member IDs, or nil on error.
+func getTeamMembers(teamID string) []string {
+	result := agentCall("team_get_info", map[string]string{"team_id": teamID})
+	if result == "" {
+		return nil
+	}
+	var resp struct {
+		Members []string `json:"members"`
+		Error   string   `json:"error,omitempty"`
+	}
+	if err := json.Unmarshal([]byte(result), &resp); err != nil || resp.Error != "" {
+		return nil
+	}
+	return resp.Members
 }
 
 func handleSendMessage(p beforeToolCallPayload) {
@@ -534,6 +558,8 @@ func handleSendMessage(p beforeToolCallPayload) {
 		ToolResult(p.ToolCallID, "send_message: "+resp.Error, true)
 		return
 	}
+	// Trigger an immediate turn so the agent processes the queued message now.
+	agentCall("agent_run", map[string]string{"id": input.AgentID})
 	upsertAgent(input.AgentID, "", "", "← "+truncate(input.Message, 60))
 	ToolResult(p.ToolCallID, `{"status":"sent"}`, false)
 }
