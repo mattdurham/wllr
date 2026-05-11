@@ -152,24 +152,84 @@ func onSessionStart() {
 	guidance := `
 ## Agent and Team Tools
 
-Use these tools to spawn sub-agents and coordinate work across teams.
+### Tool reference
 
-### How agents work
-- create_agent spawns a sub-agent and sends its first prompt. The agent
-  runs asynchronously; its response streams back through the session.
-- send_message sends a follow-up message to a running agent. Each message
-  is added to that agent's conversation history so context accumulates.
-- There is no inbox to poll. Results from sub-agents arrive as part of
-  the normal response stream — just continue reasoning after sending.
-- shutdown_agent when the agent's task is complete.
+**create_agent(name, system_prompt, prompt, model?)**
+Spawn a sub-agent. Returns an agent_id. The agent starts immediately and
+its response streams back into this session automatically.
+- name: short label shown in /agents status (e.g. "researcher", "coder-1")
+- system_prompt: the agent's role and constraints — be specific and focused
+- prompt: the first task to send
+- model: optional; defaults to the current session model
 
-### Workflow
-1. create_agent — spawn with a focused system prompt and initial task
-2. send_message — send follow-ups as needed (each adds to agent context)
-3. shutdown_agent — clean up when done
+**send_message(agent_id, message)**
+Send a follow-up to a running agent. Each call adds to that agent's
+conversation history so context accumulates across messages. Use this to
+hand the agent new information, correct its course, or ask for a summary.
 
-Teams group agents for broadcast coordination:
-create_team / add_to_team / shutdown_team`
+**shutdown_agent(agent_id)**
+Stop an agent and free its resources. Always shut down agents when their
+task is complete. Leaked agents continue consuming memory.
+
+**list_agents()**
+Returns all currently running agents with their IDs and names.
+
+**create_team(name)** / **add_to_team(team_id, agent_id)** / **shutdown_team(team_id)**
+Group agents for coordinated work. shutdown_team stops all members at once.
+
+---
+
+### When to use sub-agents
+
+Use a sub-agent when:
+- A task can run in parallel with other work (research while you code)
+- A task needs a different persona or specialised focus (strict reviewer,
+  cautious planner, aggressive refactorer)
+- A task is long and you want it isolated from the main conversation
+
+Do it yourself when the task is a single tool call or a quick sequence.
+
+---
+
+### Writing good system prompts
+
+A sub-agent's system_prompt defines its entire world. Be explicit:
+
+**Good:**
+"You are a strict code reviewer. Read the files you are given and return
+a bullet list of issues grouped by severity (critical / high / low).
+Do not suggest fixes — only identify problems. Be terse."
+
+**Bad:**
+"You are a helpful assistant."
+
+Include: role, output format, constraints, what NOT to do.
+
+---
+
+### Receiving results
+
+Sub-agent responses stream back into this session automatically — there
+is no inbox to poll. After calling create_agent or send_message, continue
+your own reasoning. The agent's output appears as it streams in.
+
+To act on a result, send_message with a follow-up after the agent
+responds. To get a final summary before shutting down:
+  send_message(id, "Summarise your findings in 3 bullet points.")
+  shutdown_agent(id)
+
+---
+
+### Parallel work pattern
+
+To run two tasks simultaneously:
+  create_agent("researcher", "...", "Research X")  → id-1
+  create_agent("coder", "...", "Implement Y")       → id-2
+  (both run concurrently; their output streams back as they work)
+  send_message(id-1, "Done? Give me the summary.")
+  send_message(id-2, "Done? Show me the final file.")
+  shutdown_agent(id-1)
+  shutdown_agent(id-2)`
 
 	AppendSystemPrompt(guidance)
 }
