@@ -61,7 +61,9 @@ func NewChatView(width, height int) ChatView {
 	vp := viewport.New()
 	vp.SetWidth(width)
 	vp.SetHeight(height)
-	return ChatView{vp: vp, width: width, height: height}
+	// histDirty starts true so the first refreshContent always builds histContent
+	// using the histDirty flag rather than the histContent=="" fallback.
+	return ChatView{vp: vp, width: width, height: height, histDirty: true}
 }
 
 // SetSize updates the viewport dimensions. No-op when dimensions are unchanged.
@@ -96,6 +98,8 @@ func (c *ChatView) FinalizeMessage() {
 	c.toolLog = nil
 	c.afterTool = false
 	if c.current == "" {
+		// Still refresh so the viewport reflects cleared tool state.
+		c.refreshContent()
 		return
 	}
 	// All text from the turn is already in c.current (including pre- and
@@ -130,6 +134,7 @@ func (c *ChatView) AddNotification(text string) {
 func (c *ChatView) AddToolCall(id, toolName, input string) {
 	c.lastDoneToolID = ""
 	c.toolLog = append(c.toolLog, ToolLogEntry{Name: toolName, Preview: toolInputPreview(input)})
+	c.refreshContent()
 }
 
 // UpdateToolCall marks the last pending tool log entry as done and sets afterTool so
@@ -144,6 +149,7 @@ func (c *ChatView) UpdateToolCall(id string, isError bool, output string) {
 		}
 	}
 	c.afterTool = true
+	c.refreshContent()
 }
 
 // Clear resets the chat history.
@@ -189,7 +195,7 @@ func (c *ChatView) invalidateHistory() {
 // The rendered historical messages are cached; only the streaming current
 // message is appended on every token, avoiding a full O(n) rebuild each time.
 func (c *ChatView) refreshContent() {
-	if c.histDirty || c.histContent == "" {
+	if c.histDirty {
 		// Find the start of the most recent user turn and the last tool call.
 		recentStart := 0
 		for i := len(c.messages) - 1; i >= 0; i-- {
