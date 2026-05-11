@@ -41,11 +41,11 @@ type ChatView struct {
 
 	// toolLog records tool calls for the current turn. Cleared by FinalizeMessage.
 	// Shown on demand via /tools command or ctrl+t — not rendered inline.
-	toolLog  []ToolLogEntry
-	messages []chatMessage
-	vp       viewport.Model
-	width    int
-	height   int
+	toolLog   []ToolLogEntry
+	messages  []chatMessage
+	vp        viewport.Model
+	width     int
+	height    int
 	histDirty bool
 
 	// afterTool is true after a tool call completes and before the next token
@@ -54,9 +54,7 @@ type ChatView struct {
 	afterTool bool
 }
 
-var (
-	systemStyle = lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("#555555"))
-)
+var systemStyle = lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("#555555"))
 
 // NewChatView creates a ChatView with the given dimensions.
 func NewChatView(width, height int) ChatView {
@@ -368,9 +366,9 @@ func (c *ChatView) ToolLogModal() string {
 		} else {
 			status = "● done"
 		}
-		sb.WriteString(fmt.Sprintf("%d. %s  %s\n", i+1, e.Name, status))
+		fmt.Fprintf(&sb, "%d. %s  %s\n", i+1, e.Name, status)
 		if e.Preview != "" {
-			sb.WriteString(fmt.Sprintf("   %s\n", e.Preview))
+			fmt.Fprintf(&sb, "   %s\n", e.Preview)
 		}
 	}
 	return strings.TrimRight(sb.String(), "\n")

@@ -109,9 +109,9 @@ type Host struct {
 	OnAppendSystemPrompt func(text string)
 	OnExec               func(command, dir string) (string, error)
 	OnGetEnv             func(name string) (string, error)
-	OnReadFile            func(path string) (string, error)
-	OnWriteFile           func(path, content string) error
-	OnHTTPPost            func(url string, headers map[string]string, body []byte) (int, []byte, error)
+	OnReadFile           func(path string) (string, error)
+	OnWriteFile          func(path, content string) error
+	OnHTTPPost           func(url string, headers map[string]string, body []byte) (int, []byte, error)
 	OnConfigRead         func(group string) (json.RawMessage, error)
 	// OnGetStatusInfo returns the current status bar snapshot for the get_status_info host call.
 	OnGetStatusInfo func() sdk.StatusInfo
@@ -866,6 +866,7 @@ func (h *Host) handleAgentSendMessage(req sdk.HostCallRequest) sdk.HostCallRespo
 	}
 	return sdk.HostCallResponse{}
 }
+
 func (h *Host) handleAgentRun(req sdk.HostCallRequest) sdk.HostCallResponse {
 	if h.OnAgentRun == nil {
 		return sdk.HostCallResponse{Error: "agent_run: not supported by host"}
