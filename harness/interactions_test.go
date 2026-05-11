@@ -66,8 +66,8 @@ func TestModel_EscEsc_DuringStream_GeneratesAbort(t *testing.T) {
 
 // ─── ToolCallStartMsg ────────────────────────────────────────────────────────
 
-func TestModel_ToolCallStartMsg_VisibleInActivityBox(t *testing.T) {
-	// Tool calls are shown in a live activity box that updates with each call.
+func TestModel_ToolCallStartMsg_RecordedInToolLog(t *testing.T) {
+	// Tool calls are recorded in the toolLog for on-demand display, not shown inline.
 	m := newTestModel()
 	m.width = 80
 	m.height = 40
@@ -80,19 +80,18 @@ func TestModel_ToolCallStartMsg_VisibleInActivityBox(t *testing.T) {
 	})
 	m = next.(Model)
 
-	content := m.chat.vp.View()
-	if !strings.Contains(content, "exec") {
-		t.Error("tool call should be visible in activity box")
+	// Tool calls are recorded in the log.
+	if len(m.chat.toolLog) != 1 {
+		t.Fatalf("expected 1 tool log entry, got %d", len(m.chat.toolLog))
 	}
-	// Tool calls are shown via the activity box, not stored in message list.
-	if m.chat.activityName != "exec" {
-		t.Errorf("activity box should show exec, got %q", m.chat.activityName)
+	if m.chat.toolLog[0].Name != "exec" {
+		t.Errorf("tool log should record exec, got %q", m.chat.toolLog[0].Name)
 	}
 }
 
 // ─── ToolCallDoneMsg ─────────────────────────────────────────────────────────
 
-func TestModel_ToolCallDoneMsg_UpdatesToolBox(t *testing.T) {
+func TestModel_ToolCallDoneMsg_UpdatesToolLog(t *testing.T) {
 	m := newTestModel()
 	m.width = 80
 	m.height = 40
@@ -100,16 +99,16 @@ func TestModel_ToolCallDoneMsg_UpdatesToolBox(t *testing.T) {
 
 	// Add a pending tool call first
 	m.chat.AddToolCall("call-1", "exec", `{"command":"ls"}`)
-	if m.chat.activityDone {
-		t.Fatal("tool call should start as pending")
+	if m.chat.toolLog[0].Done {
+		t.Fatal("tool call should start as pending (Done=false)")
 	}
 
 	// Mark it done
 	next, _ := m.Update(ToolCallDoneMsg{ID: "call-1", IsError: false, Output: "file.txt"})
 	m = next.(Model)
 
-	if !m.chat.activityDone {
-		t.Error("ToolCallDoneMsg should mark the activity as done")
+	if !m.chat.toolLog[0].Done {
+		t.Error("ToolCallDoneMsg should mark the tool log entry as done")
 	}
 }
 
@@ -120,8 +119,8 @@ func TestModel_ToolCallDoneMsg_ErrorFlag(t *testing.T) {
 	next, _ := m.Update(ToolCallDoneMsg{ID: "call-1", IsError: true, Output: "permission denied"})
 	m = next.(Model)
 
-	if !m.chat.activityError {
-		t.Error("ToolCallDoneMsg with IsError=true should set activityError")
+	if !m.chat.toolLog[0].IsError {
+		t.Error("ToolCallDoneMsg with IsError=true should set IsError on the tool log entry")
 	}
 }
 
