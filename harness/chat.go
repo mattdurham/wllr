@@ -147,15 +147,20 @@ func (c *ChatView) AddNotification(text string) {
 	c.vp.GotoBottom()
 }
 
-// AddToolCall updates the live activity box and records the tool call.
-// Any in-progress streaming text is sealed first so it appears before the box.
-// Each call replaces the previous activity entry — only the current tool is shown.
+// AddToolCall updates the live activity box and merges any in-progress text
+// into the current assistant block. Tool calls are not stored in c.messages
+// (they are not rendered) so consecutive assistant text segments merge into
+// one box without interruption.
 func (c *ChatView) AddToolCall(id, toolName, input string) {
 	if c.current != "" {
+		// Merge into the last assistant message so all text from this turn
+		// stays in one blue box, even when tool calls happen in between.
 		if n := len(c.messages); n > 0 && c.messages[n-1].role == sdk.RoleAssistant {
 			c.messages[n-1].content += "\n\n" + c.current
+			c.invalidateHistory()
 		} else {
 			c.messages = append(c.messages, chatMessage{role: sdk.RoleAssistant, content: c.current})
+			c.invalidateHistory()
 		}
 		c.current = ""
 	}
@@ -164,27 +169,12 @@ func (c *ChatView) AddToolCall(id, toolName, input string) {
 	c.activityInput = input
 	c.activityDone = false
 	c.activityError = false
-	c.messages = append(c.messages, chatMessage{
-		role:      roleToolMessage,
-		toolID:    id,
-		toolName:  toolName,
-		toolInput: input,
-	})
-	c.invalidateHistory()
 	c.refreshContent()
 	c.vp.GotoBottom()
 }
 
-// UpdateToolCall marks an existing tool call as done and updates the activity box status.
+// UpdateToolCall marks the current activity box as done.
 func (c *ChatView) UpdateToolCall(id string, isError bool, output string) {
-	for i := range c.messages {
-		if c.messages[i].role == roleToolMessage && c.messages[i].toolID == id {
-			c.messages[i].toolDone = true
-			c.messages[i].toolError = isError
-			c.messages[i].toolOutput = output // stored but not rendered
-			break
-		}
-	}
 	c.lastDoneToolID = id
 	if c.activityName != "" {
 		c.activityDone = true
