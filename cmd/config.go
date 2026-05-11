@@ -57,11 +57,11 @@ func LoadConfig() (*Config, error) {
 		cfg.Model = "claude-sonnet-4-6"
 	}
 	if cfg.Provider == "" {
-		cfg.Provider = "anthropic"
+		cfg.Provider = providerAnthropic
 	}
 
 	switch cfg.Provider {
-	case "anthropic":
+	case providerAnthropic:
 		if cfg.AnthropicAPIKey == "" {
 			return nil, fmt.Errorf("ANTHROPIC_API_KEY is required when BOB_PROVIDER=anthropic")
 		}

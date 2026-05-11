@@ -82,7 +82,9 @@ func newEnv(t *testing.T) *testEnv {
 		Description: "Read the contents of a file",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}`),
 	}, func(_ context.Context, input json.RawMessage) (string, bool) {
-		var in struct{ Path string `json:"path"` }
+		var in struct {
+			Path string `json:"path"`
+		}
 		if err := json.Unmarshal(input, &in); err != nil || in.Path == "" {
 			return "path required", true
 		}

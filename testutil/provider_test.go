@@ -169,6 +169,7 @@ func TestFakeLM_Stream_ContextCancelled_StopsEarly(t *testing.T) {
 	lm := p.LM()
 
 	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 
 	stream, err := lm.Stream(ctx, fantasy.Call{
 		Prompt: fantasy.Prompt{

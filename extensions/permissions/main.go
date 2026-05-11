@@ -147,10 +147,10 @@ func checkPermission(path string, rules PathRules) bool {
 
 // matchPath checks if path matches pattern.
 // Patterns can be:
-//  - "*" — matches everything
-//  - absolute path — exact match or prefix match
-//  - path with trailing "/" — prefix match
-//  - glob pattern (simple * wildcard)
+//   - "*" — matches everything
+//   - absolute path — exact match or prefix match
+//   - path with trailing "/" — prefix match
+//   - glob pattern (simple * wildcard)
 func matchPath(path, pattern string) bool {
 	if pattern == "*" {
 		return true

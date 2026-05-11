@@ -11,25 +11,15 @@ import (
 	"charm.land/fantasy"
 )
 
-// RecordedCall holds the inputs captured from a single Stream or Generate call.
-type RecordedCall struct {
-	// SystemPrompt is the system message content, if any.
-	SystemPrompt string
-	// Messages contains "role: content" strings for each non-system prompt message.
-	Messages []string
-	// Prompt is the final user-turn text (last user message in the prompt).
-	Prompt string
-}
-
 // FakeLM is a fantasy.LanguageModel that streams preset text responses
 // one word at a time and records every call it receives.
 type FakeLM struct {
-	mu        sync.Mutex
-	responses []string // one response string per call
-	callIdx   int
-	calls     []RecordedCall
 	modelID   string
 	provider  string
+	responses []string // one response string per call
+	calls     []RecordedCall
+	callIdx   int
+	mu        sync.Mutex
 }
 
 // compile-time interface assertion
@@ -200,37 +190,4 @@ func splitWords(text string) []string {
 		}
 	}
 	return parts
-}
-
-// FakeProvider is a fantasy.Provider that returns a single FakeLM for any model.
-type FakeProvider struct {
-	lm *FakeLM
-}
-
-// compile-time interface assertion
-var _ fantasy.Provider = (*FakeProvider)(nil)
-
-// NewFakeProvider creates a FakeProvider whose FakeLM will emit the given
-// response strings in order (one per call). After responses are exhausted the
-// last response is repeated indefinitely.
-func NewFakeProvider(responses ...string) *FakeProvider {
-	return &FakeProvider{
-		lm: &FakeLM{
-			responses: responses,
-			modelID:   "fake-model",
-			provider:  "fake",
-		},
-	}
-}
-
-// LM returns the underlying FakeLM so tests can configure tool call behaviour
-// or inspect recorded calls.
-func (p *FakeProvider) LM() *FakeLM { return p.lm }
-
-// Name implements fantasy.Provider.
-func (p *FakeProvider) Name() string { return "fake" }
-
-// LanguageModel implements fantasy.Provider. Returns the same FakeLM for any model ID.
-func (p *FakeProvider) LanguageModel(_ context.Context, _ string) (fantasy.LanguageModel, error) {
-	return p.lm, nil
 }

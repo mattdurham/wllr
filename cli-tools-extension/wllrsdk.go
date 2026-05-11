@@ -85,21 +85,21 @@ func callHost(method string, payload any) (json.RawMessage, error) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 type (
-	ToolCallHandler       func(callID, name string, input json.RawMessage) (result string, isError bool)
-	CommandHandler        func(args string)
-	SessionStartHandler   func(sessionID string)
-	BeforeAgentHandler    func(prompt string) string
-	MessageEndHandler     func(role, content string)
-	PickerHandler         func(selected string)
+	ToolCallHandler     func(callID, name string, input json.RawMessage) (result string, isError bool)
+	CommandHandler      func(args string)
+	SessionStartHandler func(sessionID string)
+	BeforeAgentHandler  func(prompt string) string
+	MessageEndHandler   func(role, content string)
+	PickerHandler       func(selected string)
 )
 
 var (
-	toolHandlers          []ToolCallHandler
-	commandHandlers       = make(map[string]CommandHandler)
-	sessionStartHandlers  []SessionStartHandler
-	beforeAgentHandlers   []BeforeAgentHandler
-	messageEndHandlers    []MessageEndHandler
-	pickerHandlers        = make(map[string]PickerHandler) // keyed by pickerID
+	toolHandlers         []ToolCallHandler
+	commandHandlers      = make(map[string]CommandHandler)
+	sessionStartHandlers []SessionStartHandler
+	beforeAgentHandlers  []BeforeAgentHandler
+	messageEndHandlers   []MessageEndHandler
+	pickerHandlers       = make(map[string]PickerHandler) // keyed by pickerID
 )
 
 //export _init

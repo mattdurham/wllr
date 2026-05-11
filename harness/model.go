@@ -36,12 +36,16 @@ type Model struct {
 	// If nil, warnings are silently dropped.
 	logFn func(int, string)
 
+	statusBar StatusBar
+
 	mainAgentID string
 	activeModel string
 
 	// Modal overlay state (non-empty when modal is open).
 	modalContent string
 	input        InputArea
+
+	chat ChatView
 
 	history []sdk.Message
 
@@ -51,12 +55,9 @@ type Model struct {
 	// Autocomplete dropdown state.
 	suggestions []Command
 
-	statusBar StatusBar
-	chat      ChatView
+	picker PickerView
 
 	width, height int
-
-	picker         PickerView
 
 	suggestionIdx  int
 	dropdownOffset int // first visible suggestion index
@@ -280,10 +281,10 @@ func (m *Model) SetProgram(p *tea.Program) {
 // Uses time-based batching with no goroutines or channels — safe to call
 // flush() multiple times across agent turns without panics.
 type tokenBatcher struct {
-	mu       sync.Mutex
-	buf      strings.Builder
 	lastSend time.Time
 	p        *tea.Program
+	buf      strings.Builder
+	mu       sync.Mutex
 }
 
 const tokenBatchInterval = 30 * time.Millisecond
@@ -472,98 +473,15 @@ func (m Model) updateKeyPress(msg tea.Msg) (Model, tea.Cmd, bool) {
 		return m, nil, false
 	}
 
-	// Picker consumes all keys while active.
 	if m.picker.IsActive() {
-		callback := m.picker.Callback
-		selected, id, cancelled := m.picker.HandleKey(kp)
-		if cancelled {
-			m.picker.Close()
-			return m, nil, true
-		}
-		if selected {
-			m.picker.Close()
-			extHost := m.extHost
-			return m, func() tea.Msg {
-				payload, _ := json.Marshal(sdk.OnCommandPayload{Name: callback, Args: []string{id}})
-				evt := sdk.Event{Type: sdk.EventOnCommand, Payload: payload}
-				results, err := extHost.DispatchEvent(context.Background(), evt)
-				return ExtensionEventResultMsg{Results: results, Err: err}
-			}, true
-		}
-		return m, nil, true
+		return m.updateKeyPressPicker(kp)
 	}
-
-	// Modal consumes all keys; esc/enter/q close it.
 	if m.modalContent != "" {
-		switch kp.String() {
-		case "esc", "enter", "q":
-			m.modalContent = ""
-			m.modalScroll = 0
-		case "up":
-			if m.modalScroll > 0 {
-				m.modalScroll--
-			}
-		case "down":
-			chatH := m.height - inputAreaHeight
-			if chatH < 5 {
-				chatH = 5
-			}
-			modalH := chatH * 8 / 10
-			if modalH < 5 {
-				modalH = 5
-			}
-			contentLines := modalH - 2
-			lines := strings.Split(strings.TrimRight(m.modalContent, "\n"), "\n")
-			if max := len(lines) - contentLines; m.modalScroll < max {
-				m.modalScroll++
-			}
-		}
-		return m, nil, true
+		return m.updateKeyPressModal(kp)
 	}
-
-	// Dropdown navigation takes priority over textarea key handling.
 	if len(m.suggestions) > 0 {
-		switch kp.String() {
-		case "up":
-			if m.suggestionIdx > 0 {
-				m.suggestionIdx--
-				if m.suggestionIdx < m.dropdownOffset {
-					m.dropdownOffset = m.suggestionIdx
-				}
-			}
-			return m, nil, true
-		case "down":
-			if m.suggestionIdx < len(m.suggestions)-1 {
-				m.suggestionIdx++
-				const maxShow = 8
-				if m.suggestionIdx >= m.dropdownOffset+maxShow {
-					m.dropdownOffset = m.suggestionIdx - maxShow + 1
-				}
-			}
-			return m, nil, true
-		case "tab":
-			// Replace the /word at the cursor with the completed command name.
-			if m.suggestionIdx < len(m.suggestions) {
-				val := m.input.Value()
-				if slashIdx := slashWordAt(val); slashIdx >= 0 {
-					m.input.SetValue(val[:slashIdx] + "/" + m.suggestions[m.suggestionIdx].Name + " ")
-				} else {
-					m.input.SetValue("/" + m.suggestions[m.suggestionIdx].Name + " ")
-				}
-			}
-			m.closeSuggestions()
-			return m, nil, true
-		case "enter":
-			// Dispatch the selected command and clear input.
-			if m.suggestionIdx < len(m.suggestions) {
-				cmd := m.suggestions[m.suggestionIdx]
-				m.input.Reset()
-				m.closeSuggestions()
-				return m, cmd.Handler(nil), true
-			}
-		case "esc":
-			m.closeSuggestions()
-			return m, nil, true
+		if m2, cmd, handled := m.updateKeyPressDropdown(kp); handled {
+			return m2, cmd, true
 		}
 	}
 
@@ -589,6 +507,103 @@ func (m Model) updateKeyPress(msg tea.Msg) (Model, tea.Cmd, bool) {
 		return m, nil, true
 	}
 
+	return m, nil, false
+}
+
+// updateKeyPressPicker handles key events when the picker overlay is active.
+func (m Model) updateKeyPressPicker(kp tea.KeyPressMsg) (Model, tea.Cmd, bool) {
+	callback := m.picker.Callback
+	selected, id, cancelled := m.picker.HandleKey(kp)
+	if cancelled {
+		m.picker.Close()
+		return m, nil, true
+	}
+	if selected {
+		m.picker.Close()
+		extHost := m.extHost
+		return m, func() tea.Msg {
+			payload, _ := json.Marshal(sdk.OnCommandPayload{Name: callback, Args: []string{id}})
+			evt := sdk.Event{Type: sdk.EventOnCommand, Payload: payload}
+			results, err := extHost.DispatchEvent(context.Background(), evt)
+			return ExtensionEventResultMsg{Results: results, Err: err}
+		}, true
+	}
+	return m, nil, true
+}
+
+// updateKeyPressModal handles key events when the modal overlay is open.
+func (m Model) updateKeyPressModal(kp tea.KeyPressMsg) (Model, tea.Cmd, bool) {
+	switch kp.String() {
+	case "esc", "enter", "q":
+		m.modalContent = ""
+		m.modalScroll = 0
+	case "up":
+		if m.modalScroll > 0 {
+			m.modalScroll--
+		}
+	case "down":
+		chatH := m.height - inputAreaHeight
+		if chatH < 5 {
+			chatH = 5
+		}
+		modalH := chatH * 8 / 10
+		if modalH < 5 {
+			modalH = 5
+		}
+		contentLines := modalH - 2
+		lines := strings.Split(strings.TrimRight(m.modalContent, "\n"), "\n")
+		if max := len(lines) - contentLines; m.modalScroll < max {
+			m.modalScroll++
+		}
+	}
+	return m, nil, true
+}
+
+// updateKeyPressDropdown handles key events when the autocomplete dropdown is visible.
+// Returns (model, cmd, true) if the key was consumed; (m, nil, false) otherwise.
+func (m Model) updateKeyPressDropdown(kp tea.KeyPressMsg) (Model, tea.Cmd, bool) {
+	switch kp.String() {
+	case "up":
+		if m.suggestionIdx > 0 {
+			m.suggestionIdx--
+			if m.suggestionIdx < m.dropdownOffset {
+				m.dropdownOffset = m.suggestionIdx
+			}
+		}
+		return m, nil, true
+	case "down":
+		if m.suggestionIdx < len(m.suggestions)-1 {
+			m.suggestionIdx++
+			const maxShow = 8
+			if m.suggestionIdx >= m.dropdownOffset+maxShow {
+				m.dropdownOffset = m.suggestionIdx - maxShow + 1
+			}
+		}
+		return m, nil, true
+	case "tab":
+		// Replace the /word at the cursor with the completed command name.
+		if m.suggestionIdx < len(m.suggestions) {
+			val := m.input.Value()
+			if slashIdx := slashWordAt(val); slashIdx >= 0 {
+				m.input.SetValue(val[:slashIdx] + "/" + m.suggestions[m.suggestionIdx].Name + " ")
+			} else {
+				m.input.SetValue("/" + m.suggestions[m.suggestionIdx].Name + " ")
+			}
+		}
+		m.closeSuggestions()
+		return m, nil, true
+	case "enter":
+		// Dispatch the selected command and clear input.
+		if m.suggestionIdx < len(m.suggestions) {
+			cmd := m.suggestions[m.suggestionIdx]
+			m.input.Reset()
+			m.closeSuggestions()
+			return m, cmd.Handler(nil), true
+		}
+	case "esc":
+		m.closeSuggestions()
+		return m, nil, true
+	}
 	return m, nil, false
 }
 
