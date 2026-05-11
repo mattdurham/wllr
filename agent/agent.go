@@ -255,7 +255,14 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 
 		// Proactive compaction: if the estimated context is close to the model's
 		// limit, summarize old history BEFORE sending, avoiding a 400 error.
-		contextWindow := contextWindowForModel(a.modelName)
+		// Use pool-configured context window if set; fall back to model-name lookup.
+		contextWindow := int64(0)
+		if pool != nil {
+			contextWindow = pool.ContextWindow()
+		}
+		if contextWindow == 0 {
+			contextWindow = contextWindowForModel(a.modelName)
+		}
 		history := priorHistory
 		if shouldCompact(history, sysPrompt, content, contextWindow) {
 			if onToken != nil {
