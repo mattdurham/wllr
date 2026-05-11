@@ -175,3 +175,26 @@ field itself.
 **Consequence:** `lastSummary` is reset to "" if the agent is re-used across unrelated
 tasks. Callers that want to preserve summary context across sessions must persist it
 externally (out of scope).
+
+---
+
+## 14. 10% keepRecent Scaling — Why One-Tenth of the Context Window
+
+*Added: 2026-05-11*
+
+**Decision:** In `Submit`, `keepRecentTokens` passed to `compactHistory` is set to
+`contextWindow / 10` (integer division), not to the fixed `defaultKeepRecentTokens` constant.
+
+**Rationale:** A fixed 20,000-token keep budget works well for 200k-token models but is
+over-conservative for 1M-token models (where 20k is only 2% of the window). Scaling to 10%
+of the context window gives a keep budget that grows with the model: 100k tokens for 1M
+models, 20k for 200k models. 10% is a rough heuristic that balances two competing concerns:
+keep enough recent context that the model has coherent short-term memory of what just
+happened, but do not keep so much that compaction almost never triggers (which would waste
+the context window on verbatim history instead of a dense summary). At 10% the model always
+has at least 90% of its window available for the system prompt, the summary, and new output.
+
+**Consequence:** For large-window models the kept span is generous (100k tokens ≈ hundreds of
+medium-length messages). On smaller models the 10% value may coincide with
+`defaultKeepRecentTokens`. The `defaultKeepRecentTokens` constant is retained for callers
+that invoke `compactHistory` directly and pass `keepRecentTokens=0`.

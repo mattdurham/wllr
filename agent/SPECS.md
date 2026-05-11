@@ -168,6 +168,11 @@ proceeds normally.
 **Invariant:** The cut point always lands on a `RoleUser` message boundary. The kept slice
 never starts with an `RoleAssistant` message.
 
+**Invariant:** When `compactHistory` is called from `Submit`, `keepRecentTokens` is set to
+`contextWindow / 10` (10% of the model's context window). For a 1M-token model this is
+100,000 tokens; for a 200k model it is 20,000 tokens. This scaling ensures the kept recent
+span is proportional to the available context regardless of model tier.
+
 ### Iterative Summary
 
 `Agent` stores `lastSummary string` (protected by `lastSummaryMu sync.RWMutex`). On each
