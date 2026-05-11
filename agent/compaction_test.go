@@ -279,7 +279,7 @@ func TestFindCutPoint_AllFitInBudget_ReturnsZero(t *testing.T) {
 
 func TestFindCutPoint_NoUserBoundaryFound_ReturnsFallback(t *testing.T) {
 	// Pathological: all assistant messages, budget = 1 token.
-	// No user boundary exists anywhere — findCutPoint must return 0 (skip compaction)
+	// No user boundary exists — findCutPoint must return -1 (skip compaction sentinel)
 	// so the caller never produces a history slice starting with an assistant message.
 	history := []sdk.Message{
 		{Role: sdk.RoleAssistant, Content: strings.Repeat("x", 400)},
@@ -287,12 +287,8 @@ func TestFindCutPoint_NoUserBoundaryFound_ReturnsFallback(t *testing.T) {
 		{Role: sdk.RoleAssistant, Content: strings.Repeat("x", 400)},
 	}
 	got := findCutPoint(history, 1)
-	if got != 0 {
-		t.Errorf("findCutPoint no-user-boundary fallback = %d, want 0", got)
-	}
-	// Verify the returned index does not point to an assistant message (invariant).
-	if got < len(history) && got > 0 && history[got].Role != sdk.RoleUser {
-		t.Errorf("findCutPoint fallback: history[%d].Role = %s, want user", got, history[got].Role)
+	if got != -1 {
+		t.Errorf("findCutPoint no-user-boundary fallback = %d, want -1", got)
 	}
 }
 
