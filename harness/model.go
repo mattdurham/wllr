@@ -182,7 +182,7 @@ func (m *Model) SetProgram(p *tea.Program) {
 		// Wire agent and team management — all agent-pool operations belong in
 		// the harness so cmd/main.go stays minimal.
 		pool := m.agentPool
-		m.extHost.OnAgentSpawn = func(id, name, systemPrompt, modelName string) error {
+		m.extHost.OnAgentSpawn = func(id, name, systemPrompt, modelName, initialPrompt string) error {
 			if pool == nil {
 				return fmt.Errorf("no agent pool")
 			}
@@ -213,6 +213,13 @@ func (m *Model) SetProgram(p *tea.Program) {
 			a.SetOnToolCall(func(toolCallID, toolName, input string) {
 				p.Send(ToolCallStartMsg{ID: toolCallID, ToolName: toolName, Input: input})
 			})
+			// If an initial prompt was provided, start the agent's first turn immediately.
+			// pool.Send is non-blocking — the turn runs in a goroutine.
+			if initialPrompt != "" {
+				if err := pool.Send(id, initialPrompt); err != nil {
+					slog.Warn("sub-agent: initial turn start failed", "agent", id, "err", err)
+				}
+			}
 			return nil
 		}
 		m.extHost.OnAgentClose = func(id string) error {
@@ -281,10 +288,29 @@ func (m *Model) SetProgram(p *tea.Program) {
 			}
 			t := pool.GetTeam(teamID)
 			if t == nil {
-				return fmt.Errorf("team not found: %s", teamID)
+				// No-op: team not found is not an error for remove operations.
+				// SPECS.md Section 5: RemoveMember is a no-op if agent is not a member.
+				// Extending that: removing from a non-existent team is also a no-op.
+				return nil
 			}
 			t.RemoveMember(agentID)
 			return nil
+		}
+		m.extHost.OnTeamGetInfo = func(teamID string) ([]string, error) {
+			if pool == nil {
+				return nil, fmt.Errorf("no agent pool")
+			}
+			members, err := pool.GetTeamMembers(teamID)
+			if err != nil {
+				return nil, err
+			}
+			return members, nil
+		}
+		m.extHost.OnTeamList = func() ([]string, error) {
+			if pool == nil {
+				return nil, nil
+			}
+			return pool.ListTeams(), nil
 		}
 	}
 	// Wire the main agent's token and done callbacks so streaming output reaches the TUI.
@@ -511,6 +537,10 @@ func (m Model) updateKeyPress(msg tea.Msg) (Model, tea.Cmd, bool) {
 		return m, tea.Quit, true
 	case "ctrl+q":
 		return m, tea.Quit, true
+	case "ctrl+t":
+		m.modalContent = m.chat.ToolLogModal()
+		m.modalScroll = 0
+		return m, nil, true
 	// Explicit chat scroll — pgup/pgdown work while typing without
 	// triggering the viewport's default vim-style key bindings.
 	case "pgup":
@@ -670,6 +700,7 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 			slog.Info("stream response", "text", preview)
 		}
 		m.chat.FinalizeMessage()
+		delete(m.statusBar.statuses, "tools")
 		cmds = append(cmds, m.cmdDispatchAfterProviderResponse())
 		if responseContent != "" {
 			cmds = append(cmds, m.cmdDispatchMessageEnd(string(sdk.RoleAssistant), responseContent))
@@ -694,6 +725,8 @@ func (m Model) updateTools(msg tea.Msg) (Model, tea.Cmd, bool) {
 		}
 		slog.Info("tool call start", "tool", msg.ToolName, "id", msg.ID, "input", preview)
 		m.chat.AddToolCall(msg.ID, msg.ToolName, msg.Input)
+		count := len(m.chat.toolLog)
+		m.statusBar.statuses["tools"] = fmt.Sprintf("⚙ %d", count)
 		return m, nil, true
 	case ToolCallDoneMsg:
 		slog.Info("tool call done", "id", msg.ID, "error", msg.IsError)
@@ -707,6 +740,11 @@ func (m Model) updateTools(msg tea.Msg) (Model, tea.Cmd, bool) {
 // Returns (model, cmd, true) when the message was handled.
 func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
+	case showToolsMsg:
+		m.modalContent = m.chat.ToolLogModal()
+		m.modalScroll = 0
+		return m, nil, true
+
 	case SubmitMsg:
 		m.closeSuggestions()
 		n, cmd := m.submitToAgent(msg.Content, msg.Display)
