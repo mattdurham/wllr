@@ -113,10 +113,10 @@ func TestShouldCompact_NegativeWindow_UsesDefault(t *testing.T) {
 
 func TestCompactHistory_ShortHistory_ReturnsUnchanged(t *testing.T) {
 	lm := &compactTestLM{response: "summary text"}
-	// 20 messages × 100 tokens each = 2,000 tokens < 20,000 budget → no compaction.
+	// 20 messages × 100 tokens each = 2,000 tokens, well within the 20,000-token budget — no compaction.
 	// Use 400-char content so token estimation is non-zero (400/4 = 100 tokens).
 	msg := strings.Repeat("x", 400)
-	history := make([]sdk.Message, keepMessages) // exactly at threshold
+	history := make([]sdk.Message, keepMessages)
 	for i := range history {
 		history[i] = sdk.Message{Role: sdk.RoleUser, Content: msg}
 	}
@@ -248,8 +248,8 @@ func TestFindCutPoint_SnapToUserBoundary(t *testing.T) {
 	// Build: user0, asst0, user1, asst1, user2, asst2
 	// Each message is 400 chars → 100 tokens.
 	// Budget = 250 tokens → fits exactly 2.5 messages from the end.
-	// Walking back: asst2 (100), user2 (100), asst1 (50 remaining → bust).
-	// Snap to user2 (index 4). Cut point = 4 → keep history[4:].
+	// Walking back: asst2 (acc=100), user2 (acc=200), asst1 (acc=300 > 250 → bust at i=3).
+	// Snap forward from j=3 (assistant) to j=4 (user2). Cut point = 4 → keep history[4:].
 	msg := strings.Repeat("x", 400) // 100 tokens each
 	history := []sdk.Message{
 		{Role: sdk.RoleUser, Content: msg},      // 0

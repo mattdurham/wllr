@@ -37,11 +37,21 @@ func contextWindowForModel(modelName string) int64 {
 		return w
 	}
 	// Substring match for versioned aliases (e.g. "claude-sonnet-4-6" matches
-	// "claude-sonnet-4-6-20250514").
+	// "claude-sonnet-4-6-20250514"). Map iteration order is non-deterministic, so
+	// we prefer the longest (most specific) matching key to ensure stable results
+	// when multiple entries match the same model name string.
+	var bestKey string
+	var bestW int64
 	for id, w := range modelContextWindows {
 		if strings.Contains(lower, id) || strings.Contains(id, lower) {
-			return w
+			if len(id) > len(bestKey) {
+				bestKey = id
+				bestW = w
+			}
 		}
+	}
+	if bestKey != "" {
+		return bestW
 	}
 	return defaultContextWindow
 }
@@ -131,7 +141,7 @@ func extractFilePaths(msgs []sdk.Message) []string {
 // compactionSummaryPrompt asks the model to produce a structured summary
 // of the conversation history provided.  Matches pi's format so skills that
 // reference this format work correctly.
-const compactionSummaryPrompt = `Summarize the conversation history above into a structured context summary. Use this EXACT format:
+const compactionSummaryPrompt = `Summarize the new conversation messages above (after the previous summary, if any) into a structured context summary. Use this EXACT format:
 
 ## Goal
 [What we're trying to accomplish]
