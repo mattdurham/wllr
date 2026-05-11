@@ -16,68 +16,15 @@ import (
 
 // ---- contextWindowForModel ----
 
-func TestContextWindowForModel_Claude(t *testing.T) {
-	tests := []struct {
-		model string
-		want  int64
-	}{
-		{"claude-sonnet-4-5", 200_000},
-		{"claude-opus-4-5", 200_000},
-		{"CLAUDE-3-HAIKU", 200_000}, // case-insensitive
-	}
-	for _, tt := range tests {
-		got := contextWindowForModel(tt.model)
-		if got != tt.want {
-			t.Errorf("contextWindowForModel(%q) = %d, want %d", tt.model, got, tt.want)
+func TestContextWindowForModel_AlwaysReturnsDefault(t *testing.T) {
+	// contextWindowForModel no longer uses model-name heuristics — it always
+	// returns defaultContextWindow. Explicit overrides go through the pool
+	// (SetContextWindow) or WLLR_CONTEXT_WINDOW env var.
+	for _, model := range []string{"claude-sonnet-4-6", "gpt-4o", "gemini-2.0", "", "unknown"} {
+		got := contextWindowForModel(model)
+		if got != defaultContextWindow {
+			t.Errorf("contextWindowForModel(%q) = %d, want %d (default)", model, got, defaultContextWindow)
 		}
-	}
-}
-
-func TestContextWindowForModel_GPT4(t *testing.T) {
-	tests := []struct {
-		model string
-		want  int64
-	}{
-		{"gpt-4o", 128_000},
-		{"gpt-4o-mini", 128_000},
-		{"gpt-4", 128_000},
-	}
-	for _, tt := range tests {
-		got := contextWindowForModel(tt.model)
-		if got != tt.want {
-			t.Errorf("contextWindowForModel(%q) = %d, want %d", tt.model, got, tt.want)
-		}
-	}
-}
-
-func TestContextWindowForModel_Gemini(t *testing.T) {
-	tests := []struct {
-		model string
-		want  int64
-	}{
-		{"gemini-1.5-pro", 1_000_000},
-		{"gemini-2.0-flash", 1_000_000},
-		{"gemini-1.0-pro", 128_000},
-	}
-	for _, tt := range tests {
-		got := contextWindowForModel(tt.model)
-		if got != tt.want {
-			t.Errorf("contextWindowForModel(%q) = %d, want %d", tt.model, got, tt.want)
-		}
-	}
-}
-
-func TestContextWindowForModel_Unknown(t *testing.T) {
-	got := contextWindowForModel("some-unknown-model")
-	if got != defaultContextWindow {
-		t.Errorf("contextWindowForModel(unknown) = %d, want %d", got, defaultContextWindow)
-	}
-}
-
-func TestContextWindowForModel_Empty(t *testing.T) {
-	got := contextWindowForModel("")
-	if got != defaultContextWindow {
-		t.Errorf("contextWindowForModel(\"\") = %d, want %d", got, defaultContextWindow)
 	}
 }
 

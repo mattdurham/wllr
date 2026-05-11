@@ -10,29 +10,21 @@ import (
 )
 
 const (
-	// defaultContextWindow is used when the model's window is unknown.
-	defaultContextWindow int64 = 200_000
+	// defaultContextWindow is the fallback when no explicit window is configured.
+	// Modern models (Claude 4.x, Gemini 2.x) all support >= 1M tokens; set
+	// WLLR_CONTEXT_WINDOW to reduce this for older or limited-tier models.
+	defaultContextWindow int64 = 1_000_000
 	// reserveTokens is kept free for the model's output response.
 	reserveTokens int64 = 16_384
 	// keepMessages is how many recent messages are kept verbatim after compaction.
 	keepMessages = 20
 )
 
-// contextWindowForModel returns the known input context window for a model name.
-func contextWindowForModel(modelName string) int64 {
-	lower := strings.ToLower(modelName)
-	switch {
-	case strings.Contains(lower, "claude"):
-		return 200_000
-	case strings.Contains(lower, "gpt-4o"), strings.Contains(lower, "gpt-4"):
-		return 128_000
-	case strings.Contains(lower, "gemini-1.5-pro"), strings.Contains(lower, "gemini-2"):
-		return 1_000_000
-	case strings.Contains(lower, "gemini"):
-		return 128_000
-	default:
-		return defaultContextWindow
-	}
+// contextWindowForModel returns a conservative default context window.
+// Model-name heuristics are fragile and go stale — prefer setting
+// WLLR_CONTEXT_WINDOW explicitly or configuring the pool via SetContextWindow.
+func contextWindowForModel(_ string) int64 {
+	return defaultContextWindow
 }
 
 // estimateTokens estimates token count using the chars/4 heuristic.

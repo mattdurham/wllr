@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	fantasy "charm.land/fantasy"
 	"github.com/mattdurham/wllr/extension"
 )
 
@@ -14,6 +15,16 @@ import (
 func wllrExtensionsDir() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".wllr", "extensions")
+}
+
+// contextWindowFromProvider attempts to discover the model's context window
+// from the provider. Returns 0 when it cannot determine the window, causing
+// the pool to fall back to the built-in default (1M tokens).
+//
+// Currently providers do not expose context window via their APIs; this is a
+// hook for future implementations.
+func contextWindowFromProvider(_ fantasy.Provider, _ string) int64 {
+	return 0
 }
 
 // openLogFile opens (or creates) ~/.wllr/wllr.log for appending.

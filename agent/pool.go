@@ -46,6 +46,10 @@ type AgentPool struct {
 
 	baseSystemPrompt string
 
+	// contextWindow is the model's input context window in tokens.
+	// Set via SetContextWindow; defaults to 0 (compaction uses model-name fallback).
+	contextWindow int64
+
 	// tokenCount accumulates all text tokens emitted by all agents in this pool.
 	tokenCount atomic.Int64
 
@@ -69,6 +73,21 @@ func NewPool() *AgentPool {
 // can call LanguageModelForModel to create sub-agent language models.
 func (p *AgentPool) SetProvider(prov fantasy.Provider) {
 	p.provider = prov
+}
+
+// SetContextWindow sets the model's input context window in tokens.
+// When non-zero this overrides the model-name-based lookup in compaction.
+func (p *AgentPool) SetContextWindow(tokens int64) {
+	p.mu.Lock()
+	p.contextWindow = tokens
+	p.mu.Unlock()
+}
+
+// ContextWindow returns the configured context window, or 0 if unset.
+func (p *AgentPool) ContextWindow() int64 {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.contextWindow
 }
 
 // SetBaseSystemPrompt replaces the base system prompt and applies it to all

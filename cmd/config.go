@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -25,6 +26,10 @@ type Config struct {
 
 	// Provider is the LLM provider name (BOB_PROVIDER, default: anthropic).
 	Provider string
+
+	// ContextWindow overrides the model's context window in tokens (WLLR_CONTEXT_WINDOW).
+	// When 0, wllr queries the provider at startup to determine the window.
+	ContextWindow int64
 }
 
 // LoadConfig reads configuration from environment variables.
@@ -45,6 +50,7 @@ func LoadConfig() (*Config, error) {
 		ExtensionsDir:   expandTilde(os.Getenv("WLLR_EXTENSIONS_DIR")),
 		Model:           os.Getenv("WLLR_MODEL"),
 		Provider:        os.Getenv("WLLR_PROVIDER"),
+		ContextWindow:   parseContextWindow(os.Getenv("WLLR_CONTEXT_WINDOW")),
 	}
 
 	if cfg.Model == "" {
@@ -72,6 +78,28 @@ func LoadConfig() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// parseContextWindow converts a string like "1000000" or "1m" to int64 tokens.
+// Returns 0 if empty or unparseable (caller uses provider-derived value).
+func parseContextWindow(s string) int64 {
+	s = strings.TrimSpace(strings.ToLower(s))
+	if s == "" {
+		return 0
+	}
+	multiplier := int64(1)
+	if strings.HasSuffix(s, "k") {
+		multiplier = 1_000
+		s = s[:len(s)-1]
+	} else if strings.HasSuffix(s, "m") {
+		multiplier = 1_000_000
+		s = s[:len(s)-1]
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n * multiplier
 }
 
 // expandTilde replaces a leading "~" with the user's home directory.
