@@ -111,6 +111,8 @@ type Host struct {
 	OnExec               func(command, dir string) (string, error)
 	OnGetEnv             func(name string) (string, error)
 	OnConfigRead         func(group string) (json.RawMessage, error)
+	// OnGetStatusInfo returns the current status bar snapshot for the get_status_info host call.
+	OnGetStatusInfo func() sdk.StatusInfo
 
 	// Agent management callbacks. Set by the pool layer.
 	// OnAgentSpawn creates a new named agent with the given system prompt and model.
@@ -427,6 +429,12 @@ func (h *Host) buildDispatch() map[string]func(ctx context.Context, ext *Extensi
 		},
 		sdk.MethodGetOS: func(_ context.Context, _ *Extension, _ sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleGetOS()
+		},
+		sdk.MethodGetStatusInfo: func(_ context.Context, _ *Extension, _ sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleGetStatusInfo()
+		},
+		sdk.MethodSetStatusLine: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleSetStatusLine(req)
 		},
 	}
 }
@@ -1077,6 +1085,21 @@ func (h *Host) RegisterNativeTool(tool sdk.Tool, fn func(ctx context.Context, in
 	}
 }
 
+// RegisterToolSchema adds a tool to the registered tools map so the LLM sees it,
+// without setting up any Go or WASM dispatch handler. Use this for components
+// (e.g. the MCP bridge) that handle dispatch via an alternative mechanism such
+// as the EventBus.
+func (h *Host) RegisterToolSchema(tool sdk.Tool) {
+	h.mu.Lock()
+	if _, exists := h.registeredTools[tool.Name]; !exists {
+		h.registeredTools[tool.Name] = tool
+	}
+	h.mu.Unlock()
+	if h.OnRegisterTool != nil {
+		_ = h.OnRegisterTool(tool)
+	}
+}
+
 // ExecuteTool dispatches a tool call to subscribed extensions and blocks until
 // an extension returns the result via the tool_result host_call method.
 // It dispatches EventBeforeToolCall so extensions may intercept the call.
@@ -1440,4 +1463,28 @@ func (h *Host) handleGetOS() sdk.HostCallResponse {
 		"arch": runtime.GOARCH,
 	})
 	return sdk.HostCallResponse{Result: result}
+}
+
+func (h *Host) handleGetStatusInfo() sdk.HostCallResponse {
+	if h.OnGetStatusInfo == nil {
+		// Return a minimal empty response if the harness hasn't wired this yet.
+		result, _ := json.Marshal(sdk.StatusInfo{Statuses: map[string]string{}})
+		return sdk.HostCallResponse{Result: result}
+	}
+	info := h.OnGetStatusInfo()
+	result, _ := json.Marshal(info)
+	return sdk.HostCallResponse{Result: result}
+}
+
+func (h *Host) handleSetStatusLine(req sdk.HostCallRequest) sdk.HostCallResponse {
+	var params struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return sdk.HostCallResponse{Error: fmt.Sprintf("set_status_line: %v", err)}
+	}
+	if h.OnSetStatus != nil {
+		h.OnSetStatus("_override", params.Text)
+	}
+	return sdk.HostCallResponse{}
 }

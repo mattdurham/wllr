@@ -372,6 +372,39 @@ type Message struct {
 	Content string `json:"content"`
 }
 
+
+// StatusInfo holds a snapshot of the current status bar state.
+// Returned by GetStatusInfo.
+type StatusInfo struct {
+	Tokens   int               `json:"tokens"`
+	Working  bool              `json:"working"`
+	Provider string            `json:"provider"`
+	Model    string            `json:"model"`
+	Statuses map[string]string `json:"statuses"`
+}
+
+// GetStatusInfo returns a snapshot of the current status bar state.
+// Extensions can use this to compose a fully custom status line.
+// No permission required.
+func GetStatusInfo() (StatusInfo, error) {
+	raw := _sdkCallResult("get_status_info", nil)
+	if raw == nil {
+		return StatusInfo{}, fmt.Errorf("get_status_info: no response")
+	}
+	var info StatusInfo
+	if err := json.Unmarshal(raw, &info); err != nil {
+		return StatusInfo{}, err
+	}
+	return info, nil
+}
+
+// SetStatusLine replaces the entire status bar text with a custom string.
+// Pass an empty string to revert to the default auto-generated line.
+// No permission required.
+func SetStatusLine(text string) {
+	_sdkCall("set_status_line", map[string]string{"text": text})
+}
+
 // ─── Internal host_call helpers ───────────────────────────────────────────────
 
 // _sdkCall fires a host_call and discards the response.

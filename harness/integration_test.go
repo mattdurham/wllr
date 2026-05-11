@@ -21,11 +21,9 @@ func TestIntegration_FullSubmitFlow(t *testing.T) {
 
 	m := New(pool, "main", nil)
 
-	// Track tokens and done via manual callback wiring (simulates SetProgram).
+	// Track tokens via manual callback wiring.
 	var receivedTokens []string
-	var receivedDone bool
 	a.SetOnToken(func(tok string) { receivedTokens = append(receivedTokens, tok) })
-	a.SetOnDone(func(_ error) { receivedDone = true })
 
 	// Submit user message.
 	m, cmd := callUpdate(m, SubmitMsg{Content: "what is 2+2?"})
@@ -42,16 +40,9 @@ func TestIntegration_FullSubmitFlow(t *testing.T) {
 		t.Errorf("history[0].Content: got %q, want %q", m.history[0].Content, "what is 2+2?")
 	}
 
-	// Wait for the agent goroutine to complete.
-	// The mock LM runs synchronously; give it a moment.
-	for i := 0; i < 100 && !receivedDone; i++ {
-		// spin — mock LM goroutine should finish quickly
-	}
-	// Even without spin, by the time we check, the goroutine has run.
-	// Use a small sleep-free approach: the mock LM is synchronous so the goroutine
-	// should have finished before we read receivedDone below (best effort test).
+	// The agent goroutine is started by pool.Send inside the returned tea.Cmd,
+	// which is discarded here — this test only verifies synchronous state changes.
 	_ = receivedTokens
-	_ = receivedDone
 }
 
 // TestIntegration_UserMessageInHistory verifies the user message is recorded correctly.
