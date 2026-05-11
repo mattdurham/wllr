@@ -257,6 +257,29 @@ func (p *AgentPool) ListAgents() []string {
 	return ids
 }
 
+// ListTeams returns a snapshot of all registered team IDs.
+func (p *AgentPool) ListTeams() []string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	ids := make([]string, 0, len(p.teams))
+	for id := range p.teams {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+// GetTeamMembers returns the member agent IDs for the named team.
+// Returns ErrTeamNotFound if the team does not exist.
+func (p *AgentPool) GetTeamMembers(teamID string) ([]string, error) {
+	p.mu.RLock()
+	t, exists := p.teams[teamID]
+	p.mu.RUnlock()
+	if !exists {
+		return nil, ErrTeamNotFound
+	}
+	return t.Members(), nil
+}
+
 // CreateTeam creates a new named Team associated with this pool.
 // Returns ErrTeamExists if the ID is already taken.
 func (p *AgentPool) CreateTeam(id string) (*Team, error) {

@@ -2,6 +2,8 @@ package extension
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -764,10 +766,10 @@ func TestHost_HandleAgentSpawn_CallbackInvoked(t *testing.T) {
 	h := NewHost(nil)
 	defer h.Close(ctx)
 
-	type spawnArgs struct{ id, name, systemPrompt, modelName string }
+	type spawnArgs struct{ id, name, systemPrompt, modelName, initialPrompt string }
 	got := make(chan spawnArgs, 1)
-	h.OnAgentSpawn = func(id, name, systemPrompt, modelName string) error {
-		got <- spawnArgs{id, name, systemPrompt, modelName}
+	h.OnAgentSpawn = func(id, name, systemPrompt, modelName, initialPrompt string) error {
+		got <- spawnArgs{id, name, systemPrompt, modelName, initialPrompt}
 		return nil
 	}
 
@@ -1085,5 +1087,196 @@ func TestHost_HandleTeamRemoveMember_CallbackInvoked(t *testing.T) {
 		}
 	default:
 		t.Fatal("OnTeamRemoveMember was not called")
+	}
+}
+
+func TestHost_HandleTeamGetInfo_CallbackInvoked(t *testing.T) {
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer h.Close(ctx)
+
+	h.OnTeamGetInfo = func(teamID string) ([]string, error) {
+		if teamID == "team-1" {
+			return []string{"agent-a", "agent-b"}, nil
+		}
+		return nil, fmt.Errorf("team not found: %s", teamID)
+	}
+
+	path := writeWASM(t, "minimal.wasm", minimalWASM)
+	if err := h.Load(ctx, path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	ext := h.extensions[0]
+
+	resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+		Method: sdk.MethodTeamGetInfo,
+		Params: []byte(`{"team_id":"team-1"}`),
+	})
+	if resp.Error != "" {
+		t.Fatalf("team_get_info: %s", resp.Error)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if result["team_id"] != "team-1" {
+		t.Errorf("team_id: got %v, want team-1", result["team_id"])
+	}
+	members, ok := result["members"].([]any)
+	if !ok || len(members) != 2 {
+		t.Errorf("members: got %v, want [agent-a agent-b]", result["members"])
+	}
+}
+
+func TestHost_HandleTeamGetInfo_UnknownTeam_ReturnsError(t *testing.T) {
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer h.Close(ctx)
+
+	h.OnTeamGetInfo = func(teamID string) ([]string, error) {
+		return nil, fmt.Errorf("team not found: %s", teamID)
+	}
+
+	path := writeWASM(t, "minimal.wasm", minimalWASM)
+	if err := h.Load(ctx, path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	ext := h.extensions[0]
+
+	resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+		Method: sdk.MethodTeamGetInfo,
+		Params: []byte(`{"team_id":"ghost"}`),
+	})
+	if resp.Error == "" {
+		t.Fatal("expected error for unknown team, got nil")
+	}
+}
+
+func TestHost_HandleTeamGetInfo_MissingTeamID_ReturnsError(t *testing.T) {
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer h.Close(ctx)
+
+	h.OnTeamGetInfo = func(teamID string) ([]string, error) {
+		return nil, nil
+	}
+
+	path := writeWASM(t, "minimal.wasm", minimalWASM)
+	if err := h.Load(ctx, path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	ext := h.extensions[0]
+
+	resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+		Method: sdk.MethodTeamGetInfo,
+		Params: []byte(`{}`),
+	})
+	if resp.Error == "" {
+		t.Fatal("expected error for missing team_id, got nil")
+	}
+}
+
+func TestHost_HandleTeamList_CallbackInvoked(t *testing.T) {
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer h.Close(ctx)
+
+	h.OnTeamList = func() ([]string, error) {
+		return []string{"team-alpha", "team-beta"}, nil
+	}
+
+	path := writeWASM(t, "minimal.wasm", minimalWASM)
+	if err := h.Load(ctx, path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	ext := h.extensions[0]
+
+	resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+		Method: sdk.MethodTeamList,
+	})
+	if resp.Error != "" {
+		t.Fatalf("team_list: %s", resp.Error)
+	}
+
+	var result map[string][]string
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	teams := result["teams"]
+	if len(teams) != 2 {
+		t.Errorf("teams: got %v, want [team-alpha team-beta]", teams)
+	}
+}
+
+func TestHost_HandleTeamList_EmptyList(t *testing.T) {
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer h.Close(ctx)
+
+	h.OnTeamList = func() ([]string, error) {
+		return []string{}, nil
+	}
+
+	path := writeWASM(t, "minimal.wasm", minimalWASM)
+	if err := h.Load(ctx, path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	ext := h.extensions[0]
+
+	resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+		Method: sdk.MethodTeamList,
+	})
+	if resp.Error != "" {
+		t.Fatalf("team_list: %s", resp.Error)
+	}
+
+	var result map[string][]string
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if len(result["teams"]) != 0 {
+		t.Errorf("expected empty teams, got %v", result["teams"])
+	}
+}
+
+func TestHost_HandleTeamGetInfo_NilCallback_ReturnsError(t *testing.T) {
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer h.Close(ctx)
+	// OnTeamGetInfo not set
+
+	path := writeWASM(t, "minimal.wasm", minimalWASM)
+	if err := h.Load(ctx, path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	ext := h.extensions[0]
+
+	resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+		Method: sdk.MethodTeamGetInfo,
+		Params: []byte(`{"team_id":"t1"}`),
+	})
+	if resp.Error == "" {
+		t.Fatal("expected error when callback not set")
+	}
+}
+
+func TestHost_HandleTeamList_NilCallback_ReturnsError(t *testing.T) {
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer h.Close(ctx)
+	// OnTeamList not set
+
+	path := writeWASM(t, "minimal.wasm", minimalWASM)
+	if err := h.Load(ctx, path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	ext := h.extensions[0]
+
+	resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+		Method: sdk.MethodTeamList,
+	})
+	if resp.Error == "" {
+		t.Fatal("expected error when callback not set")
 	}
 }
