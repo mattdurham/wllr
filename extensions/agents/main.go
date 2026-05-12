@@ -98,7 +98,7 @@ func removeAgent(id string) {
 func init() {
 	RegisterTool(
 		"create_agent",
-		"Create a new agent with a name, system prompt, and optional model",
+		`Create a new agent. The agent ID is always "agent-"+name (e.g. name="researcher" → id="agent-researcher"). Use this ID with send_message and shutdown_agent.`,
 		json.RawMessage(`{"type":"object","properties":{"name":{"type":"string","description":"Agent name"},"system_prompt":{"type":"string","description":"System prompt for the agent"},"prompt":{"type":"string","description":"Initial prompt to send"},"model":{"type":"string","description":"Model name (optional)"}},"required":["name","system_prompt","prompt"]}`),
 	)
 	RegisterTool(
@@ -248,11 +248,11 @@ Both agents accumulate history across every exchange — neither forgets.
 ### Parallel work pattern
 
 To run two tasks simultaneously:
-  create_agent("researcher", "...", "Research X, then send_message me the findings")  → id-1
-  create_agent("coder", "...", "Implement Y, then send_message me the result")        → id-2
+  create_agent("researcher", "...", "Research X, then send_message me the findings")  → agent-researcher
+  create_agent("coder", "...", "Implement Y, then send_message me the result")        → agent-coder
   (both run; they send_message their results back — labeled with their names)
-  shutdown_agent(id-1)
-  shutdown_agent(id-2)`
+  shutdown_agent("agent-researcher")
+  shutdown_agent("agent-coder")`
 
 	AppendSystemPrompt(guidance)
 }
