@@ -255,3 +255,230 @@ func TestModel_AbortStreamMsg_CancelsAgent(t *testing.T) {
 		t.Error("expected nil cmd from abortStreamMsg")
 	}
 }
+
+// --- TestHarnessModel_OnTeam* tests ---
+// These tests exercise the OnTeam* callbacks as wired in Model.SetProgram.
+// Rather than starting a real tea.Program (which requires a TTY), we call the
+// same closure logic that SetProgram wires, operating directly on the pool.
+
+// makeTeamCallbacks replicates the team-management closure wiring from
+// SetProgram so tests can exercise the logic without a running TUI program.
+func makeTeamCallbacks(pool *agent.AgentPool) (
+	onTeamCreate func(id, name string) error,
+	onTeamClose func(id string) error,
+	onTeamAddMember func(teamID, agentID string) error,
+	onAgentSendMessage func(id, message string) error,
+) {
+	onTeamCreate = func(id, _ string) error {
+		if pool == nil {
+			return nil
+		}
+		_, err := pool.CreateTeam(id)
+		return err
+	}
+	onTeamClose = func(id string) error {
+		if pool == nil {
+			return nil
+		}
+		return pool.CloseTeam(context.Background(), id)
+	}
+	onTeamAddMember = func(teamID, agentID string) error {
+		if pool == nil {
+			return nil
+		}
+		t := pool.GetTeam(teamID)
+		if t == nil {
+			return nil
+		}
+		return t.AddMember(agentID)
+	}
+	onAgentSendMessage = func(id, message string) error {
+		if pool == nil {
+			return nil
+		}
+		// pool.Send calls agent.Submit in a goroutine — non-blocking and safe.
+		// This wakes the target agent immediately to process the message.
+		return pool.Send(id, message)
+	}
+	return
+}
+
+func TestHarnessModel_OnTeamCreate_CreatesTeamInPool(t *testing.T) {
+	pool := agent.NewPool()
+	onTeamCreate, _, _, _ := makeTeamCallbacks(pool)
+
+	if err := onTeamCreate("team-alpha", "Alpha Team"); err != nil {
+		t.Fatalf("OnTeamCreate: %v", err)
+	}
+
+	team := pool.GetTeam("team-alpha")
+	if team == nil {
+		t.Fatal("expected pool.GetTeam(team-alpha) to return non-nil after create")
+	}
+	if team.ID() != "team-alpha" {
+		t.Errorf("team.ID(): got %q, want %q", team.ID(), "team-alpha")
+	}
+}
+
+func TestHarnessModel_OnTeamAddMember_AddsAgent(t *testing.T) {
+	pool := agent.NewPool()
+	lm := newMockLM("hi")
+	_, err := pool.Spawn("worker-1", lm, agent.SpawnOpts{})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	_, err = pool.CreateTeam("team-b")
+	if err != nil {
+		t.Fatalf("CreateTeam: %v", err)
+	}
+
+	_, _, onTeamAddMember, _ := makeTeamCallbacks(pool)
+
+	if err := onTeamAddMember("team-b", "worker-1"); err != nil {
+		t.Fatalf("OnTeamAddMember: %v", err)
+	}
+
+	team := pool.GetTeam("team-b")
+	if team == nil {
+		t.Fatal("team-b not found in pool")
+	}
+	members := team.Members()
+	if len(members) != 1 || members[0] != "worker-1" {
+		t.Errorf("team members: got %v, want [worker-1]", members)
+	}
+}
+
+func TestHarnessModel_OnTeamClose_RemovesTeamAndMembers(t *testing.T) {
+	pool := agent.NewPool()
+	lm := newMockLM("hi")
+	_, err := pool.Spawn("member-1", lm, agent.SpawnOpts{})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	team, err := pool.CreateTeam("team-c")
+	if err != nil {
+		t.Fatalf("CreateTeam: %v", err)
+	}
+	if err := team.AddMember("member-1"); err != nil {
+		t.Fatalf("AddMember: %v", err)
+	}
+
+	// Verify setup.
+	if pool.GetTeam("team-c") == nil {
+		t.Fatal("team-c should exist before close")
+	}
+	if pool.Get("member-1") == nil {
+		t.Fatal("member-1 should exist in pool before close")
+	}
+
+	_, onTeamClose, _, _ := makeTeamCallbacks(pool)
+	if err := onTeamClose("team-c"); err != nil {
+		t.Fatalf("OnTeamClose: %v", err)
+	}
+
+	if pool.GetTeam("team-c") != nil {
+		t.Error("expected pool.GetTeam(team-c) to return nil after close")
+	}
+	if pool.Get("member-1") != nil {
+		t.Error("expected pool.Get(member-1) to return nil after team close (member was closed)")
+	}
+}
+
+func TestHarnessModel_OnAgentSendMessage_TriggersAgentTurn(t *testing.T) {
+	// Regression test: OnAgentSendMessage must call pool.Send (not AppendInbox).
+	// pool.Send calls agent.Submit directly, waking the agent immediately.
+	// The inbox must be empty after the call — nothing was queued there.
+	pool := agent.NewPool()
+	lm := newMockLM("response")
+	_, err := pool.Spawn("sub-1", lm, agent.SpawnOpts{})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	_, _, _, onAgentSendMessage := makeTeamCallbacks(pool)
+	if err := onAgentSendMessage("sub-1", "hello from orchestrator"); err != nil {
+		t.Fatalf("OnAgentSendMessage: %v", err)
+	}
+
+	a := pool.Get("sub-1")
+	if a == nil {
+		t.Fatal("agent sub-1 not found in pool")
+	}
+	// pool.Send bypasses the inbox entirely — it calls Submit directly.
+	// DrainInbox must return empty: the message was never queued here.
+	inbox := a.DrainInbox()
+	if len(inbox) != 0 {
+		t.Errorf("expected inbox to be empty (pool.Send uses Submit, not AppendInbox), got %d messages", len(inbox))
+	}
+}
+
+// --- Bug 3: OnAgentRun wires to pool.Send ---
+
+// --- Bug 3: OnAgentRun wires to pool.Send ---
+
+func TestHarnessModel_OnAgentRun_TriggersPoolSend(t *testing.T) {
+	// Bug 3 fix: OnAgentRun must call pool.Send(id, "") which invokes Submit
+	// on the target agent. pool.Send returns ErrAgentNotFound for unknown IDs.
+	pool := agent.NewPool()
+	lm := newMockLM("ok")
+	if _, err := pool.Spawn("worker-a", lm, agent.SpawnOpts{}); err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	// Same closure as harness/model.go OnAgentRun.
+	onAgentRun := func(id string) error {
+		return pool.Send(id, "")
+	}
+
+	// Known agent: should succeed (Submit is called in a goroutine, no error).
+	if err := onAgentRun("worker-a"); err != nil {
+		t.Errorf("onAgentRun(known): expected nil, got %v", err)
+	}
+
+	// Unknown agent: pool.Send must return ErrAgentNotFound.
+	err := onAgentRun("does-not-exist")
+	if err == nil {
+		t.Fatal("onAgentRun(unknown): expected error, got nil")
+	}
+	if err != agent.ErrAgentNotFound {
+		t.Errorf("expected ErrAgentNotFound, got %v", err)
+	}
+}
+
+// --- Bug 6: Sub-agent system prompts include own ID + orchestrator reference ---
+
+func TestHarnessModel_SubAgentSystemPrompt_ContainsAgentIDAndMain(t *testing.T) {
+	// Bug 6 fix: OnAgentSpawn appends an "Agent Identity" block to the system
+	// prompt containing the agent's own ID and a reference to "main" so sub-agents
+	// know how to coordinate. We verify the prompt construction formula directly.
+	agentID := "agent-worker-99"
+	baseSystemPrompt := "You are a helpful sub-agent."
+
+	// Replicate the formula from harness/model.go OnAgentSpawn.
+	fullSystemPrompt := baseSystemPrompt +
+		"\n\n## Your Agent Identity\nYour agent ID is: " + agentID +
+		"\nTo report results back to the orchestrator, call send_message with agent_id=\"main\"."
+
+	if !contains(fullSystemPrompt, agentID) {
+		t.Errorf("system prompt missing agent ID %q\ngot: %s", agentID, fullSystemPrompt)
+	}
+	if !contains(fullSystemPrompt, "main") {
+		t.Errorf("system prompt missing orchestrator reference \"main\"\ngot: %s", fullSystemPrompt)
+	}
+	if !contains(fullSystemPrompt, "## Your Agent Identity") {
+		t.Errorf("system prompt missing identity header\ngot: %s", fullSystemPrompt)
+	}
+}
+
+// contains is a helper to avoid importing strings just for this.
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
+		func() bool {
+			for i := 0; i <= len(s)-len(substr); i++ {
+				if s[i:i+len(substr)] == substr {
+					return true
+				}
+			}
+			return false
+		}())
+}

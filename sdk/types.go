@@ -219,6 +219,15 @@ const (
 	MethodAppendSystemPrompt = "append_system_prompt"
 	// MethodExec executes a shell command on the host. Requires PermExec.
 	MethodExec = "exec"
+	// MethodReadFile reads the contents of a file on the host filesystem.
+	// Requires PermFileRead.
+	MethodReadFile = "read_file"
+	// MethodWriteFile writes content to a file on the host filesystem.
+	// Requires PermFileWrite.
+	MethodWriteFile = "write_file"
+	// MethodHTTPPost makes an HTTP POST request from the host.
+	// Requires PermNetworkWrite.
+	MethodHTTPPost = "http_post"
 	// MethodBeforeToolCall is sent by extensions that want to intercept tool
 	// calls before execution.
 	MethodBeforeToolCall = "before_tool_call"
@@ -230,14 +239,20 @@ const (
 	MethodAgentSpawn       = "agent_spawn"
 	MethodAgentClose       = "agent_close"
 	MethodAgentSendMessage = "agent_send_message"
-	MethodAgentList        = "agent_list"
-	MethodAgentTokenCount  = "agent_token_count"
+	// MethodAgentRun triggers an immediate turn for an existing agent.
+	MethodAgentRun        = "agent_run"
+	MethodAgentList       = "agent_list"
+	MethodAgentTokenCount = "agent_token_count"
 
 	// Team management host_call methods.
 	MethodTeamCreate       = "team_create"
 	MethodTeamClose        = "team_close"
 	MethodTeamAddMember    = "team_add_member"
 	MethodTeamRemoveMember = "team_remove_member"
+	// MethodTeamGetInfo returns the member agent IDs for a team.
+	MethodTeamGetInfo = "team_get_info"
+	// MethodTeamList returns all registered team IDs.
+	MethodTeamList = "team_list"
 
 	// MCP bridge host_call methods.
 	MethodMCPSpawn = "mcp_spawn"

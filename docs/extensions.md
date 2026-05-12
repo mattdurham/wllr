@@ -351,6 +351,111 @@ No response result.
 
 ---
 
+### `exec`
+
+Execute a shell command on the host filesystem. The combined stdout and stderr
+are returned. Requires the `exec` permission.
+
+```json
+{"method": "exec", "params": {"command": "ls -la", "dir": "/tmp"}}
+```
+
+| Field     | Type   | Description                                             |
+|-----------|--------|---------------------------------------------------------|
+| `command` | string | Shell command passed to `sh -c`.                        |
+| `dir`     | string | Working directory. Defaults to current dir if omitted.  |
+
+Response result:
+
+```json
+{"output": "file1
+file2
+", "error": ""}
+```
+
+| Field    | Type   | Description                                       |
+|----------|--------|---------------------------------------------------|
+| `output` | string | Combined stdout+stderr of the command.            |
+| `error`  | string | Non-empty if the command exited with a non-zero status. |
+
+Requires permission: `exec`
+
+---
+
+### `read_file`
+
+Read the contents of a file on the host filesystem.
+
+```json
+{"method": "read_file", "params": {"path": "/etc/hosts"}}
+```
+
+| Field  | Type   | Description                              |
+|--------|--------|------------------------------------------|
+| `path` | string | Absolute or relative path to the file.  |
+
+Response result:
+
+```json
+{"content": "127.0.0.1 localhost
+..."}
+```
+
+| Field     | Type   | Description            |
+|-----------|--------|------------------------|
+| `content` | string | File contents as UTF-8.|
+
+Requires permission: `file_read`
+
+---
+
+### `write_file`
+
+Write content to a file on the host filesystem. Parent directories are created
+automatically.
+
+```json
+{"method": "write_file", "params": {"path": "/tmp/out.txt", "content": "hello"}}
+```
+
+| Field     | Type   | Description                        |
+|-----------|--------|------------------------------------|
+| `path`    | string | Absolute or relative path to write.|
+| `content` | string | Content to write (UTF-8).          |
+
+Response result:
+
+```json
+{"written": "/tmp/out.txt"}
+```
+
+Requires permission: `file_write`
+
+---
+
+### `get_env`
+
+Read an environment variable from the host process. Pass an empty name to get
+all variables as a JSON array of `"KEY=VALUE"` strings.
+
+```json
+{"method": "get_env", "params": {"name": "HOME"}}
+```
+
+| Field  | Type   | Description                                          |
+|--------|--------|------------------------------------------------------|
+| `name` | string | Variable name. Omit or pass `""` to list all vars. |
+
+Response result:
+
+```json
+{"value": "/home/user"}
+```
+
+No permission required (read-only).
+
+---
+
 ## Lifecycle Events
 
 Events are dispatched to subscribed extensions via `_on_event`. The `sdk.Event`

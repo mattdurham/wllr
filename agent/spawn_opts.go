@@ -6,6 +6,8 @@ import "charm.land/fantasy"
 type SpawnOpts struct {
 	// SystemPrompt is passed as the agent's system prompt on each turn.
 	SystemPrompt string
+	// Name is the human-readable display name for the agent.
+	Name string
 	// Tools are the tools available to the agent.
 	Tools []fantasy.AgentTool
 }

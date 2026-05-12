@@ -77,6 +77,10 @@ A `Team` is a lightweight membership set — it does not own goroutines or resou
 
 **Invariant:** Team membership is guarded by `Team.mu` (separate from the pool-level `p.mu`). Reads and writes to `members` always hold `Team.mu` in the appropriate mode.
 
+`AgentPool.ListTeams()` returns a snapshot of all registered team IDs under `p.mu.RLock()`. The snapshot is consistent but not synchronized with concurrent `CreateTeam`/`CloseTeam` calls; callers must tolerate TOCTOU gaps.
+
+`AgentPool.GetTeamMembers(teamID)` returns the member agent IDs for a team under `p.mu.RLock()` (to locate the team) and `Team.mu.RLock()` (for the membership snapshot). Returns `ErrTeamNotFound` if the team does not exist.
+
 ---
 
 ## 6. Pool.Send vs. Pool.SendMessage
