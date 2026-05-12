@@ -180,6 +180,12 @@ Stop an agent and free its resources. Always shut down agents when their
 task is complete. Leaked agents continue consuming memory.
 
 **list_agents()**
+Returns all running agent IDs and names.
+
+**get_agent_status(agent_id, history_limit?)**
+Get turn count, last compaction summary, and recent conversation of a running
+agent. Use this to check what a sub-agent has done before sending follow-ups.
+history_limit defaults to 10 messages.
 Returns all currently running agents with their IDs and names.
 
 **create_team(name)** / **add_to_team(team_id, agent_id)** / **shutdown_team(team_id)**
