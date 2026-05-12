@@ -144,6 +144,47 @@ func (a *Agent) DrainInbox() []sdk.Message {
 	return msgs
 }
 
+// ModelName returns the model name used for context-window sizing.
+func (a *Agent) ModelName() string { return a.modelName }
+
+// SystemPrompt returns the agent's current effective system prompt.
+func (a *Agent) SystemPrompt() string {
+	a.systemPromptMu.RLock()
+	base := a.systemPrompt
+	a.systemPromptMu.RUnlock()
+	specific := a.opts.SystemPrompt
+	if base != "" && specific != "" {
+		return base + "\n\n" + specific
+	}
+	if base != "" {
+		return base
+	}
+	return specific
+}
+
+// History returns a snapshot of the agent's conversation history.
+func (a *Agent) History() []sdk.Message {
+	a.historyMu.Lock()
+	h := make([]sdk.Message, len(a.history))
+	copy(h, a.history)
+	a.historyMu.Unlock()
+	return h
+}
+
+// LastSummary returns the most recent compaction summary.
+func (a *Agent) LastSummary() string {
+	a.lastSummaryMu.RLock()
+	defer a.lastSummaryMu.RUnlock()
+	return a.lastSummary
+}
+
+// SetLastSummary sets the compaction summary (used in tests).
+func (a *Agent) SetLastSummary(s string) {
+	a.lastSummaryMu.Lock()
+	a.lastSummary = s
+	a.lastSummaryMu.Unlock()
+}
+
 // ID returns the agent's unique identifier within its pool.
 func (a *Agent) ID() string { return a.id }
 
