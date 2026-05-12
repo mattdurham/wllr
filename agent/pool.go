@@ -174,20 +174,29 @@ func (p *AgentPool) Spawn(id string, lm fantasy.LanguageModel, opts SpawnOpts) (
 	if _, exists := p.agents[id]; exists {
 		return nil, ErrAgentExists
 	}
+	modelName := p.defaultModelName
+	if opts.ModelName != "" {
+		modelName = opts.ModelName
+	}
 	a := &Agent{
 		id:        id,
 		name:      opts.Name,
 		lm:        lm,
 		opts:      opts,
 		pool:      p,
-		modelName: p.defaultModelName,
+		modelName: modelName,
 	}
-	// New agents inherit the accumulated base system prompt (AGENTS.md, skills, etc.).
-	p.baseSystemPromptMu.RLock()
-	base := p.baseSystemPrompt
-	p.baseSystemPromptMu.RUnlock()
-	if base != "" {
-		a.systemPrompt = base
+	// New agents inherit the base system prompt unless explicitly disabled.
+	// Sub-agents that don't need the full orchestration context can set
+	// InheritBasePrompt = &false to avoid carrying unnecessary overhead.
+	inherit := opts.InheritBasePrompt == nil || *opts.InheritBasePrompt
+	if inherit {
+		p.baseSystemPromptMu.RLock()
+		base := p.baseSystemPrompt
+		p.baseSystemPromptMu.RUnlock()
+		if base != "" {
+			a.systemPrompt = base
+		}
 	}
 	p.agents[id] = a
 	return a, nil
