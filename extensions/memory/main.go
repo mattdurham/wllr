@@ -214,16 +214,13 @@ func init() {
 		if err != nil {
 			return fmt.Sprintf(`{"error":%q}`, err.Error()), true
 		}
-		SetStatus("engram", "installing…")
 		if errMsg := install(goos, goarch); errMsg != "" {
-			SetStatus("engram", "install failed")
 			return fmt.Sprintf(`{"error":%q}`, errMsg), true
 		}
 		bin := expandHome(engramBin)
 		if goos == "windows" {
 			bin += ".exe"
 		}
-		SetStatus("engram", "v"+engramVersion)
 		Notify(fmt.Sprintf("✅ Engram v%s installed at %s", engramVersion, bin))
 		return fmt.Sprintf(`{"installed":true,"version":%q,"path":%q}`, engramVersion, bin), false
 	})
@@ -266,7 +263,6 @@ func ensureEngram() {
 	goos, goarch, err := GetOS()
 	if err != nil {
 		Logf(2, "engram: GetOS failed: %v", err)
-		SetStatus("engram", "error")
 		return
 	}
 
@@ -285,11 +281,9 @@ func ensureEngram() {
 			action = "upgrading"
 		}
 		Logf(1, "engram: %s v%s for %s/%s", action, engramVersion, goos, goarch)
-		SetStatus("engram", action+"…")
 
 		if errMsg := install(goos, goarch); errMsg != "" {
 			Logf(3, "engram: install failed: %s", errMsg)
-			SetStatus("engram", "install failed")
 			Notify("❌ Engram install failed: " + errMsg)
 			return
 		}
@@ -301,7 +295,6 @@ func ensureEngram() {
 		Notify(fmt.Sprintf("✅ Engram v%s ready at %s", engramVersion, bin))
 	}
 
-	SetStatus("engram", "v"+engramVersion)
 }
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
