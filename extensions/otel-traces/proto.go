@@ -19,7 +19,7 @@ type spanRecord struct {
 	name         string
 	startNano    int64
 	endNano      int64
-	kind         int32      // 1=INTERNAL
+	kind         int32       // 1=INTERNAL
 	attrs        [][2]string // [][key, value]
 }
 
