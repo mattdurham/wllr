@@ -4,7 +4,6 @@ package agent
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -368,7 +367,9 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 		// the message was sent. Providers require alternating user/assistant,
 		// so we never leave history ending with a lone user message.
 		assistantText := collectedText
-		if assistantText == "" && errors.Is(err, context.Canceled) {
+		if assistantText == "" && childCtx.Err() != nil {
+			// Context was cancelled (Esc / timeout). Record a placeholder so the
+			// user message isn't silently dropped from history.
 			assistantText = "[response cancelled]"
 		}
 		if assistantText != "" {
