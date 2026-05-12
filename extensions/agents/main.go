@@ -98,7 +98,7 @@ func removeAgent(id string) {
 func init() {
 	RegisterTool(
 		"create_agent",
-		`Create a new agent. The agent ID is always "agent-"+name (e.g. name="researcher" → id="agent-researcher"). Use this ID with send_message and shutdown_agent.`,
+		`Create a new agent. The agent ID is {your_agent_id}/{name} (e.g. main creating "researcher" → id="main/researcher"). The returned agent_id is what you pass to send_message and shutdown_agent.`,
 		json.RawMessage(`{"type":"object","properties":{"name":{"type":"string","description":"Agent name"},"system_prompt":{"type":"string","description":"System prompt for the agent"},"prompt":{"type":"string","description":"Initial prompt to send"},"model":{"type":"string","description":"Model name (optional)"}},"required":["name","system_prompt","prompt"]}`),
 	)
 	RegisterTool(
@@ -248,11 +248,11 @@ Both agents accumulate history across every exchange — neither forgets.
 ### Parallel work pattern
 
 To run two tasks simultaneously:
-  create_agent("researcher", "...", "Research X, then send_message me the findings")  → agent-researcher
-  create_agent("coder", "...", "Implement Y, then send_message me the result")        → agent-coder
+  create_agent("researcher", ...) → main/researcher
+  create_agent("coder", ...) → main/coder
   (both run; they send_message their results back — labeled with their names)
-  shutdown_agent("agent-researcher")
-  shutdown_agent("agent-coder")`
+  shutdown_agent("main/researcher")
+  shutdown_agent("main/coder")`
 
 	AppendSystemPrompt(guidance)
 }
@@ -333,7 +333,15 @@ func handleCreateAgent(p beforeToolCallPayload) {
 		return
 	}
 
-	agentID := "agent-" + input.Name
+	// Scope the agent ID to the calling agent to prevent collisions when
+	// multiple orchestrators spawn agents with the same name.
+	// e.g. orchestrator "main" creating "researcher" → "main/researcher"
+	//      sub-agent "planner" creating "researcher" → "planner/researcher"
+	scope := p.AgentID
+	if scope == "" {
+		scope = "main"
+	}
+	agentID := scope + "/" + input.Name
 
 	// Pass the initial prompt directly to agent_spawn as initial_prompt.
 	// The host calls pool.Send after spawning, starting the first turn immediately.
