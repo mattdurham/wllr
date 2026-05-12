@@ -84,7 +84,11 @@ func (c *ChatView) SetSize(width, height int) {
 // fragmented across multiple boxes when the LLM interleaves text and tool calls.
 func (c *ChatView) AppendToken(token string) {
 	if c.afterTool {
-		c.current += "\n\n"
+		// Only add separator when there's preceding text — prevents leading
+		// blank lines when the agent calls tools before writing any text.
+		if c.current != "" {
+			c.current += "\n\n"
+		}
 		c.afterTool = false
 	}
 	c.current += token
