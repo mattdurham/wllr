@@ -1,15 +1,18 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	fantasy "charm.land/fantasy"
@@ -101,6 +104,20 @@ func main() {
 		data, _ := json.Marshal(vars)
 		return string(data), nil
 	}
+	h.OnReadFile = func(path string) (string, error) {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
+	}
+	h.OnWriteFile = func(path, content string) error {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(path, []byte(content), 0o600)
+	}
+	h.OnHTTPPost = httpPost
 	h.OnConfigRead = loadConfigGroup
 	// Apply system prompt changes to ALL agents so sub-agents stay in sync.
 	h.OnSetSystemPrompt = func(prompt string) {
@@ -248,4 +265,26 @@ func loadConfigGroup(group string) (json.RawMessage, error) {
 		return v, nil
 	}
 	return json.RawMessage("{}"), nil
+}
+
+// httpPost performs an HTTP POST request and returns the status code and body.
+// Extracted from main() to keep cyclomatic complexity within the project limit.
+func httpPost(url string, headers map[string]string, body []byte) (int, []byte, error) {
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return 0, nil, err
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req) //nolint:gosec // URL is from user config; SSRF is intentional
+	if err != nil {
+		return 0, nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var buf bytes.Buffer
+	if _, err = buf.ReadFrom(resp.Body); err != nil {
+		return resp.StatusCode, nil, err
+	}
+	return resp.StatusCode, buf.Bytes(), nil
 }

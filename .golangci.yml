@@ -151,6 +151,11 @@ linters:
       - path: harness/messages\.go
         linters:
           - revive
+      # harness/chat.go contains ToolLogEntry and ChatView — tightly coupled
+      # view-layer types that belong together in the same file.
+      - path: harness/chat\.go
+        linters:
+          - revive
       - path: mcp/protocol\.go
         linters:
           - revive

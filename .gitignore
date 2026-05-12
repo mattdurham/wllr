@@ -39,3 +39,4 @@ dist/
 
 # bob/pi working directory
 .bob/
+features.md

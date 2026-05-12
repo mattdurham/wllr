@@ -163,12 +163,11 @@ Its output does NOT appear in your chat — it works silently in the background.
 - model: optional; defaults to the current session model
 
 **send_message(agent_id, message)**
-Queue a message into an agent's inbox. Delivered at the start of that
-agent's next turn — does NOT start an immediate turn.
-- To ask a sub-agent for results: send_message(id, "Report your findings")
-  then call create_agent or any tool to trigger that agent's next turn.
+Send a message to an agent and trigger its next turn immediately. The agent
+will process all queued inbox messages at the start of that turn.
 - Sub-agents reporting back to you: they call send_message(your_id, result),
   which queues into your inbox and appears in your context next turn.
+- Sub-agents reporting back to the orchestrator: call send_message("main", result) — the main agent ID is always "main".
 
 **shutdown_agent(agent_id)**
 Stop an agent and free its resources. Always shut down agents when their
@@ -321,21 +320,28 @@ func handleCreateAgent(p beforeToolCallPayload) {
 
 	agentID := "agent-" + input.Name
 
+	// Pass the initial prompt directly to agent_spawn as initial_prompt.
+	// The host calls pool.Send after spawning, starting the first turn immediately.
+	// Using agent_send_message here would only queue to the inbox with no turn
+	// started, leaving the agent permanently idle.
 	type spawnParams struct {
-		ID           string `json:"id"`
-		Name         string `json:"name"`
-		SystemPrompt string `json:"system_prompt"`
-		ModelName    string `json:"model_name"`
+		ID            string `json:"id"`
+		Name          string `json:"name"`
+		SystemPrompt  string `json:"system_prompt"`
+		ModelName     string `json:"model_name"`
+		InitialPrompt string `json:"initial_prompt"`
 	}
 	result := agentCall("agent_spawn", spawnParams{
-		ID:           agentID,
-		Name:         input.Name,
-		SystemPrompt: input.SystemPrompt,
-		ModelName:    input.Model,
+		ID:            agentID,
+		Name:          input.Name,
+		SystemPrompt:  input.SystemPrompt,
+		ModelName:     input.Model,
+		InitialPrompt: input.Prompt,
 	})
 
 	var resp struct {
-		Error string `json:"error,omitempty"`
+		Error   string `json:"error,omitempty"`
+		AgentID string `json:"agent_id,omitempty"`
 	}
 	if result != "" {
 		_ = json.Unmarshal([]byte(result), &resp)
@@ -343,14 +349,6 @@ func handleCreateAgent(p beforeToolCallPayload) {
 	if resp.Error != "" {
 		ToolResult(p.ToolCallID, "create_agent: "+resp.Error, true)
 		return
-	}
-
-	if input.Prompt != "" {
-		type msgParams struct {
-			ID      string `json:"id"`
-			Message string `json:"message"`
-		}
-		agentCall("agent_send_message", msgParams{ID: agentID, Message: input.Prompt})
 	}
 
 	upsertAgent(agentID, input.Name, truncate(input.Prompt, 80), "")
@@ -464,14 +462,22 @@ func handleGetTeam(p beforeToolCallPayload) {
 		ToolResult(p.ToolCallID, "get_team: team_id is required", true)
 		return
 	}
-	// Return available info. The host doesn't have a dedicated get_team method yet;
-	// we return what we know from the agent list.
-	result := agentCall("agent_list", map[string]string{})
-	if result == "" {
-		result = `{"agents":[]}`
+	type teamInfoParams struct {
+		TeamID string `json:"team_id"`
 	}
-	out, _ := json.Marshal(map[string]string{"team_id": input.TeamID, "members": result})
-	ToolResult(p.ToolCallID, string(out), false)
+	result := agentCall("team_get_info", teamInfoParams{TeamID: input.TeamID})
+	if result == "" {
+		ToolResult(p.ToolCallID, "get_team: host returned no response", true)
+		return
+	}
+	var resp struct {
+		Error string `json:"error,omitempty"`
+	}
+	if err := json.Unmarshal([]byte(result), &resp); err == nil && resp.Error != "" {
+		ToolResult(p.ToolCallID, "get_team: "+resp.Error, true)
+		return
+	}
+	ToolResult(p.ToolCallID, result, false)
 }
 
 func handleShutdownTeam(p beforeToolCallPayload) {
@@ -482,6 +488,9 @@ func handleShutdownTeam(p beforeToolCallPayload) {
 		ToolResult(p.ToolCallID, "shutdown_team: team_id is required", true)
 		return
 	}
+
+	// Get member IDs BEFORE closing so we can clean up agentRecords.
+	memberIDs := getTeamMembers(input.TeamID)
 
 	type closeParams struct {
 		ID string `json:"id"`
@@ -498,7 +507,29 @@ func handleShutdownTeam(p beforeToolCallPayload) {
 		ToolResult(p.ToolCallID, "shutdown_team: "+resp.Error, true)
 		return
 	}
+
+	// Clean up WASM-side records for all team members.
+	for _, id := range memberIDs {
+		removeAgent(id)
+	}
+
 	ToolResult(p.ToolCallID, `{"status":"closed"}`, false)
+}
+
+// getTeamMembers calls team_get_info and returns member IDs, or nil on error.
+func getTeamMembers(teamID string) []string {
+	result := agentCall("team_get_info", map[string]string{"team_id": teamID})
+	if result == "" {
+		return nil
+	}
+	var resp struct {
+		Members []string `json:"members"`
+		Error   string   `json:"error,omitempty"`
+	}
+	if err := json.Unmarshal([]byte(result), &resp); err != nil || resp.Error != "" {
+		return nil
+	}
+	return resp.Members
 }
 
 func handleSendMessage(p beforeToolCallPayload) {
@@ -527,6 +558,8 @@ func handleSendMessage(p beforeToolCallPayload) {
 		ToolResult(p.ToolCallID, "send_message: "+resp.Error, true)
 		return
 	}
+	// Trigger an immediate turn so the agent processes the queued message now.
+	agentCall("agent_run", map[string]string{"id": input.AgentID})
 	upsertAgent(input.AgentID, "", "", "← "+truncate(input.Message, 60))
 	ToolResult(p.ToolCallID, `{"status":"sent"}`, false)
 }

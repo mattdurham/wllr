@@ -30,6 +30,7 @@ type Agent struct {
 	toolsFn func() []fantasy.AgentTool
 
 	id           string
+	name         string
 	modelName    string // for context window lookup
 	systemPrompt string
 
@@ -145,6 +146,9 @@ func (a *Agent) DrainInbox() []sdk.Message {
 
 // ID returns the agent's unique identifier within its pool.
 func (a *Agent) ID() string { return a.id }
+
+// Name returns the agent's human-readable display name.
+func (a *Agent) Name() string { return a.name }
 
 // Cancel cancels the current active turn, if any.
 // No-op if no turn is running.
