@@ -190,7 +190,8 @@ func (m *Model) SetProgram(p *tea.Program) {
 			if err != nil {
 				return fmt.Errorf("spawn agent %q: get model %q: %w", id, modelName, err)
 			}
-			a, err := pool.Spawn(id, lm, agent.SpawnOpts{SystemPrompt: systemPrompt})
+			fullSystemPrompt := systemPrompt + "\n\n## Your Agent Identity\nYour agent ID is: " + id + "\nTo report results back to the orchestrator, call send_message with agent_id=\"main\"."
+			a, err := pool.Spawn(id, lm, agent.SpawnOpts{SystemPrompt: fullSystemPrompt, Name: name})
 			if err != nil {
 				return fmt.Errorf("spawn agent %q: %w", id, err)
 			}
@@ -232,15 +233,13 @@ func (m *Model) SetProgram(p *tea.Program) {
 			if pool == nil {
 				return fmt.Errorf("no agent pool")
 			}
-			// Queue to inbox rather than starting an immediate turn.
-			// pool.Send would call agent.Submit directly, causing competing
-			// concurrent turns. AppendInbox delivers on the agent's next Submit.
-			a := pool.Get(id)
-			if a == nil {
-				return fmt.Errorf("agent %q not found", id)
+			return pool.SendMessage(id, sdk.Message{Role: sdk.RoleUser, Content: message})
+		}
+		m.extHost.OnAgentRun = func(id string) error {
+			if pool == nil {
+				return fmt.Errorf("no agent pool")
 			}
-			a.AppendInbox(sdk.Message{Role: sdk.RoleUser, Content: message})
-			return nil
+			return pool.Send(id, "")
 		}
 		m.extHost.OnAgentList = func() ([]extension.AgentInfo, error) {
 			if pool == nil {
@@ -249,7 +248,11 @@ func (m *Model) SetProgram(p *tea.Program) {
 			ids := pool.ListAgents()
 			infos := make([]extension.AgentInfo, 0, len(ids))
 			for _, id := range ids {
-				infos = append(infos, extension.AgentInfo{ID: id, Name: id})
+				agentName := id
+				if a := pool.Get(id); a != nil {
+					agentName = a.Name()
+				}
+				infos = append(infos, extension.AgentInfo{ID: id, Name: agentName})
 			}
 			return infos, nil
 		}

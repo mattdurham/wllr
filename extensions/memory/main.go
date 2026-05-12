@@ -13,11 +13,13 @@ import (
 const (
 	engramVersion = "1.15.10"
 	engramBaseURL = "https://github.com/Gentleman-Programming/engram/releases/download/v" + engramVersion
-	engramBinDir  = "~/.wllr/bin"
-	engramBin     = "~/.wllr/bin/engram"
+	engramBinDir  = "~/.local/bin"
+	engramBin     = "~/.local/bin/engram"
 
 	// storeKeyInstalled records the installed version so we can detect upgrades.
 	storeKeyInstalled = "engram_installed_version"
+	// storeKeyChecked records that we've completed the startup check this session.
+	storeKeyChecked = "engram_checked"
 )
 
 // ─── Asset URL resolution ─────────────────────────────────────────────────────
@@ -53,15 +55,20 @@ func binName(goos string) string {
 
 // ─── Install logic ────────────────────────────────────────────────────────────
 
-// isInstalled returns true if the engram binary already exists at engramBin.
+// isInstalled returns true if the engram binary exists at engramBin.
+// If exec itself fails (e.g. host not ready), it returns true to avoid
+// spurious install attempts — a failed exec does not mean the binary is absent.
 func isInstalled(goos string) bool {
 	bin := expandHome(engramBin)
 	if goos == "windows" {
-		bin += "e" // engram.exe
+		bin += ".exe"
 	}
 	out, err := Exec(fmt.Sprintf("test -f %s && echo yes || echo no", shellQuote(bin)), "")
 	if err != nil {
-		return false
+		// Exec failed (e.g. host not ready yet). Assume installed to avoid
+		// triggering a broken install attempt.
+		Logf(2, "engram: isInstalled exec error (assuming installed): %v", err)
+		return true
 	}
 	return strings.TrimSpace(out) == "yes"
 }
@@ -180,8 +187,21 @@ func init() {
 	// Register a /memory slash command for convenience.
 	RegisterCommand("memory", "Show Engram memory status and install info")
 
-	// On session start: ensure engram is installed, then inject the system prompt.
+	// On session start: inject the system prompt immediately (no exec needed).
+	// The actual install check runs on the first user message via OnBeforeAgentStart,
+	// by which time the host exec handler is fully ready.
 	OnSessionStart(func() {
+		AppendSystemPrompt(engramSystemPrompt)
+	})
+
+	// On the first user message: check/install engram. The host is fully
+	// initialised by this point so Exec calls will succeed.
+	OnBeforeAgentStart(func(prompt string) {
+		// Only run once per session.
+		if _, done := StoreGet(storeKeyChecked); done {
+			return
+		}
+		StoreSet(storeKeyChecked, "1")
 		ensureEngram()
 	})
 
@@ -240,7 +260,8 @@ func init() {
 }
 
 // ensureEngram checks whether engram is installed and installs it if not.
-// It also appends the system prompt so the LLM knows how to use engram.
+// Must only be called after the host is fully initialised (e.g. from
+// OnBeforeAgentStart, not OnSessionStart).
 func ensureEngram() {
 	goos, goarch, err := GetOS()
 	if err != nil {
@@ -249,18 +270,20 @@ func ensureEngram() {
 		return
 	}
 
-	alreadyInstalled := isInstalled(goos)
-
-	// Check if we need to upgrade (stored version differs from target).
 	storedVersion, hasStored := StoreGet(storeKeyInstalled)
 	needsUpgrade := hasStored && storedVersion != engramVersion
+
+	// Check filesystem only if we don't have a confirmed installed version.
+	alreadyInstalled := hasStored && !needsUpgrade
+	if !alreadyInstalled {
+		alreadyInstalled = isInstalled(goos)
+	}
 
 	if !alreadyInstalled || needsUpgrade {
 		action := "installing"
 		if needsUpgrade {
 			action = "upgrading"
 		}
-		// Use status bar only — do not write to the chat window during background install.
 		Logf(1, "engram: %s v%s for %s/%s", action, engramVersion, goos, goarch)
 		SetStatus("engram", action+"…")
 
@@ -279,7 +302,6 @@ func ensureEngram() {
 	}
 
 	SetStatus("engram", "v"+engramVersion)
-	AppendSystemPrompt(engramSystemPrompt)
 }
 
 // ─── Utilities ────────────────────────────────────────────────────────────────

@@ -196,7 +196,7 @@ The full set of dispatched methods is:
 
 | Field                  | Signature                                                    | Purpose                                         |
 |-----------------------|--------------------------------------------------------------|-------------------------------------------------|
-| `OnAgentSpawn`        | `func(id, name, systemPrompt, modelName string) error`       | Create and register a new sub-agent             |
+| `OnAgentSpawn`        | `func(id, name, systemPrompt, modelName, initialPrompt string) error` | Create and register a new sub-agent; if initialPrompt is non-empty, calls `pool.Send` to start the first turn immediately |
 | `OnAgentClose`        | `func(id string) error`                                      | Cancel and remove a sub-agent                   |
 | `OnAgentSendMessage`  | `func(id, message string) error`                             | Send a message to a named agent                 |
 | `OnAgentList`         | `func() ([]AgentInfo, error)`                                | Return all live agent IDs and names             |
@@ -209,7 +209,9 @@ The full set of dispatched methods is:
 | `OnTeamCreate`        | `func(id, name string) error`                    | Create a new named team                      |
 | `OnTeamClose`         | `func(id string) error`                          | Cancel all members and remove the team       |
 | `OnTeamAddMember`     | `func(teamID, agentID string) error`             | Add an agent to a team                       |
-| `OnTeamRemoveMember`  | `func(teamID, agentID string) error`             | Remove an agent from a team (no cancel)      |
+| `OnTeamRemoveMember`  | `func(teamID, agentID string) error`             | Remove an agent from a team (no cancel); no-op if team does not exist |
+| `OnTeamGetInfo`      | `func(teamID string) ([]string, error)`          | Return member agent IDs for a team           |
+| `OnTeamList`         | `func() ([]string, error)`                       | Return all registered team IDs               |
 
 ### MCP bridge callbacks
 
