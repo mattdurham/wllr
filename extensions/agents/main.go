@@ -154,6 +154,12 @@ func onSessionStart() {
 
 ### Tool reference
 
+**run_agent(name, system_prompt, prompt, model?)** ← USE THIS FOR MOST TASKS
+Run a sub-agent and wait for its output — returns the result inline, keeping
+you in the same turn with full context. The fast path: no fire-and-forget,
+no lost context. Use whenever you need the result before continuing.
+
+
 **create_agent(name, system_prompt, prompt, model?)**
 Spawn a sub-agent and send its first task. The agent starts immediately.
 Its output does NOT appear in your chat — it works silently in the background.

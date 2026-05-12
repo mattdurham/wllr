@@ -199,9 +199,17 @@ func (m *Model) SetProgram(p *tea.Program) {
 			// orchestrating agent's output is shown. Sub-agents report results
 			// via send_message which queues to the orchestrator's inbox.
 			a.SetOnToken(func(_ string) {})
+			subID := id
+			mainID := m.mainAgentID
 			a.SetOnDone(func(e error) {
 				if e != nil {
-					slog.Info("sub-agent turn error", "agent", id, "err", e)
+					slog.Error("sub-agent error", "agent", subID, "err", e)
+					// Surface the error to the main agent so the orchestrator
+					// knows something went wrong and can react.
+					if main := pool.Get(mainID); main != nil {
+						msg := fmt.Sprintf("[sub-agent '%s' failed: %v — you should handle this or try a different approach]", subID, e)
+						pool.Send(mainID, msg) //nolint:errcheck
+					}
 				}
 			})
 			// Give sub-agents identical wiring to the main agent.
