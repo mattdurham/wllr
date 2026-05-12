@@ -4,6 +4,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -362,14 +363,18 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 			collectedText, err = streamTurn(childCtx, fa, history, content, pool, onToken, onToolCall)
 		}
 
-		// Only record the turn in history when it produced a response.
-		// Appending the user message without a following assistant message leaves
-		// history in an invalid state that causes the next turn to be rejected
-		// (providers require messages to alternate user/assistant).
-		if collectedText != "" {
+		// Always record what the user said. If the turn produced a response
+		// use it; if cancelled use a placeholder so the agent doesn't forget
+		// the message was sent. Providers require alternating user/assistant,
+		// so we never leave history ending with a lone user message.
+		assistantText := collectedText
+		if assistantText == "" && errors.Is(err, context.Canceled) {
+			assistantText = "[response cancelled]"
+		}
+		if assistantText != "" {
 			a.historyMu.Lock()
 			a.history = append(a.history, sdk.Message{Role: sdk.RoleUser, Content: content})
-			a.history = append(a.history, sdk.Message{Role: sdk.RoleAssistant, Content: collectedText})
+			a.history = append(a.history, sdk.Message{Role: sdk.RoleAssistant, Content: assistantText})
 			a.historyMu.Unlock()
 		}
 

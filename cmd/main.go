@@ -191,6 +191,53 @@ func main() {
 		}
 	})
 
+	// get_agent_status: returns turn count and recent history for a running agent.
+	h.RegisterNativeTool(sdk.Tool{
+		Name:        "get_agent_status",
+		Description: "Get the status and recent conversation history of a running agent. Returns turn count and the last N messages.",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string","description":"Agent ID to inspect"},"history_limit":{"type":"integer","description":"Number of recent messages to include (default 10)"}},"required":["agent_id"]}`),
+	}, func(_ context.Context, input json.RawMessage) (string, bool) {
+		var in struct {
+			AgentID      string `json:"agent_id"`
+			HistoryLimit int    `json:"history_limit"`
+		}
+		if err := json.Unmarshal(input, &in); err != nil || in.AgentID == "" {
+			return "agent_id is required", true
+		}
+		if in.HistoryLimit <= 0 {
+			in.HistoryLimit = 10
+		}
+		a := pool.Get(in.AgentID)
+		if a == nil {
+			return fmt.Sprintf("agent %q not found", in.AgentID), true
+		}
+		history := a.History()
+		start := len(history) - in.HistoryLimit
+		if start < 0 {
+			start = 0
+		}
+		recent := history[start:]
+		type msgOut struct {
+			Role    string `json:"role"`
+			Preview string `json:"preview"`
+		}
+		msgs := make([]msgOut, 0, len(recent))
+		for _, m := range recent {
+			preview := string([]rune(m.Content))
+			if r := []rune(preview); len(r) > 200 {
+				preview = string(r[:200]) + "…"
+			}
+			msgs = append(msgs, msgOut{Role: string(m.Role), Preview: preview})
+		}
+		out, _ := json.Marshal(map[string]any{
+			"agent_id":    in.AgentID,
+			"turn_count":  len(history) / 2,
+			"last_summary": a.LastSummary(),
+			"recent":      msgs,
+		})
+		return string(out), false
+	})
+
 	// Load built-in trusted WASM extensions.
 	builtins := []struct {
 		name string
