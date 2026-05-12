@@ -215,23 +215,33 @@ Include: role, output format, constraints, what NOT to do.
 
 ---
 
-### Receiving results
+### Long-running back-and-forth conversations
 
-Sub-agent output does NOT stream into your chat. Agents work silently.
-Results reach you in two ways:
+Agents maintain their full conversation history across turns — you can
+exchange many messages with a sub-agent without losing context.
 
-1. **Agent reports back**: tell the agent in its system_prompt or initial
-   prompt to call send_message back to you when done. The message queues
-   in your inbox and appears in your context on your next turn.
+Messages you receive from sub-agents are labeled: [from agent 'name']:
+This lets you track which agent said what across a multi-turn conversation.
 
-2. **You ask for a summary**: send_message(id, "Summarise your findings"),
-   then trigger the agent's next turn by calling create_agent or any other
-   tool. The agent processes your queued message and calls send_message
-   back with results.
+Sub-agents should always restate their task in reports:
+  GOOD: "I was researching X. I found that Y and Z."
+  BAD:  "Here are the results."
 
-Pattern to collect results and shut down:
-  send_message(id, "Give me your 3 key findings, then stop.")
-  shutdown_agent(id)  ← after you see the findings in context
+The back-and-forth pattern:
+  create_agent("researcher", "You research topics. Always restate what you
+    were asked to research when reporting findings.", "Research X")
+
+  → researcher does work, calls send_message("main", "I was researching X.
+    Found: Y and Z. Shall I go deeper on Y?")
+
+  → Your next turn sees: [from agent 'researcher']: I was researching X...
+  → You reply: send_message("researcher", "Yes, go deeper on Y")
+
+  → researcher continues with full context of prior conversation
+  → Exchange continues as long as needed
+  → shutdown_agent("researcher") when done
+
+Both agents accumulate history across every exchange — neither forgets.
 
 ---
 
@@ -240,10 +250,9 @@ Pattern to collect results and shut down:
 To run two tasks simultaneously:
   create_agent("researcher", "...", "Research X, then send_message me the findings")  → id-1
   create_agent("coder", "...", "Implement Y, then send_message me the result")        → id-2
-  (both run; they send_message their results back to your inbox when done)
+  (both run; they send_message their results back — labeled with their names)
   shutdown_agent(id-1)
-  shutdown_agent(id-2)
-  (on your next turn, inbox has both results in context)`
+  shutdown_agent(id-2)`
 
 	AppendSystemPrompt(guidance)
 }
@@ -548,11 +557,19 @@ func handleSendMessage(p beforeToolCallPayload) {
 		return
 	}
 
+	// Label the message with the sender's agent ID so the recipient has
+	// thread context — otherwise "here are my findings" arrives with no
+	// indication of who sent it or why.
+	labeledMessage := input.Message
+	if p.AgentID != "" && p.AgentID != input.AgentID {
+		labeledMessage = "[from agent '" + p.AgentID + "']: " + input.Message
+	}
+
 	type msgParams struct {
 		ID      string `json:"id"`
 		Message string `json:"message"`
 	}
-	result := agentCall("agent_send_message", msgParams{ID: input.AgentID, Message: input.Message})
+	result := agentCall("agent_send_message", msgParams{ID: input.AgentID, Message: labeledMessage})
 
 	var resp struct {
 		Error string `json:"error,omitempty"`
