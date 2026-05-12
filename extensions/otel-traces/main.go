@@ -176,7 +176,7 @@ func onBeforeToolCall(payload json.RawMessage) {
 		name:         "tool:" + p.ToolName,
 		startNano:    now,
 		endNano:      now, // point-in-time: tool results are not captured
-		kind:      1, // INTERNAL — tool calls are local dispatch, not remote calls
+		kind:         1,   // INTERNAL — tool calls are local dispatch, not remote calls
 		attrs: [][2]string{
 			{"agent.id", p.AgentID},
 			{"tool.input", truncate(string(p.Input), inputTruncateLen)},
