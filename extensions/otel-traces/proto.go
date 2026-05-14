@@ -65,7 +65,8 @@ func appendVarintField(b []byte, fieldNum int, v uint64) []byte {
 // which are proto type fixed64, wire type 1.
 func appendFixed64Field(b []byte, fieldNum int, v uint64) []byte {
 	b = appendVarint(b, fieldTag(fieldNum, 1))
-	b = append(b,
+	b = append(
+		b,
 		byte(v),
 		byte(v>>8),
 		byte(v>>16),
