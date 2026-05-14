@@ -84,6 +84,7 @@ func upsertAgent(id, name, task, lastUpdate string) {
 }
 
 func removeAgent(id string) {
+	// safe: WASM is single-threaded; in-place filter avoids allocation
 	out := agentRecords[:0]
 	for _, r := range agentRecords {
 		if r.id != id {
@@ -154,12 +155,6 @@ func onSessionStart() {
 
 ### Tool reference
 
-**run_agent(name, system_prompt, prompt, model?)** ← USE THIS FOR MOST TASKS
-Run a sub-agent and wait for its output — returns the result inline, keeping
-you in the same turn with full context. The fast path: no fire-and-forget,
-no lost context. Use whenever you need the result before continuing.
-
-
 **create_agent(name, system_prompt, prompt, model?)**
 Spawn a sub-agent and send its first task. The agent starts immediately.
 Its output does NOT appear in your chat — it works silently in the background.
@@ -167,6 +162,11 @@ Its output does NOT appear in your chat — it works silently in the background.
 - system_prompt: the agent's role, constraints, and output format — be explicit
 - prompt: the first task. Tell the agent to call send_message back to you with results.
 - model: optional; defaults to the current session model
+
+Sub-agents MUST restate their task when reporting back:
+  GOOD: "I was researching X. I found that Y and Z."
+  BAD:  "Here are the results."
+This is required for one-shot spawning AND multi-turn conversations.
 
 **send_message(agent_id, message)**
 Send a message to an agent and trigger its next turn immediately. The agent
@@ -186,7 +186,6 @@ Returns all running agent IDs and names.
 Get turn count, last compaction summary, and recent conversation of a running
 agent. Use this to check what a sub-agent has done before sending follow-ups.
 history_limit defaults to 10 messages.
-Returns all currently running agents with their IDs and names.
 
 **create_team(name)** / **add_to_team(team_id, agent_id)** / **shutdown_team(team_id)**
 Group agents for coordinated work. shutdown_team stops all members at once.
@@ -226,12 +225,10 @@ Include: role, output format, constraints, what NOT to do.
 Agents maintain their full conversation history across turns — you can
 exchange many messages with a sub-agent without losing context.
 
-Messages you receive from sub-agents are labeled: [from agent 'name']:
+Messages you receive from sub-agents are labeled with one of:
+  [from agent 'name' (task: first 80 chars of prompt…)]: — when task is known
+  [from agent 'name']:                                    — fallback, no task stored
 This lets you track which agent said what across a multi-turn conversation.
-
-Sub-agents should always restate their task in reports:
-  GOOD: "I was researching X. I found that Y and Z."
-  BAD:  "Here are the results."
 
 The back-and-forth pattern:
   create_agent("researcher", "You research topics. Always restate what you
@@ -256,9 +253,34 @@ Both agents accumulate history across every exchange — neither forgets.
 To run two tasks simultaneously:
   create_agent("researcher", ...) → main/researcher
   create_agent("coder", ...) → main/coder
-  (both run; they send_message their results back — labeled with their names)
+  END YOUR TURN. Do nothing else — do not sleep, do not poll.
+  (sub-agents work; each calls send_message("main", result) when done)
+  (each send_message wakes you up; your next turn starts automatically)
+  → Your next turn: process [from agent 'researcher']: …
+  → Your next turn: process [from agent 'coder']: …
   shutdown_agent("main/researcher")
-  shutdown_agent("main/coder")`
+  shutdown_agent("main/coder")
+
+---
+
+### NEVER do this — async waiting anti-patterns
+
+WRONG — do NOT poll or sleep while waiting for a sub-agent:
+  create_agent("researcher", ...)
+  exec sleep 10          ← WRONG: wastes a turn, blocks the LLM
+  exec sleep 10          ← WRONG: still polling
+  get_agent_status(...)  ← WRONG: busy-wait loop
+
+WRONG — do NOT call get_agent_status in a loop:
+  for { get_agent_status("main/researcher") } ← WRONG
+
+RIGHT — end your turn and let the message wake you:
+  create_agent("researcher", ...)
+  (end turn — the researcher's send_message call wakes you automatically)
+
+The sub-agent's send_message IS the wakeup mechanism. Your next turn
+starts immediately when the sub-agent calls send_message("main", result).
+You never need to check, sleep, or poll. Sleeping actively delays results.`
 
 	AppendSystemPrompt(guidance)
 }
@@ -335,7 +357,7 @@ func handleCreateAgent(p beforeToolCallPayload) {
 		Model        string `json:"model"`
 	}
 	if err := json.Unmarshal(p.Input, &input); err != nil || input.Name == "" {
-		ToolResult(p.ToolCallID, "create_agent: name and system_prompt are required", true)
+		ToolResult(p.ToolCallID, "create_agent: name is required", true)
 		return
 	}
 
@@ -574,9 +596,20 @@ func handleSendMessage(p beforeToolCallPayload) {
 	// Label the message with the sender's agent ID so the recipient has
 	// thread context — otherwise "here are my findings" arrives with no
 	// indication of who sent it or why.
+	// Also append the sender's stored task summary to reduce context-loss
+	// when the orchestrator wakes up from a send_message.
 	labeledMessage := input.Message
+	// p.AgentID is "" for main-agent sends; label suppression is intentional
 	if p.AgentID != "" && p.AgentID != input.AgentID {
-		labeledMessage = "[from agent '" + p.AgentID + "']: " + input.Message
+		label := "[from agent '" + p.AgentID + "'"
+		for _, r := range agentRecords {
+			if r.id == p.AgentID && r.task != "" {
+				label += " (task: " + r.task + ")"
+				break
+			}
+		}
+		label += "]"
+		labeledMessage = label + ": " + input.Message
 	}
 
 	type msgParams struct {
