@@ -12,7 +12,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -136,60 +135,6 @@ func main() {
 
 	// Register stateless tools as native Go functions — bypasses WASM entirely.
 	registerNativeTools(h)
-
-	// run_agent: synchronous sub-agent call. Spawns a sub-agent, waits for it
-	// to complete, and returns its output inline as the tool result — keeping
-	// the orchestrator in one turn so context is never lost.
-	h.RegisterNativeTool(sdk.Tool{
-		Name:        "run_agent",
-		Description: "Run a sub-agent synchronously and return its output. Use this when you need a result before continuing. The agent runs to completion and its output is returned as this tool's result.",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"name":{"type":"string","description":"Short label for the agent"},"system_prompt":{"type":"string","description":"Role and constraints for the agent"},"prompt":{"type":"string","description":"Task to execute"},"model":{"type":"string","description":"Model name (optional)"}},"required":["name","system_prompt","prompt"]}`),
-	}, func(ctx context.Context, input json.RawMessage) (string, bool) {
-		var in struct {
-			Name         string `json:"name"`
-			SystemPrompt string `json:"system_prompt"`
-			Prompt       string `json:"prompt"`
-			Model        string `json:"model"`
-		}
-		if err := json.Unmarshal(input, &in); err != nil || in.Prompt == "" {
-			return "name, system_prompt, and prompt are required", true
-		}
-		lm, err := pool.LanguageModelForModel(ctx, in.Model)
-		if err != nil {
-			return "could not get language model: " + err.Error(), true
-		}
-		agentID := "run_agent_" + in.Name
-		a, err := pool.Spawn(agentID, lm, agent.SpawnOpts{SystemPrompt: in.SystemPrompt})
-		if err != nil {
-			return "spawn failed: " + err.Error(), true
-		}
-		var collected strings.Builder
-		done := make(chan error, 1)
-		a.SetOnToken(func(tok string) { collected.WriteString(tok) })
-		a.SetOnDone(func(e error) { done <- e })
-		a.SetToolsFn(func() []fantasy.AgentTool {
-			return harness.BuildFantasyTools(h, agentID, nil)
-		})
-		if err := pool.Send(agentID, in.Prompt); err != nil {
-			_ = pool.Close(agentID)
-			return "send failed: " + err.Error(), true
-		}
-		select {
-		case err := <-done:
-			_ = pool.Close(agentID)
-			if err != nil {
-				return fmt.Sprintf("agent error: %v", err), true
-			}
-			result := strings.TrimSpace(collected.String())
-			if result == "" {
-				return "(agent produced no output)", false
-			}
-			return result, false
-		case <-ctx.Done():
-			_ = pool.Close(agentID)
-			return "agent timed out", true
-		}
-	})
 
 	// get_agent_status: returns turn count and recent history for a running agent.
 	h.RegisterNativeTool(sdk.Tool{
