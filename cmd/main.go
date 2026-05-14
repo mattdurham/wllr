@@ -262,7 +262,7 @@ func loadBuiltinExtensions(ctx context.Context, h *extension.Host) {
 	}
 }
 
-// startMCPBridge initialises the MCP server bridge and returns a cleanup function.
+// startMCPBridge initializes the MCP server bridge and returns a cleanup function.
 // Startup errors are non-fatal: the bridge logs a warning and the app continues.
 func startMCPBridge(ctx context.Context, h *extension.Host) func() {
 	mcpExt := mcp.NewExtension(h)
