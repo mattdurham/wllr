@@ -53,22 +53,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	// In TUI mode stderr is suppressed (it bleeds into alt-screen).
-	// In --exec mode stderr stays on so the user can see output.
-	tuiMode := *execPrompt == ""
-	var logHandler slog.Handler = newTeeHandler(os.Stderr, !tuiMode)
-	if tuiMode {
-		// Also write to ~/.wllr/wllr.log so errors are visible after the fact.
-		if lf, err := openLogFile(); err == nil {
-			logHandler = newTeeHandler(lf, true)
-			defer func() {
-				if closeErr := lf.Close(); closeErr != nil {
-					slog.Warn("wllr: close log file", "error", closeErr)
-				}
-			}()
-		}
-	}
-	slog.SetDefault(slog.New(logHandler))
+	cleanupLog := setupLogging(*execPrompt == "")
+	defer cleanupLog()
 
 	// Create agent pool and spawn the main agent.
 	pool := agent.NewPool()
@@ -135,8 +121,84 @@ func main() {
 
 	// Register stateless tools as native Go functions — bypasses WASM entirely.
 	registerNativeTools(h)
+	registerAgentStatusTool(h, pool)
 
-	// get_agent_status: returns turn count and recent history for a running agent.
+	loadBuiltinExtensions(ctx, h)
+
+	closeMCP := startMCPBridge(ctx, h)
+	defer closeMCP()
+
+	// Load extensions from ~/.wllr/extensions/ and WLLR_EXTENSIONS_DIR.
+	var extPaths []string
+	extPaths = append(extPaths, loadExtensionsFromSubdirs(ctx, h, wllrExtensionsDir())...)
+	if cfg.ExtensionsDir != "" && cfg.ExtensionsDir != wllrExtensionsDir() {
+		extPaths = append(extPaths, loadExtensionsFlat(ctx, h, cfg.ExtensionsDir)...)
+	}
+
+	defer func() {
+		if err := h.Close(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "wllr: close extension host: %v\n", err)
+		}
+	}()
+
+	// Log registered tools so startup issues are visible in the log.
+	{
+		registered := h.RegisteredTools()
+		names := make([]string, 0, len(registered))
+		for _, t := range registered {
+			names = append(names, t.Tool.Name)
+		}
+		slog.Info("wllr: extensions ready", "tools", names)
+	}
+
+	// --exec mode: run a single prompt non-interactively and exit.
+	if *execPrompt != "" {
+		runExecMode(ctx, h, langModel, *execPrompt)
+		return
+	}
+
+	m.SetExtensionPaths(extPaths)
+	m.SetLogFn(func(level int, msg string) {
+		lvl := []slog.Level{slog.LevelDebug, slog.LevelInfo, slog.LevelWarn, slog.LevelError}
+		l := slog.LevelError
+		if level >= 0 && level < len(lvl) {
+			l = lvl[level]
+		}
+		slog.Log(ctx, l, msg)
+	})
+
+	prog := tea.NewProgram(&m)
+	m.SetProgram(prog)
+
+	if _, err := prog.Run(); err != nil {
+		fmt.Fprintln(os.Stderr, "wllr: "+err.Error())
+		os.Exit(1)
+	}
+}
+
+// setupLogging configures the default slog handler. In TUI mode logs go to
+// ~/.wllr/wllr.log (stderr bleeds into alt-screen). In exec mode logs go to
+// stderr. Returns a cleanup function that must be deferred by the caller.
+func setupLogging(tuiMode bool) func() {
+	var logHandler slog.Handler = newTeeHandler(os.Stderr, !tuiMode)
+	cleanup := func() {}
+	if tuiMode {
+		if lf, err := openLogFile(); err == nil {
+			logHandler = newTeeHandler(lf, true)
+			cleanup = func() {
+				if closeErr := lf.Close(); closeErr != nil {
+					slog.Warn("wllr: close log file", "error", closeErr)
+				}
+			}
+		}
+	}
+	slog.SetDefault(slog.New(logHandler))
+	return cleanup
+}
+
+// registerAgentStatusTool registers the get_agent_status native tool on h.
+// The tool returns turn count and recent conversation history for a running agent.
+func registerAgentStatusTool(h *extension.Host, pool *agent.AgentPool) {
 	h.RegisterNativeTool(sdk.Tool{
 		Name:        "get_agent_status",
 		Description: "Get the status and recent conversation history of a running agent. Returns turn count and the last N messages.",
@@ -182,8 +244,10 @@ func main() {
 		})
 		return string(out), false
 	})
+}
 
-	// Load built-in trusted WASM extensions.
+// loadBuiltinExtensions loads the trusted built-in WASM extensions (agents, history).
+func loadBuiltinExtensions(ctx context.Context, h *extension.Host) {
 	builtins := []struct {
 		name string
 		data []byte
@@ -196,88 +260,51 @@ func main() {
 			fmt.Fprintf(os.Stderr, "wllr: load built-in extension %q: %v\n", b.name, loadErr)
 		}
 	}
-	// Initialize MCP bridge for MCP server tool integration.
+}
+
+// startMCPBridge initialises the MCP server bridge and returns a cleanup function.
+// Startup errors are non-fatal: the bridge logs a warning and the app continues.
+func startMCPBridge(ctx context.Context, h *extension.Host) func() {
 	mcpExt := mcp.NewExtension(h)
 	if mcpErr := mcpExt.Start(ctx); mcpErr != nil {
-		// Non-fatal: log and continue if MCP bridge fails to start.
 		slog.Warn("wllr: mcp bridge init failed", "error", mcpErr)
 	}
-	defer func() {
+	return func() {
 		if closeErr := mcpExt.Close(); closeErr != nil {
 			slog.Warn("wllr: close mcp bridge", "error", closeErr)
 		}
-	}()
-
-	// Load extensions from ~/.wllr/extensions/ and WLLR_EXTENSIONS_DIR.
-	var extPaths []string
-	extPaths = append(extPaths, loadExtensionsFromSubdirs(ctx, h, wllrExtensionsDir())...)
-	if cfg.ExtensionsDir != "" && cfg.ExtensionsDir != wllrExtensionsDir() {
-		extPaths = append(extPaths, loadExtensionsFlat(ctx, h, cfg.ExtensionsDir)...)
 	}
+}
 
-	defer func() {
-		if err := h.Close(ctx); err != nil {
-			fmt.Fprintf(os.Stderr, "wllr: close extension host: %v\n", err)
-		}
-	}()
-
-	// Log registered tools so startup issues are visible in the log.
-	{
-		registered := h.RegisteredTools()
-		names := make([]string, 0, len(registered))
-		for _, t := range registered {
-			names = append(names, t.Tool.Name)
-		}
-		slog.Info("wllr: extensions ready", "tools", names)
-	}
-
-	// --exec mode: run a single prompt non-interactively and exit.
-	if *execPrompt != "" {
-		fantasyTools := harness.BuildFantasyTools(h, "exec", func(level int, msg string) {
-			slog.Log(
-				ctx,
-				[]slog.Level{slog.LevelDebug, slog.LevelInfo, slog.LevelWarn, slog.LevelError}[min(level, 3)],
-				msg,
-			)
-		})
-		var agentOpts []fantasy.AgentOption
-		if len(fantasyTools) > 0 {
-			agentOpts = append(agentOpts, fantasy.WithTools(fantasyTools...))
-		}
-		if sp := loadSystemPrompt(); sp != "" {
-			agentOpts = append(agentOpts, fantasy.WithSystemPrompt(sp))
-		}
-		fa := fantasy.NewAgent(langModel, agentOpts...)
-		_, execErr := fa.Stream(ctx, fantasy.AgentStreamCall{
-			Prompt: *execPrompt,
-			OnTextDelta: func(_, text string) error {
-				fmt.Print(text)
-				return nil
-			},
-		})
-		fmt.Println()
-		if execErr != nil {
-			fmt.Fprintf(os.Stderr, "wllr: %v\n", execErr)
-			os.Exit(1)
-		}
-		return
-	}
-
-	m.SetExtensionPaths(extPaths)
-	m.SetLogFn(func(level int, msg string) {
-		lvl := []slog.Level{slog.LevelDebug, slog.LevelInfo, slog.LevelWarn, slog.LevelError}
-		l := slog.LevelError
-		if level >= 0 && level < len(lvl) {
-			l = lvl[level]
-		}
-		slog.Log(ctx, l, msg)
+// runExecMode runs a single prompt non-interactively and exits.
+// It builds a one-shot fantasy agent, streams the response to stdout, and calls
+// os.Exit(1) on error.
+func runExecMode(ctx context.Context, h *extension.Host, langModel fantasy.LanguageModel, prompt string) {
+	fantasyTools := harness.BuildFantasyTools(h, "exec", func(level int, msg string) {
+		slog.Log(
+			ctx,
+			[]slog.Level{slog.LevelDebug, slog.LevelInfo, slog.LevelWarn, slog.LevelError}[min(level, 3)],
+			msg,
+		)
 	})
-
-	prog := tea.NewProgram(&m)
-	m.SetProgram(prog)
-
-	if _, err := prog.Run(); err != nil {
-		fmt.Fprintln(os.Stderr, "wllr: "+err.Error())
+	var agentOpts []fantasy.AgentOption
+	if len(fantasyTools) > 0 {
+		agentOpts = append(agentOpts, fantasy.WithTools(fantasyTools...))
+	}
+	if sp := loadSystemPrompt(); sp != "" {
+		agentOpts = append(agentOpts, fantasy.WithSystemPrompt(sp))
+	}
+	fa := fantasy.NewAgent(langModel, agentOpts...)
+	_, execErr := fa.Stream(ctx, fantasy.AgentStreamCall{
+		Prompt: prompt,
+		OnTextDelta: func(_, text string) error {
+			fmt.Print(text)
+			return nil
+		},
+	})
+	fmt.Println()
+	if execErr != nil {
+		fmt.Fprintf(os.Stderr, "wllr: %v\n", execErr)
 		os.Exit(1)
 	}
 }
