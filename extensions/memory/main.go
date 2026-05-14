@@ -294,7 +294,6 @@ func ensureEngram() {
 		}
 		Notify(fmt.Sprintf("✅ Engram v%s ready at %s", engramVersion, bin))
 	}
-
 }
 
 // ─── Utilities ────────────────────────────────────────────────────────────────

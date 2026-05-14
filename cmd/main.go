@@ -175,10 +175,10 @@ func main() {
 			msgs = append(msgs, msgOut{Role: string(m.Role), Preview: preview})
 		}
 		out, _ := json.Marshal(map[string]any{
-			"agent_id":    in.AgentID,
-			"turn_count":  len(history) / 2,
+			"agent_id":     in.AgentID,
+			"turn_count":   len(history) / 2,
 			"last_summary": a.LastSummary(),
-			"recent":      msgs,
+			"recent":       msgs,
 		})
 		return string(out), false
 	})
