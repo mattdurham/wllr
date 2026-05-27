@@ -404,27 +404,13 @@ func Logf(level int, format string, args ...any) {
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 // PickerItem is one entry in a ShowPicker call.
-type PickerItem struct {
-	ID       string `json:"id"`
-	Label    string `json:"label"`
-	Sublabel string `json:"sublabel,omitempty"`
-}
 
 // Message is a chat message for AgentResetHistory.
-type Message struct {
-	Role    string `json:"role"` // "user" or "assistant"
-	Content string `json:"content"`
-}
+
+// "user" or "assistant"
 
 // StatusInfo holds a snapshot of the current status bar state.
 // Returned by GetStatusInfo.
-type StatusInfo struct {
-	Tokens   int               `json:"tokens"`
-	Working  bool              `json:"working"`
-	Provider string            `json:"provider"`
-	Model    string            `json:"model"`
-	Statuses map[string]string `json:"statuses"`
-}
 
 // GetStatusInfo returns a snapshot of the current status bar state.
 // Extensions can use this to compose a fully custom status line.

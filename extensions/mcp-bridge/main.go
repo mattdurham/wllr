@@ -19,31 +19,14 @@ func hostCall(reqPtr, reqLen, respPtrPtr, respLenPtr uint32) uint32
 var pinned = map[uintptr][]byte{}
 
 // mcpServerConfig defines a single MCP server in the extension config.
-type mcpServerConfig struct {
-	Command string            `json:"command"`
-	Args    []string          `json:"args,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
-}
 
 // mcpConfig is the top-level config structure.
-type mcpConfig struct {
-	Servers map[string]mcpServerConfig `json:"servers"`
-}
 
 // mcpTool represents a tool discovered from an MCP server.
-type mcpTool struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	InputSchema json.RawMessage `json:"inputSchema"`
-}
 
 // mcpServerState tracks a running MCP server process.
-type mcpServerState struct {
-	Name   string
-	Config mcpServerConfig
-	PID    string // process ID returned by host
-	Tools  []mcpTool
-}
+
+// process ID returned by host
 
 var (
 	config  mcpConfig
@@ -185,13 +168,6 @@ func onShutdown() {
 	servers = make(map[string]*mcpServerState)
 }
 
-type beforeToolCallPayload struct {
-	AgentID    string          `json:"agent_id"`
-	ToolCallID string          `json:"tool_call_id"`
-	ToolName   string          `json:"tool_name"`
-	Input      json.RawMessage `json:"input"`
-}
-
 func onBeforeToolCall(raw json.RawMessage) {
 	var p beforeToolCallPayload
 	if err := json.Unmarshal(raw, &p); err != nil {
@@ -285,10 +261,6 @@ func callMCPTool(state *mcpServerState, toolName string, input json.RawMessage) 
 }
 
 // Utility functions
-
-type jsonError struct {
-	msg string
-}
 
 func (e *jsonError) Error() string {
 	return e.msg

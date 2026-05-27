@@ -8,8 +8,6 @@ package agent
 import (
 	"context"
 	"errors"
-	"sync"
-	"sync/atomic"
 
 	"charm.land/fantasy"
 	"github.com/mattdurham/wllr/sdk"
@@ -28,38 +26,24 @@ var (
 
 // AgentPool manages all live agents and a shared token counter.
 // It is safe for concurrent use from multiple goroutines.
-type AgentPool struct {
-	// provider is stored so sub-agents can request new language model instances
-	// for arbitrary model names.
-	provider fantasy.Provider
 
-	agents map[string]*Agent
-	teams  map[string]*Team
+// provider is stored so sub-agents can request new language model instances
+// for arbitrary model names.
 
-	// providerName is a human-readable display name for the provider (e.g. "anthropic").
-	// Set via SetProviderName; read via ProviderName.
-	providerName string
+// providerName is a human-readable display name for the provider (e.g. "anthropic").
+// Set via SetProviderName; read via ProviderName.
 
-	// defaultModelName is used when LanguageModelForModel is called with an
-	// empty name (e.g. sub-agents that don't specify a model).
-	defaultModelName string
+// defaultModelName is used when LanguageModelForModel is called with an
+// empty name (e.g. sub-agents that don't specify a model).
 
-	baseSystemPrompt string
+// contextWindow is the model's input context window in tokens.
+// Set via SetContextWindow; defaults to 0 (compaction uses model-name fallback).
 
-	// contextWindow is the model's input context window in tokens.
-	// Set via SetContextWindow; defaults to 0 (compaction uses model-name fallback).
-	contextWindow int64
+// tokenCount accumulates all text tokens emitted by all agents in this pool.
 
-	// tokenCount accumulates all text tokens emitted by all agents in this pool.
-	tokenCount atomic.Int64
-
-	mu sync.RWMutex
-
-	// baseSystemPrompt is accumulated from set_system_prompt / append_system_prompt
-	// and applied to every agent (current and future) so all agents share the
-	// same base context (AGENTS.md, skill list, etc.).
-	baseSystemPromptMu sync.RWMutex
-}
+// baseSystemPrompt is accumulated from set_system_prompt / append_system_prompt
+// and applied to every agent (current and future) so all agents share the
+// same base context (AGENTS.md, skill list, etc.).
 
 // NewPool creates an empty AgentPool.
 func NewPool() *AgentPool {

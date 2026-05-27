@@ -11,11 +11,8 @@ import (
 )
 
 // InputArea wraps a textarea and handles command detection.
-type InputArea struct {
-	ta         textarea.Model
-	width      int
-	lastWasEsc bool // true if the previous keypress was esc
-}
+
+// true if the previous keypress was esc
 
 // NewInputArea creates an InputArea with the given width.
 func NewInputArea(width int) InputArea {

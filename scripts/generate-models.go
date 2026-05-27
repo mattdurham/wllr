@@ -51,11 +51,6 @@ func contextWindowFor(modelID string) int64 {
 	return defaultTokens
 }
 
-type modelEntry struct {
-	ID            string
-	ContextWindow int64
-}
-
 func fetchModels(apiKey string) ([]modelEntry, error) {
 	req, err := http.NewRequest("GET", "https://api.anthropic.com/v1/models", nil)
 	if err != nil {

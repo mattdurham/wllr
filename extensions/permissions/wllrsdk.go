@@ -15,29 +15,12 @@ func hostLog(level uint32, ptr uint32, length uint32)
 func hostCall(reqPtr uint32, reqLen uint32, respPtrPtr uint32, respLenPtr uint32) uint32
 
 // Event represents an event dispatched from the host.
-type Event struct {
-	Type    string          `json:"type"`
-	Payload json.RawMessage `json:"payload"`
-}
 
 // EventResponse is returned by OnEvent to signal cancellation, blocking, or errors.
-type EventResponse struct {
-	Cancel bool   `json:"cancel,omitempty"`
-	Block  bool   `json:"block,omitempty"`
-	Error  string `json:"error,omitempty"`
-}
 
 // HostCallRequest is the JSON-RPC envelope for host_call.
-type HostCallRequest struct {
-	Method string          `json:"method"`
-	Params json.RawMessage `json:"params"`
-}
 
 // HostCallResponse is the JSON-RPC response from host_call.
-type HostCallResponse struct {
-	Result json.RawMessage `json:"result"`
-	Error  string          `json:"error"`
-}
 
 //export _alloc
 func _alloc(size uint32) uint32 {

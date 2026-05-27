@@ -105,30 +105,6 @@ var (
 
 // ─── JSONL entry types ────────────────────────────────────────────────────────
 
-type sessionHeader struct {
-	Type      string `json:"type"`
-	ID        string `json:"id"`
-	Timestamp string `json:"timestamp"`
-	CWD       string `json:"cwd"`
-}
-
-type messageEntry struct {
-	Type      string `json:"type"`
-	ID        string `json:"id"`
-	Timestamp string `json:"timestamp"`
-	Role      string `json:"role"`
-	Content   string `json:"content"`
-}
-
-type toolCallEntry struct {
-	Type       string          `json:"type"`
-	ID         string          `json:"id"`
-	Timestamp  string          `json:"timestamp"`
-	ToolCallID string          `json:"tool_call_id"`
-	ToolName   string          `json:"tool_name"`
-	Input      json.RawMessage `json:"input,omitempty"`
-}
-
 // ─── Event handlers ───────────────────────────────────────────────────────────
 
 func handleSessionStart() {
@@ -319,12 +295,6 @@ func handleMessageSelected(idxStr string) {
 
 // ─── Session file I/O ─────────────────────────────────────────────────────────
 
-type sessionInfo struct {
-	path      string
-	timestamp string
-	preview   string
-}
-
 func listSessions() ([]sessionInfo, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -398,8 +368,6 @@ func peekSession(path string) (sessionInfo, error) {
 	}
 	return sessionInfo{path: path, timestamp: ts, preview: preview}, nil
 }
-
-type storedMsg struct{ role, content string }
 
 func loadMessages(path string) ([]storedMsg, error) {
 	data, err := os.ReadFile(path)

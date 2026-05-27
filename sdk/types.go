@@ -3,7 +3,6 @@ package sdk
 
 // NOTE: Any changes to this file must be reflected in the corresponding SPECS.md or NOTES.md.
 
-import "encoding/json"
 
 // EventType identifies a lifecycle event dispatched to extensions.
 type EventType string
@@ -29,77 +28,30 @@ const (
 )
 
 // Event is dispatched to extensions via _on_event.
-type Event struct {
-	Type    EventType       `json:"type"`
-	Payload json.RawMessage `json:"payload"`
-}
 
 // EventResponse is the optional JSON response from _on_event.
-type EventResponse struct {
-	Error  string `json:"error,omitempty"`
-	Cancel bool   `json:"cancel,omitempty"`
-	Block  bool   `json:"block,omitempty"`
-}
 
 // Payload types for each event.
 
 // SessionStartPayload is the payload for EventSessionStart.
-type SessionStartPayload struct {
-	Reason string `json:"reason"`
-}
 
 // BeforeAgentStartPayload is the payload for EventBeforeAgentStart.
-type BeforeAgentStartPayload struct {
-	Prompt       string `json:"prompt"`
-	SystemPrompt string `json:"system_prompt"`
-}
 
 // BeforeProviderRequestPayload is the payload for EventBeforeProviderRequest.
-type BeforeProviderRequestPayload struct {
-	Model    string    `json:"model"`
-	Messages []Message `json:"messages"`
-}
 
 // AfterProviderResponsePayload is the payload for EventAfterProviderResponse.
-type AfterProviderResponsePayload struct {
-	Usage UsageStats `json:"usage"`
-}
 
 // OnToolCallPayload is the payload for EventOnToolCall.
-type OnToolCallPayload struct {
-	ToolCallID string          `json:"tool_call_id"`
-	ToolName   string          `json:"tool_name"`
-	Input      json.RawMessage `json:"input"`
-}
 
 // OnToolResultPayload is the payload for EventOnToolResult.
-type OnToolResultPayload struct {
-	ToolCallID string `json:"tool_call_id"`
-	Result     string `json:"result"`
-	IsError    bool   `json:"is_error"`
-}
 
 // MessageStartPayload is the payload for EventMessageStart.
-type MessageStartPayload struct {
-	Role string `json:"role"`
-}
 
 // MessageEndPayload is the payload for EventMessageEnd.
-type MessageEndPayload struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
 
 // ShutdownPayload is the payload for EventShutdown.
-type ShutdownPayload struct {
-	Reason string `json:"reason"`
-}
 
 // UsageStats holds token usage from a provider response.
-type UsageStats struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
-}
 
 // Role is a message role (user or assistant).
 type Role string
@@ -110,20 +62,11 @@ const (
 )
 
 // Message is a chat message.
-type Message struct {
-	Role    Role   `json:"role"`
-	Content string `json:"content"`
-}
 
 // Tool is a function the LLM may call.
-type Tool struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	InputSchema json.RawMessage `json:"input_schema"`
-	// Override, when true, allows this registration to replace an existing tool
-	// with the same name. Without this flag, duplicate registrations are rejected.
-	Override bool `json:"override,omitempty"`
-}
+
+// Override, when true, allows this registration to replace an existing tool
+// with the same name. Without this flag, duplicate registrations are rejected.
 
 // Permission identifies a capability that an extension may request.
 // User extensions declare permissions in their manifest; built-in extensions
@@ -147,45 +90,18 @@ const (
 
 // ExtensionManifest is loaded from the JSON file alongside a .wasm extension.
 // It declares the permissions the extension requires.
-type ExtensionManifest struct {
-	// Permissions is the list of permissions the extension requires.
-	Permissions []Permission `json:"permissions"`
-}
+
+// Permissions is the list of permissions the extension requires.
 
 // BeforeToolCallPayload is the payload for EventBeforeToolCall.
-type BeforeToolCallPayload struct {
-	AgentID    string          `json:"agent_id"`
-	ToolCallID string          `json:"tool_call_id"`
-	ToolName   string          `json:"tool_name"`
-	Input      json.RawMessage `json:"input"`
-}
 
 // AfterToolCallPayload is the payload for EventAfterToolCall.
-type AfterToolCallPayload struct {
-	AgentID    string `json:"agent_id"`
-	ToolCallID string `json:"tool_call_id"`
-	ToolName   string `json:"tool_name"`
-	Result     string `json:"result"`
-	IsError    bool   `json:"is_error"`
-}
 
 // OnCommandPayload is the payload for EventOnCommand.
-type OnCommandPayload struct {
-	Name string   `json:"name"`
-	Args []string `json:"args"`
-}
 
 // HostCallRequest is the JSON payload sent by an extension via host_call.
-type HostCallRequest struct {
-	Method string          `json:"method"`
-	Params json.RawMessage `json:"params,omitempty"`
-}
 
 // HostCallResponse is the JSON response returned by the host via host_call.
-type HostCallResponse struct {
-	Error  string          `json:"error,omitempty"`
-	Result json.RawMessage `json:"result,omitempty"`
-}
 
 // host_call method constants.
 const (
@@ -280,37 +196,22 @@ const (
 )
 
 // ShowPickerItem is one entry displayed in the interactive picker overlay.
-type ShowPickerItem struct {
-	ID       string `json:"id"`
-	Label    string `json:"label"`
-	Sublabel string `json:"sublabel,omitempty"`
-}
 
 // ShowPickerParams is the params blob for the show_picker host_call.
-type ShowPickerParams struct {
-	Title    string           `json:"title"`
-	Callback string           `json:"callback"`
-	Items    []ShowPickerItem `json:"items"`
-}
 
 // AgentResetHistoryParams is the params blob for the agent_reset_history host_call.
-type AgentResetHistoryParams struct {
-	Messages []Message `json:"messages"`
-}
 
 // StatusInfo is returned by the get_status_info host_call.
 // It gives extensions a read-only snapshot of the current status bar state
 // so they can compose a fully custom status line.
-type StatusInfo struct {
-	// Statuses is the current set of keyed status values set via set_status.
-	// The "_override" key is excluded — use set_status_line to manage it.
-	Statuses map[string]string `json:"statuses"`
-	// Provider is the active provider name (e.g. "anthropic").
-	Provider string `json:"provider"`
-	// Model is the active model name (e.g. "claude-opus-4-5").
-	Model string `json:"model"`
-	// Tokens is the total token count across all agents in the current session.
-	Tokens int `json:"tokens"`
-	// Working is true while the LLM is streaming a response.
-	Working bool `json:"working"`
-}
+
+// Statuses is the current set of keyed status values set via set_status.
+// The "_override" key is excluded — use set_status_line to manage it.
+
+// Provider is the active provider name (e.g. "anthropic").
+
+// Model is the active model name (e.g. "claude-opus-4-5").
+
+// Tokens is the total token count across all agents in the current session.
+
+// Working is true while the LLM is streaming a response.
