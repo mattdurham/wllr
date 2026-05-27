@@ -191,7 +191,12 @@ func (m *Model) SetProgram(p *tea.Program) {
 				return fmt.Errorf("spawn agent %q: get model %q: %w", id, modelName, err)
 			}
 			fullSystemPrompt := systemPrompt + "\n\n## Your Agent Identity\nYour agent ID is: " + id + "\nTo report results back to the orchestrator, call send_message with agent_id=\"main\"."
-			spawnOpts := agent.SpawnOpts{SystemPrompt: fullSystemPrompt, Name: name}
+			// Derive parent ID from the scoped agent ID (e.g. "main/coder" → parent "main").
+			parentID := ""
+			if slash := strings.LastIndex(id, "/"); slash > 0 {
+				parentID = id[:slash]
+			}
+			spawnOpts := agent.SpawnOpts{SystemPrompt: fullSystemPrompt, Name: name, NotifyParentID: parentID}
 			if thinkingBudget > 0 {
 				spawnOpts.ProviderOptions = fantasy.ProviderOptions{
 					anthropicprovider.Name: &anthropicprovider.ProviderOptions{
