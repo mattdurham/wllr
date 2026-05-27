@@ -48,8 +48,6 @@ type Model struct {
 
 	chat ChatView
 
-	history []sdk.Message
-
 	// Loaded extension paths for reload.
 	extPaths []string
 
@@ -260,7 +258,16 @@ func (m *Model) SetProgram(p *tea.Program) {
 			if pool == nil {
 				return fmt.Errorf("no agent pool")
 			}
-			return pool.Send(id, "")
+			// Send agentWakeupMsg to set m.streaming=true for the TUI indicator.
+			// Only fire for the main agent — sub-agents don't have TUI streaming state.
+			// See harness/NOTES.md §19.
+			if id == mainID {
+				p.Send(agentWakeupMsg{})
+			}
+			// Use a non-empty sentinel as belt-and-suspenders even after Fix 1 (inbox append).
+			// If OnAgentRun is called when the inbox is empty (edge case), an empty
+			// prompt would still fail. The sentinel signals intent. See harness/NOTES.md §18.
+			return pool.Send(id, "[process pending inbox messages]")
 		}
 		m.extHost.OnAgentList = func() ([]extension.AgentInfo, error) {
 			if pool == nil {
@@ -513,8 +520,6 @@ func (m Model) updateWindow(msg tea.Msg) (Model, tea.Cmd, bool) {
 		m.picker.SetSize(m.width, m.chatHeight())
 		return m, nil, true
 	case ResetHistoryMsg:
-		m.history = make([]sdk.Message, len(msg.Messages))
-		copy(m.history, msg.Messages)
 		m.chat.Clear()
 		for _, sm := range msg.Messages {
 			switch sm.Role {
@@ -556,7 +561,7 @@ func (m Model) updateKeyPress(msg tea.Msg) (Model, tea.Cmd, bool) {
 	case "ctrl+c":
 		if m.streaming {
 			if m.agentPool != nil {
-				_ = m.agentPool.Cancel(m.mainAgentID)
+				m.agentPool.CancelAll()
 			}
 			m.statusBar.statuses["stream"] = "cancelling…"
 			return m, nil, true
@@ -678,10 +683,19 @@ func (m Model) updateKeyPressDropdown(kp tea.KeyPressMsg) (Model, tea.Cmd, bool)
 	return m, nil, false
 }
 
-// updateStream handles token streaming messages: TokenMsg, streamTickMsg, StreamDoneMsg, addAssistantMsgToHistoryMsg.
+// updateStream handles token streaming messages: TokenMsg, streamTickMsg, StreamDoneMsg, agentWakeupMsg.
 // Returns (model, cmd, true) when the message was handled.
 func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
+	case agentWakeupMsg:
+		_ = msg
+		if !m.streaming {
+			m.streaming = true
+			m.streamStart = time.Now()
+			m.statusBar.statuses["stream"] = "working."
+		}
+		return m, tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return streamTickMsg{} }), true
+
 	case TokenMsg:
 		m.chat.AppendToken(msg.Token)
 		return m, nil, true
@@ -735,9 +749,6 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 		}
 		return m, tea.Batch(cmds...), true
 
-	case addAssistantMsgToHistoryMsg:
-		m.history = append(m.history, sdk.Message{Role: sdk.RoleAssistant, Content: msg.content})
-		return m, nil, true
 	}
 	return m, nil, false
 }
@@ -797,7 +808,6 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 
 	case clearMsg:
 		m.chat.Clear()
-		m.history = nil
 		return m, nil, true
 
 	case setModelMsg:
@@ -808,7 +818,7 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 
 	case abortStreamMsg:
 		if m.agentPool != nil {
-			_ = m.agentPool.Cancel(m.mainAgentID)
+			m.agentPool.CancelAll()
 		}
 		m.statusBar.statuses["stream"] = "cancelling…"
 		return m, nil, true
@@ -882,8 +892,6 @@ func (m Model) updateExtension(msg tea.Msg) (Model, tea.Cmd, bool) {
 	return m, nil, false
 }
 
-// addAssistantMsgToHistoryMsg carries a finalised assistant message to add to history.
-type addAssistantMsgToHistoryMsg struct{ content string }
 
 // skillDisplayName extracts a compact display string from a skill XML block.
 // Returns something like "[skill: bob:work]" instead of the raw XML.
@@ -906,7 +914,6 @@ func (m Model) submitToAgent(content, display string) (tea.Model, tea.Cmd) {
 		chatText = content
 	}
 	m.chat.AddUserMessage(chatText)
-	m.history = append(m.history, sdk.Message{Role: sdk.RoleUser, Content: content})
 	m.streaming = true
 	m.streamStart = time.Now()
 	m.statusBar.statuses["stream"] = "working."
@@ -946,7 +953,7 @@ func (m Model) submitToAgent(content, display string) (tea.Model, tea.Cmd) {
 		if r := []rune(prompt); len(r) > 120 {
 			prompt = string(r[:120]) + "…"
 		}
-		slog.Info("stream start", "prompt", prompt, "history_msgs", len(m.history), "system_prompt_len", len(pool.BaseSystemPrompt()))
+		slog.Info("stream start", "prompt", prompt, "system_prompt_len", len(pool.BaseSystemPrompt()))
 		if err := pool.Send(mainAgentID, content); err != nil {
 			return StreamDoneMsg{Err: fmt.Errorf("submit to agent: %w", err)}
 		}

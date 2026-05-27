@@ -218,6 +218,64 @@ not a tool call box; it is a live feed from the subprocess, not from the LLM.
 
 **Consequence:** `chatHeight()` now subtracts `consoleHeight()` (9 lines when visible).
 Layout math tests must account for the new pane. Console lines do NOT appear in
-`m.chat.messages` or `m.history` — they are completely separate.
+`m.chat.messages` — they are completely separate.
 
 *Addendum (see also):* NOTES.md §11 is not reversed; `renderToolGroup` remains a no-op.
+
+---
+
+## 18. OnAgentRun Sentinel Prompt — Non-Empty String for Belt-and-Suspenders
+
+*Added: 2026-05-27*
+
+**Decision:** `OnAgentRun` calls `pool.Send(id, "[process pending inbox messages]")` instead
+of `pool.Send(id, "")`.
+
+**Rationale:** Fix 1 (inbox append in agent/NOTES.md §16) makes empty-prompt valid when the
+inbox is non-empty. But if `OnAgentRun` is ever called when the inbox is empty (edge case —
+shouldn't happen in normal flow but possible if extensions call `agent_run` without a prior
+`send_message`), empty prompt would still fail. The sentinel is a valid user message, uses
+minimal tokens, and clearly communicates intent to the agent.
+
+**Consequence:** The sentinel string appears in the agent's conversation history as a user
+message. For long-running agents this adds one extra low-token message per agent wakeup.
+Acceptable trade-off for correctness.
+
+---
+
+## 19. agentWakeupMsg — TUI Streaming State for Agent-Triggered Turns
+
+*Added: 2026-05-27*
+
+**Decision:** A new `agentWakeupMsg{}` type is sent from `OnAgentRun` (for the main agent
+only) before `pool.Send`. The `updateStream` handler sets `m.streaming=true` and starts the
+tick timer.
+
+**Rationale:** `m.streaming` is only set in `submitToAgent` (user-triggered turns). When a
+sub-agent calls `send_message` and triggers `agent_run`, the main agent runs a new turn but
+`m.streaming` stays false. The TUI shows no "working." indicator, no tick timer fires, and
+`StreamDoneMsg` arrives without a matching streaming start (a no-op but misleading).
+
+**Consequence:** The TUI correctly shows the streaming indicator during all main-agent turns,
+regardless of whether they were user-triggered or sub-agent-triggered.
+
+---
+
+## 20. m.history Removed — History Lives on AgentPool Only
+
+*Added: 2026-05-27*
+
+**Decision:** The `m.history []sdk.Message` field is removed from `harness.Model` entirely,
+along with the dead `addAssistantMsgToHistoryMsg` type and its handler.
+
+**Rationale:** After the pool-based refactor (NOTES.md §9), `m.history` was written in
+`submitToAgent` (user messages only) and in the `ResetHistoryMsg` handler, but never read for
+any functional purpose. The `addAssistantMsgToHistoryMsg` message was never sent by any code
+path (confirmed by grep). Retaining the field creates a misleading partial view of the
+conversation that could cause bugs if code is written to rely on it. The canonical history
+is `pool.Get(mainID).History()`.
+
+**Consequence:** Callers that need the conversation history must call
+`pool.Get(mainID).History()`. The `ResetHistoryMsg` handler now sets agent history via
+`pool.SetAgentHistory` and rebuilds the chat from the provided messages, without maintaining
+a separate `m.history` copy.
