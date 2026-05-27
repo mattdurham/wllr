@@ -97,3 +97,31 @@ The following scenarios are not currently covered and should be added:
 | Low | `TestStatusBar_View_StreamingStatus` | When `statuses["stream"] == "streaming…"`, view contains that string |
 | Low | `TestStatusBar_Update_SetsStatus` | `StatusUpdateMsg` sets the keyed value |
 | Low | `TestStatusBar_View_SortedKeys` | Multiple status keys appear in sorted order in view output |
+
+
+### console_test.go
+
+| Test | Scenario | Setup | Assertions |
+|---|---|---|---|
+| `TestConsoleView_Append_SingleLine` | Single append makes line visible | `NewConsoleView()` | `View(80, 3)` contains "hello" |
+| `TestConsoleView_Append_RingBuffer_EvictsOldest` | Ring buffer wraps | Append more lines than ring size | Oldest line evicted; newest visible |
+| `TestConsoleView_Clear_EmptiesBuffer` | Clear removes all lines | Append then Clear | `IsEmpty() == true` |
+| `TestConsoleView_View_WidthClamped` | Lines truncated at width | Append 100-char line; `View(20, 1)` | No line exceeds 20 chars |
+| `TestConsoleView_Empty_ViewIsEmpty` | Empty view returns empty string | No lines appended | `IsEmpty() == true`; `View(80, 0) == ""` |
+| `TestConsoleView_Visible_AfterAppend` | IsEmpty tracks append state | `NewConsoleView` → `Append` | IsEmpty false after Append |
+
+### model_test.go (new additions)
+
+| Test | Scenario | Setup | Assertions |
+|---|---|---|---|
+| `TestModel_Update_ConsoleMsg_AppendsToConsole` | ConsoleMsg makes console visible | `newTestModel()`; `ConsoleMsg{Line}` | `consoleVisible == true` |
+| `TestModel_Update_ConsoleMsg_Clear_ResetsConsole` | `ConsoleMsg{Clear}` empties console | Append then Clear msg | console empty |
+| `TestModel_Update_StreamDoneMsg_HidesConsole` | StreamDone hides console | `consoleVisible=true`; `StreamDoneMsg` | `consoleVisible == false` |
+| `TestModel_chatHeight_AccountsForConsole` | chatHeight subtracts console height | `consoleVisible` on/off | height changes by `consolePaneLines` |
+
+### Missing / Recommended Tests
+
+| Priority | Test | Description | Success Criteria |
+|---|---|---|---|
+| High | `TestConsoleView_Append_LargeCount` | Append 300 lines without panic; ring buffer wraps correctly | Ring stable at 200 entries |
+| Medium | `TestModel_View_ConsoleVisible_RendersFeed` | When `consoleVisible`, `View()` contains console header | View output contains "─ console" |

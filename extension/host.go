@@ -70,7 +70,8 @@ type RegisteredToolInfo struct {
 
 // Host manages a collection of WASM extensions.
 type Host struct {
-	runtime  wazero.Runtime
+	runtime wazero.Runtime
+
 	logger   *slog.Logger
 	dispatch map[string]func(ctx context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse
 
@@ -107,12 +108,15 @@ type Host struct {
 	OnAgentResetHistory  func(messages []sdk.Message) error
 	OnSetSystemPrompt    func(prompt string)
 	OnAppendSystemPrompt func(text string)
-	OnExec               func(command, dir string) (string, error)
-	OnGetEnv             func(name string) (string, error)
-	OnReadFile           func(path string) (string, error)
-	OnWriteFile          func(path, content string) error
-	OnHTTPPost           func(url string, headers map[string]string, body []byte) (int, []byte, error)
-	OnConfigRead         func(group string) (json.RawMessage, error)
+	OnExec               func(ctx context.Context, command, dir string, onLine func(string)) (string, error)
+	OnConsoleOutput      func(line string)
+	OnConsoleClear       func()
+
+	OnGetEnv     func(name string) (string, error)
+	OnReadFile   func(path string) (string, error)
+	OnWriteFile  func(path, content string) error
+	OnHTTPPost   func(url string, headers map[string]string, body []byte) (int, []byte, error)
+	OnConfigRead func(group string) (json.RawMessage, error)
 	// OnGetStatusInfo returns the current status bar snapshot for the get_status_info host call.
 	OnGetStatusInfo func() sdk.StatusInfo
 
@@ -163,9 +167,11 @@ type Host struct {
 	// pendingTools holds channels waiting for tool_result responses.
 	// Keyed by toolCallID.
 	pendingMu sync.Mutex
+
+	// AgentInfo describes a running agent.
+
 }
 
-// AgentInfo describes a running agent.
 type AgentInfo struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
@@ -618,7 +624,7 @@ func (h *Host) handleExec(ctx context.Context, ext *Extension, req sdk.HostCallR
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("exec: %v", err)}
 	}
-	output, err := h.OnExec(params.Command, params.Dir)
+	output, err := h.OnExec(ctx, params.Command, params.Dir, nil)
 	if err != nil {
 		result, _ := json.Marshal(map[string]string{"output": output, "error": err.Error()})
 		return sdk.HostCallResponse{Result: result}
