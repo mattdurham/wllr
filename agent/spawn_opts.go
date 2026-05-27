@@ -18,4 +18,13 @@ type SpawnOpts struct {
 	ModelName string
 	// Tools are the tools available to the agent.
 	Tools []fantasy.AgentTool
+	// ThinkingBudget enables extended thinking for the agent with the given
+	// token budget. Only supported on Anthropic models. Zero means disabled.
+	// The harness wires this into fantasy.WithProviderOptions using the
+	// provider-specific options struct.
+	ThinkingBudget int
+	// ProviderOptions are passed directly to fantasy.WithProviderOptions when
+	// the agent runs each turn. Use this for provider-specific settings such
+	// as extended thinking (Anthropic) or effort levels.
+	ProviderOptions fantasy.ProviderOptions
 }

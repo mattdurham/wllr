@@ -119,7 +119,7 @@ type Host struct {
 	// Agent management callbacks. Set by the pool layer.
 	// OnAgentSpawn creates a new named agent with the given system prompt, model, and optional initial prompt.
 	// If initialPrompt is non-empty, the agent's first turn is started immediately after spawning.
-	OnAgentSpawn func(id, name, systemPrompt, modelName, initialPrompt string) error
+	OnAgentSpawn func(id, name, systemPrompt, modelName, initialPrompt string, thinkingBudget int) error
 	// OnAgentClose closes and removes a named agent.
 	OnAgentClose func(id string) error
 	// OnAgentSendMessage queues a plain-text message into a named agent's inbox.
@@ -818,16 +818,17 @@ func (h *Host) handleAgentSpawn(req sdk.HostCallRequest) sdk.HostCallResponse {
 		return sdk.HostCallResponse{Error: "agent_spawn: not supported by host"}
 	}
 	var params struct {
-		ID            string `json:"id"`
-		Name          string `json:"name"`
-		SystemPrompt  string `json:"system_prompt"`
-		ModelName     string `json:"model_name"`
-		InitialPrompt string `json:"initial_prompt"`
+		ID             string `json:"id"`
+		Name           string `json:"name"`
+		SystemPrompt   string `json:"system_prompt"`
+		ModelName      string `json:"model_name"`
+		InitialPrompt  string `json:"initial_prompt"`
+		ThinkingBudget int    `json:"thinking_budget"`
 	}
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("agent_spawn: %v", err)}
 	}
-	if err := h.OnAgentSpawn(params.ID, params.Name, params.SystemPrompt, params.ModelName, params.InitialPrompt); err != nil {
+	if err := h.OnAgentSpawn(params.ID, params.Name, params.SystemPrompt, params.ModelName, params.InitialPrompt, params.ThinkingBudget); err != nil {
 		return sdk.HostCallResponse{Error: err.Error()}
 	}
 	result, _ := json.Marshal(map[string]string{"agent_id": params.ID, "status": "created"})

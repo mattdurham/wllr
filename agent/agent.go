@@ -309,6 +309,10 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 			agentOpts = append(agentOpts, fantasy.WithSystemPrompt(sysPrompt))
 		}
 
+		if len(opts.ProviderOptions) > 0 {
+			agentOpts = append(agentOpts, fantasy.WithProviderOptions(opts.ProviderOptions))
+		}
+
 		fa := fantasy.NewAgent(lm, agentOpts...)
 
 		// Proactive compaction: if the estimated context is close to the model's

@@ -766,10 +766,10 @@ func TestHost_HandleAgentSpawn_CallbackInvoked(t *testing.T) {
 	h := NewHost(nil)
 	defer h.Close(ctx)
 
-	type spawnArgs struct{ id, name, systemPrompt, modelName, initialPrompt string }
+	type spawnArgs struct{ id, name, systemPrompt, modelName, initialPrompt string; thinkingBudget int }
 	got := make(chan spawnArgs, 1)
-	h.OnAgentSpawn = func(id, name, systemPrompt, modelName, initialPrompt string) error {
-		got <- spawnArgs{id, name, systemPrompt, modelName, initialPrompt}
+	h.OnAgentSpawn = func(id, name, systemPrompt, modelName, initialPrompt string, thinkingBudget int) error {
+		got <- spawnArgs{id, name, systemPrompt, modelName, initialPrompt, thinkingBudget}
 		return nil
 	}
 
