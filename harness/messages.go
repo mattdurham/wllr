@@ -97,3 +97,7 @@ type sessionStartDoneMsg struct {
 	Err     error
 	Results []sdk.EventResponse
 }
+type ConsoleMsg struct {
+	Line  string
+	Clear bool
+}

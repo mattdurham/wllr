@@ -93,7 +93,7 @@ Sub-agents spawned via `OnAgentSpawn` receive identical wiring except `agentID` 
 | `updateWindow`     | `tea.WindowSizeMsg`, `ShowModalMsg`                                               |
 | `updateKeyPress`   | `tea.KeyPressMsg` — modal keys, dropdown navigation, Ctrl+C / Ctrl+Q, pgup/pgdown |
 | `updateStream`     | `TokenMsg`, `streamTickMsg`, `StreamDoneMsg`, `addAssistantMsgToHistoryMsg`       |
-| `updateTools`      | `ToolCallStartMsg`, `ToolCallDoneMsg`                                             |
+| `updateTools`      | `ToolCallStartMsg`, `ToolCallDoneMsg`, `ConsoleMsg`                               |
 | `updateActions`    | `SubmitMsg`, `CommandMsg`, `clearMsg`, `setModelMsg`, `abortStreamMsg`, `dispatchOnCommandMsg` |
 | `updateExtension`  | `sessionStartDoneMsg`, `ExtensionEventResultMsg`, `ReloadMsg`, `NotifyMsg`, `StatusUpdateMsg` |
 
@@ -425,3 +425,20 @@ Returns the current set of registered tools from `extHost.RegisteredTools()` as 
 
 - `AltScreen = true` is set on every `tea.View` returned from `View()`.
 - The output is padded to exactly `m.height` lines to prevent old content bleeding through on resize.
+
+## 23. ConsoleView
+
+`ConsoleView` is a ring-buffer live tail pane for subprocess output lines.
+
+- Ring buffer capacity: 200 lines (`consoleRingSize`).
+- Always renders the most-recent lines (live tail, no scroll).
+- `Append(line)` evicts the oldest line when the buffer is full.
+- `Clear()` resets the buffer to empty.
+- `IsEmpty()` returns true when no lines have been appended since the last `Clear`.
+- `View(width, height)` renders the last `min(height, count)` lines, each truncated to `width` runes.
+
+**Invariant:** `histContent` in `ChatView` is never affected by `ConsoleView`; they are independent display components.
+
+**Invariant:** `consoleVisible` is set to `true` on `ConsoleMsg{Line: ...}` and to `false` on `StreamDoneMsg`.
+
+**Invariant:** `ConsoleMsg` never adds to `m.chat.messages`. Console lines are ephemeral and not part of the conversation history.
