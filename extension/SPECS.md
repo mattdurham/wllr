@@ -188,7 +188,9 @@ The full set of dispatched methods is:
 | `OnModal`             | `func(text string)`                                  | Display text in a modal overlay                          |
 | `OnSetSystemPrompt`   | `func(prompt string)`                                | Replace the base system prompt on all agents             |
 | `OnAppendSystemPrompt`| `func(text string)`                                  | Append to the base system prompt on all agents           |
-| `OnExec`              | `func(command, dir string) (string, error)`          | Execute a shell command (requires PermExec)              |
+| `OnExec`              | `func(ctx context.Context, command, dir string, onLine func(string)) (string, error)` | Execute a shell command (requires PermExec). `ctx` propagates cancellation. `onLine` is called for each output line as it arrives; may be nil. |
+| `OnConsoleOutput`     | `func(line string)`                                  | Called for each output line streamed from OnExec; nil-safe.          |
+| `OnConsoleClear`      | `func()`                                             | Called at the start of each OnExec to signal the console should be cleared. |
 | `OnGetEnv`            | `func(name string) (string, error)`                  | Read a host environment variable                         |
 | `OnConfigRead`        | `func(group string) (json.RawMessage, error)`        | Read config for the named extension group                |
 

@@ -219,3 +219,28 @@ Append-only design decision log. Never delete entries; add an `*Addendum (date):
 **Rationale:** Stateless tools (file I/O, exec, env) have no state in WASM linear memory; they only delegate to host OS calls. Running them through WASM adds: (a) two full WASM dispatch round-trips (`_alloc` + `_on_event`), (b) serialization through the `host_call` JSON protocol, and (c) contention on `Extension.callMu` which serializes all calls into each WASM module. There is no correctness benefit from going through WASM for these tools — they do not subscribe to events, hold extension state, or require isolation. Registering them as native functions in `ExecuteTool` eliminates all of that overhead. `EventAfterToolCall` is still fired so WASM extensions that observe tool results (e.g. the `history` extension) continue to work.
 
 **Consequence:** `RegisterNativeTool` must be called before the harness processes any tool call. Native tools bypass `EventBeforeToolCall` — WASM extensions cannot intercept or short-circuit them. If interception is needed in the future the tool must be moved back to WASM (or a native interception hook added). The `nativeToolsMu` is separate from `h.mu` to avoid lock ordering issues between tool registration and the existing extension/tool registration paths.
+
+## 19. OnExec Signature Change — Context and Line Streaming Callback
+
+*Added: 2026-05-27*
+
+**Decision:** `OnExec` signature changed from `func(command, dir string) (string, error)` to
+`func(ctx context.Context, command, dir string, onLine func(string)) (string, error)`.
+Two new callback fields added: `OnConsoleOutput func(line string)` and `OnConsoleClear func()`.
+
+**Rationale:** Two independent improvements are bundled into one breaking change to avoid
+two separate signature bumps. First, `ctx context.Context` is added as the first parameter
+(Go convention) so that a cancelled agent turn can kill the subprocess via `exec.CommandContext`.
+Without this, `cmd.CombinedOutput()` blocks indefinitely even after the user presses Ctrl+C.
+Second, `onLine func(string)` is added as the last parameter so the registering caller can
+receive output lines as they arrive (for streaming to the TUI) without changing the return
+contract (the full output string is still returned). The `onLine` parameter is nil-safe by
+convention: all implementations must guard with `if onLine != nil`.
+`OnConsoleOutput` and `OnConsoleClear` are separate host callbacks that decouple the line
+delivery mechanism from the exec signature: the registering harness wires these to the TUI
+program, while the exec closure in cmd/exec.go calls them directly.
+
+**Consequence:** This is a breaking change. Any caller that previously assigned `OnExec` with
+the old signature must be updated. As of this change, the only caller is `cmd/exec.go`
+(extracted from `cmd/main.go`). The SPECS.md §7 table is updated. Callers compiled against
+the old ABI will fail to compile.
