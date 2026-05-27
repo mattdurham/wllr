@@ -292,7 +292,7 @@ func renderAssistantMessage(sb *strings.Builder, content string, width int, old 
 		Foreground(textColor).
 		Padding(0, 1).
 		Width(width - 2) // -2 for left+right border chars
-	sb.WriteString(style.Render(strings.ReplaceAll(content, "\n\n", "\n")))
+	sb.WriteString(style.Render(content))
 	sb.WriteString("\n\n")
 }
 
