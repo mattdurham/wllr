@@ -158,8 +158,14 @@ Spawn a sub-agent and send its first task. The agent starts immediately.
 Its output does NOT appear in your chat — it works silently in the background.
 - name: short label shown in /agents status (e.g. "researcher", "coder-1")
 - system_prompt: the agent's role, constraints, and output format — be explicit
-- prompt: the first task. Tell the agent to call send_message back to you with results.
+- prompt: the first task. ALWAYS end the prompt with an explicit instruction:
+    "When all your work is done, call send_message(\"main\", \"[summary]\")."
+  Without this, the agent completes silently and you never receive a wakeup.
 - model: optional; defaults to the current session model
+
+Sub-agents MUST call send_message("main", result) when they finish. This is
+the ONLY wakeup mechanism. If you do not require it in the prompt, the agent
+will go idle and you will never know it is done.
 
 Sub-agents MUST restate their task when reporting back:
   GOOD: "I was researching X. I found that Y and Z."
@@ -181,8 +187,11 @@ task is complete. Leaked agents continue consuming memory.
 Returns all running agent IDs and names.
 
 **get_agent_status(agent_id, history_limit?)**
-Get turn count, last compaction summary, and recent conversation of a running
-agent. Use this to check what a sub-agent has done before sending follow-ups.
+Diagnostic tool — returns is_running (true if mid-turn), turn_count, and
+recent conversation history. Use ONCE to diagnose a stuck agent; do not poll.
+- is_running=true: agent is currently working; do not interrupt, end your turn
+- is_running=false: agent is idle; read "recent" field to see what it did last
+- Always use history_limit=20 to see enough context to understand what happened
 history_limit defaults to 10 messages.
 
 **create_team(name)** / **add_to_team(team_id, agent_id)** / **shutdown_team(team_id)**
@@ -249,8 +258,8 @@ Both agents accumulate history across every exchange — neither forgets.
 ### Parallel work pattern
 
 To run two tasks simultaneously:
-  create_agent("researcher", ...) → main/researcher
-  create_agent("coder", ...) → main/coder
+  create_agent("researcher", "...", "Research X. When done call send_message(\"main\", summary).")
+  create_agent("coder", "...", "Implement Y. When done call send_message(\"main\", summary).")
   END YOUR TURN. Do nothing else — do not sleep, do not poll.
   (sub-agents work; each calls send_message("main", result) when done)
   (each send_message wakes you up; your next turn starts automatically)
@@ -259,22 +268,38 @@ To run two tasks simultaneously:
   shutdown_agent("main/researcher")
   shutdown_agent("main/coder")
 
+If an agent is taking longer than expected and you have not received a
+send_message after several minutes:
+  get_agent_status("main/coder", 20)  ← check ONCE with high history_limit
+  Read the "recent" field to see what it last did.
+  If is_running=true: it is still working — end your turn and wait.
+  If is_running=false and it did not call send_message: it may be stuck.
+    → send_message("main/coder", "Are you still working? Please report status.")
+  Never call get_agent_status more than once without ending your turn in between.
+
 ---
 
 ### NEVER do this — async waiting anti-patterns
 
 WRONG — do NOT poll or sleep while waiting for a sub-agent:
   create_agent("researcher", ...)
-  exec sleep 10          ← WRONG: wastes a turn, blocks the LLM
-  exec sleep 10          ← WRONG: still polling
-  get_agent_status(...)  ← WRONG: busy-wait loop
+  exec sleep 10           ← WRONG: wastes a turn, blocks the LLM
+  get_agent_status(...)   ← WRONG: busy-wait, same turn, same turn
+  get_agent_status(...)   ← WRONG: still in same turn, accomplishes nothing
 
-WRONG — do NOT call get_agent_status in a loop:
-  for { get_agent_status("main/researcher") } ← WRONG
+WRONG — do NOT call get_agent_status multiple times in one turn:
+  get_agent_status("main/coder-1")  ← first call
+  get_agent_status("main/coder-1")  ← second call — redundant, agent hasn't changed
+  get_agent_status("main/coder-1")  ← third call — WRONG, end your turn instead
 
 RIGHT — end your turn and let the message wake you:
-  create_agent("researcher", ...)
+  create_agent("researcher", "...", "...When done call send_message(\"main\", summary).")
   (end turn — the researcher's send_message call wakes you automatically)
+
+RIGHT — check status ONCE if agent seems stuck (no send_message after minutes):
+  get_agent_status("main/coder-1", 20)  ← check ONCE with high history_limit
+  (read recent history to understand the situation)
+  (end turn — either it is still running, or send it a nudge)
 
 The sub-agent's send_message IS the wakeup mechanism. Your next turn
 starts immediately when the sub-agent calls send_message("main", result).
