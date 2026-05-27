@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"charm.land/fantasy"
@@ -67,6 +68,12 @@ type Agent struct {
 
 	// cancelMu protects the cancel function for the current active turn.
 	cancelMu sync.Mutex
+
+	// isRunning is set to true while Submit's goroutine is active. A second
+	// Submit call that arrives while a turn is running appends content to the
+	// inbox instead of starting a new goroutine. The running goroutine drains
+	// inbox on completion (drain-until-empty pattern). See NOTES.md §17.
+	isRunning atomic.Bool
 
 	// history is the conversation history for this agent (all completed turns).
 	historyMu sync.Mutex
@@ -215,17 +222,32 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 	// Drain any inbox messages queued by other agents since the last turn.
 	inboxMsgs := a.DrainInbox()
 
+	// Guard against concurrent Submit calls. If a turn is already running,
+	// queue content to inbox and return. The goroutine's post-turn drain loop
+	// will process queued messages before declaring the turn done.
+	if !a.isRunning.CompareAndSwap(false, true) {
+		// Re-queue previously-drained messages first (FIFO order), then new content.
+		for _, msg := range inboxMsgs {
+			a.AppendInbox(msg)
+		}
+		if content != "" {
+			a.AppendInbox(sdk.Message{Role: sdk.RoleUser, Content: content})
+		}
+		return
+	}
+
 	// Snapshot current history under lock.
 	a.historyMu.Lock()
 	priorHistory := make([]sdk.Message, len(a.history))
 	copy(priorHistory, a.history)
 	a.historyMu.Unlock()
-
-	// Prepend inbox messages to prior history so the LLM sees them as prior context.
+	// Append inbox messages after prior history so they are the most-recent context.
+	// This ensures the last message is always a user/inbox message when inbox is non-empty,
+	// making empty-prompt valid. See NOTES.md §16.
 	if len(inboxMsgs) > 0 {
-		combined := make([]sdk.Message, 0, len(inboxMsgs)+len(priorHistory))
-		combined = append(combined, inboxMsgs...)
+		combined := make([]sdk.Message, 0, len(priorHistory)+len(inboxMsgs))
 		combined = append(combined, priorHistory...)
+		combined = append(combined, inboxMsgs...)
 		priorHistory = combined
 	}
 
@@ -383,10 +405,35 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 			a.historyMu.Unlock()
 		}
 
-		if onDone != nil {
-			onDone(err)
-		}
+		a.finishTurn(err, childCtx.Err(), onDone)
 	}()
+}
+
+// finishTurn releases isRunning and either fires onDone or starts the next drain turn.
+// Extracted from Submit to keep its cyclomatic complexity below threshold.
+// Implements the drain-until-empty pattern: if new inbox messages arrived while a turn was
+// running, re-queue them and start another turn without a race window. See NOTES.md §17.
+func (a *Agent) finishTurn(err error, ctxErr error, onDone func(error)) {
+	a.isRunning.Store(false)
+
+	// Only drain on successful turns — errors and cancellations terminate the chain.
+	if err == nil && ctxErr == nil {
+		pending := a.DrainInbox()
+		if len(pending) > 0 {
+			for _, m := range pending {
+				a.AppendInbox(m)
+			}
+			if onDone != nil {
+				onDone(nil)
+			}
+			a.Submit(context.Background(), "")
+			return
+		}
+	}
+
+	if onDone != nil {
+		onDone(err)
+	}
 }
 
 // streamTurn sends history+content to fa and collects the full text response.

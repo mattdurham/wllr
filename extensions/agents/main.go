@@ -7,6 +7,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"unsafe"
 )
@@ -632,7 +633,17 @@ func handleSendMessage(p beforeToolCallPayload) {
 		return
 	}
 	// Trigger an immediate turn so the agent processes the queued message now.
-	agentCall("agent_run", map[string]string{"id": input.AgentID})
+	runResult := agentCall("agent_run", map[string]string{"id": input.AgentID})
+	var runResp struct {
+		Error string `json:"error,omitempty"`
+	}
+	if runResult != "" {
+		_ = json.Unmarshal([]byte(runResult), &runResp)
+	}
+	if runResp.Error != "" {
+		ToolResult(p.ToolCallID, fmt.Sprintf(`{"status":"error","error":"agent_run failed: %s"}`, runResp.Error), true)
+		return
+	}
 	upsertAgent(input.AgentID, "", "", "← "+truncate(input.Message, 60))
 	ToolResult(p.ToolCallID, `{"status":"sent"}`, false)
 }
