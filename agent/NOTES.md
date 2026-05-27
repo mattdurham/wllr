@@ -14,6 +14,8 @@ Append-only design decision log. Never delete entries; add an `*Addendum (date):
 
 **Consequence:** Messages sent to an agent's inbox after `DrainInbox` has been called (i.e., during an active turn) are queued for the next turn. This creates at-most-one-turn-latency for inbox delivery, which is acceptable for the inter-agent coordination use case.
 
+*Addendum (2026-05-27):* The ordering described above changed from **prepend** to **append** — inbox messages are now appended AFTER priorHistory, not prepended before it. See §16 for rationale. The sequential-drain invariant (no concurrent delivery, no lost messages) is unchanged.
+
 ---
 
 ## 2. New fantasy.Agent Per Turn — Why Not Reuse
@@ -219,3 +221,47 @@ the existing error variable semantics (`ErrAgentNotFound`, `ErrTeamNotFound`).
 
 **Consequence:** These methods expose team membership at a point in time — membership may
 change between the read and subsequent action. Callers must tolerate TOCTOU gaps.
+
+---
+
+## 16. Inbox Ordering Changed from Prepend to Append
+
+*Added: 2026-05-27*
+
+**Decision:** Inbox messages are appended AFTER prior history rather than prepended before it.
+
+**Rationale:** The original prepend design (§1) was incompatible with the empty-prompt
+mechanism used by OnAgentRun (harness/model.go). Fantasy's createPrompt rejects an empty
+prompt when the last message in the history array is an assistant message — which is always
+the case after the first turn when inbox messages are prepended. Appending inbox messages
+makes them the most-recent context (which is semantically correct — they ARE more recent
+than the prior conversation) and ensures the last message is always a user/inbox message
+when the inbox is non-empty, making empty-prompt valid.
+
+**Consequence:** The LLM now sees inbox messages as the most recent context in the message
+list, not as earlier context. This is more correct behavior. The "prior context" framing
+in §1 is superseded by this decision. §1 is retained as historical context.
+
+---
+
+## 17. isRunning Guard — Drain-Until-Empty Pattern
+
+*Added: 2026-05-27*
+
+**Decision:** `Agent.Submit` uses an `atomic.Bool` (`isRunning`) to detect concurrent calls.
+If a turn is already running when `Submit` is called, the new content is appended to the
+inbox and `Submit` returns immediately. After each turn completes, the goroutine checks for
+new inbox messages (drain-until-empty) and, if any exist, fires `onDone` and restarts
+immediately with `context.Background()`.
+
+**Rationale:** SPECS.md §2 previously placed the burden on callers to avoid concurrent
+Submit. But the system itself violates this: multiple sub-agents finishing simultaneously
+all trigger `pool.Send("main", ...)` which launches concurrent Submits. Without a guard,
+concurrent Submits snapshot the same history, run in parallel, and the last writer wins —
+silently corrupting the history. The drain-until-empty pattern ensures all queued messages
+are processed in order without concurrent goroutines.
+
+**Consequence:** Submit is now safe to call concurrently. Queued messages are processed
+sequentially. The onDone callback fires after each sub-turn, so the TUI may see multiple
+StreamDoneMsg events from a single logical "agent wakeup." Each StreamDoneMsg finalizes
+one response chunk.
