@@ -21,28 +21,16 @@ import (
 )
 
 // Extension wraps a loaded WASM module.
-type Extension struct {
-	module api.Module
-	store  *Store
 
-	subscriptions map[sdk.EventType]bool
+// permissions holds the declared permissions for untrusted extensions.
+// Map entries are set to true for each granted permission.
 
-	// permissions holds the declared permissions for untrusted extensions.
-	// Map entries are set to true for each granted permission.
-	permissions map[sdk.Permission]bool
-	name        string
+// callMu serializes calls into the WASM module. WASM linear memory is
+// shared within a module instance, so concurrent _on_event or host_call
+// invocations race on the module's globals (pinned map, handler maps).
 
-	subMu sync.RWMutex
-
-	// callMu serializes calls into the WASM module. WASM linear memory is
-	// shared within a module instance, so concurrent _on_event or host_call
-	// invocations race on the module's globals (pinned map, handler maps).
-	callMu sync.Mutex
-
-	// trusted is true for built-in extensions loaded via LoadBytes with trusted=true.
-	// Trusted extensions bypass permission checks.
-	trusted bool
-}
+// trusted is true for built-in extensions loaded via LoadBytes with trusted=true.
+// Trusted extensions bypass permission checks.
 
 // HasPermission reports whether the extension holds permission p.
 // Trusted extensions always return true. Untrusted extensions must have p
@@ -55,18 +43,10 @@ func (e *Extension) HasPermission(p sdk.Permission) bool {
 }
 
 // toolResult holds the result of a tool execution sent back by an extension.
-type toolResult struct {
-	Result  string
-	IsError bool
-}
 
 // RegisteredToolInfo pairs a registered tool with the name of the extension
 // that registered it.  OwnerName is empty for tools registered outside of an
 // extension context.
-type RegisteredToolInfo struct {
-	OwnerName string
-	Tool      sdk.Tool
-}
 
 // Host manages a collection of WASM extensions.
 type Host struct {
@@ -170,11 +150,6 @@ type Host struct {
 
 	// AgentInfo describes a running agent.
 
-}
-
-type AgentInfo struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
 }
 
 // NewHost creates a Host and installs the "env" host module into a fresh wazero runtime.

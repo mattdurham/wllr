@@ -9,26 +9,13 @@ import (
 )
 
 // Task represents a task in a task list.
-type Task struct {
-	ID           string   `json:"id"`
-	Title        string   `json:"title"`
-	Description  string   `json:"description"`
-	Status       string   `json:"status"`   // pending, in_progress, completed, blocked
-	Priority     string   `json:"priority"` // low, medium, high, critical
-	Tags         []string `json:"tags"`
-	Dependencies []string `json:"dependencies"` // Task IDs this task depends on
-	CreatedAt    int64    `json:"created_at"`
-	UpdatedAt    int64    `json:"updated_at"`
-}
+
+// pending, in_progress, completed, blocked
+// low, medium, high, critical
+
+// Task IDs this task depends on
 
 // TaskList represents a collection of tasks.
-type TaskList struct {
-	ID          string           `json:"id"`
-	Name        string           `json:"name"`
-	Description string           `json:"description"`
-	Tasks       map[string]*Task `json:"tasks"`
-	mu          sync.RWMutex
-}
 
 var (
 	taskLists    = make(map[string]*TaskList)
@@ -82,11 +69,6 @@ func init() {
 			return "", false
 		}
 	})
-}
-
-type toolPayload struct {
-	ToolCallID string
-	Input      json.RawMessage
 }
 
 func handleTasklistCreate(p toolPayload) (string, bool) {

@@ -6,21 +6,14 @@ package testutil
 import (
 	"context"
 	"strings"
-	"sync"
 
 	"charm.land/fantasy"
 )
 
 // FakeLM is a fantasy.LanguageModel that streams preset text responses
 // one word at a time and records every call it receives.
-type FakeLM struct {
-	modelID   string
-	provider  string
-	responses []string // one response string per call
-	calls     []RecordedCall
-	callIdx   int
-	mu        sync.Mutex
-}
+
+// one response string per call
 
 // compile-time interface assertion
 var _ fantasy.LanguageModel = (*FakeLM)(nil)

@@ -49,12 +49,9 @@ func agentCall(method string, params any) string {
 // ─── Agent registry ───────────────────────────────────────────────────────────
 
 // agentRecord tracks a running sub-agent's status for the /agents modal.
-type agentRecord struct {
-	id         string
-	name       string
-	task       string // initial prompt (truncated)
-	lastUpdate string // most recent action
-}
+
+// initial prompt (truncated)
+// most recent action
 
 var agentRecords []agentRecord // ordered by creation
 
@@ -308,13 +305,6 @@ func onAgentsCommand(_ []string) {
 		text += "\n"
 	}
 	Modal(strings.TrimRight(text, "\n"))
-}
-
-type beforeToolCallPayload struct {
-	AgentID    string          `json:"agent_id"`
-	ToolCallID string          `json:"tool_call_id"`
-	ToolName   string          `json:"tool_name"`
-	Input      json.RawMessage `json:"input"`
 }
 
 func onBeforeToolCall(payload json.RawMessage) {

@@ -36,11 +36,10 @@ const (
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 // Config is loaded from the host via config_read.
-type Config struct {
-	Server   string `json:"server"`   // OTLP HTTP base URL, e.g. "http://tempo:4318"
-	Username string `json:"username"` // HTTP basic auth username
-	Token    string `json:"token"`    // HTTP basic auth password / token
-}
+
+// OTLP HTTP base URL, e.g. "http://tempo:4318"
+// HTTP basic auth username
+// HTTP basic auth password / token
 
 // ─── State ────────────────────────────────────────────────────────────────────
 

@@ -11,9 +11,6 @@ import (
 )
 
 // Registry holds registered slash commands and dispatches them.
-type Registry struct {
-	commands map[string]Command
-}
 
 // NewRegistry creates an empty Registry.
 func NewRegistry() *Registry {
@@ -119,8 +116,3 @@ func registerBuiltins(r *Registry) {
 }
 
 // Internal message types used by built-in command handlers.
-type (
-	clearMsg     struct{}
-	setModelMsg  struct{ Model string }
-	showToolsMsg struct{}
-)

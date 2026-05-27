@@ -18,18 +18,6 @@ var (
 )
 
 // PickerView is a fullscreen overlay list picker shown instead of the chat.
-type PickerView struct {
-	Title    string
-	Callback string
-
-	Items []sdk.ShowPickerItem
-
-	selectedIdx  int
-	scrollOffset int
-	width        int
-	height       int
-	active       bool
-}
 
 // Open activates the picker with the given items and resets navigation.
 func (p *PickerView) Open(title string, items []sdk.ShowPickerItem, callback string) {

@@ -15,44 +15,26 @@ import (
 const roleToolMessage = "tool"
 
 // chatMessage is a finalised message in the chat history.
-type chatMessage struct {
-	role    sdk.Role
-	content string
-}
 
 // ToolLogEntry records one tool call during the current agent turn.
-type ToolLogEntry struct {
-	Name    string
-	Preview string // toolInputPreview result
-	Done    bool
-	IsError bool
-}
+
+// toolInputPreview result
 
 // ChatView renders the conversation history in a scrollable viewport.
-type ChatView struct {
-	current string // current in-progress assistant message
-	// lastDoneToolID is set when a tool call completes; subsequent tokens
-	// are routed into that tool box until the next tool call or FinalizeMessage.
-	lastDoneToolID string
 
-	// histContent caches the rendered historical messages.
-	// Rebuilt only when messages change, not on every streaming token.
-	histContent string
+// current in-progress assistant message
+// lastDoneToolID is set when a tool call completes; subsequent tokens
+// are routed into that tool box until the next tool call or FinalizeMessage.
 
-	// toolLog records tool calls for the current turn. Cleared by FinalizeMessage.
-	// Shown on demand via /tools command or ctrl+t — not rendered inline.
-	toolLog   []ToolLogEntry
-	messages  []chatMessage
-	vp        viewport.Model
-	width     int
-	height    int
-	histDirty bool
+// histContent caches the rendered historical messages.
+// Rebuilt only when messages change, not on every streaming token.
 
-	// afterTool is true after a tool call completes and before the next token
-	// arrives. The first new token after a tool gets "\n\n" prepended so all
-	// text within one turn flows as one block in c.current.
-	afterTool bool
-}
+// toolLog records tool calls for the current turn. Cleared by FinalizeMessage.
+// Shown on demand via /tools command or ctrl+t — not rendered inline.
+
+// afterTool is true after a tool call completes and before the next token
+// arrives. The first new token after a tool gets "\n\n" prepended so all
+// text within one turn flows as one block in c.current.
 
 var systemStyle = lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("#555555"))
 

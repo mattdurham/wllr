@@ -4,12 +4,6 @@ import "strings"
 
 const consoleRingSize = 200
 
-type ConsoleView struct {
-	lines [consoleRingSize]string
-	head  int
-	count int
-}
-
 func NewConsoleView() ConsoleView {
 	return ConsoleView{}
 }

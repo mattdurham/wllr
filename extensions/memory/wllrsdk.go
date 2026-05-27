@@ -360,17 +360,10 @@ func Logf(level int, format string, args ...any) {
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 // PickerItem is one entry in a ShowPicker call.
-type PickerItem struct {
-	ID       string `json:"id"`
-	Label    string `json:"label"`
-	Sublabel string `json:"sublabel,omitempty"`
-}
 
 // Message is a chat message for AgentResetHistory.
-type Message struct {
-	Role    string `json:"role"` // "user" or "assistant"
-	Content string `json:"content"`
-}
+
+// "user" or "assistant"
 
 // ─── Internal host_call helpers ───────────────────────────────────────────────
 
