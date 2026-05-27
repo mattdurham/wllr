@@ -8,7 +8,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/mattdurham/wllr/agent"
-	"github.com/mattdurham/wllr/sdk"
 )
 
 // newTestPool creates an AgentPool with a mock LM and a spawned "main" agent.
@@ -114,13 +113,9 @@ func TestModel_Update_ReloadMsg_TriggersExtensionReload(t *testing.T) {
 
 func TestModel_Update_ClearMsg_ClearsHistory(t *testing.T) {
 	m := newTestModel()
-	m.history = append(m.history, sdk.Message{Role: sdk.RoleUser, Content: "hello"})
 	m.chat.AddUserMessage("hello")
 
 	m, _ = callUpdate(m, clearMsg{})
-	if len(m.history) != 0 {
-		t.Errorf("expected empty history after clear, got %d items", len(m.history))
-	}
 	if len(m.chat.messages) != 0 {
 		t.Errorf("expected empty chat after clear, got %d messages", len(m.chat.messages))
 	}
@@ -139,15 +134,15 @@ func TestModel_Update_SetModelMsg(t *testing.T) {
 
 func TestModel_Update_CommandMsg_Clear(t *testing.T) {
 	m := newTestModel()
-	m.history = append(m.history, sdk.Message{Role: sdk.RoleUser, Content: "test"})
+	m.chat.AddUserMessage("test")
 
 	// Dispatch /clear command.
 	cmd := m.commands.Dispatch("clear", nil)
 	msg := cmd()
 	m, _ = callUpdate(m, msg)
 
-	if len(m.history) != 0 {
-		t.Errorf("expected empty history after /clear, got %d", len(m.history))
+	if len(m.chat.messages) != 0 {
+		t.Errorf("expected empty chat after /clear, got %d", len(m.chat.messages))
 	}
 }
 
@@ -177,17 +172,12 @@ func TestModel_Update_SubmitMsg_AddsToHistoryAndChat(t *testing.T) {
 	// The model should return nil cmd (pool runs asynchronously).
 	_ = cmd
 
-	// User message should be in history immediately.
-	if len(m.history) != 1 {
-		t.Fatalf("expected 1 history entry after SubmitMsg, got %d", len(m.history))
-	}
-	if m.history[0].Content != "hello" {
-		t.Errorf("history[0].Content: got %q, want %q", m.history[0].Content, "hello")
-	}
-
-	// User message should be in chat.
+	// User message should be in chat immediately after SubmitMsg.
 	if len(m.chat.messages) != 1 {
-		t.Errorf("expected 1 chat message after SubmitMsg, got %d", len(m.chat.messages))
+		t.Fatalf("expected 1 chat message after SubmitMsg, got %d", len(m.chat.messages))
+	}
+	if m.chat.messages[0].content != "hello" {
+		t.Errorf("chat.messages[0].content: got %q, want %q", m.chat.messages[0].content, "hello")
 	}
 }
 
@@ -200,9 +190,9 @@ func TestModel_Update_SubmitMsg_MultipleSubmitsAllowed(t *testing.T) {
 	m, _ = callUpdate(m, SubmitMsg{Content: "first"})
 	m, _ = callUpdate(m, SubmitMsg{Content: "second"})
 
-	// Both messages should be in history.
-	if len(m.history) != 2 {
-		t.Errorf("expected 2 history entries, got %d", len(m.history))
+	// Both messages should be in chat.
+	if len(m.chat.messages) != 2 {
+		t.Errorf("expected 2 chat messages, got %d", len(m.chat.messages))
 	}
 }
 
@@ -238,9 +228,9 @@ func TestModel_NilPool_SubmitMsg_Safe(t *testing.T) {
 
 	m, cmd := callUpdate(m, SubmitMsg{Content: "hello"})
 	_ = cmd
-	// User message should still be in history and chat.
-	if len(m.history) != 1 {
-		t.Errorf("expected 1 history entry, got %d", len(m.history))
+	// User message should still be in chat.
+	if len(m.chat.messages) != 1 {
+		t.Errorf("expected 1 chat entry, got %d", len(m.chat.messages))
 	}
 }
 

@@ -63,6 +63,7 @@ Must be called after creating the bubbletea program and before calling `prog.Run
 | `OnAppendSystemPrompt`   | Calls `pool.AppendBaseSystemPrompt(text)` (if pool non-nil)            |
 | `OnAgentSpawn`           | Creates agent in pool, wires batched token callback, wires tool/done   |
 | `OnAgentClose`           | Calls `pool.Close(id)`                                                 |
+| `OnAgentRun`             | Sends `agentWakeupMsg{}` (main agent only), calls `pool.Send(id, "[process pending inbox messages]")` |
 | `OnAgentSendMessage`     | Calls `pool.Send(id, message)`                                         |
 | `OnAgentList`            | Returns `pool.ListAgents()` as `[]AgentInfo`                           |
 | `OnAgentTokenCount`      | Returns `pool.TokenCount()`                                            |
@@ -92,7 +93,7 @@ Sub-agents spawned via `OnAgentSpawn` receive identical wiring except `agentID` 
 |--------------------|-----------------------------------------------------------------------------------|
 | `updateWindow`     | `tea.WindowSizeMsg`, `ShowModalMsg`                                               |
 | `updateKeyPress`   | `tea.KeyPressMsg` — modal keys, dropdown navigation, Ctrl+C / Ctrl+Q, pgup/pgdown |
-| `updateStream`     | `TokenMsg`, `streamTickMsg`, `StreamDoneMsg`, `addAssistantMsgToHistoryMsg`       |
+| `updateStream`     | `agentWakeupMsg`, `TokenMsg`, `streamTickMsg`, `StreamDoneMsg`                    |
 | `updateTools`      | `ToolCallStartMsg`, `ToolCallDoneMsg`, `ConsoleMsg`                               |
 | `updateActions`    | `SubmitMsg`, `CommandMsg`, `clearMsg`, `setModelMsg`, `abortStreamMsg`, `dispatchOnCommandMsg` |
 | `updateExtension`  | `sessionStartDoneMsg`, `ExtensionEventResultMsg`, `ReloadMsg`, `NotifyMsg`, `StatusUpdateMsg` |
@@ -126,11 +127,12 @@ const tokenBatchInterval = 30 * time.Millisecond
 `submitToAgent(content, display string)` is called from the `SubmitMsg` handler:
 
 1. Adds `display` (or `content` if display is empty) to `m.chat` as a user message.
-2. Appends `sdk.Message{Role: RoleUser, Content: content}` to `m.history`.
-3. Sets `m.streaming = true`, records `m.streamStart`.
-4. Dispatches `EventBeforeAgentStart` and `EventBeforeProviderRequest` to extensions.
-5. Calls `pool.Send(mainAgentID, content)` (non-blocking).
-6. Fires an immediate `streamTickMsg` and a 100ms tick to start the animated "working." indicator.
+2. Sets `m.streaming = true`, records `m.streamStart`.
+3. Dispatches `EventBeforeAgentStart` and `EventBeforeProviderRequest` to extensions.
+4. Calls `pool.Send(mainAgentID, content)` (non-blocking).
+5. Fires an immediate `streamTickMsg` and a 100ms tick to start the animated "working." indicator.
+
+Note: `m.history` was removed (see NOTES.md §20). The canonical conversation history lives in `pool.Get(mainID).History()`.
 
 **Invariant:** `pool.Send` is non-blocking. The agent runs in a goroutine; results arrive via `TokenMsg` and `StreamDoneMsg`.
 
@@ -298,7 +300,7 @@ No key is forwarded to the input area while the modal is open.
 
 ## 16. Key Handling: Ctrl+C
 
-- If `m.streaming == true`: calls `m.agentPool.Cancel(m.mainAgentID)`, sets status to "cancelling…". Does NOT quit.
+- If `m.streaming == true`: calls `m.agentPool.CancelAll()` (cancels main and all sub-agents), sets status to "cancelling…". Does NOT quit.
 - If `m.streaming == false`: returns `tea.Quit`.
 - `Ctrl+Q` always quits regardless of streaming state.
 
