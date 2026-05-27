@@ -2,6 +2,7 @@ package harness
 
 import (
 	"testing"
+	"time"
 
 	"github.com/mattdurham/wllr/agent"
 	"github.com/mattdurham/wllr/extension"
@@ -29,15 +30,15 @@ func TestIntegration_FullSubmitFlow(t *testing.T) {
 	m, cmd := callUpdate(m, SubmitMsg{Content: "what is 2+2?"})
 	_ = cmd
 
-	// User message should be in history immediately.
-	if len(m.history) != 1 {
-		t.Fatalf("expected 1 message in history after SubmitMsg, got %d", len(m.history))
+	// User message should be in chat immediately after SubmitMsg.
+	if len(m.chat.messages) != 1 {
+		t.Fatalf("expected 1 message in chat after SubmitMsg, got %d", len(m.chat.messages))
 	}
-	if m.history[0].Role != sdk.RoleUser {
-		t.Errorf("expected RoleUser, got %v", m.history[0].Role)
+	if m.chat.messages[0].role != sdk.RoleUser {
+		t.Errorf("expected RoleUser, got %v", m.chat.messages[0].role)
 	}
-	if m.history[0].Content != "what is 2+2?" {
-		t.Errorf("history[0].Content: got %q, want %q", m.history[0].Content, "what is 2+2?")
+	if m.chat.messages[0].content != "what is 2+2?" {
+		t.Errorf("chat.messages[0].content: got %q, want %q", m.chat.messages[0].content, "what is 2+2?")
 	}
 
 	// The agent goroutine is started by pool.Send inside the returned tea.Cmd,
@@ -52,15 +53,15 @@ func TestIntegration_UserMessageInHistory(t *testing.T) {
 
 	m, _ = callUpdate(m, SubmitMsg{Content: "hello world"})
 
-	// History should have 1 user message immediately after SubmitMsg.
-	if len(m.history) != 1 {
-		t.Fatalf("expected 1 message in history, got %d", len(m.history))
+	// User message should be in chat immediately after SubmitMsg.
+	if len(m.chat.messages) != 1 {
+		t.Fatalf("expected 1 message in chat, got %d", len(m.chat.messages))
 	}
-	if m.history[0].Role != sdk.RoleUser {
-		t.Errorf("expected RoleUser, got %v", m.history[0].Role)
+	if m.chat.messages[0].role != sdk.RoleUser {
+		t.Errorf("expected RoleUser, got %v", m.chat.messages[0].role)
 	}
-	if m.history[0].Content != "hello world" {
-		t.Errorf("history[0].Content: got %q, want %q", m.history[0].Content, "hello world")
+	if m.chat.messages[0].content != "hello world" {
+		t.Errorf("chat.messages[0].content: got %q, want %q", m.chat.messages[0].content, "hello world")
 	}
 
 	// Chat should have 1 message (the user message).
@@ -109,8 +110,8 @@ func TestIntegration_NilExtensionHost_Safe(t *testing.T) {
 
 	// A normal SubmitMsg should work without panicking.
 	m, _ = callUpdate(m, SubmitMsg{Content: "test"})
-	if len(m.history) != 1 {
-		t.Errorf("expected 1 history entry, got %d", len(m.history))
+	if len(m.chat.messages) != 1 {
+		t.Errorf("expected 1 chat entry, got %d", len(m.chat.messages))
 	}
 }
 
@@ -128,7 +129,55 @@ func TestIntegration_ExtensionHost_NoExtensions_Safe(t *testing.T) {
 
 	// Submit — no extensions loaded, no panics expected.
 	m, _ = callUpdate(m, SubmitMsg{Content: "test with host"})
-	if len(m.history) != 1 {
-		t.Errorf("expected 1 history entry, got %d", len(m.history))
+	if len(m.chat.messages) != 1 {
+		t.Errorf("expected 1 chat entry, got %d", len(m.chat.messages))
+	}
+}
+
+// TestOnAgentRun_NonEmptyPromptPreventsError verifies that when the main agent's
+// history ends with an assistant message, calling pool.Send with a non-empty
+// sentinel does NOT produce a "prompt can't be empty" error.
+// This directly tests the belt-and-suspenders fix in OnAgentRun (Fix 2).
+func TestOnAgentRun_NonEmptyPromptPreventsError(t *testing.T) {
+	pool := agent.NewPool()
+	lm := newMockLM("response")
+	a, err := pool.Spawn("main", lm, agent.SpawnOpts{})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	// Run one complete turn so history ends with an assistant message.
+	done := make(chan error, 1)
+	a.SetOnDone(func(err error) { done <- err })
+
+	if err := pool.Send("main", "first message"); err != nil {
+		t.Fatalf("first Send: %v", err)
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("first turn error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("first turn timed out")
+	}
+
+	// History ends with assistant message. Simulate OnAgentRun by sending
+	// a non-empty sentinel. This must not produce "prompt can't be empty".
+	// AppendInbox first (simulating what send_message does before agent_run).
+	a.AppendInbox(sdk.Message{Role: sdk.RoleUser, Content: "from sub-agent"})
+
+	if err := pool.Send("main", "[process pending inbox messages]"); err != nil {
+		t.Fatalf("second Send: %v", err)
+	}
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("OnAgentRun sentinel turn failed: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("second turn timed out")
 	}
 }
