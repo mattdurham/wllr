@@ -105,6 +105,26 @@ func (c *ChatView) AddUserMessage(content string) {
 	c.vp.GotoBottom()
 }
 
+// AddQueuedUserMessage adds a user message marked as queued (sent while agent was mid-turn).
+func (c *ChatView) AddQueuedUserMessage(content string) {
+	c.messages = append(c.messages, chatMessage{role: sdk.RoleUser, content: content, queued: true})
+	c.invalidateHistory()
+	c.refreshContent()
+	c.vp.GotoBottom()
+}
+
+// UnqueueLastMessage clears the queued flag on the most recent queued user message.
+func (c *ChatView) UnqueueLastMessage() {
+	for i := len(c.messages) - 1; i >= 0; i-- {
+		if c.messages[i].queued {
+			c.messages[i].queued = false
+			c.invalidateHistory()
+			c.refreshContent()
+			return
+		}
+	}
+}
+
 // AddNotification appends a system/notification line.
 func (c *ChatView) AddNotification(text string) {
 	c.messages = append(c.messages, chatMessage{role: sdk.Role("system"), content: text})
@@ -241,7 +261,7 @@ func renderMessage(sb *strings.Builder, m chatMessage, width int, old bool) {
 	}
 	switch m.role {
 	case sdk.RoleUser:
-		renderUserMessage(sb, m.content, width, old)
+		renderUserMessage(sb, m.content, width, old, m.queued)
 		return
 	case sdk.RoleAssistant:
 		renderAssistantMessage(sb, m.content, width, old)
@@ -272,19 +292,51 @@ func renderAssistantMessage(sb *strings.Builder, content string, width int, old 
 		Foreground(textColor).
 		Padding(0, 1).
 		Width(width - 2) // -2 for left+right border chars
-	sb.WriteString(style.Render(content))
+	sb.WriteString(style.Render(strings.ReplaceAll(content, "\n\n", "\n")))
 	sb.WriteString("\n\n")
 }
 
-func renderUserMessage(sb *strings.Builder, content string, width int, old bool) {
+func renderUserMessage(sb *strings.Builder, content string, width int, old bool, queued bool) {
 	if width < 14 {
 		width = 14
 	}
 	borderColor := lipgloss.Color("#00AA00")
 	textColor := lipgloss.Color("#CCFFCC")
-	if old {
+	if old || queued {
 		borderColor = lipgloss.Color("#444444")
 		textColor = lipgloss.Color("#555555")
+	}
+	if queued {
+		// Render manually so we can embed "─ queued… ─" in the top border.
+		innerWidth := width - 2
+		b := lipgloss.NewStyle().Foreground(borderColor)
+		label := "─ queued… "
+		fillWidth := innerWidth - lipgloss.Width(label)
+		if fillWidth < 0 {
+			fillWidth = 0
+		}
+		header := b.Render("╭" + label + strings.Repeat("─", fillWidth) + "╮")
+		body := lipgloss.NewStyle().
+			Foreground(textColor).
+			Padding(0, 1).
+			Width(width - 2).
+			Render(content)
+		// Strip the border that lipgloss would add — we're using a plain content block.
+		// Wrap each line in manual side borders.
+		bodyLines := strings.Split(strings.TrimRight(body, "\n"), "\n")
+		var bodySb strings.Builder
+		for _, line := range bodyLines {
+			visible := lipgloss.Width(line)
+			pad := innerWidth - 2 - visible
+			if pad < 0 {
+				pad = 0
+			}
+			bodySb.WriteString(b.Render("│") + " " + line + strings.Repeat(" ", pad) + " " + b.Render("│") + "\n")
+		}
+		footer := b.Render("╰" + strings.Repeat("─", innerWidth) + "╯")
+		sb.WriteString(header + "\n" + bodySb.String() + footer)
+		sb.WriteString("\n\n")
+		return
 	}
 	style := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
