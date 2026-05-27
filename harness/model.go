@@ -706,6 +706,7 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 		cmds := make([]tea.Cmd, 0, 2)
 		m.streaming = false
 		m.consoleVisible = false
+		m.chat.UnqueueLastMessage()
 		if m.agentPool != nil {
 			m.statusBar.totalTokens = int(m.agentPool.TokenCount())
 		}
@@ -904,8 +905,12 @@ func (m Model) submitToAgent(content, display string) (tea.Model, tea.Cmd) {
 	if chatText == "" {
 		chatText = content
 	}
-	m.chat.AddUserMessage(chatText)
-	m.streaming = true
+	if m.streaming {
+		m.chat.AddQueuedUserMessage(chatText)
+	} else {
+		m.chat.AddUserMessage(chatText)
+		m.streaming = true
+	}
 	m.streamStart = time.Now()
 	m.statusBar.statuses["stream"] = "working."
 
