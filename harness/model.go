@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -352,13 +351,6 @@ func (m *Model) SetProgram(p *tea.Program) {
 	}
 
 	m.wireMainAgentCallbacks(p)
-}
-
-type tokenBatcher struct {
-	lastSend time.Time
-	p        *tea.Program
-	buf      strings.Builder
-	mu       sync.Mutex
 }
 
 const tokenBatchInterval = 30 * time.Millisecond
@@ -891,7 +883,6 @@ func (m Model) updateExtension(msg tea.Msg) (Model, tea.Cmd, bool) {
 	}
 	return m, nil, false
 }
-
 
 // skillDisplayName extracts a compact display string from a skill XML block.
 // Returns something like "[skill: bob:work]" instead of the raw XML.

@@ -9,16 +9,8 @@ import (
 )
 
 // Config holds the permission rules loaded from the extension config.
-type Config struct {
-	Read  PathRules `json:"read"`
-	Write PathRules `json:"write"`
-}
 
 // PathRules holds allow and deny lists for a permission type.
-type PathRules struct {
-	Allow []string `json:"allow"`
-	Deny  []string `json:"deny"`
-}
 
 var config Config
 

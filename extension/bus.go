@@ -2,7 +2,6 @@ package extension
 
 import (
 	"context"
-	"sync"
 
 	"github.com/mattdurham/wllr/sdk"
 )
@@ -11,11 +10,8 @@ import (
 // wllr pass through it. Handlers registered via Subscribe are called
 // asynchronously (fire-and-forget). If no handlers are registered for an
 // event type, Publish is a zero-cost no-op.
-type EventBus struct {
-	handlers map[sdk.EventType][]Handler
-	counts   map[sdk.EventType]int // fast O(1) has-subscribers check
-	mu       sync.RWMutex
-}
+
+// fast O(1) has-subscribers check
 
 // NewEventBus returns an empty EventBus.
 func NewEventBus() *EventBus {

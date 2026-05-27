@@ -50,18 +50,10 @@ func skillsCall(method string, params any) {
 // ─── Skill state ──────────────────────────────────────────────────────────────
 
 // skillMeta holds the parsed frontmatter metadata for a skill.
-type skillMeta struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Category    string `json:"category"`
-}
 
 // skillEntry holds both metadata and body for a loaded skill.
-type skillEntry struct {
-	meta     skillMeta
-	body     string
-	filePath string // absolute path to the SKILL.md file
-}
+
+// absolute path to the SKILL.md file
 
 // skills maps skill name to its loaded entry.
 var skills map[string]skillEntry
