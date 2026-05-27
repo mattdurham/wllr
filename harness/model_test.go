@@ -182,17 +182,19 @@ func TestModel_Update_SubmitMsg_AddsToHistoryAndChat(t *testing.T) {
 }
 
 func TestModel_Update_SubmitMsg_MultipleSubmitsAllowed(t *testing.T) {
-	// With the pool-based model, SubmitMsg is never dropped.
-	// Multiple submits are accepted (each enqueued to the pool).
+	// First submit goes into chat.messages; second (while streaming) goes into chat.queued.
 	pool := newTestPool()
 	m := New(pool, "main", nil)
 
 	m, _ = callUpdate(m, SubmitMsg{Content: "first"})
 	m, _ = callUpdate(m, SubmitMsg{Content: "second"})
 
-	// Both messages should be in chat.
-	if len(m.chat.messages) != 2 {
-		t.Errorf("expected 2 chat messages, got %d", len(m.chat.messages))
+	// First message in history, second queued below streaming output.
+	if len(m.chat.messages) != 1 {
+		t.Errorf("expected 1 chat message (first), got %d", len(m.chat.messages))
+	}
+	if len(m.chat.queued) != 1 {
+		t.Errorf("expected 1 queued message (second), got %d", len(m.chat.queued))
 	}
 }
 
