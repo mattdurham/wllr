@@ -34,6 +34,26 @@ func init() {
 		}
 	})
 
+	OnBeforeToolCall(func(payload json.RawMessage) {
+		var p struct {
+			ToolCallID string          `json:"tool_call_id"`
+			ToolName   string          `json:"tool_name"`
+			Input      json.RawMessage `json:"input"`
+		}
+		if json.Unmarshal(payload, &p) != nil || currentFile == "" {
+			return
+		}
+		entryCount++
+		appendJSONL(currentFile, toolCallEntry{
+			Type:       "tool_call",
+			ID:         fmt.Sprintf("t%d", entryCount),
+			Timestamp:  time.Now().Format(time.RFC3339Nano),
+			ToolCallID: p.ToolCallID,
+			ToolName:   p.ToolName,
+			Input:      p.Input,
+		})
+	})
+
 	OnCommand("history", func(_ []string) {
 		handleHistoryCommand()
 	})
@@ -98,6 +118,15 @@ type messageEntry struct {
 	Timestamp string `json:"timestamp"`
 	Role      string `json:"role"`
 	Content   string `json:"content"`
+}
+
+type toolCallEntry struct {
+	Type       string          `json:"type"`
+	ID         string          `json:"id"`
+	Timestamp  string          `json:"timestamp"`
+	ToolCallID string          `json:"tool_call_id"`
+	ToolName   string          `json:"tool_name"`
+	Input      json.RawMessage `json:"input,omitempty"`
 }
 
 // ─── Event handlers ───────────────────────────────────────────────────────────
@@ -381,7 +410,7 @@ func loadMessages(path string) ([]storedMsg, error) {
 	var out []storedMsg
 	for _, line := range lines[1:] {
 		var e messageEntry
-		if json.Unmarshal([]byte(line), &e) == nil && e.Type == "message" {
+		if json.Unmarshal([]byte(line), &e) == nil && e.Type == "message" && e.Role != "" {
 			out = append(out, storedMsg{role: e.Role, content: e.Content})
 		}
 	}
