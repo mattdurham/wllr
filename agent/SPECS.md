@@ -36,15 +36,15 @@ idle ──(Submit called)──▶ running ──(turn complete)──▶ idle
 - **running**: `Submit`'s goroutine is active. `Cancel` may be called.
 - **closed**: the agent has been removed from the pool via `pool.Close`. Further `Submit` calls are possible but the language model field `lm` may be nil.
 
-**Invariant:** Only one goroutine runs per agent turn. `Submit` replaces the stored cancel function atomically before launching the goroutine. Callers are responsible for not calling `Submit` concurrently.
+**Invariant:** Only one goroutine runs per agent turn. `Submit` replaces the stored cancel function atomically before launching the goroutine. Concurrent `Submit` calls are safe: if a turn is already running, the new content is queued to the inbox and the running goroutine drains it on completion (drain-until-empty pattern). See NOTES.md §17.
 
 ---
 
 ## 3. Message Queue (Inbox) Ordering
 
-`AppendInbox` enqueues messages for delivery before the next turn. `DrainInbox` atomically retrieves and clears all queued messages. `Submit` calls `DrainInbox` at the start of each turn and **prepends** inbox messages to the conversation history (inbox messages appear before prior history, making them visible as earlier prior context).
+`AppendInbox` enqueues messages for delivery before the next turn. `DrainInbox` atomically retrieves and clears all queued messages. `Submit` calls `DrainInbox` at the start of each turn and **appends** inbox messages after the conversation history (inbox messages appear after prior history, making them the most-recent messages visible to the LLM). See NOTES.md §16.
 
-**Invariant:** Inbox messages are delivered in FIFO order. Messages appended before `Submit` is called are guaranteed to be visible within that turn. Messages appended after `Submit` has called `DrainInbox` will appear in the next turn.
+**Invariant:** Inbox messages are delivered in FIFO order and always appear as the most recent messages in the prompt. Messages appended before `Submit` is called are guaranteed to be visible within that turn. Messages appended after `Submit` has called `DrainInbox` will appear in the next turn.
 
 **Invariant:** `DrainInbox` is atomic — no message is lost between `AppendInbox` and `DrainInbox` regardless of concurrent calls. This is guaranteed by the `inboxMu` mutex.
 
