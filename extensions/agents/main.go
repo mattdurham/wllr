@@ -173,11 +173,12 @@ Sub-agents MUST restate their task when reporting back:
 This is required for one-shot spawning AND multi-turn conversations.
 
 **send_message(agent_id, message)**
-Send a message to an agent and trigger its next turn immediately. The agent
-will process all queued inbox messages at the start of that turn.
-- Sub-agents reporting back to you: they call send_message(your_id, result),
-  which queues into your inbox and appears in your context next turn.
-- Sub-agents reporting back to the orchestrator: call send_message("main", result) — the main agent ID is always "main".
+Send a message to an agent and trigger its next turn immediately.
+- Use for multi-turn conversations: send follow-up questions or additional tasks.
+- Completion notifications are sent automatically by the system — you do not
+  need to ask agents to call send_message when they finish.
+- Sub-agents can still call send_message("main", result) for richer summaries,
+  but it is no longer required for the wakeup to work.
 
 **shutdown_agent(agent_id)**
 Stop an agent and free its resources. Always shut down agents when their
@@ -257,25 +258,31 @@ Both agents accumulate history across every exchange — neither forgets.
 
 ### Parallel work pattern
 
-To run two tasks simultaneously:
-  create_agent("researcher", "...", "Research X. When done call send_message(\"main\", summary).")
-  create_agent("coder", "...", "Implement Y. When done call send_message(\"main\", summary).")
-  END YOUR TURN. Do nothing else — do not sleep, do not poll.
-  (sub-agents work; each calls send_message("main", result) when done)
-  (each send_message wakes you up; your next turn starts automatically)
-  → Your next turn: process [from agent 'researcher']: …
-  → Your next turn: process [from agent 'coder']: …
-  shutdown_agent("main/researcher")
-  shutdown_agent("main/coder")
+**Wakeups are automatic.** When a sub-agent finishes its turn, the system
+automatically sends a completion notification to the parent and starts the
+parent's next turn. You do NOT need to ask the agent to call send_message.
 
-If an agent is taking longer than expected and you have not received a
-send_message after several minutes:
-  get_agent_status("main/coder", 20)  ← check ONCE with high history_limit
-  Read the "recent" field to see what it last did.
-  If is_running=true: it is still working — end your turn and wait.
-  If is_running=false and it did not call send_message: it may be stuck.
-    → send_message("main/coder", "Are you still working? Please report status.")
-  Never call get_agent_status more than once without ending your turn in between.
+To run two tasks simultaneously:
+  create_agent("researcher", "...", "Research X.")
+  create_agent("coder", "...", "Implement Y.")
+  END YOUR TURN. The system wakes you when each agent finishes.
+
+  → Your next turn receives: "[from agent 'researcher' (main/researcher)]: turn complete — call get_agent_status(...)"
+  → Call get_agent_status("main/researcher", 20) to read what it produced.
+  → Your next turn receives: "[from agent 'coder' (main/coder)]: turn complete — ..."
+  → Call get_agent_status("main/coder", 20) to read what it produced.
+  → shutdown_agent("main/researcher"), shutdown_agent("main/coder")
+
+If you receive a completion notification:
+  get_agent_status("main/coder", 20)  ← call ONCE, read the "recent" history
+  If is_running=true: another turn just started — end your turn and wait.
+  If is_running=false: agent is idle, read "recent" to get its output.
+
+If an agent seems stuck (no notification after several minutes):
+  get_agent_status("main/coder", 20)  ← diagnose ONCE
+  If is_running=true: still working — wait.
+  If is_running=false with no useful output: nudge it.
+    → send_message("main/coder", "Please report your current status.")
 
 ---
 
@@ -301,9 +308,8 @@ RIGHT — check status ONCE if agent seems stuck (no send_message after minutes)
   (read recent history to understand the situation)
   (end turn — either it is still running, or send it a nudge)
 
-The sub-agent's send_message IS the wakeup mechanism. Your next turn
-starts immediately when the sub-agent calls send_message("main", result).
-You never need to check, sleep, or poll. Sleeping actively delays results.`
+Completion notifications fire automatically when a sub-agent finishes.
+Your next turn starts immediately — you never need to poll, sleep, or check.`
 
 	AppendSystemPrompt(guidance)
 }
@@ -388,19 +394,6 @@ func handleCreateAgent(p beforeToolCallPayload) {
 	}
 	agentID := scope + "/" + input.Name
 
-	// Inject completion instructions into every agent prompt so agents always
-	// call send_message when done. This is the ONLY wakeup mechanism — without
-	// it the orchestrator has no signal and will poll or time out.
-	callerID := p.AgentID
-	if callerID == "" {
-		callerID = "main"
-	}
-	completionInstructions := "\n\n---\nWhen you have finished ALL your work, you MUST call:\n  send_message(\"" + callerID + "\", \"[your name]: [concise summary of what you did and the outcome]\")\nThis is required. The orchestrator has no other way to know you are done."
-	prompt := input.Prompt
-	if prompt != "" {
-		prompt += completionInstructions
-	}
-
 	// Pass the initial prompt directly to agent_spawn as initial_prompt.
 	// The host calls pool.Send after spawning, starting the first turn immediately.
 	// Using agent_send_message here would only queue to the inbox with no turn
@@ -418,7 +411,7 @@ func handleCreateAgent(p beforeToolCallPayload) {
 		Name:           input.Name,
 		SystemPrompt:   input.SystemPrompt,
 		ModelName:      input.Model,
-		InitialPrompt:  prompt,
+		InitialPrompt:  input.Prompt,
 		ThinkingBudget: input.ThinkingBudget,
 	})
 
