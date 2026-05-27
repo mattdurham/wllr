@@ -365,9 +365,21 @@ func loadMessages(path string) ([]storedMsg, error) {
 	var out []storedMsg
 	for _, line := range lines[1:] {
 		var e messageEntry
-		if json.Unmarshal([]byte(line), &e) == nil && e.Type == "message" && e.Role != "" {
-			out = append(out, storedMsg{role: e.Role, content: e.Content})
+		if json.Unmarshal([]byte(line), &e) != nil || e.Type != "message" || e.Role == "" {
+			continue
 		}
+		if strings.TrimSpace(e.Content) == "" {
+			continue // skip empty messages — API rejects them
+		}
+		// Enforce alternation: skip consecutive same-role messages.
+		if len(out) > 0 && out[len(out)-1].role == e.Role {
+			continue
+		}
+		out = append(out, storedMsg{role: e.Role, content: e.Content})
+	}
+	// API requires history to start with a user message.
+	for len(out) > 0 && out[0].role != "user" {
+		out = out[1:]
 	}
 	return out, nil
 }
