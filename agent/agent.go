@@ -391,22 +391,24 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 			collectedText, err = streamTurn(childCtx, fa, history, content, pool, onToken, onToolCall)
 		}
 
-		// Always record what the user said. If the turn produced a response
-		// use it; if cancelled use a placeholder so the agent doesn't forget
-		// the message was sent. Providers require alternating user/assistant,
-		// so we never leave history ending with a lone user message.
+		// Always record what the user said and the assistant response.
+		// Providers require strictly alternating user/assistant messages —
+		// leaving history ending with a lone user message causes "text content
+		// cannot be empty" on the next turn.
 		assistantText := collectedText
-		if assistantText == "" && childCtx.Err() != nil {
-			// Context was cancelled (Esc / timeout). Record a placeholder so the
-			// user message isn't silently dropped from history.
-			assistantText = "[response cancelled]"
+		if assistantText == "" {
+			if childCtx.Err() != nil {
+				assistantText = "[response cancelled]"
+			} else {
+				// Tool-only turn: no text produced. Use a placeholder so the
+				// user message is never silently dropped from history.
+				assistantText = "[tool calls only]"
+			}
 		}
-		if assistantText != "" {
-			a.historyMu.Lock()
-			a.history = append(a.history, sdk.Message{Role: sdk.RoleUser, Content: content})
-			a.history = append(a.history, sdk.Message{Role: sdk.RoleAssistant, Content: assistantText})
-			a.historyMu.Unlock()
-		}
+		a.historyMu.Lock()
+		a.history = append(a.history, sdk.Message{Role: sdk.RoleUser, Content: content})
+		a.history = append(a.history, sdk.Message{Role: sdk.RoleAssistant, Content: assistantText})
+		a.historyMu.Unlock()
 
 		a.finishTurn(err, childCtx.Err(), onDone)
 	}()
