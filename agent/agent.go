@@ -198,6 +198,9 @@ func (a *Agent) ID() string { return a.id }
 // Name returns the agent's human-readable display name.
 func (a *Agent) Name() string { return a.name }
 
+// IsRunning reports whether the agent is currently mid-turn.
+func (a *Agent) IsRunning() bool { return a.isRunning.Load() }
+
 // Cancel cancels the current active turn, if any.
 // No-op if no turn is running.
 func (a *Agent) Cancel() {
