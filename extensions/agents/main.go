@@ -388,6 +388,19 @@ func handleCreateAgent(p beforeToolCallPayload) {
 	}
 	agentID := scope + "/" + input.Name
 
+	// Inject completion instructions into every agent prompt so agents always
+	// call send_message when done. This is the ONLY wakeup mechanism — without
+	// it the orchestrator has no signal and will poll or time out.
+	callerID := p.AgentID
+	if callerID == "" {
+		callerID = "main"
+	}
+	completionInstructions := "\n\n---\nWhen you have finished ALL your work, you MUST call:\n  send_message(\"" + callerID + "\", \"[your name]: [concise summary of what you did and the outcome]\")\nThis is required. The orchestrator has no other way to know you are done."
+	prompt := input.Prompt
+	if prompt != "" {
+		prompt += completionInstructions
+	}
+
 	// Pass the initial prompt directly to agent_spawn as initial_prompt.
 	// The host calls pool.Send after spawning, starting the first turn immediately.
 	// Using agent_send_message here would only queue to the inbox with no turn
@@ -405,7 +418,7 @@ func handleCreateAgent(p beforeToolCallPayload) {
 		Name:           input.Name,
 		SystemPrompt:   input.SystemPrompt,
 		ModelName:      input.Model,
-		InitialPrompt:  input.Prompt,
+		InitialPrompt:  prompt,
 		ThinkingBudget: input.ThinkingBudget,
 	})
 
