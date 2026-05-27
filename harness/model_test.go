@@ -3,6 +3,7 @@ package harness
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -470,15 +471,49 @@ func TestHarnessModel_SubAgentSystemPrompt_ContainsAgentIDAndMain(t *testing.T) 
 	}
 }
 
-// contains is a helper to avoid importing strings just for this.
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
-		func() bool {
-			for i := 0; i <= len(s)-len(substr); i++ {
-				if s[i:i+len(substr)] == substr {
-					return true
-				}
-			}
-			return false
-		}())
+	return strings.Contains(s, substr)
+}
+
+func TestModel_Update_ConsoleMsg_AppendsToConsole(t *testing.T) {
+	m := newTestModel()
+	m, _ = callUpdate(m, ConsoleMsg{Line: "test output"})
+	if !m.consoleVisible {
+		t.Fatal("consoleVisible should be true after ConsoleMsg{Line}")
+	}
+	if m.console.IsEmpty() {
+		t.Fatal("console should not be empty after ConsoleMsg{Line}")
+	}
+}
+func TestModel_Update_ConsoleMsg_Clear_ResetsConsole(t *testing.T) {
+	m := newTestModel()
+	m, _ = callUpdate(m, ConsoleMsg{Line: "old"})
+	m, _ = callUpdate(m, ConsoleMsg{Clear: true})
+	if !m.console.IsEmpty() {
+		t.Fatal("console should be empty after ConsoleMsg{Clear}")
+	}
+	if m.consoleVisible {
+		t.Fatal("consoleVisible should be false after ConsoleMsg{Clear}")
+	}
+}
+func TestModel_Update_StreamDoneMsg_HidesConsole(t *testing.T) {
+	m := newTestModel()
+	m.streaming = true
+	m.consoleVisible = true
+	m, _ = callUpdate(m, StreamDoneMsg{})
+	if m.consoleVisible {
+		t.Fatal("consoleVisible should be false after StreamDoneMsg")
+	}
+}
+func TestModel_chatHeight_AccountsForConsole(t *testing.T) {
+	m := newTestModel()
+	m.width = 120
+	m.height = 40
+	m.consoleVisible = false
+	h1 := m.chatHeight()
+	m.consoleVisible = true
+	h2 := m.chatHeight()
+	if h1-h2 != consolePaneLines {
+		t.Errorf("chatHeight diff: got %d, want %d (consolePaneLines)", h1-h2, consolePaneLines)
+	}
 }
