@@ -308,9 +308,13 @@ func renderUserMessage(sb *strings.Builder, content string, width int, old bool,
 	if width < 14 {
 		width = 14
 	}
-	borderColor := lipgloss.Color("#44AA44") // light green border, no fill
-	textColor := lipgloss.Color("#DDFFDD")
-	if old || queued {
+	borderColor := lipgloss.Color("#00AA00")
+	textColor := lipgloss.Color("#CCFFCC")
+	if queued {
+		borderColor = lipgloss.Color("#44AA44")
+		textColor = lipgloss.Color("#DDFFDD")
+	}
+	if old {
 		borderColor = lipgloss.Color("#444444")
 		textColor = lipgloss.Color("#555555")
 	}
