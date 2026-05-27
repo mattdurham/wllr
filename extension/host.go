@@ -167,7 +167,12 @@ func NewHost(logger *slog.Logger) *Host {
 		Bus:             NewEventBus(),
 	}
 	h.dispatch = h.buildDispatch()
-	h.runtime = wazero.NewRuntime(context.Background())
+	cacheDir := filepath.Join(os.TempDir(), "wllr-wasm-cache")
+	rCfg := wazero.NewRuntimeConfig()
+	if cache, cacheErr := wazero.NewCompilationCacheWithDir(cacheDir); cacheErr == nil {
+		rCfg = rCfg.WithCompilationCache(cache)
+	}
+	h.runtime = wazero.NewRuntimeWithConfig(context.Background(), rCfg)
 	// WASI is required by native Go WASM modules (GOOS=wasip1).
 	if _, err := wasi_snapshot_preview1.Instantiate(context.Background(), h.runtime); err != nil {
 		h.logger.Error("extension: install wasi module", "err", err)
