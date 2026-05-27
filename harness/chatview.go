@@ -9,6 +9,7 @@ type ChatView struct {
 	histContent    string
 	toolLog        []ToolLogEntry
 	messages       []chatMessage
+	queued         []chatMessage // messages sent while streaming; rendered below current
 	vp             viewport.Model
 	width          int
 	height         int
