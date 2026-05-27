@@ -194,27 +194,14 @@ func handleSessionSelected(path string) {
 		return
 	}
 
-	// Build a readable conversation transcript for the modal.
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Session: %s  (%d messages)\n", conversationTimestamp(path), len(msgs)))
-	sb.WriteString(strings.Repeat("─", 60) + "\n\n")
-	for _, m := range msgs {
-		if m.role == "user" {
-			sb.WriteString("You:\n")
-		} else {
-			sb.WriteString("Assistant:\n")
-		}
-		content := m.content
-		// Truncate very long messages (e.g. file contents) to keep modal readable.
-		if r := []rune(content); len(r) > 800 {
-			content = string(r[:800]) + "\n…[truncated]"
-		}
-		sb.WriteString(content)
-		sb.WriteString("\n\n")
+	// Load all messages into the agent's context so the conversation can be resumed.
+	wire := make([]Message, len(msgs))
+	for i, m := range msgs {
+		wire[i] = Message{Role: m.role, Content: m.content}
 	}
-	sb.WriteString(strings.Repeat("─", 60) + "\n")
-	sb.WriteString("Press esc to close · /history rollback to restore this session")
-	Modal(sb.String())
+	AgentResetHistory(wire)
+	Notify(fmt.Sprintf("Resumed session from %s (%d messages loaded)", conversationTimestamp(path), len(msgs)))
+	pendingSessionPath = ""
 }
 
 // conversationTimestamp reads the session header timestamp from the JSONL file.
