@@ -105,24 +105,27 @@ func (c *ChatView) AddUserMessage(content string) {
 	c.vp.GotoBottom()
 }
 
-// AddQueuedUserMessage adds a user message marked as queued (sent while agent was mid-turn).
+// AddQueuedUserMessage stores a message sent while the agent was mid-turn.
+// It is rendered below the current streaming output, not in the history.
 func (c *ChatView) AddQueuedUserMessage(content string) {
-	c.messages = append(c.messages, chatMessage{role: sdk.RoleUser, content: content, queued: true})
-	c.invalidateHistory()
+	c.queued = append(c.queued, chatMessage{role: sdk.RoleUser, content: content, queued: true})
 	c.refreshContent()
 	c.vp.GotoBottom()
 }
 
-// UnqueueLastMessage clears the queued flag on the most recent queued user message.
+// UnqueueLastMessage moves all queued messages into the history and clears the queue.
+// Called on StreamDoneMsg so the messages appear as normal history entries.
 func (c *ChatView) UnqueueLastMessage() {
-	for i := len(c.messages) - 1; i >= 0; i-- {
-		if c.messages[i].queued {
-			c.messages[i].queued = false
-			c.invalidateHistory()
-			c.refreshContent()
-			return
-		}
+	if len(c.queued) == 0 {
+		return
 	}
+	for _, m := range c.queued {
+		m.queued = false
+		c.messages = append(c.messages, m)
+	}
+	c.queued = nil
+	c.invalidateHistory()
+	c.refreshContent()
 }
 
 // AddNotification appends a system/notification line.
@@ -244,10 +247,15 @@ func (c *ChatView) refreshContent() {
 		c.histDirty = false
 	}
 
+	var sb strings.Builder
+	sb.WriteString(c.histContent)
 	if c.current != "" {
-		var sb strings.Builder
-		sb.WriteString(c.histContent)
 		renderMessage(&sb, chatMessage{role: sdk.RoleAssistant, content: c.current}, c.width, false)
+	}
+	for _, q := range c.queued {
+		renderMessage(&sb, q, c.width, false)
+	}
+	if sb.Len() > len(c.histContent) {
 		c.vp.SetContent(sb.String())
 	} else {
 		c.vp.SetContent(c.histContent)
@@ -300,8 +308,8 @@ func renderUserMessage(sb *strings.Builder, content string, width int, old bool,
 	if width < 14 {
 		width = 14
 	}
-	borderColor := lipgloss.Color("#00AA00")
-	textColor := lipgloss.Color("#CCFFCC")
+	borderColor := lipgloss.Color("#44AA44") // light green border, no fill
+	textColor := lipgloss.Color("#DDFFDD")
 	if old || queued {
 		borderColor = lipgloss.Color("#444444")
 		textColor = lipgloss.Color("#555555")
