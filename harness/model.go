@@ -62,8 +62,10 @@ type Model struct {
 	suggestionIdx  int
 	dropdownOffset int // first visible suggestion index
 
-	modalScroll int
-	streaming   bool
+	modalScroll    int
+	streaming      bool
+	console        ConsoleView
+	consoleVisible bool
 }
 
 // inputAreaHeight = top border (1) + textarea rows (3) + bottom border (1)
@@ -88,7 +90,7 @@ func New(pool *agent.AgentPool, mainAgentID string, h *extension.Host) Model {
 		commands:    NewRegistry(),
 		agentPool:   pool,
 		mainAgentID: mainAgentID,
-		extHost:     h,
+		extHost:     h, console: NewConsoleView(),
 	}
 
 	registerBuiltins(m.commands)
@@ -323,14 +325,17 @@ func (m *Model) SetProgram(p *tea.Program) {
 			}
 			return pool.ListTeams(), nil
 		}
+		m.extHost.OnConsoleOutput = func(line string) {
+			p.Send(ConsoleMsg{Line: line})
+		}
+		m.extHost.OnConsoleClear = func() {
+			p.Send(ConsoleMsg{Clear: true})
+		}
 	}
-	// Wire the main agent's token and done callbacks so streaming output reaches the TUI.
+
 	m.wireMainAgentCallbacks(p)
 }
 
-// tokenBatcher coalesces tokens and sends them at most every batchInterval.
-// Uses time-based batching with no goroutines or channels — safe to call
-// flush() multiple times across agent turns without panics.
 type tokenBatcher struct {
 	lastSend time.Time
 	p        *tea.Program
@@ -683,6 +688,7 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 	case StreamDoneMsg:
 		cmds := make([]tea.Cmd, 0, 2)
 		m.streaming = false
+		m.consoleVisible = false
 		if m.agentPool != nil {
 			m.statusBar.totalTokens = int(m.agentPool.TokenCount())
 		}
@@ -743,12 +749,20 @@ func (m Model) updateTools(msg tea.Msg) (Model, tea.Cmd, bool) {
 		slog.Info("tool call done", "id", msg.ID, "error", msg.IsError)
 		m.chat.UpdateToolCall(msg.ID, msg.IsError, msg.Output)
 		return m, nil, true
+	case ConsoleMsg:
+		if msg.Clear {
+			m.console.Clear()
+			m.consoleVisible = false
+		}
+		if msg.Line != "" {
+			m.console.Append(msg.Line)
+			m.consoleVisible = true
+		}
+		return m, nil, true
 	}
 	return m, nil, false
 }
 
-// updateActions handles user-action messages: SubmitMsg, CommandMsg, clearMsg, setModelMsg, abortStreamMsg, dispatchOnCommandMsg.
-// Returns (model, cmd, true) when the message was handled.
 func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case showToolsMsg:
@@ -984,7 +998,8 @@ func (m Model) cmdReloadExtensions() tea.Cmd {
 // chatHeight returns the number of lines available for the chat viewport,
 // accounting for the input box and any visible suggestion dropdown.
 func (m Model) chatHeight() int {
-	h := m.height - inputAreaHeight - statusBarHeight - m.dropdownHeight()
+	h := m.height - inputAreaHeight - statusBarHeight - m.dropdownHeight() - m.consoleHeight()
+
 	if h < 1 {
 		h = 1
 	}
@@ -1156,10 +1171,15 @@ func (m Model) View() tea.View {
 			sb.WriteString("\n")
 		}
 	}
+	if m.consoleVisible && !m.console.
+
+		// Pad to exactly m.height lines so no old content bleeds through when
+		// the viewport shrinks (e.g. dropdown appears/disappears).
+		IsEmpty() {
+		sb.WriteString(m.renderConsole())
+	}
 	sb.WriteString(inputBox)
 
-	// Pad to exactly m.height lines so no old content bleeds through when
-	// the viewport shrinks (e.g. dropdown appears/disappears).
 	out := sb.String()
 	if m.height > 0 {
 		lineCount := strings.Count(out, "\n")
@@ -1281,4 +1301,42 @@ func (m Model) renderInputBox() string {
 
 	bottom := b.Render("╰" + strings.Repeat("─", innerWidth) + "╯")
 	return top + "\n" + body.String() + bottom
+}
+
+const consolePaneLines = 10
+
+func (m Model) consoleHeight() int {
+	if !m.consoleVisible {
+		return 0
+	}
+	return consolePaneLines
+}
+func (m Model) renderConsole() string {
+	width := m.width
+	if width < 20 {
+		width = 20
+	}
+	innerWidth := width - 2
+	b := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+	dimText := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
+	label := "─ console "
+	fillWidth := innerWidth - lipgloss.Width(label)
+	if fillWidth < 0 {
+		fillWidth = 0
+	}
+	fill := strings.Repeat("─", fillWidth)
+	header := b.Render("╭" + label + fill + "╮")
+	content := m.console.View(width-4, 8)
+	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
+	body := strings.Builder{}
+	for _, line := range lines {
+		visible := lipgloss.Width(line)
+		pad := innerWidth - 2 - visible
+		if pad < 0 {
+			pad = 0
+		}
+		body.WriteString(b.Render("│") + " " + dimText.Render(line) + strings.Repeat(" ", pad) + " " + (b.Render("│") + "\n"))
+	}
+	footer := b.Render("╰" + strings.Repeat("─", innerWidth) + "╯")
+	return header + "\n" + body.String() + footer + "\n"
 }

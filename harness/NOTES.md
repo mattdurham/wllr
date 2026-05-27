@@ -197,3 +197,27 @@ Append-only design decision log. Never delete entries; add an `*Addendum (date):
 **Rationale:** Extension-registered commands must go through the event bus so the registering extension (and any other subscriber) can handle them. The two-step pattern (command handler → `dispatchOnCommandMsg` → `EventOnCommand`) is needed because the command `Handler` runs synchronously in the bubbletea update loop, but `DispatchEvent` involves async WASM execution. Converting to a message allows `updateActions` to return the dispatch as a `tea.Cmd`, keeping WASM execution off the update-loop hot path.
 
 **Consequence:** Extension command handlers see `EventOnCommand` with `OnCommandPayload{Name, Args}`. The harness does not inspect the command name or args further.
+
+## 17. ConsoleView — Live Subprocess Output Pane
+
+*Added: 2026-05-27*
+
+**Decision:** A new `ConsoleView` component is added to `Model` and rendered as a separate
+pane between the chat viewport and the input box when `consoleVisible == true`. It uses a
+ring buffer (200 lines) and always shows the most-recent lines (live tail, no scroll).
+
+**Rationale:** NOTES.md §11 ("renderToolGroup is a No-Op") established that tool call boxes
+are hidden. This addendum adds a separate display mechanism that does not pollute chat history.
+The console pane is ephemeral: it appears during subprocess execution and collapses when the
+stream ends. It solves two problems simultaneously: (1) the user can see that the LLM is doing
+something concrete (not just "working..."), and (2) ANSI-stripped output still reaches the
+LLM while raw output (with colour) is visible to the user.
+
+This decision does NOT reverse §11 — `renderToolGroup` remains a no-op. The console pane is
+not a tool call box; it is a live feed from the subprocess, not from the LLM.
+
+**Consequence:** `chatHeight()` now subtracts `consoleHeight()` (9 lines when visible).
+Layout math tests must account for the new pane. Console lines do NOT appear in
+`m.chat.messages` or `m.history` — they are completely separate.
+
+*Addendum (see also):* NOTES.md §11 is not reversed; `renderToolGroup` remains a no-op.
