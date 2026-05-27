@@ -100,7 +100,7 @@ func init() {
 	RegisterTool(
 		"create_agent",
 		`Create a new agent. The agent ID is {your_agent_id}/{name} (e.g. main creating "researcher" → id="main/researcher"). The returned agent_id is what you pass to send_message and shutdown_agent.`,
-		json.RawMessage(`{"type":"object","properties":{"name":{"type":"string","description":"Agent name"},"system_prompt":{"type":"string","description":"System prompt for the agent"},"prompt":{"type":"string","description":"Initial prompt to send"},"model":{"type":"string","description":"Model name (optional)"}},"required":["name","system_prompt","prompt"]}`),
+		json.RawMessage(`{"type":"object","properties":{"name":{"type":"string","description":"Agent name"},"system_prompt":{"type":"string","description":"System prompt for the agent"},"prompt":{"type":"string","description":"Initial prompt to send"},"model":{"type":"string","description":"Model name (optional)"},"thinking_budget":{"type":"integer","description":"Extended thinking token budget (optional, Anthropic only). Enables deeper reasoning before responding."}},"required":["name","system_prompt","prompt"]}`),
 	)
 	RegisterTool(
 		"shutdown_agent",
@@ -351,10 +351,11 @@ func onBeforeToolCall(payload json.RawMessage) {
 
 func handleCreateAgent(p beforeToolCallPayload) {
 	var input struct {
-		Name         string `json:"name"`
-		SystemPrompt string `json:"system_prompt"`
-		Prompt       string `json:"prompt"`
-		Model        string `json:"model"`
+		Name           string `json:"name"`
+		SystemPrompt   string `json:"system_prompt"`
+		Prompt         string `json:"prompt"`
+		Model          string `json:"model"`
+		ThinkingBudget int    `json:"thinking_budget"`
 	}
 	if err := json.Unmarshal(p.Input, &input); err != nil || input.Name == "" {
 		ToolResult(p.ToolCallID, "create_agent: name is required", true)
@@ -376,18 +377,20 @@ func handleCreateAgent(p beforeToolCallPayload) {
 	// Using agent_send_message here would only queue to the inbox with no turn
 	// started, leaving the agent permanently idle.
 	type spawnParams struct {
-		ID            string `json:"id"`
-		Name          string `json:"name"`
-		SystemPrompt  string `json:"system_prompt"`
-		ModelName     string `json:"model_name"`
-		InitialPrompt string `json:"initial_prompt"`
+		ID             string `json:"id"`
+		Name           string `json:"name"`
+		SystemPrompt   string `json:"system_prompt"`
+		ModelName      string `json:"model_name"`
+		InitialPrompt  string `json:"initial_prompt"`
+		ThinkingBudget int    `json:"thinking_budget"`
 	}
 	result := agentCall("agent_spawn", spawnParams{
-		ID:            agentID,
-		Name:          input.Name,
-		SystemPrompt:  input.SystemPrompt,
-		ModelName:     input.Model,
-		InitialPrompt: input.Prompt,
+		ID:             agentID,
+		Name:           input.Name,
+		SystemPrompt:   input.SystemPrompt,
+		ModelName:      input.Model,
+		InitialPrompt:  input.Prompt,
+		ThinkingBudget: input.ThinkingBudget,
 	})
 
 	var resp struct {
