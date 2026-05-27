@@ -37,7 +37,7 @@ func TestChatRender_CurrentUserMsg_HasGreenBorder(t *testing.T) {
 	}
 	out := renderChat(t, 80, 20, msgs)
 	// Green border colour: #00AA00 → R=0 G=170 B=0
-	if !containsColour(out, "68;170;68") {
+	if !containsColour(out, "0;170;0") {
 		t.Error("current user message should have green border (#00AA00)")
 	}
 }
@@ -53,7 +53,7 @@ func TestChatRender_OldUserMsg_HasGreyBorder(t *testing.T) {
 		t.Error("old user message should have grey border (#444444)")
 	}
 	// Current message should still have green border
-	if !containsColour(out, "68;170;68") {
+	if !containsColour(out, "0;170;0") {
 		t.Error("current user message should still have green border")
 	}
 }
