@@ -14,6 +14,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/fantasy"
+	anthropicprovider "charm.land/fantasy/providers/anthropic"
 	lipgloss "charm.land/lipgloss/v2"
 	"github.com/mattdurham/wllr/agent"
 	"github.com/mattdurham/wllr/extension"
@@ -182,7 +183,7 @@ func (m *Model) SetProgram(p *tea.Program) {
 		// Wire agent and team management — all agent-pool operations belong in
 		// the harness so cmd/main.go stays minimal.
 		pool := m.agentPool
-		m.extHost.OnAgentSpawn = func(id, name, systemPrompt, modelName, initialPrompt string) error {
+		m.extHost.OnAgentSpawn = func(id, name, systemPrompt, modelName, initialPrompt string, thinkingBudget int) error {
 			if pool == nil {
 				return fmt.Errorf("no agent pool")
 			}
@@ -191,7 +192,17 @@ func (m *Model) SetProgram(p *tea.Program) {
 				return fmt.Errorf("spawn agent %q: get model %q: %w", id, modelName, err)
 			}
 			fullSystemPrompt := systemPrompt + "\n\n## Your Agent Identity\nYour agent ID is: " + id + "\nTo report results back to the orchestrator, call send_message with agent_id=\"main\"."
-			a, err := pool.Spawn(id, lm, agent.SpawnOpts{SystemPrompt: fullSystemPrompt, Name: name})
+			spawnOpts := agent.SpawnOpts{SystemPrompt: fullSystemPrompt, Name: name}
+			if thinkingBudget > 0 {
+				spawnOpts.ProviderOptions = fantasy.ProviderOptions{
+					anthropicprovider.Name: &anthropicprovider.ProviderOptions{
+						Thinking: &anthropicprovider.ThinkingProviderOption{
+							BudgetTokens: int64(thinkingBudget),
+						},
+					},
+				}
+			}
+			a, err := pool.Spawn(id, lm, spawnOpts)
 			if err != nil {
 				return fmt.Errorf("spawn agent %q: %w", id, err)
 			}
