@@ -30,10 +30,11 @@ type Agent struct {
 
 	toolsFn func() []fantasy.AgentTool
 
-	id           string
-	name         string
-	modelName    string // for context window lookup
-	systemPrompt string
+	id             string
+	name           string
+	modelName      string // for context window lookup
+	systemPrompt   string
+	notifyParentID string // if set, pool sends a completion message here after the final turn
 
 	// lastSummary is the most recent compaction summary text. Passed to
 	// compactHistory as priorSummary on subsequent compaction calls so the model
@@ -434,6 +435,17 @@ func (a *Agent) finishTurn(err error, ctxErr error, onDone func(error)) {
 			a.Submit(context.Background(), "")
 			return
 		}
+	}
+
+	// Notify parent if configured — gives the orchestrator a guaranteed wakeup
+	// without requiring the sub-agent to call send_message explicitly.
+	if a.notifyParentID != "" && err == nil && ctxErr == nil {
+		msg := sdk.Message{
+			Role:    sdk.RoleUser,
+			Content: "[from agent '" + a.name + "' (" + a.id + ")]: turn complete — call get_agent_status(\"" + a.id + "\", 20) to read results",
+		}
+		_ = a.pool.SendMessage(a.notifyParentID, msg)
+		_ = a.pool.Send(a.notifyParentID, "")
 	}
 
 	if onDone != nil {
