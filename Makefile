@@ -68,7 +68,7 @@ extensions: $(DIST_DIR) $(BUILTINS)
 	cp extensions/memory/extension.yaml $(EXT_DIR)/memory/
 	mkdir -p $(EXT_DIR)/statusline
 	cd extensions/statusline && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(EXT_DIR)/statusline/statusline.wasm .
-	cp extensions/statusline/extension.yaml $(EXT_DIR)/statusline/
+	cp extensions/statusline/statusline.json $(EXT_DIR)/statusline/
 	@echo "Built all extensions"
 
 $(DIST_DIR):
