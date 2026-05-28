@@ -437,15 +437,12 @@ func (a *Agent) finishTurn(err error, ctxErr error, onDone func(error)) {
 		}
 	}
 
-	// Notify parent if configured — gives the orchestrator a guaranteed wakeup
-	// without requiring the sub-agent to call send_message explicitly.
+	// Notify parent if configured — gives the orchestrator a guaranteed wakeup.
+	// Pass the notification as the prompt content (not via SendMessage+empty Send)
+	// so pool.Send records a non-empty user message in the parent's history.
 	if a.notifyParentID != "" && err == nil && ctxErr == nil {
-		msg := sdk.Message{
-			Role:    sdk.RoleUser,
-			Content: "[from agent '" + a.name + "' (" + a.id + ")]: turn complete — call get_agent_status(\"" + a.id + "\", 20) to read results",
-		}
-		_ = a.pool.SendMessage(a.notifyParentID, msg)
-		_ = a.pool.Send(a.notifyParentID, "")
+		notification := "[from agent '" + a.name + "' (" + a.id + ")]: turn complete — call get_agent_status(\"" + a.id + "\", 20) to read results"
+		_ = a.pool.Send(a.notifyParentID, notification)
 	}
 
 	if onDone != nil {
