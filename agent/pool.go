@@ -164,6 +164,7 @@ func (p *AgentPool) Spawn(id string, lm fantasy.LanguageModel, opts SpawnOpts) (
 	if opts.ModelName != "" {
 		modelName = opts.ModelName
 	}
+	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	a := &Agent{
 		id:             id,
 		name:           opts.Name,
@@ -172,6 +173,8 @@ func (p *AgentPool) Spawn(id string, lm fantasy.LanguageModel, opts SpawnOpts) (
 		pool:           p,
 		modelName:      modelName,
 		notifyParentID: opts.NotifyParentID,
+		shutdownCtx:    shutdownCtx,
+		shutdownCancel: shutdownCancel,
 	}
 	// New agents inherit the base system prompt unless explicitly disabled.
 	// Sub-agents that don't need the full orchestration context can set
@@ -208,8 +211,10 @@ func (p *AgentPool) Close(id string) error {
 	}
 	delete(p.agents, id)
 	p.mu.Unlock()
-	// Cancel any running turn.
-	a.Cancel()
+	// Shut down the agent — cancels the shutdown context (drain loop) and
+	// any active turn. Using shutdown() instead of Cancel() ensures the drain
+	// loop respects the shutdown signal (H-con1/C9).
+	a.shutdown()
 	return nil
 }
 
@@ -238,11 +243,6 @@ func (p *AgentPool) TokenCount() int64 {
 // addTokens increments the global token counter by n.
 // Called by Agent.Submit's onToken closure.
 func (p *AgentPool) addTokens(n int64) {
-	p.tokenCount.Add(n)
-}
-
-// AddTokens is the exported counterpart of addTokens, exposed for testing.
-func (p *AgentPool) AddTokens(n int64) {
 	p.tokenCount.Add(n)
 }
 

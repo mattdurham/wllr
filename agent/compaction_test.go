@@ -292,6 +292,23 @@ func TestFindCutPoint_NoUserBoundaryFound_ReturnsFallback(t *testing.T) {
 	}
 }
 
+// H-quality1: regression test for findCutPoint j==0 edge case
+func TestFindCutPoint_CutAtIndexZero_TreatedAsFits(t *testing.T) {
+	// When the very first message (index 0) alone exceeds the budget,
+	// i=0 and the forward scan starts at j=0. If history[0] is a user message,
+	// j=0 is returned. Callers treat 0 as "everything fits" and skip compaction,
+	// which is correct — toSummarize = rest[:0] would be empty anyway.
+	history := []sdk.Message{
+		{Role: sdk.RoleUser, Content: strings.Repeat("x", 400)}, // large user msg
+	}
+	// Budget is tiny (1 token) — budget exceeded at i=0, j snaps to 0.
+	got := findCutPoint(history, 1)
+	// j==0 is returned; caller treats it as "fits" and skips compaction.
+	if got != 0 {
+		t.Errorf("findCutPoint j==0 edge case = %d, want 0 (no compaction)", got)
+	}
+}
+
 // ---- extractFilePaths ----
 
 func TestExtractFilePaths_AbsolutePaths(t *testing.T) {

@@ -54,8 +54,7 @@ idle ──(Submit called)──▶ running ──(turn complete)──▶ idle
 
 `AgentPool.tokenCount` is an `atomic.Int64`. It is incremented by one per text token emitted by any agent in the pool.
 
-- `addTokens(n)` (unexported) is called from agent goroutines via the pool pointer captured at spawn time.
-- `AddTokens(n)` (exported) is the publicly accessible equivalent, exposed for testing.
+- `addTokens(n)` (unexported) is called from agent goroutines via the pool pointer captured at spawn time. Tests that need to exercise the counter directly must be in the same package (internal test files).
 - `TokenCount()` returns the current snapshot and is non-blocking.
 
 **Invariant:** The counter is monotonically increasing and never resets within a pool's lifetime.
