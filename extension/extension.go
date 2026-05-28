@@ -16,4 +16,8 @@ type Extension struct {
 	subMu         sync.RWMutex
 	callMu        sync.Mutex
 	trusted       bool
+	// Priority controls dispatch order. Lower = runs first.
+	// Built-ins default to 0, user extensions to 100.
+	// Within the same priority, extensions run alphabetically by name.
+	Priority int
 }
