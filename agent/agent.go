@@ -261,8 +261,22 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 		priorHistory = combined
 	}
 
-	// Create a child context with a timeout so hung API requests don't block forever.
-	childCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	// Create a child context with a per-turn timeout.
+	// Default is 30 minutes (pi.dev uses no timeout; 10 minutes was too short for heavy tool use).
+	// Set SpawnOpts.TurnTimeout to override; negative value disables entirely.
+	turnTimeout := 30 * time.Minute
+	if a.opts.TurnTimeout < 0 {
+		turnTimeout = 0
+	} else if a.opts.TurnTimeout > 0 {
+		turnTimeout = a.opts.TurnTimeout
+	}
+	var childCtx context.Context
+	var cancel context.CancelFunc
+	if turnTimeout > 0 {
+		childCtx, cancel = context.WithTimeout(ctx, turnTimeout)
+	} else {
+		childCtx, cancel = context.WithCancel(ctx)
+	}
 	a.cancelMu.Lock()
 	a.cancel = cancel
 	a.cancelMu.Unlock()
