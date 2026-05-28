@@ -279,7 +279,14 @@ func renderMessage(sb *strings.Builder, m chatMessage, width int, old bool) {
 		renderToolGroup(sb, []chatMessage{m}, width, old)
 		return
 	default:
-		sb.WriteString(systemStyle.Render(lipgloss.Wrap("» "+m.content, width, "")))
+		if strings.HasPrefix(m.content, "⚠") {
+			red := lipgloss.NewStyle().Foreground(lipgloss.Color("#FF4444")).Bold(true)
+			prefix := red.Render("» ⚠")
+			rest := systemStyle.Render(lipgloss.Wrap(m.content[len("⚠"):], width-4, ""))
+			sb.WriteString(prefix + rest)
+		} else {
+			sb.WriteString(systemStyle.Render(lipgloss.Wrap("» "+m.content, width, "")))
+		}
 		sb.WriteString("\n\n")
 	}
 }
