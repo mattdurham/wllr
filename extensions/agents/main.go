@@ -315,23 +315,43 @@ Your next turn starts immediately — you never need to poll, sleep, or check.`
 }
 
 func onAgentsCommand(_ []string) {
-	if len(agentRecords) == 0 {
+	// Query the pool directly — agentRecords is WASM-local and can be stale.
+	result := agentCall("agent_list", map[string]string{})
+	var poolResp struct {
+		Agents []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"agents"`
+	}
+	if result != "" {
+		_ = json.Unmarshal([]byte(result), &poolResp)
+	}
+
+	if len(poolResp.Agents) == 0 {
 		Modal("No sub-agents running.")
 		return
 	}
 
+	// Build a lookup of WASM-side metadata (task, last update) by agent ID.
+	meta := make(map[string]*agentRecord, len(agentRecords))
+	for i := range agentRecords {
+		meta[agentRecords[i].id] = &agentRecords[i]
+	}
+
 	text := "Sub-agents\n" + strings.Repeat("─", 40) + "\n\n"
-	for _, r := range agentRecords {
-		text += r.id
-		if r.name != "" && r.name != r.id {
-			text += "  (" + r.name + ")"
+	for _, a := range poolResp.Agents {
+		text += a.ID
+		if a.Name != "" && a.Name != a.ID {
+			text += "  (" + a.Name + ")"
 		}
 		text += "\n"
-		if r.task != "" {
-			text += "  Task: " + r.task + "\n"
-		}
-		if r.lastUpdate != "" {
-			text += "  Last: " + r.lastUpdate + "\n"
+		if r, ok := meta[a.ID]; ok {
+			if r.task != "" {
+				text += "  Task: " + r.task + "\n"
+			}
+			if r.lastUpdate != "" {
+				text += "  Last: " + r.lastUpdate + "\n"
+			}
 		}
 		text += "\n"
 	}
