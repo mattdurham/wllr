@@ -743,7 +743,6 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 		}
 		m.chat.FinalizeMessage()
 		m.chat.UnqueueLastMessage() // must be after FinalizeMessage so queued msgs appear after the assistant response
-		delete(m.statusBar.statuses, "tools")
 		cmds = append(cmds, m.cmdDispatchAfterProviderResponse())
 		if responseContent != "" {
 			cmds = append(cmds, m.cmdDispatchMessageEnd(string(sdk.RoleAssistant), responseContent))
@@ -765,8 +764,6 @@ func (m Model) updateTools(msg tea.Msg) (Model, tea.Cmd, bool) {
 		}
 		slog.Info("tool call start", "tool", msg.ToolName, "id", msg.ID, "input", preview)
 		m.chat.AddToolCall(msg.ID, msg.ToolName, msg.Input)
-		count := len(m.chat.toolLog)
-		m.statusBar.statuses["tools"] = fmt.Sprintf("⚙ %d", count)
 		return m, nil, true
 	case ToolCallDoneMsg:
 		slog.Info("tool call done", "id", msg.ID, "error", msg.IsError)
