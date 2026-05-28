@@ -406,8 +406,17 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 				assistantText = "[tool calls only]"
 			}
 		}
+		// Record this turn to history. When content is empty (drain-until-empty
+		// path), use the inbox messages instead so we never write an empty user
+		// message — Anthropic rejects empty text content blocks.
 		a.historyMu.Lock()
-		a.history = append(a.history, sdk.Message{Role: sdk.RoleUser, Content: content})
+		if content != "" {
+			a.history = append(a.history, sdk.Message{Role: sdk.RoleUser, Content: content})
+		} else {
+			for _, m := range inboxMsgs {
+				a.history = append(a.history, m)
+			}
+		}
 		a.history = append(a.history, sdk.Message{Role: sdk.RoleAssistant, Content: assistantText})
 		a.historyMu.Unlock()
 
