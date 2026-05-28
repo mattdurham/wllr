@@ -256,6 +256,9 @@ func (m *Model) SetProgram(p *tea.Program) {
 			if pool == nil {
 				return fmt.Errorf("no agent pool")
 			}
+			if strings.TrimSpace(message) == "" {
+				return fmt.Errorf("send_message: message must be non-empty")
+			}
 			return pool.SendMessage(id, sdk.Message{Role: sdk.RoleUser, Content: message})
 		}
 		m.extHost.OnAgentRun = func(id string) error {
