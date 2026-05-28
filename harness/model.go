@@ -711,7 +711,6 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 		cmds := make([]tea.Cmd, 0, 2)
 		m.streaming = false
 		m.consoleVisible = false
-		m.chat.UnqueueLastMessage()
 		if m.agentPool != nil {
 			m.statusBar.totalTokens = int(m.agentPool.TokenCount())
 		}
@@ -740,6 +739,7 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 			slog.Info("stream response", "text", preview)
 		}
 		m.chat.FinalizeMessage()
+		m.chat.UnqueueLastMessage() // must be after FinalizeMessage so queued msgs appear after the assistant response
 		delete(m.statusBar.statuses, "tools")
 		cmds = append(cmds, m.cmdDispatchAfterProviderResponse())
 		if responseContent != "" {
