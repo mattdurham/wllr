@@ -225,7 +225,7 @@ func (m *Model) SetProgram(p *tea.Program) {
 			if slash := strings.LastIndex(id, "/"); slash > 0 {
 				parentID = id[:slash]
 			}
-			spawnOpts := agent.SpawnOpts{SystemPrompt: fullSystemPrompt, Name: name, NotifyParentID: parentID}
+			spawnOpts := agent.SpawnOpts{SystemPrompt: fullSystemPrompt, Name: name, NotifyParentID: parentID, TurnTimeout: -1}
 			if thinkingBudget > 0 {
 				spawnOpts.ProviderOptions = fantasy.ProviderOptions{
 					anthropicprovider.Name: &anthropicprovider.ProviderOptions{
