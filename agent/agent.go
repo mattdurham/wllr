@@ -345,6 +345,7 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 			agentOpts = append(agentOpts, fantasy.WithProviderOptions(opts.ProviderOptions))
 		}
 
+		agentOpts = append(agentOpts, fantasy.WithMaxRetries(6))
 		fa := fantasy.NewAgent(lm, agentOpts...)
 
 		// Proactive compaction: if the estimated context is close to the model's
