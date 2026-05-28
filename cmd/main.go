@@ -64,7 +64,7 @@ func main() {
 		pool.SetContextWindow(cfg.ContextWindow)
 	}
 
-	if _, spawnErr := pool.Spawn("main", langModel, agent.SpawnOpts{}); spawnErr != nil {
+	if _, spawnErr := pool.Spawn("main", langModel, agent.SpawnOpts{TurnTimeout: -1}); spawnErr != nil {
 		fmt.Fprintf(os.Stderr, "wllr: spawn main agent: %v\n", spawnErr)
 		os.Exit(1)
 	}
