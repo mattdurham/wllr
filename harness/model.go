@@ -756,7 +756,7 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 				slog.Info("stream cancelled by user")
 			} else {
 				slog.Error("stream error", "err", msg.Err)
-				m.chat.AddNotification(fmt.Sprintf("Error: %v", msg.Err))
+				m.chat.AddNotification(fmt.Sprintf("⚠ %v", msg.Err))
 				m.statusBar.statuses["stream"] = "error"
 				m.live.hasError = true
 			}
@@ -895,7 +895,19 @@ func (m Model) updateExtension(msg tea.Msg) (Model, tea.Cmd, bool) {
 				m.agentPool.SetBaseSystemPrompt(action + "\n\n" + existing)
 			}
 		}
-		return m, nil, true
+		// Start the 1-second extension tick after session is ready.
+		return m, tea.Tick(time.Second, func(time.Time) tea.Msg { return extensionTickMsg{} }), true
+
+	case extensionTickMsg:
+		cmds := []tea.Cmd{tea.Tick(time.Second, func(time.Time) tea.Msg { return extensionTickMsg{} })}
+		if m.extHost != nil {
+			extHost := m.extHost
+			cmds = append(cmds, func() tea.Msg {
+				results, _ := extHost.DispatchEvent(context.Background(), sdk.Event{Type: sdk.EventTick})
+				return ExtensionEventResultMsg{Results: results}
+			})
+		}
+		return m, tea.Batch(cmds...), true
 
 	case ExtensionEventResultMsg:
 		for _, r := range msg.Results {

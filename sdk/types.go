@@ -17,6 +17,8 @@ const (
 	EventMessageStart          EventType = "message_start"
 	EventMessageEnd            EventType = "message_end"
 	EventShutdown              EventType = "shutdown"
+	// EventTick is dispatched once per second by the harness for time-based extensions.
+	EventTick EventType = "tick"
 	// EventBeforeToolCall is dispatched before a tool is executed.
 	// Extensions may cancel the call by setting Cancel: true in their response.
 	EventBeforeToolCall EventType = "before_tool_call"
