@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	fantasy "charm.land/fantasy"
 	fantasyanthropicprovider "charm.land/fantasy/providers/anthropic"
@@ -30,9 +31,20 @@ func buildProvider(ctx context.Context, cfg *Config) (fantasy.Provider, fantasy.
 
 	switch cfg.Provider {
 	case providerAnthropic:
-		prov, provErr = fantasyanthropicprovider.New(
+		anthropicOpts := []fantasyanthropicprovider.Option{
 			fantasyanthropicprovider.WithAPIKey(cfg.AnthropicAPIKey),
-		)
+		}
+		// OAuth tokens (sk-ant-oat...) are Claude Code subscription tokens.
+		// They route through a higher-limit tier and require Claude Code beta headers
+		// to identify the client correctly — matching how pi/Claude Code authenticates.
+		if strings.HasPrefix(cfg.AnthropicAPIKey, "sk-ant-oat") {
+			anthropicOpts = append(anthropicOpts, fantasyanthropicprovider.WithHeaders(map[string]string{
+				"anthropic-beta": "claude-code-20250219,oauth-2025-04-20",
+				"user-agent":     "claude-cli/1.0.0",
+				"x-app":          "cli",
+			}))
+		}
+		prov, provErr = fantasyanthropicprovider.New(anthropicOpts...)
 	case "openai":
 		prov, provErr = fantasyopenapiprovider.New(
 			fantasyopenapiprovider.WithAPIKey(cfg.OpenAIAPIKey),
