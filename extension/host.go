@@ -1554,7 +1554,17 @@ func (h *Host) Reload(ctx context.Context, paths []string) error {
 	h.mu.Lock()
 	old := h.extensions
 	h.extensions = nil
-	h.registeredTools = make(map[string]sdk.Tool)
+	// Preserve native tools — they are registered once at startup and must
+	// survive reloads. Only clear WASM-owned tool registrations.
+	preserved := make(map[string]sdk.Tool)
+	h.nativeToolsMu.RLock()
+	for name, tool := range h.registeredTools {
+		if _, isNative := h.nativeTools[name]; isNative {
+			preserved[name] = tool
+		}
+	}
+	h.nativeToolsMu.RUnlock()
+	h.registeredTools = preserved
 	h.toolOwners = make(map[string]string)
 	h.mu.Unlock()
 
