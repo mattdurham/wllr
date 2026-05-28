@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 
@@ -1115,10 +1116,14 @@ func (h *Host) Load(ctx context.Context, path string) error {
 		return fmt.Errorf("load extension %s: %w", path, err)
 	}
 
-	// Load optional manifest for permission declarations.
-	perms := loadManifestPermissions(path, h.logger)
+	// Load optional manifest for permission declarations and priority.
+	manifest := loadManifest(path, h.logger)
+	var perms []sdk.Permission
+	if manifest != nil {
+		perms = manifest.Permissions
+	}
 
-	return h.loadExtension(ctx, path, data, false, perms)
+	return h.loadExtension(ctx, path, data, false, perms, manifest)
 }
 
 // LoadBytes instantiates a WASM module from in-memory bytes.
@@ -1136,6 +1141,7 @@ func (h *Host) loadExtension(
 	data []byte,
 	trusted bool,
 	perms []sdk.Permission,
+	manifest ...*sdk.ExtensionManifest,
 ) error {
 	modName := moduleNameFromPath(name)
 
@@ -1165,6 +1171,13 @@ func (h *Host) loadExtension(
 		permMap[p] = true
 	}
 
+	priority := 100 // user extension default
+	if trusted {
+		priority = 0 // built-ins always run first
+	}
+	if len(manifest) > 0 && manifest[0] != nil && manifest[0].Priority != nil {
+		priority = *manifest[0].Priority
+	}
 	ext := &Extension{
 		name:          extensionDisplayName(name),
 		module:        mod,
@@ -1172,6 +1185,7 @@ func (h *Host) loadExtension(
 		store:         NewStore(),
 		trusted:       trusted,
 		permissions:   permMap,
+		Priority:      priority,
 	}
 
 	// Register ext before calling _init so host_call works.
@@ -1191,10 +1205,9 @@ func (h *Host) loadExtension(
 	return nil
 }
 
-// loadManifestPermissions reads a companion JSON manifest at
-// "<basename>.json" alongside the WASM file and returns the declared
-// permissions. Missing or invalid manifest files are silently ignored.
-func loadManifestPermissions(wasmPath string, logger *slog.Logger) []sdk.Permission {
+// loadManifest reads a companion JSON manifest at "<basename>.json" alongside
+// the WASM file. Missing or invalid manifest files are silently ignored.
+func loadManifest(wasmPath string, logger *slog.Logger) *sdk.ExtensionManifest {
 	manifestPath := strings.TrimSuffix(wasmPath, ".wasm") + ".json"
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
@@ -1205,7 +1218,7 @@ func loadManifestPermissions(wasmPath string, logger *slog.Logger) []sdk.Permiss
 		logger.Warn("extension: manifest parse error", "path", manifestPath, "err", err)
 		return nil
 	}
-	return manifest.Permissions
+	return &manifest
 }
 
 // RegisterNativeTool registers a Go-native tool handler that is invoked directly
@@ -1400,6 +1413,14 @@ func (h *Host) DispatchEvent(ctx context.Context, evt sdk.Event) ([]sdk.EventRes
 	exts := make([]*Extension, len(h.extensions))
 	copy(exts, h.extensions)
 	h.mu.RUnlock()
+
+	// Sort by priority ascending (lower = runs first), alphabetical within same priority.
+	sort.Slice(exts, func(i, j int) bool {
+		if exts[i].Priority != exts[j].Priority {
+			return exts[i].Priority < exts[j].Priority
+		}
+		return exts[i].name < exts[j].name
+	})
 
 	var responses []sdk.EventResponse
 	for _, ext := range exts {
