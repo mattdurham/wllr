@@ -252,7 +252,7 @@ in §1 is superseded by this decision. §1 is retained as historical context.
 If a turn is already running when `Submit` is called, the new content is appended to the
 inbox and `Submit` returns immediately. After each turn completes, the goroutine checks for
 new inbox messages (drain-until-empty) and, if any exist, fires `onDone` and restarts
-immediately with `context.Background()`.
+immediately with `a.shutdownCtx` (not `context.Background()` — fixes H-con1/C9).
 
 **Rationale:** SPECS.md §2 previously placed the burden on callers to avoid concurrent
 Submit. But the system itself violates this: multiple sub-agents finishing simultaneously

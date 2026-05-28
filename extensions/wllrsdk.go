@@ -72,20 +72,30 @@ func _sdkInit() int32 {
 	return 0
 }
 
+// _sdkOnEvent implements the ABI v2 _on_event export: (ptr i32, len i32) -> (ptr i32, len i32).
+// Returns (0, 0) when there is no response (the common case).
+// The response buffer is allocated via _sdkAlloc and must be freed by the host
+// after reading (the host calls _free(respPtr) after reading the response).
+// Do NOT free the event input buffer (ptr) — the host owns it and will free it (H-abi1).
+//
 //go:wasmexport _on_event
-func _sdkOnEvent(ptr, length int32) int32 {
+func _sdkOnEvent(ptr, length int32) (int32, int32) {
+	// Memory ownership rule (H-abi1):
+	// The event buffer at ptr was allocated by the host and will be freed by the host
+	// after _on_event returns. Do NOT call _sdkFree(ptr) here — that would double-free
+	// the buffer. The host is the sole owner of evtPtr.
 	data := unsafe.Slice((*byte)(unsafe.Pointer(uintptr(ptr))), length)
 	var evt struct {
 		Type    string          `json:"type"`
 		Payload json.RawMessage `json:"payload"`
 	}
 	if err := json.Unmarshal(data, &evt); err != nil {
-		return 0
+		return 0, 0
 	}
 	for _, fn := range _sdkHandlers[evt.Type] {
 		fn(evt.Payload)
 	}
-	return 0
+	return 0, 0
 }
 
 // ─── Internal registry ────────────────────────────────────────────────────────

@@ -71,6 +71,12 @@ type Agent struct {
 	// cancelMu protects the cancel function for the current active turn.
 	cancelMu sync.Mutex
 
+	// shutdownCtx is cancelled when the agent is closed (via pool.Close).
+	// The drain loop uses this instead of context.Background() to respect
+	// shutdown signals (H-con1/C9). Set in Spawn; cancelled in shutdown().
+	shutdownCtx    context.Context
+	shutdownCancel context.CancelFunc
+
 	// isRunning is set to true while Submit's goroutine is active. A second
 	// Submit call that arrives while a turn is running appends content to the
 	// inbox instead of starting a new goroutine. The running goroutine drains
@@ -219,6 +225,16 @@ func (a *Agent) Cancel() {
 	}
 }
 
+// shutdown cancels the shutdown context (used by the drain loop) and then
+// cancels any active turn. Called by pool.Close to ensure the drain loop
+// respects the shutdown signal (H-con1/C9).
+func (a *Agent) shutdown() {
+	if a.shutdownCancel != nil {
+		a.shutdownCancel()
+	}
+	a.Cancel()
+}
+
 // Submit starts a new turn with the given user content.
 // It injects any pending inbox messages into the conversation history before
 // constructing the request. Calls onToken for each text delta and onDone when
@@ -298,16 +314,19 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 		defer cancel()
 		defer func() {
 			if r := recover(); r != nil {
-				if onDone != nil {
-					onDone(fmt.Errorf("agent %s: panic: %v", a.id, r))
-				}
+				// C1: call finishTurn so isRunning is reset and parent
+				// notification fires even on a panic. Pass a non-nil error so
+				// finishTurn does NOT start the drain loop (panics terminate
+				// the turn chain — no retry).
+				panicErr := fmt.Errorf("agent %s: panic: %v", a.id, r)
+				a.finishTurn(panicErr, nil, onDone)
 			}
 		}()
 
 		if lm == nil {
-			if onDone != nil {
-				onDone(fmt.Errorf("agent %s: no language model configured", a.id))
-			}
+			// C1: use finishTurn so isRunning is reset consistently on all
+			// early-exit paths.
+			a.finishTurn(fmt.Errorf("agent %s: no language model configured", a.id), nil, onDone)
 			return
 		}
 
@@ -448,7 +467,7 @@ func (a *Agent) finishTurn(err error, ctxErr error, onDone func(error)) {
 			if onDone != nil {
 				onDone(nil)
 			}
-			a.Submit(context.Background(), "")
+			a.Submit(a.shutdownCtx, "")
 			return
 		}
 	}

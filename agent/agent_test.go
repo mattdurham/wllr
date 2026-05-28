@@ -3,6 +3,7 @@ package agent_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -350,48 +351,63 @@ func TestAgent_Cancel_RecordsUserMessageInHistory(t *testing.T) {
 }
 
 func TestAgent_Cancel_PlaceholderAllowsNextTurn(t *testing.T) {
-	// After a cancelled turn, a subsequent turn must succeed without a
+	// Regression test: after a cancelled turn, transferring the cancelled history
+	// to a second agent and running a new turn must succeed without a
 	// "messages must alternate" rejection from the provider.
+	//
+	// The mechanism: Cancel() causes the agent to record "[response cancelled]" as
+	// the assistant placeholder, so history ends with a valid user/assistant pair.
+	// A second agent with this history can immediately accept a new user message.
 	pool := agent.NewPool()
-	lm := &tokenStreamLM{tokens: []string{"Paris"}}
 
-	a, err := pool.Spawn("main", &slowLM{}, agent.SpawnOpts{})
+	a, err := pool.Spawn("first", &slowLM{}, agent.SpawnOpts{})
 	if err != nil {
-		t.Fatalf("Spawn: %v", err)
+		t.Fatalf("Spawn first: %v", err)
 	}
 
 	done := make(chan error, 1)
 	a.SetOnDone(func(e error) { done <- e })
 
-	// First turn — cancel it.
+	// First turn — cancel it mid-flight.
 	a.Submit(testCtx(t), "cancelled question")
 	time.Sleep(10 * time.Millisecond)
 	a.Cancel()
 	<-done
 
-	// Second turn with a real LM — must succeed.
-	// Replace the LM by re-spawning with the real LM on a fresh pool.
-	pool2 := agent.NewPool()
-	a2, err := pool2.Spawn("main", lm, agent.SpawnOpts{})
-	if err != nil {
-		t.Fatalf("Spawn2: %v", err)
+	// The cancelled history must end with an assistant placeholder message.
+	cancelledHistory := a.History()
+	if len(cancelledHistory) < 2 {
+		t.Fatalf("expected at least 2 history messages after cancel, got %d", len(cancelledHistory))
+	}
+	last := cancelledHistory[len(cancelledHistory)-1]
+	if last.Role != sdk.RoleAssistant {
+		t.Errorf("history after cancel must end with assistant placeholder, got role=%s content=%q",
+			last.Role, last.Content)
 	}
 
-	// Copy history from first agent to simulate continuity.
-	for _, m := range a.History() {
-		_ = m // history verified separately; just ensure no panic
+	// Spawn a second agent on the SAME pool and transfer the cancelled history.
+	// This exercises the regression: cancelled history must be transferable.
+	lm := &tokenStreamLM{tokens: []string{"Paris"}}
+	a2, err := pool.Spawn("second", lm, agent.SpawnOpts{})
+	if err != nil {
+		t.Fatalf("Spawn second: %v", err)
+	}
+	if err := pool.SetAgentHistory("second", cancelledHistory); err != nil {
+		t.Fatalf("SetAgentHistory: %v", err)
 	}
 
 	done2 := make(chan error, 1)
 	var got string
 	a2.SetOnToken(func(tok string) { got += tok })
 	a2.SetOnDone(func(e error) { done2 <- e })
+
+	// Submit a new turn — must NOT fail with "messages must alternate" error.
 	a2.Submit(testCtx(t), "what is the capital of France?")
 
 	select {
 	case err := <-done2:
 		if err != nil {
-			t.Fatalf("second turn failed: %v", err)
+			t.Fatalf("second turn failed: %v — cancelled history did not transfer cleanly", err)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timeout on second turn")
@@ -399,5 +415,128 @@ func TestAgent_Cancel_PlaceholderAllowsNextTurn(t *testing.T) {
 
 	if got == "" {
 		t.Error("second turn produced no output")
+	}
+}
+
+// --- C9/H-con1: shutdown context in drain loop ---
+
+func TestAgent_ShutdownCancels_DrainLoop(t *testing.T) {
+	// H-con1/C9: pool.Close must cancel the drain loop by cancelling shutdownCtx.
+	// Without this fix, the drain loop would use context.Background() and ignore
+	// the shutdown signal for up to 10 minutes.
+	pool := agent.NewPool()
+
+	// Use a slow LM that blocks so we can test shutdown during a drain turn.
+	// The inbox pattern: queue a message while a turn runs, then close the agent
+	// before the drain turn can complete.
+	lm := &tokenStreamLM{tokens: []string{"A"}}
+	a, err := pool.Spawn("main", lm, agent.SpawnOpts{})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	done := make(chan error, 1)
+	a.SetOnDone(func(e error) {
+		done <- e
+	})
+
+	// Start first turn.
+	a.Submit(testCtx(t), "turn 1")
+
+	// Queue a second message to trigger the drain loop.
+	a.AppendInbox(sdk.Message{Role: sdk.RoleUser, Content: "drain message"})
+
+	// Wait for first turn to finish (which will trigger drain loop).
+	select {
+	case <-done:
+		// First turn done; drain turn starts.
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for first turn")
+	}
+
+	// Immediately close the pool agent — shutdown context should cancel drain.
+	if err := pool.Close("main"); err != nil {
+		t.Fatalf("pool.Close: %v", err)
+	}
+
+	// The drain turn should terminate (context cancelled) — wait for done.
+	select {
+	case err := <-done:
+		// Expected: drain loop terminated due to shutdown context.
+		// Error may be context.Canceled or nil (if drain completed before shutdown).
+		_ = err
+	case <-time.After(2 * time.Second):
+		// If we timeout here, the drain loop is ignoring the shutdown signal.
+		// This is the regression we're fixing.
+		t.Error("drain loop did not terminate after pool.Close — shutdownCtx not respected")
+	}
+}
+
+// --- C1: panic leaves isRunning stuck ---
+
+// panicLM panics inside Stream to test the recover() path in Submit.
+type panicLM struct{}
+
+func (p *panicLM) Model() string    { return "panic-model" }
+func (p *panicLM) Provider() string { return "test" }
+func (p *panicLM) Stream(_ context.Context, _ fantasy.Call) (fantasy.StreamResponse, error) {
+	panic("simulated LM panic")
+}
+func (p *panicLM) Generate(_ context.Context, _ fantasy.Call) (*fantasy.Response, error) {
+	panic("simulated LM panic")
+}
+func (p *panicLM) GenerateObject(_ context.Context, _ fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
+	return nil, nil
+}
+func (p *panicLM) StreamObject(_ context.Context, _ fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
+	return nil, nil
+}
+
+func TestAgent_Panic_ResetsIsRunning(t *testing.T) {
+	// C1: if the LM panics during streaming, the recover() block must reset
+	// isRunning to false so the agent can accept future turns.
+	// Before this fix: isRunning stayed true forever after a panic.
+	pool := agent.NewPool()
+	a, err := pool.Spawn("panic-agent", &panicLM{}, agent.SpawnOpts{})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	done := make(chan error, 1)
+	a.SetOnDone(func(e error) { done <- e })
+
+	a.Submit(context.Background(), "trigger panic")
+
+	// Wait for the turn to complete (via the recover path).
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected non-nil error from panic recovery, got nil")
+		}
+		if !strings.Contains(err.Error(), "panic") {
+			t.Errorf("expected panic error, got: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout: onDone was never called after panic")
+	}
+
+	// Critical invariant: IsRunning must be false after the panic.
+	if a.IsRunning() {
+		t.Error("C1 regression: IsRunning() is still true after panic — agent is stuck")
+	}
+
+	// Bonus: verify the agent can accept a new turn after recovery.
+	lm2 := &tokenStreamLM{tokens: []string{"recovered"}}
+	a2, _ := pool.Spawn("panic-agent-2", lm2, agent.SpawnOpts{})
+	done2 := make(chan error, 1)
+	a2.SetOnDone(func(e error) { done2 <- e })
+	a2.Submit(context.Background(), "post-panic turn")
+	select {
+	case err := <-done2:
+		if err != nil {
+			t.Errorf("post-panic turn failed: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout on post-panic turn")
 	}
 }

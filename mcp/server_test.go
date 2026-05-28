@@ -295,3 +295,113 @@ func TestBridge_Close_WithServer(t *testing.T) {
 
 // Ensure os is used.
 var _ = os.DevNull
+
+// --- H-contract2: MCP protocol version validation ---
+
+// fakeVersionMismatchServer serves an initialize response with an incompatible protocol version.
+type fakeVersionMismatchServer struct {
+	version string
+}
+
+func (f *fakeVersionMismatchServer) serve(r io.Reader, w io.Writer) {
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		var req JSONRPCRequest
+		if err := json.Unmarshal(scanner.Bytes(), &req); err != nil {
+			continue
+		}
+		if req.ID == 0 {
+			continue
+		}
+		result := InitializeResult{
+			ProtocolVersion: f.version,
+			Capabilities:    map[string]any{},
+			ServerInfo:      ServerInfo{Name: "fake", Version: "0.0.1"},
+		}
+		resp := JSONRPCResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+		}
+		resp.Result, _ = json.Marshal(result)
+		data, _ := json.Marshal(resp)
+		_, _ = w.Write(append(data, '\n'))
+	}
+}
+
+func TestServer_Initialize_RejectsIncompatibleVersion(t *testing.T) {
+	// H-contract2: servers with an incompatible protocol version must be rejected.
+	clientR, serverW := io.Pipe()
+	serverR, clientW := io.Pipe()
+	stderrR, stderrW := io.Pipe()
+
+	fake := &fakeVersionMismatchServer{version: "1999-01-01"}
+	go fake.serve(serverR, serverW)
+	go io.Copy(io.Discard, stderrR) // drain stderr
+
+	srv := &Server{
+		name:    "version-test",
+		config:  ServerConfig{},
+		pending: make(map[int]chan *JSONRPCResponse),
+		stdin:   clientW,
+		stdout:  clientR,
+		stderr:  stderrR,
+	}
+	go srv.readLoop()
+	go srv.logStderr()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	err := srv.initialize(ctx)
+	if err == nil {
+		t.Fatal("expected error for incompatible protocol version, got nil")
+	}
+	if !strings.Contains(err.Error(), "incompatible") {
+		t.Errorf("expected 'incompatible' in error message, got: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_ = clientW.Close()
+		_ = serverW.Close()
+		_ = stderrW.Close()
+	})
+}
+
+func TestServer_Initialize_AcceptsCompatibleVersion(t *testing.T) {
+	// H-contract2: servers with the expected protocol version must succeed.
+	clientR, serverW := io.Pipe()
+	serverR, clientW := io.Pipe()
+	stderrR, stderrW := io.Pipe()
+
+	fake := &fakeVersionMismatchServer{version: expectedProtocolVersion}
+	go fake.serve(serverR, serverW)
+	go io.Copy(io.Discard, stderrR)
+
+	srv := &Server{
+		name:    "version-compat-test",
+		config:  ServerConfig{},
+		pending: make(map[int]chan *JSONRPCResponse),
+		stdin:   clientW,
+		stdout:  clientR,
+		stderr:  stderrR,
+	}
+	go srv.readLoop()
+	go srv.logStderr()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	// initialize should succeed (version matches) but no tools/list yet.
+	// We can't call discoverTools because our fake server doesn't handle it,
+	// so just test that initialize returns nil.
+	err := srv.initialize(ctx)
+	if err != nil {
+		t.Fatalf("expected no error for compatible version, got: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_ = clientW.Close()
+		_ = serverW.Close()
+		_ = stderrW.Close()
+	})
+}
