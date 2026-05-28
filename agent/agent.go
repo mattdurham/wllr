@@ -5,6 +5,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -135,8 +136,13 @@ func (a *Agent) SetToolsFn(fn func() []fantasy.AgentTool) {
 
 // AppendInbox adds msg to the agent's pending inbox.
 // Messages are delivered before the next Submit turn via DrainInbox.
-// Thread-safe.
+// Thread-safe. Silently drops messages with empty content — empty content
+// causes Anthropic API rejection ("text content blocks must be non-empty").
 func (a *Agent) AppendInbox(msg sdk.Message) {
+	if strings.TrimSpace(msg.Content) == "" {
+		slog.Warn("agent: dropping inbox message with empty content", "agent", a.id, "role", msg.Role)
+		return
+	}
 	a.inboxMu.Lock()
 	a.inbox = append(a.inbox, msg)
 	a.inboxMu.Unlock()

@@ -8,6 +8,8 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 
 	"charm.land/fantasy"
 	"github.com/mattdurham/wllr/sdk"
@@ -212,8 +214,11 @@ func (p *AgentPool) Close(id string) error {
 }
 
 // SendMessage appends msg to the named agent's inbox for delivery before its next turn.
-// Returns ErrAgentNotFound if id is unknown.
+// Returns ErrAgentNotFound if id is unknown, or an error if msg.Content is empty.
 func (p *AgentPool) SendMessage(id string, msg sdk.Message) error {
+	if strings.TrimSpace(msg.Content) == "" {
+		return fmt.Errorf("SendMessage: content must be non-empty (would cause API rejection)")
+	}
 	p.mu.RLock()
 	a, exists := p.agents[id]
 	p.mu.RUnlock()

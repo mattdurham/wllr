@@ -633,8 +633,8 @@ func handleSendMessage(p beforeToolCallPayload) {
 		AgentID string `json:"agent_id"`
 		Message string `json:"message"`
 	}
-	if err := json.Unmarshal(p.Input, &input); err != nil || input.AgentID == "" {
-		ToolResult(p.ToolCallID, "send_message: agent_id and message are required", true)
+	if err := json.Unmarshal(p.Input, &input); err != nil || input.AgentID == "" || input.Message == "" {
+		ToolResult(p.ToolCallID, "send_message: agent_id and message are required and message must be non-empty", true)
 		return
 	}
 
