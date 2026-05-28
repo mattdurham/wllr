@@ -219,6 +219,8 @@ func (m *Model) SetProgram(p *tea.Program) {
 			a.SetOnDone(func(e error) {
 				if e != nil {
 					slog.Error("sub-agent error", "agent", subID, "err", e)
+					// Show the error in the TUI immediately so the user knows.
+					p.Send(NotifyMsg{Text: fmt.Sprintf("⚠ sub-agent %s: %v", subID, e)})
 					// Surface the error to the main agent so the orchestrator
 					// knows something went wrong and can react.
 					if main := pool.Get(mainID); main != nil {
