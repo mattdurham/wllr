@@ -236,9 +236,7 @@ func (m *Model) SetProgram(p *tea.Program) {
 			a.SetToolsFn(func() []fantasy.AgentTool {
 				return BuildFantasyTools(extHostRef, agentID, logFnRef)
 			})
-			a.SetOnToolCall(func(toolCallID, toolName, input string) {
-				p.Send(ToolCallStartMsg{ID: toolCallID, ToolName: toolName, Input: input})
-			})
+			a.SetOnToolCall(func(_, _, _ string) {}) // sub-agent tool calls are silent
 			// If an initial prompt was provided, start the agent's first turn immediately.
 			// pool.Send is non-blocking — the turn runs in a goroutine.
 			if initialPrompt != "" {
