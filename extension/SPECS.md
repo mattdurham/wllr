@@ -49,9 +49,9 @@ Host.Load(path)
   ├─ loadManifestPermissions              (reads <basename>.json for permissions)
   ├─ h.loadMu.Lock()                      (serializes concurrent loads — wazevo JIT is not concurrency-safe)
   ├─ runtime.InstantiateWithConfig        (WithStartFunctions() — no auto _start/_main)
-  ├─ h.loadMu.Unlock()
   │   ├─ WithFSConfig: WithDirMount("/", "/")   (full filesystem read/write access)
   │   └─ WithEnv: all host env vars passed through
+  ├─ h.loadMu.Unlock()
   ├─ validateExports                      (abort + close if any export missing)
   ├─ Register ext in h.extensions         (before callInit so host_call works during _init)
   └─ callInit

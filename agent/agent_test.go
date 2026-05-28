@@ -525,18 +525,23 @@ func TestAgent_Panic_ResetsIsRunning(t *testing.T) {
 		t.Error("C1 regression: IsRunning() is still true after panic — agent is stuck")
 	}
 
-	// Bonus: verify the agent can accept a new turn after recovery.
-	lm2 := &tokenStreamLM{tokens: []string{"recovered"}}
-	a2, _ := pool.Spawn("panic-agent-2", lm2, agent.SpawnOpts{})
+	// Bonus: verify the *same* agent accepts a second turn after recovery (L-1 fix).
+	// Submitting to "a" again proves the original panicking agent's isRunning was
+	// correctly reset — not merely that a fresh agent works.
 	done2 := make(chan error, 1)
-	a2.SetOnDone(func(e error) { done2 <- e })
-	a2.Submit(context.Background(), "post-panic turn")
+	a.SetOnDone(func(e error) { done2 <- e })
+	a.Submit(context.Background(), "post-panic turn")
 	select {
 	case err := <-done2:
-		if err != nil {
-			t.Errorf("post-panic turn failed: %v", err)
+		// The panicLM will panic again — that's fine; we only care that isRunning resets.
+		if err == nil {
+			t.Fatal("expected non-nil error from second panic, got nil")
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("timeout on post-panic turn")
+		t.Fatal("timeout on second turn of panicking agent")
+	}
+	// IsRunning must be false again after the second panic.
+	if a.IsRunning() {
+		t.Error("C1 regression: IsRunning() is still true after second panic on same agent")
 	}
 }

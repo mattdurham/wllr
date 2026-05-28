@@ -1571,10 +1571,10 @@ func TestHost_GetEnv_TrustedExtension_NoPermissionRequired(t *testing.T) {
 	}
 }
 
-// --- H-abi2: verify broken WASM load does not hang ---
+// --- C4: verify broken WASM load does not hang ---
 
 func TestHost_Load_BrokenWASM_DoesNotHang(t *testing.T) {
-	// H-abi2 review finding: a broken .wasm file must not hang the process.
+	// C4 review finding: a broken .wasm file must not hang the process.
 	// Verified: the extension loader does not use a sync.WaitGroup; loading
 	// is synchronous within loadExtension. A broken file returns an error
 	// immediately without any goroutine leak risk.
