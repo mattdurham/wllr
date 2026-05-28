@@ -144,6 +144,11 @@ type Host struct {
 
 	mu sync.RWMutex
 
+	// loadMu serializes concurrent calls to loadExtension.
+	// wazero's JIT compilation (wazevo) is not safe for concurrent compilation
+	// of the same module; this mutex prevents race conditions in InstantiateWithConfig.
+	loadMu sync.Mutex
+
 	// pendingTools holds channels waiting for tool_result responses.
 	// Keyed by toolCallID.
 	pendingMu sync.Mutex
@@ -614,6 +619,9 @@ func (h *Host) handleExec(ctx context.Context, ext *Extension, req sdk.HostCallR
 }
 
 func (h *Host) handleGetEnv(ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+	if ext == nil || !ext.HasPermission(sdk.PermEnvRead) {
+		return sdk.HostCallResponse{Error: "get_env: permission denied: requires env_read"}
+	}
 	if h.OnGetEnv == nil {
 		return sdk.HostCallResponse{Error: "get_env: not supported by host"}
 	}
@@ -1150,7 +1158,11 @@ func (h *Host) loadExtension(
 			cfg = cfg.WithEnv(kv[:idx], kv[idx+1:])
 		}
 	}
+	// Serialize instantiation to protect against wazero JIT compilation races
+	// (wazevo is not safe for concurrent compilation of the same module — C4).
+	h.loadMu.Lock()
 	mod, err := h.runtime.InstantiateWithConfig(ctx, data, cfg)
+	h.loadMu.Unlock()
 	if err != nil {
 		return fmt.Errorf("instantiate extension %s: %w", name, err)
 	}
@@ -1245,7 +1257,9 @@ func (h *Host) RegisterToolSchema(tool sdk.Tool) {
 
 // ExecuteTool dispatches a tool call to subscribed extensions and blocks until
 // an extension returns the result via the tool_result host_call method.
-// It dispatches EventBeforeToolCall so extensions may intercept the call.
+// For WASM tools, it dispatches EventBeforeToolCall so extensions may intercept the call.
+// For native tools, EventBeforeToolCall is NOT dispatched (per SPECS.md §15).
+// EventAfterToolCall is dispatched for both native and WASM tools.
 // The call is cancelled and an error is returned if ctx is cancelled.
 func (h *Host) ExecuteTool(
 	ctx context.Context,
@@ -1258,21 +1272,9 @@ func (h *Host) ExecuteTool(
 	h.nativeToolsMu.RUnlock()
 
 	if isNative {
-		// Fire before_tool_call so extensions can intercept or cancel native tools.
-		beforePayload, _ := json.Marshal(sdk.BeforeToolCallPayload{
-			AgentID:    agentID,
-			ToolCallID: toolCallID,
-			ToolName:   toolName,
-			Input:      input,
-		})
-		beforeEvt := sdk.Event{Type: sdk.EventBeforeToolCall, Payload: beforePayload}
-		responses, _ := h.DispatchEvent(ctx, beforeEvt)
-		for _, r := range responses {
-			if r.Cancel {
-				return toolResult{Result: "tool call cancelled by extension", IsError: true}, nil
-			}
-		}
-
+		// C8: EventBeforeToolCall is NOT dispatched for native tools (per SPECS.md §15).
+		// Native tools are trusted built-ins; they cannot be intercepted or cancelled
+		// by WASM extensions. EventAfterToolCall IS dispatched so extensions can observe results.
 		result, isError := nativeFn(ctx, input)
 		tr := toolResult{Result: result, IsError: isError}
 
@@ -1451,6 +1453,21 @@ func (h *Host) dispatchToExtension(ctx context.Context, ext *Extension, evtJSON 
 		return sdk.EventResponse{}, nil
 	}
 
+	// Register the free for evtPtr HERE — before mem.Write — so all exit paths
+	// below (write failure, missing _on_event, _on_event trap) are covered (C-1).
+	// Memory ownership rule (H-abi1):
+	//   evtPtr  — allocated by the host via ext._alloc; freed by the host via ext._free.
+	//             Extensions must NOT free evtPtr — that would double-free the buffer.
+	//   respPtr — allocated by the extension inside _on_event and returned as the result.
+	//             The host frees respPtr after reading the response. Extensions must not
+	//             free respPtr after returning it.
+	freeFn := mod.ExportedFunction("_free")
+	defer func() {
+		if freeFn != nil {
+			_, _ = freeFn.Call(ctx, uint64(evtPtr))
+		}
+	}()
+
 	if !mem.Write(evtPtr, evtJSON) {
 		return sdk.EventResponse{}, fmt.Errorf("extension %s: write event to memory failed", ext.name)
 	}
@@ -1460,14 +1477,10 @@ func (h *Host) dispatchToExtension(ctx context.Context, ext *Extension, evtJSON 
 	if onEvent == nil {
 		return sdk.EventResponse{}, fmt.Errorf("extension %s missing _on_event", ext.name)
 	}
+
 	results, err := onEvent.Call(ctx, uint64(evtPtr), uint64(len(evtJSON)))
 	if err != nil {
 		return sdk.EventResponse{}, fmt.Errorf("extension %s _on_event trap: %w", ext.name, err)
-	}
-
-	// Free the event memory.
-	if freeFn := mod.ExportedFunction("_free"); freeFn != nil {
-		_, _ = freeFn.Call(ctx, uint64(evtPtr))
 	}
 
 	if len(results) == 0 || results[0] == 0 {
@@ -1475,16 +1488,27 @@ func (h *Host) dispatchToExtension(ctx context.Context, ext *Extension, evtJSON 
 	}
 
 	// Read response JSON from WASM memory.
+	// respPtr was allocated by the extension; the host frees it after reading.
 	respPtr := uint32(results[0])
-
-	// Read length: we don't know the length directly, so read until null byte or
-	// use a size prefix. Per the ABI, the extension must ensure the response is
-	// valid JSON. We read up to 64KB and find the JSON boundary.
-	// Simpler: the extension stores resp JSON starting at respPtr; scan for end.
-	// We read a reasonable max (64KB) and try to unmarshal.
-	respBytes := readNullTerminatedOrJSON(mem, respPtr)
-
-	freeFn := mod.ExportedFunction("_free")
+	var respBytes []byte
+	if len(results) >= 2 && results[1] > 0 {
+		// C5/ABI v2: _on_event returns (ptr, len) — use the explicit length.
+		// This is safe and avoids the arbitrary memory scan of readNullTerminatedOrJSON.
+		respLen := uint32(results[1])
+		respBytes, _ = mem.Read(respPtr, respLen)
+	} else {
+		// ABI v1 fallback: _on_event returns only ptr; scan for JSON boundary.
+		// Used by extensions compiled before ABI v2 (single return value).
+		respBytes = readNullTerminatedOrJSON(mem, respPtr)
+	}
+	// C10: Zero the full response buffer before freeing it. This invalidates
+	// the buffer contents in WASM linear memory so that any use-after-free
+	// of respPtr (by extension code that retains the pointer) reads zeroes
+	// rather than stale response data.
+	if len(respBytes) > 0 {
+		zeros := make([]byte, len(respBytes))
+		_ = mem.Write(respPtr, zeros)
+	}
 	if freeFn != nil {
 		_, _ = freeFn.Call(ctx, uint64(respPtr))
 	}
@@ -1551,19 +1575,27 @@ func readNullTerminatedOrJSON(mem api.Memory, ptr uint32) []byte {
 
 // Reload closes all extensions and reloads them from the given paths.
 func (h *Host) Reload(ctx context.Context, paths []string) error {
+	// Build the set of native tool names before acquiring h.mu to avoid
+	// lock-ordering inversion with RegisterNativeTool (which takes nativeToolsMu
+	// then mu). We read nativeToolsMu first, then mu — consistent ordering.
+	h.nativeToolsMu.RLock()
+	nativeNames := make(map[string]bool, len(h.nativeTools))
+	for name := range h.nativeTools {
+		nativeNames[name] = true
+	}
+	h.nativeToolsMu.RUnlock()
+
 	h.mu.Lock()
 	old := h.extensions
 	h.extensions = nil
 	// Preserve native tools — they are registered once at startup and must
 	// survive reloads. Only clear WASM-owned tool registrations.
 	preserved := make(map[string]sdk.Tool)
-	h.nativeToolsMu.RLock()
 	for name, tool := range h.registeredTools {
-		if _, isNative := h.nativeTools[name]; isNative {
+		if nativeNames[name] {
 			preserved[name] = tool
 		}
 	}
-	h.nativeToolsMu.RUnlock()
 	h.registeredTools = preserved
 	h.toolOwners = make(map[string]string)
 	h.mu.Unlock()

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/mattdurham/wllr/sdk"
@@ -1482,4 +1483,220 @@ func TestHost_HandleExec_PassesContext(t *testing.T) {
 	if !ctxCalled {
 		t.Fatal("ctx was nil when OnExec was called")
 	}
+}
+
+// --- H-sec1: get_env permission check tests ---
+
+func TestHost_GetEnv_PermissionDenied_NoPermission(t *testing.T) {
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer h.Close(ctx)
+
+	if err := h.LoadBytes(ctx, "untrusted.wasm", minimalWASM, false); err != nil {
+		t.Fatalf("LoadBytes: %v", err)
+	}
+	ext := h.extensions[0]
+	// No permissions granted.
+
+	h.OnGetEnv = func(name string) (string, error) {
+		t.Fatal("OnGetEnv must not be called when permission is denied")
+		return "", nil
+	}
+
+	resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+		Method: sdk.MethodGetEnv,
+		Params: []byte(`{"name":"ANTHROPIC_API_KEY"}`),
+	})
+	if resp.Error == "" {
+		t.Fatal("expected permission denied error, got none")
+	}
+	if resp.Error != "get_env: permission denied: requires env_read" {
+		t.Errorf("unexpected error: %q", resp.Error)
+	}
+}
+
+func TestHost_GetEnv_PermissionGranted(t *testing.T) {
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer h.Close(ctx)
+
+	if err := h.LoadBytes(ctx, "untrusted.wasm", minimalWASM, false); err != nil {
+		t.Fatalf("LoadBytes: %v", err)
+	}
+	ext := h.extensions[0]
+	ext.permissions[sdk.PermEnvRead] = true
+
+	h.OnGetEnv = func(name string) (string, error) {
+		if name == "MY_VAR" {
+			return "hello", nil
+		}
+		return "", nil
+	}
+
+	resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+		Method: sdk.MethodGetEnv,
+		Params: []byte(`{"name":"MY_VAR"}`),
+	})
+	if resp.Error != "" {
+		t.Fatalf("get_env with env_read permission: %s", resp.Error)
+	}
+}
+
+func TestHost_GetEnv_TrustedExtension_NoPermissionRequired(t *testing.T) {
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer h.Close(ctx)
+
+	// Trusted extensions bypass all permission checks.
+	if err := h.LoadBytes(ctx, "trusted.wasm", minimalWASM, true); err != nil {
+		t.Fatalf("LoadBytes trusted: %v", err)
+	}
+	ext := h.extensions[0]
+
+	called := false
+	h.OnGetEnv = func(name string) (string, error) {
+		called = true
+		return "secret", nil
+	}
+
+	resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+		Method: sdk.MethodGetEnv,
+		Params: []byte(`{"name":"SECRET"}`),
+	})
+	if resp.Error != "" {
+		t.Fatalf("trusted get_env: %s", resp.Error)
+	}
+	if !called {
+		t.Error("OnGetEnv should have been called for trusted extension")
+	}
+}
+
+// --- H-abi2: verify broken WASM load does not hang ---
+
+func TestHost_Load_BrokenWASM_DoesNotHang(t *testing.T) {
+	// H-abi2 review finding: a broken .wasm file must not hang the process.
+	// Verified: the extension loader does not use a sync.WaitGroup; loading
+	// is synchronous within loadExtension. A broken file returns an error
+	// immediately without any goroutine leak risk.
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer h.Close(ctx)
+
+	// Write an invalid WASM file (just some garbage bytes).
+	path := writeWASM(t, "broken.wasm", []byte("not a wasm file at all"))
+	err := h.Load(ctx, path)
+	if err == nil {
+		t.Fatal("expected error loading broken WASM, got nil")
+	}
+	// Extension list must be empty — partial state must not be registered.
+	if len(h.extensions) != 0 {
+		t.Errorf("expected 0 extensions after broken load, got %d", len(h.extensions))
+	}
+}
+
+// --- H-abi3: verify handler errors surface in host_call response ---
+
+func TestHost_HandlerError_Surfaces_In_Response(t *testing.T) {
+	// H-abi3 review finding: shadowed ':=' could drop handler errors.
+	// Verified: buildDispatch closures return handler results directly.
+	// This test confirms that a handler returning an error produces a
+	// non-OK response to the caller (not silently ErrOK with zero data).
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer h.Close(ctx)
+
+	if err := h.LoadBytes(ctx, "ext.wasm", minimalWASM, false); err != nil {
+		t.Fatalf("LoadBytes: %v", err)
+	}
+	ext := h.extensions[0]
+
+	// agent_spawn with no OnAgentSpawn callback should return an error response.
+	resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+		Method: sdk.MethodAgentSpawn,
+		Params: []byte(`{"id":"a1","name":"w","system_prompt":"sp","model_name":"m"}`),
+	})
+	if resp.Error == "" {
+		t.Fatal("expected handler error to surface in response, got empty error field")
+	}
+
+	// get_env with no permission should return an error response, not ErrOK.
+	resp2 := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+		Method: sdk.MethodGetEnv,
+		Params: []byte(`{"name":"TEST"}`),
+	})
+	if resp2.Error == "" {
+		t.Fatal("expected permission-denied error in response, got empty error field")
+	}
+}
+
+// --- C4: verify concurrent Load calls don't race on runtime ---
+
+func TestHost_ConcurrentLoad_NoRace(t *testing.T) {
+	// C4 review finding: WASM runtime lazy-init race. Verified: runtime is
+	// initialized eagerly in NewHost() before any Load call. This test confirms
+	// concurrent Load calls with valid and invalid WASM don't race.
+	ctx := context.Background()
+	h := NewHost(nil)
+
+	const n = 4
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			dir := t.TempDir()
+			p := dir + "/test.wasm"
+			_ = os.WriteFile(p, minimalWASM, 0o600)
+			_ = h.Load(ctx, p)
+		}()
+		go func() {
+			defer wg.Done()
+			// Also try loading a broken WASM concurrently.
+			dir := t.TempDir()
+			p := dir + "/broken.wasm"
+			_ = os.WriteFile(p, []byte("invalid"), 0o600)
+			_ = h.Load(ctx, p)
+		}()
+	}
+	// Wait for all goroutines to finish before closing the host.
+	wg.Wait()
+	h.Close(ctx)
+}
+
+// --- C6: verify extensions map is safe during concurrent reload and dispatch ---
+
+func TestHost_ConcurrentReloadAndDispatch_NoRace(t *testing.T) {
+	// C6 review finding: extensions map race during hot-reload.
+	// The DispatchEvent snapshot pattern (copy under RLock) and Reload (write under Lock)
+	// should be safe. This test exercises both concurrently.
+	ctx := context.Background()
+	h := NewHost(nil)
+
+	path := writeWASM(t, "ext.wasm", minimalWASM)
+	if err := h.Load(ctx, path); err != nil {
+		t.Fatalf("initial Load: %v", err)
+	}
+	h.extensions[0].subscriptions[sdk.EventSessionStart] = true
+
+	var wg sync.WaitGroup
+
+	// Concurrent dispatchers.
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			evt := sdk.Event{Type: sdk.EventSessionStart}
+			_, _ = h.DispatchEvent(ctx, evt)
+		}()
+	}
+
+	// Concurrent reload.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		_ = h.Reload(ctx, []string{path})
+	}()
+
+	wg.Wait()
+	h.Close(ctx)
 }

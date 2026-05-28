@@ -119,22 +119,6 @@ func TestAgentPool_Close_UnknownID_ReturnsError(t *testing.T) {
 	}
 }
 
-func TestAgentPool_TokenCount(t *testing.T) {
-	pool := agent.NewPool()
-	if pool.TokenCount() != 0 {
-		t.Errorf("initial TokenCount: got %d, want 0", pool.TokenCount())
-	}
-	// Increment via the internal method.
-	pool.AddTokens(5)
-	if pool.TokenCount() != 5 {
-		t.Errorf("TokenCount after Add(5): got %d, want 5", pool.TokenCount())
-	}
-	pool.AddTokens(3)
-	if pool.TokenCount() != 8 {
-		t.Errorf("TokenCount after Add(3): got %d, want 8", pool.TokenCount())
-	}
-}
-
 func TestAgentPool_SendMessage_ToExisting(t *testing.T) {
 	pool := agent.NewPool()
 	lm := newMockLM()

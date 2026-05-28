@@ -13,6 +13,10 @@ import (
 	"sync/atomic"
 )
 
+// expectedProtocolVersion is the MCP protocol version this client supports.
+// Initialize handshakes with servers advertising a different version are rejected.
+const expectedProtocolVersion = "2024-11-05"
+
 // Server represents a running MCP server process.
 type Server struct {
 	config ServerConfig
@@ -98,7 +102,7 @@ func (s *Server) Start(ctx context.Context) error {
 // initialize performs the MCP initialize handshake.
 func (s *Server) initialize(ctx context.Context) error {
 	params := InitializeParams{
-		ProtocolVersion: "2024-11-05",
+		ProtocolVersion: expectedProtocolVersion,
 		Capabilities:    map[string]any{},
 		ClientInfo: ClientInfo{
 			Name:    "wllr",
@@ -109,6 +113,12 @@ func (s *Server) initialize(ctx context.Context) error {
 	var result InitializeResult
 	if err := s.call(ctx, "initialize", params, &result); err != nil {
 		return err
+	}
+
+	// H-contract2: Validate protocol version — incompatible servers must be rejected.
+	if result.ProtocolVersion != expectedProtocolVersion {
+		return fmt.Errorf("mcp: server protocol version %q incompatible with client %q",
+			result.ProtocolVersion, expectedProtocolVersion)
 	}
 
 	s.info = result.ServerInfo

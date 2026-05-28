@@ -12,7 +12,7 @@ Every `.wasm` extension **must** export the following four symbols. `validateExp
 | Export | Signature (WAT) | Semantics |
 |--------|-----------------|-----------|
 | `_init` | `() -> i32` | Called once after the module is instantiated. Return 0 on success; any other value is an error and causes load to fail. |
-| `_on_event` | `(ptr i32, len i32) -> i32` | Dispatch an event. `ptr`/`len` point to a JSON-encoded `sdk.Event` in WASM linear memory. Returns a pointer to a JSON-encoded `sdk.EventResponse` in WASM memory, or 0 if there is no response. |
+| `_on_event` | `(ptr i32, len i32) -> (ptr i32, len i32)` | Dispatch an event (ABI v2). `ptr`/`len` point to a JSON-encoded `sdk.Event` in WASM linear memory. Returns `(respPtr, respLen)` pointing to a JSON-encoded `sdk.EventResponse` in WASM memory, or `(0, 0)` if there is no response. ABI v1 (single i32 return) is accepted for backward compatibility. |
 | `_alloc` | `(size i32) -> i32` | Allocate `size` bytes in WASM linear memory and return the pointer. Return 0 to signal allocation failure. |
 | `_free` | `(ptr i32)` | Free memory previously allocated by `_alloc`. |
 
@@ -47,8 +47,10 @@ NewHost
 Host.Load(path)
   ├─ os.ReadFile
   ├─ loadManifestPermissions              (reads <basename>.json for permissions)
+  ├─ h.loadMu.Lock()                      (serializes concurrent loads — wazevo JIT is not concurrency-safe)
   ├─ runtime.InstantiateWithConfig        (WithStartFunctions() — no auto _start/_main)
-  │   ├─ WithFSConfig: WithDirMount("/", "/")   (full filesystem read access)
+  ├─ h.loadMu.Unlock()
+  │   ├─ WithFSConfig: WithDirMount("/", "/")   (full filesystem read/write access)
   │   └─ WithEnv: all host env vars passed through
   ├─ validateExports                      (abort + close if any export missing)
   ├─ Register ext in h.extensions         (before callInit so host_call works during _init)
@@ -93,12 +95,21 @@ Host.Close
 ```
 host calls _alloc(len(evtJSON))  →  evtPtr
 host writes evtJSON to evtPtr
-host calls _on_event(evtPtr, len(evtJSON))  →  respPtr
-host calls _free(evtPtr)
+host calls _on_event(evtPtr, len(evtJSON))  →  (respPtr, respLen)  [ABI v2]
+                                            or →  respPtr             [ABI v1 fallback]
+host calls _free(evtPtr)              ← host owns evtPtr; extensions must NOT free it
 if respPtr != 0:
-    host reads JSON from respPtr using readNullTerminatedOrJSON
-    host calls _free(respPtr)
+    if respLen > 0 (ABI v2): host reads respLen bytes from respPtr
+    else (ABI v1): host uses readNullTerminatedOrJSON to find JSON boundary (up to 64KB)
+    host calls _free(respPtr)         ← host frees respPtr after reading
 ```
+
+**ABI v2 (C5 fix):** `_on_event` should return `(ptr i32, len i32)` — two i32 values. This allows responses larger than 64KB and eliminates the JSON boundary scan. ABI v1 (single i32 return) is still accepted by the host for backward compatibility with extensions compiled before ABI v2.
+
+**Memory ownership invariant (H-abi1):**
+- `evtPtr` is allocated by the host (via `ext._alloc`) and freed by the host (via `ext._free`) after `_on_event` returns. Extensions must NOT free `evtPtr` inside `_on_event` — doing so would double-free the buffer.
+- `respPtr` is allocated by the extension inside `_on_event` and returned as the result value. The host frees `respPtr` after reading the response JSON. Extensions must NOT free `respPtr` after returning it.
+- The host always frees `evtPtr` via `defer` regardless of whether `_on_event` succeeds or traps.
 
 ---
 
@@ -151,7 +162,7 @@ The full set of dispatched methods is:
 | `MethodSetSystemPrompt`       | `handleSetSystemPrompt`        |
 | `MethodAppendSystemPrompt`    | `handleAppendSystemPrompt`     |
 | `MethodExec`                  | `handleExec`                   |
-| `MethodGetEnv`                | `handleGetEnv`                 |
+| `MethodGetEnv`                | `handleGetEnv`  (requires `PermEnvRead`) |
 | `MethodConfigRead`            | `handleConfigRead`             |
 | `MethodAgentSpawn`            | `handleAgentSpawn`             |
 | `MethodAgentClose`            | `handleAgentClose`             |
@@ -162,6 +173,17 @@ The full set of dispatched methods is:
 | `MethodTeamClose`             | `handleTeamClose`              |
 | `MethodTeamAddMember`         | `handleTeamAddMember`          |
 | `MethodTeamRemoveMember`      | `handleTeamRemoveMember`       |
+| `MethodReadFile`              | `handleReadFile` (requires `PermFileRead`) |
+| `MethodWriteFile`             | `handleWriteFile` (requires `PermFileWrite`) |
+| `MethodHTTPPost`              | `handleHTTPPost` (requires `PermNetworkWrite`) |
+| `MethodAgentRun`              | `handleAgentRun`               |
+| `MethodShowPicker`            | `handleShowPicker`             |
+| `MethodAgentResetHistory`     | `handleAgentResetHistory`      |
+| `MethodGetOS`                 | `handleGetOS`                  |
+| `MethodGetStatusInfo`         | `handleGetStatusInfo`          |
+| `MethodSetStatusLine`         | `handleSetStatusLine`          |
+| `MethodTeamGetInfo`           | `handleTeamGetInfo`            |
+| `MethodTeamList`              | `handleTeamList`               |
 | `MethodMCPSpawn`              | `handleMCPSpawn`               |
 | `MethodMCPClose`              | `handleMCPClose`               |
 | `MethodMCPSend`               | `handleMCPSend`                |
@@ -191,18 +213,25 @@ The full set of dispatched methods is:
 | `OnExec`              | `func(ctx context.Context, command, dir string, onLine func(string)) (string, error)` | Execute a shell command (requires PermExec). `ctx` propagates cancellation. `onLine` is called for each output line as it arrives; may be nil. |
 | `OnConsoleOutput`     | `func(line string)`                                  | Called for each output line streamed from OnExec; nil-safe.          |
 | `OnConsoleClear`      | `func()`                                             | Called at the start of each OnExec to signal the console should be cleared. |
-| `OnGetEnv`            | `func(name string) (string, error)`                  | Read a host environment variable                         |
+| `OnGetEnv`            | `func(name string) (string, error)`                  | Read a host environment variable (requires PermEnvRead for untrusted extensions) |
+| `OnReadFile`          | `func(path string) (string, error)`                  | Read a file from the host filesystem (requires PermFileRead) |
+| `OnWriteFile`         | `func(path, content string) error`                   | Write a file to the host filesystem (requires PermFileWrite) |
+| `OnHTTPPost`          | `func(url string, headers map[string]string, body []byte) (int, []byte, error)` | HTTP POST via host (requires PermNetworkWrite) |
 | `OnConfigRead`        | `func(group string) (json.RawMessage, error)`        | Read config for the named extension group                |
 
 ### Agent management callbacks
 
 | Field                  | Signature                                                    | Purpose                                         |
 |-----------------------|--------------------------------------------------------------|-------------------------------------------------|
-| `OnAgentSpawn`        | `func(id, name, systemPrompt, modelName, initialPrompt string) error` | Create and register a new sub-agent; if initialPrompt is non-empty, calls `pool.Send` to start the first turn immediately |
+| `OnAgentSpawn`        | `func(id, name, systemPrompt, modelName, initialPrompt string, thinkingBudget int) error` | Create and register a new sub-agent; if initialPrompt is non-empty, calls `pool.Send` to start the first turn immediately |
 | `OnAgentClose`        | `func(id string) error`                                      | Cancel and remove a sub-agent                   |
 | `OnAgentSendMessage`  | `func(id, message string) error`                             | Send a message to a named agent                 |
+| `OnAgentRun`          | `func(id string) error`                                      | Trigger an immediate turn for an existing agent |
 | `OnAgentList`         | `func() ([]AgentInfo, error)`                                | Return all live agent IDs and names             |
 | `OnAgentTokenCount`   | `func() int64`                                               | Return total token count across all agents      |
+| `OnAgentResetHistory` | `func(messages []sdk.Message) error`                         | Replace the main agent's conversation history and rebuild the chat view |
+| `OnGetStatusInfo`     | `func() sdk.StatusInfo`                                      | Return a snapshot of the current status bar state |
+| `OnShowPicker`        | `func(title string, items []sdk.ShowPickerItem, callback string)` | Open the interactive TUI list picker          |
 
 ### Team management callbacks
 
@@ -256,7 +285,9 @@ The full set of dispatched methods is:
 
 `readNullTerminatedOrJSON(mem, ptr)` reads up to 64 KB from WASM linear memory starting at `ptr` and finds the boundary of the first complete JSON object by tracking brace depth, respecting string literals and escape sequences.
 
-**Invariant:** The function never panics on malformed input; it returns whatever bytes it could read if no `{}`-balanced boundary is found. The ABI v1 design choice (no length prefix) is why this scanner exists — see NOTES.md §4.
+**Invariant:** The function never panics on malformed input; it returns whatever bytes it could read if no `{}`-balanced boundary is found.
+
+**Note (C5):** This function is only used on the ABI v1 fallback path. Extensions compiled with the ABI v2 SDK return `(ptr, len)` from `_on_event`, and the host uses `memory.Read(ptr, len)` directly instead of scanning. New extensions should target ABI v2 to avoid the 64KB limit and eliminate the scan.
 
 ---
 
@@ -272,6 +303,8 @@ The full set of dispatched methods is:
 ---
 
 ## 11. Host.mu Guards
+
+`Host.loadMu` is a `sync.Mutex` that serializes calls to `loadExtension`. wazero's wazevo JIT engine is not safe for concurrent compilation of the same module; `loadMu` prevents data races in `InstantiateWithConfig`.
 
 `Host.mu` is a `sync.RWMutex` that guards:
 - `h.extensions` slice (append in `Load`, nil + replacement in `Reload`, iteration in `DispatchEvent`, removal in `removeExtension`)
@@ -321,6 +354,8 @@ Each `Extension` carries:
 
 **Invariant:** Trusted extensions always pass `HasPermission` for any permission value.
 
+**Invariant:** `get_env` (host_call `MethodGetEnv`) requires `PermEnvRead`. Untrusted extensions without this permission receive a permission-denied error and cannot read any host environment variable. Trusted extensions bypass this check.
+
 `Host.Load` loads the companion manifest (`<basename>.json`) alongside the WASM file and populates `ext.permissions` from `ExtensionManifest.Permissions`. Missing or malformed manifests are logged at warn level and result in zero permissions.
 
 `Host.LoadBytes(ctx, name, data, trusted)` skips manifest loading entirely.
@@ -347,7 +382,7 @@ Each `Extension` carries:
 
 **Invariants:**
 - Native tools are checked before WASM; a tool registered via `RegisterNativeTool` is never dispatched through WASM.
-- `EventBeforeToolCall` is **not** dispatched for native tools (no interception needed for trusted built-ins).
+- `EventBeforeToolCall` is **not** dispatched for native tools (C8 — native tools are trusted built-ins that cannot be intercepted or cancelled by WASM extensions).
 - `EventAfterToolCall` **is** dispatched for both native and WASM tools so extensions that observe results work uniformly.
 - The WASM channel is registered in `pendingTools` **before** dispatching the event.
 - `AgentID` is included in both `BeforeToolCallPayload` and `AfterToolCallPayload` so extensions can correlate tool calls with the originating agent.
@@ -400,4 +435,6 @@ Files that trigger this requirement when modified:
 
 **Invariant:** After `Reload`, previously loaded modules are always closed regardless of whether reloading any new module succeeds.
 
-**Invariant:** `h.registeredTools` and `h.toolOwners` are both cleared on reload.
+**Invariant:** `h.registeredTools` and `h.toolOwners` are cleared of WASM-owned entries on reload. Native tool registrations (from `RegisterNativeTool`) are preserved across reload; native tools are registered once at startup and are not managed by the WASM lifecycle.
+
+**Lock-ordering invariant (C6):** `Reload` must acquire `nativeToolsMu` before `mu` to avoid deadlock with `RegisterNativeTool` (which takes `nativeToolsMu` then `mu`). The native tool name snapshot is taken under `nativeToolsMu.RLock()` before `mu.Lock()` is acquired.

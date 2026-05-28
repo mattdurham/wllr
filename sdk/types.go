@@ -3,7 +3,6 @@ package sdk
 
 // NOTE: Any changes to this file must be reflected in the corresponding SPECS.md or NOTES.md.
 
-
 // EventType identifies a lifecycle event dispatched to extensions.
 type EventType string
 
@@ -86,6 +85,8 @@ const (
 	PermNetworkRead Permission = "network_read"
 	// PermNetworkWrite grants the extension the right to write to the network.
 	PermNetworkWrite Permission = "network_write"
+	// PermEnvRead grants the extension the right to read host environment variables.
+	PermEnvRead Permission = "env_read"
 )
 
 // ExtensionManifest is loaded from the JSON file alongside a .wasm extension.
@@ -118,7 +119,7 @@ const (
 	// MethodRequestPermission checks whether the calling extension holds a
 	// permission.  Returns an error response if the permission is not granted.
 	MethodRequestPermission = "request_permission"
-	// MethodGetEnv reads environment variables from the host. Requires PermFileRead (env is read-only).
+	// MethodGetEnv reads environment variables from the host. Requires PermEnvRead.
 	MethodGetEnv = "get_env"
 	// MethodGetOS returns the host operating system and architecture strings.
 	// Returns {"os": "darwin", "arch": "arm64"} (GOOS/GOARCH values).
