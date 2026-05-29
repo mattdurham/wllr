@@ -18,8 +18,13 @@ import (
 // Agent wraps a fantasy.LanguageModel with a message inbox and lifecycle management.
 // Each agent maintains its own conversation history and can run one turn at a time.
 type Agent struct {
-	lm   fantasy.LanguageModel
-	pool *AgentPool
+	lm fantasy.LanguageModel
+
+	// shutdownCtx is cancelled when the agent is closed (via pool.Close).
+	// The drain loop uses this instead of context.Background() to respect
+	// shutdown signals (H-con1/C9). Set in Spawn; cancelled in shutdown().
+	shutdownCtx context.Context
+	pool        *AgentPool
 
 	cancel context.CancelFunc
 
@@ -31,6 +36,8 @@ type Agent struct {
 
 	toolsFn func() []fantasy.AgentTool
 
+	shutdownCancel context.CancelFunc
+
 	id             string
 	name           string
 	modelName      string // for context window lookup
@@ -41,10 +48,11 @@ type Agent struct {
 	// compactHistory as priorSummary on subsequent compaction calls so the model
 	// can build an incremental summary. Protected by lastSummaryMu.
 	lastSummary string
-	opts        SpawnOpts
 	inbox       []sdk.Message
 
 	history []sdk.Message
+
+	opts SpawnOpts
 
 	// onToken is called per text delta. Set via SetOnToken before calling Submit.
 	onTokenMu sync.RWMutex
@@ -71,20 +79,14 @@ type Agent struct {
 	// cancelMu protects the cancel function for the current active turn.
 	cancelMu sync.Mutex
 
-	// shutdownCtx is cancelled when the agent is closed (via pool.Close).
-	// The drain loop uses this instead of context.Background() to respect
-	// shutdown signals (H-con1/C9). Set in Spawn; cancelled in shutdown().
-	shutdownCtx    context.Context
-	shutdownCancel context.CancelFunc
+	// history is the conversation history for this agent (all completed turns).
+	historyMu sync.Mutex
 
 	// isRunning is set to true while Submit's goroutine is active. A second
 	// Submit call that arrives while a turn is running appends content to the
 	// inbox instead of starting a new goroutine. The running goroutine drains
 	// inbox on completion (drain-until-empty pattern). See NOTES.md §17.
 	isRunning atomic.Bool
-
-	// history is the conversation history for this agent (all completed turns).
-	historyMu sync.Mutex
 }
 
 // SetOnToken sets the callback invoked for each text delta during streaming.
@@ -439,9 +441,7 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 		if content != "" {
 			a.history = append(a.history, sdk.Message{Role: sdk.RoleUser, Content: content})
 		} else {
-			for _, m := range inboxMsgs {
-				a.history = append(a.history, m)
-			}
+			a.history = append(a.history, inboxMsgs...)
 		}
 		a.history = append(a.history, sdk.Message{Role: sdk.RoleAssistant, Content: assistantText})
 		a.historyMu.Unlock()

@@ -1,8 +1,9 @@
 package extension
 
 import (
-	"github.com/mattdurham/wllr/sdk"
 	"sync"
+
+	"github.com/mattdurham/wllr/sdk"
 )
 
 // EventBus is a single, shared event stream. All events fired anywhere in

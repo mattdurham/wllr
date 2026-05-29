@@ -1,9 +1,10 @@
 package extension
 
 import (
+	"sync"
+
 	"github.com/mattdurham/wllr/sdk"
 	"github.com/tetratelabs/wazero/api"
-	"sync"
 )
 
 // Extension wraps a loaded WASM module.

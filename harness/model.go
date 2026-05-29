@@ -36,8 +36,6 @@ type Model struct {
 	// If nil, warnings are silently dropped.
 	logFn func(int, string)
 
-	statusBar StatusBar
-
 	mainAgentID string
 	activeModel string
 
@@ -45,13 +43,17 @@ type Model struct {
 	modalContent string
 	input        InputArea
 
-	chat ChatView
-
 	// Loaded extension paths for reload.
 	extPaths []string
 
 	// Autocomplete dropdown state.
 	suggestions []Command
+
+	console ConsoleView
+
+	statusBar StatusBar
+
+	chat ChatView
 
 	picker PickerView
 
@@ -62,7 +64,6 @@ type Model struct {
 
 	modalScroll    int
 	streaming      bool
-	console        ConsoleView
 	consoleVisible bool
 }
 
@@ -133,7 +134,7 @@ func New(pool *agent.AgentPool, mainAgentID string, h *extension.Host) Model {
 
 // SetProgram stores the bubbletea program reference so goroutines can call Send.
 // It also wires the main agent's onToken and onDone callbacks to the program.
-func (m *Model) SetProgram(p *tea.Program) {
+func (m *Model) SetProgram(p *tea.Program) { //nolint:gocyclo
 	m.program = p
 	if m.extHost != nil {
 		m.extHost.OnSetStatus = func(k, v string) {
@@ -1330,6 +1331,7 @@ func (m Model) consoleHeight() int {
 	}
 	return consolePaneLines
 }
+
 func (m Model) renderConsole() string {
 	width := m.width
 	if width < 20 {

@@ -154,7 +154,6 @@ type Host struct {
 	pendingMu sync.Mutex
 
 	// AgentInfo describes a running agent.
-
 }
 
 // NewHost creates a Host and installs the "env" host module into a fresh wazero runtime.
