@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mattdurham/wllr/extension"
+	"github.com/mattdurham/wllr/modules/extension"
 )
 
 // wllrExtensionsDir returns the default user extensions directory.
