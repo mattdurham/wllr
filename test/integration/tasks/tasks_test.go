@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/mattdurham/wllr/extension"
+	"github.com/mattdurham/wllr/modules/extension"
 )
 
 func setupTasksExtension(t *testing.T) (*extension.Host, func()) {
