@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -359,6 +360,10 @@ func TestAgent_Cancel_PlaceholderAllowsNextTurn(t *testing.T) {
 	// the assistant placeholder, so history ends with a valid user/assistant pair.
 	// A second agent with this history can immediately accept a new user message.
 	pool := agent.NewPool()
+	t.Cleanup(func() {
+		pool.Close("first")
+		pool.Close("second")
+	})
 
 	a, err := pool.Spawn("first", &slowLM{}, agent.SpawnOpts{})
 	if err != nil {
@@ -420,16 +425,51 @@ func TestAgent_Cancel_PlaceholderAllowsNextTurn(t *testing.T) {
 
 // --- C9/H-con1: shutdown context in drain loop ---
 
+// switchableLM completes the first turn instantly, then blocks subsequent turns
+// until their context is cancelled. This lets us guarantee the drain turn is
+// in-flight when pool.Close fires, making TestAgent_ShutdownCancels_DrainLoop
+// a deterministic regression test rather than a timing-dependent one.
+type switchableLM struct {
+	calls atomic.Int32
+}
+
+func (s *switchableLM) Model() string    { return "switchable" }
+func (s *switchableLM) Provider() string { return "test" }
+func (s *switchableLM) Stream(ctx context.Context, _ fantasy.Call) (fantasy.StreamResponse, error) {
+	if s.calls.Add(1) == 1 {
+		// First call: return immediately so the drain loop starts.
+		return func(yield func(fantasy.StreamPart) bool) {
+			yield(fantasy.StreamPart{
+				Type:         fantasy.StreamPartTypeFinish,
+				FinishReason: fantasy.FinishReasonStop,
+			})
+		}, nil
+	}
+	// Subsequent calls: block until context cancelled — drain turn is in-flight.
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+func (s *switchableLM) Generate(_ context.Context, _ fantasy.Call) (*fantasy.Response, error) {
+	return &fantasy.Response{}, nil
+}
+func (s *switchableLM) GenerateObject(_ context.Context, _ fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
+	return &fantasy.ObjectResponse{}, nil
+}
+func (s *switchableLM) StreamObject(_ context.Context, _ fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
+	return nil, nil
+}
+
 func TestAgent_ShutdownCancels_DrainLoop(t *testing.T) {
 	// H-con1/C9: pool.Close must cancel the drain loop by cancelling shutdownCtx.
 	// Without this fix, the drain loop would use context.Background() and ignore
 	// the shutdown signal for up to 10 minutes.
+	//
+	// switchableLM guarantees the drain turn is always in-flight when pool.Close
+	// fires: the first LM call returns instantly (completing turn 1 and starting
+	// the drain loop), and all subsequent calls block until context cancellation.
+	// This makes the test deterministic — no sleep or timing dependency.
 	pool := agent.NewPool()
-
-	// Use a slow LM that blocks so we can test shutdown during a drain turn.
-	// The inbox pattern: queue a message while a turn runs, then close the agent
-	// before the drain turn can complete.
-	lm := &tokenStreamLM{tokens: []string{"A"}}
+	lm := &switchableLM{}
 	a, err := pool.Spawn("main", lm, agent.SpawnOpts{})
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
@@ -440,35 +480,33 @@ func TestAgent_ShutdownCancels_DrainLoop(t *testing.T) {
 		done <- e
 	})
 
-	// Start first turn.
+	// Start first turn — completes quickly, triggering the drain loop.
 	a.Submit(testCtx(t), "turn 1")
 
-	// Queue a second message to trigger the drain loop.
+	// Queue a second message so the drain loop picks it up immediately.
 	a.AppendInbox(sdk.Message{Role: sdk.RoleUser, Content: "drain message"})
 
-	// Wait for first turn to finish (which will trigger drain loop).
+	// Wait for first turn to finish (drain turn is now in-flight and blocking).
 	select {
 	case <-done:
-		// First turn done; drain turn starts.
+		// First turn done — drain turn has started and is blocking in slowLM.
 	case <-time.After(5 * time.Second):
 		t.Fatal("timeout waiting for first turn")
 	}
 
-	// Immediately close the pool agent — shutdown context should cancel drain.
+	// Close the pool — shutdownCtx must be cancelled, unblocking the drain turn.
 	if err := pool.Close("main"); err != nil {
 		t.Fatalf("pool.Close: %v", err)
 	}
 
-	// The drain turn should terminate (context cancelled) — wait for done.
+	// The drain turn must terminate with context.Canceled — not time out.
 	select {
 	case err := <-done:
-		// Expected: drain loop terminated due to shutdown context.
-		// Error may be context.Canceled or nil (if drain completed before shutdown).
-		_ = err
+		if err != context.Canceled {
+			t.Errorf("drain turn error = %v, want context.Canceled", err)
+		}
 	case <-time.After(2 * time.Second):
-		// If we timeout here, the drain loop is ignoring the shutdown signal.
-		// This is the regression we're fixing.
-		t.Error("drain loop did not terminate after pool.Close — shutdownCtx not respected")
+		t.Error("drain loop did not terminate after pool.Close — shutdownCtx not propagated to drain turn")
 	}
 }
 
