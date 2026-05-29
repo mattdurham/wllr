@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/mattdurham/wllr/agent"
-	"github.com/mattdurham/wllr/extension"
+	"github.com/mattdurham/wllr/modules/agent"
+	"github.com/mattdurham/wllr/modules/extension"
 )
 
 // osCapabilityProvider implements extension.CapabilityProvider using host OS calls.
