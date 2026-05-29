@@ -13,8 +13,8 @@ import (
 	fantasyanthropicprovider "charm.land/fantasy/providers/anthropic"
 	fantasygoogleprovider "charm.land/fantasy/providers/google"
 	fantasyopenapiprovider "charm.land/fantasy/providers/openai"
-	"github.com/mattdurham/wllr/extension"
-	"github.com/mattdurham/wllr/sdk"
+	"github.com/mattdurham/wllr/modules/extension"
+	"github.com/mattdurham/wllr/modules/sdk"
 )
 
 // providerAnthropic is the canonical provider name for Anthropic.

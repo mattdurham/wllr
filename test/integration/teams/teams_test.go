@@ -19,10 +19,10 @@ import (
 
 	fantasy "charm.land/fantasy"
 	fantasyanthropicprovider "charm.land/fantasy/providers/anthropic"
-	"github.com/mattdurham/wllr/agent"
-	"github.com/mattdurham/wllr/extension"
-	"github.com/mattdurham/wllr/harness"
-	"github.com/mattdurham/wllr/sdk"
+	"github.com/mattdurham/wllr/modules/agent"
+	"github.com/mattdurham/wllr/modules/extension"
+	"github.com/mattdurham/wllr/modules/harness"
+	"github.com/mattdurham/wllr/modules/sdk"
 )
 
 // ─── Setup ───────────────────────────────────────────────────────────────────
