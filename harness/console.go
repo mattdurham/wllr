@@ -7,6 +7,7 @@ const consoleRingSize = 200
 func NewConsoleView() ConsoleView {
 	return ConsoleView{}
 }
+
 func (c *ConsoleView) Append(line string) {
 	c.lines[c.head] = line
 	c.head = (c.head + 1) % consoleRingSize
@@ -14,13 +15,16 @@ func (c *ConsoleView) Append(line string) {
 		c.count++
 	}
 }
+
 func (c *ConsoleView) Clear() {
 	c.count = 0
 	c.head = 0
 }
+
 func (c *ConsoleView) IsEmpty() bool {
 	return c.count == 0
 }
+
 func (c *ConsoleView) View(width, height int) string {
 	if height <= 0 || c.count == 0 {
 		return ""

@@ -2,6 +2,7 @@ package main
 
 import "encoding/json"
 
+//lint:ignore U1000 used in WASM build (wasip1 tag)
 type toolCallEntry struct {
 	Type       string          `json:"type"`
 	ID         string          `json:"id"`

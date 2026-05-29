@@ -1,9 +1,10 @@
 package agent
 
 import (
-	"charm.land/fantasy"
 	"sync"
 	"sync/atomic"
+
+	"charm.land/fantasy"
 )
 
 // AgentPool manages all live agents and a shared token counter.

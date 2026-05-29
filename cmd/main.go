@@ -71,10 +71,8 @@ func main() {
 
 	// Build extension host — extension logs flow through slog with "extension" attribute.
 	h := extension.NewHost(nil)
-	h.OnExec =
-
-		// Wire host capabilities.
-		makeExecHandler(h)
+	h.OnExec = // Wire host capabilities.
+	makeExecHandler(h)
 
 	h.OnGetEnv = func(name string) (string, error) {
 		if name != "" {

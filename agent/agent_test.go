@@ -449,12 +449,15 @@ func (s *switchableLM) Stream(ctx context.Context, _ fantasy.Call) (fantasy.Stre
 	<-ctx.Done()
 	return nil, ctx.Err()
 }
+
 func (s *switchableLM) Generate(_ context.Context, _ fantasy.Call) (*fantasy.Response, error) {
 	return &fantasy.Response{}, nil
 }
+
 func (s *switchableLM) GenerateObject(_ context.Context, _ fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
 	return &fantasy.ObjectResponse{}, nil
 }
+
 func (s *switchableLM) StreamObject(_ context.Context, _ fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
 	return nil, nil
 }
@@ -520,12 +523,15 @@ func (p *panicLM) Provider() string { return "test" }
 func (p *panicLM) Stream(_ context.Context, _ fantasy.Call) (fantasy.StreamResponse, error) {
 	panic("simulated LM panic")
 }
+
 func (p *panicLM) Generate(_ context.Context, _ fantasy.Call) (*fantasy.Response, error) {
 	panic("simulated LM panic")
 }
+
 func (p *panicLM) GenerateObject(_ context.Context, _ fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
 	return nil, nil
 }
+
 func (p *panicLM) StreamObject(_ context.Context, _ fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
 	return nil, nil
 }
