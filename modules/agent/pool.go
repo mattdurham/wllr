@@ -15,6 +15,10 @@ import (
 	"github.com/mattdurham/wllr/modules/sdk"
 )
 
+// MainAgentID is the conventional ID of the primary agent the user interacts with.
+// All sub-agents derive their IDs from this (e.g. "main/coder", "main/team/worker").
+const MainAgentID = "main"
+
 var (
 	// ErrAgentExists is returned when an agent with the same ID is spawned twice.
 	ErrAgentExists = errors.New("agent: ID already exists")

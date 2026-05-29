@@ -11,7 +11,7 @@ The `Session` interface defines the public contract:
 | Method | Description |
 |--------|-------------|
 | `Start(ctx)` | Fires `session_start` events via the extension host. No-op if host is nil. |
-| `Submit(ctx, content, display)` | Sends user input to the main agent's inbox. Returns error if pool is nil. |
+| `Submit(ctx, content, display)` | Sends user input to the main agent's inbox. The `display` parameter is accepted by the interface but is silently discarded by the `wire.go` implementation — it is not forwarded to the pool. Returns error if pool is nil. |
 | `Cancel()` | Cancels all active agent turns. No-op if pool is nil. |
 | `ReloadExtensions(ctx, paths)` | Hot-reloads WASM extensions. No-op if host is nil. |
 | `Close(ctx)` | Cancels all agents then closes the extension host. |
@@ -30,7 +30,7 @@ The `Session` interface defines the public contract:
 func Wire(host *extension.Host, pool *agent.AgentPool, mainAgentID string, renderer harness.Renderer) Session
 ```
 
-Wire creates a `ConversationSession`. The caller is responsible for installing interface bridges on the host (via `host.SetAgentBridge`, `host.SetTeamBridge`, `host.SetUIBridge`, `host.SetCapabilities`, `host.SetMCPBridge`) before or after calling Wire.
+Wire creates a `ConversationSession`. Wire itself does NOT install any interface bridges on the host. Bridge installation is the caller's responsibility: `harness.Model.New()` installs `earlyUIBridge` and `earlyAgentBridge` stubs immediately, and `harness.Model.SetProgram()` replaces them with the full `harnessUIBridge`, `harnessAgentBridge`, and `harnessTeamBridge`. `CapabilityProvider` is installed by `cmd/main.go`. Wire only wires the renderer for `Start`'s `session_start` dispatch.
 
 ## 4. Lifecycle Sequence
 

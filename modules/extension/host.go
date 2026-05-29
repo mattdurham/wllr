@@ -87,9 +87,6 @@ type Host struct {
 	// pendingTools holds channels waiting for tool_result responses.
 	// Keyed by toolCallID.
 	pendingMu sync.Mutex
-
-	// AgentInfo describes a running agent.
-
 }
 
 // NewHost creates a Host and installs the "env" host module into a fresh wazero runtime.
@@ -127,28 +124,94 @@ func NewHost(logger *slog.Logger) *Host {
 // Replaces the individual OnAgentSpawn, OnAgentClose, OnAgentSendMessage,
 // OnAgentRun, OnAgentList, OnAgentTokenCount callback fields.
 // Must be called before loading extensions.
-func (h *Host) SetAgentBridge(b AgentBridge) { h.agents = b }
+func (h *Host) SetAgentBridge(b AgentBridge) {
+	h.mu.Lock()
+	h.agents = b
+	h.mu.Unlock()
+}
 
 // SetTeamBridge installs the team management bridge.
 // Replaces the individual OnTeamCreate, OnTeamClose, OnTeamAddMember,
 // OnTeamRemoveMember, OnTeamGetInfo, OnTeamList callback fields.
-func (h *Host) SetTeamBridge(b TeamBridge) { h.teams = b }
+// Must be called before loading extensions.
+func (h *Host) SetTeamBridge(b TeamBridge) {
+	h.mu.Lock()
+	h.teams = b
+	h.mu.Unlock()
+}
 
 // SetUIBridge installs the UI bridge.
 // Replaces the UI-related On* callback fields.
-func (h *Host) SetUIBridge(b UIBridge) { h.ui = b }
+// Must be called before loading extensions.
+func (h *Host) SetUIBridge(b UIBridge) {
+	h.mu.Lock()
+	h.ui = b
+	h.mu.Unlock()
+}
 
 // SetCapabilities installs the capability provider.
 // Replaces OnExec, OnGetEnv, OnReadFile, OnWriteFile, OnHTTPPost, OnConfigRead.
-func (h *Host) SetCapabilities(c CapabilityProvider) { h.capabilities = c }
+// Must be called before loading extensions.
+func (h *Host) SetCapabilities(c CapabilityProvider) {
+	h.mu.Lock()
+	h.capabilities = c
+	h.mu.Unlock()
+}
 
 // SetMCPBridge installs the MCP bridge.
 // Replaces OnMCPSpawn, OnMCPClose, OnMCPSend, OnMCPRead.
-func (h *Host) SetMCPBridge(m MCPBridge) { h.mcp = m }
+// Must be called before loading extensions.
+func (h *Host) SetMCPBridge(m MCPBridge) {
+	h.mu.Lock()
+	h.mcp = m
+	h.mu.Unlock()
+}
 
 // AgentBridgeSet reports whether an AgentBridge has been installed.
 // Used in tests to verify wiring.
-func (h *Host) AgentBridgeSet() bool { return h.agents != nil }
+func (h *Host) AgentBridgeSet() bool {
+	return h.agentBridge() != nil
+}
+
+// agentBridge snapshots the current AgentBridge under h.mu.RLock.
+func (h *Host) agentBridge() AgentBridge {
+	h.mu.RLock()
+	b := h.agents
+	h.mu.RUnlock()
+	return b
+}
+
+// teamBridge snapshots the current TeamBridge under h.mu.RLock.
+func (h *Host) teamBridge() TeamBridge {
+	h.mu.RLock()
+	b := h.teams
+	h.mu.RUnlock()
+	return b
+}
+
+// uiBridge snapshots the current UIBridge under h.mu.RLock.
+func (h *Host) uiBridge() UIBridge {
+	h.mu.RLock()
+	b := h.ui
+	h.mu.RUnlock()
+	return b
+}
+
+// capabilityProvider snapshots the current CapabilityProvider under h.mu.RLock.
+func (h *Host) capabilityProvider() CapabilityProvider {
+	h.mu.RLock()
+	c := h.capabilities
+	h.mu.RUnlock()
+	return c
+}
+
+// mcpBridge snapshots the current MCPBridge under h.mu.RLock.
+func (h *Host) mcpBridge() MCPBridge {
+	h.mu.RLock()
+	m := h.mcp
+	h.mu.RUnlock()
+	return m
+}
 
 // installEnvModule registers the "env" host module that extensions import.
 func (h *Host) installEnvModule() error {
@@ -321,8 +384,8 @@ func (h *Host) buildDispatch() map[string]func(ctx context.Context, ext *Extensi
 			return h.handleStoreGet(ext, req)
 		},
 		sdk.MethodAbort: func(_ context.Context, _ *Extension, _ sdk.HostCallRequest) sdk.HostCallResponse {
-			if h.ui != nil {
-				h.ui.Abort()
+			if h.uiBridge() != nil {
+				h.uiBridge().Abort()
 			}
 			return sdk.HostCallResponse{}
 		},
@@ -455,8 +518,8 @@ func (h *Host) handleRegisterTool(ext *Extension, req sdk.HostCallRequest) sdk.H
 	if exists && !tool.Override {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("tool already registered: %s", tool.Name)}
 	}
-	if h.ui != nil {
-		if err := h.ui.RegisterTool(tool); err != nil {
+	if h.uiBridge() != nil {
+		if err := h.uiBridge().RegisterTool(tool); err != nil {
 			return sdk.HostCallResponse{Error: err.Error()}
 		}
 	}
@@ -471,8 +534,8 @@ func (h *Host) handleRegisterCommand(req sdk.HostCallRequest) sdk.HostCallRespon
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("register_command: %v", err)}
 	}
-	if h.ui != nil {
-		_ = h.ui.RegisterCommand(params.Name, params.Desc)
+	if h.uiBridge() != nil {
+		_ = h.uiBridge().RegisterCommand(params.Name, params.Desc)
 	}
 	return sdk.HostCallResponse{}
 }
@@ -482,8 +545,8 @@ func (h *Host) handleSendMessage(req sdk.HostCallRequest) sdk.HostCallResponse {
 	if err := json.Unmarshal(req.Params, &msg); err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("send_message: %v", err)}
 	}
-	if h.ui != nil {
-		h.ui.SendMessage(msg)
+	if h.uiBridge() != nil {
+		h.uiBridge().SendMessage(msg)
 	}
 	return sdk.HostCallResponse{}
 }
@@ -496,8 +559,8 @@ func (h *Host) handleSetStatus(req sdk.HostCallRequest) sdk.HostCallResponse {
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("set_status: %v", err)}
 	}
-	if h.ui != nil {
-		h.ui.SetStatus(params.Key, params.Value)
+	if h.uiBridge() != nil {
+		h.uiBridge().SetStatus(params.Key, params.Value)
 	}
 	return sdk.HostCallResponse{}
 }
@@ -509,14 +572,14 @@ func (h *Host) handleNotify(req sdk.HostCallRequest) sdk.HostCallResponse {
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("notify: %v", err)}
 	}
-	if h.ui != nil {
-		h.ui.Notify(params.Text)
+	if h.uiBridge() != nil {
+		h.uiBridge().Notify(params.Text)
 	}
 	return sdk.HostCallResponse{}
 }
 
 func (h *Host) handleModal(req sdk.HostCallRequest) sdk.HostCallResponse {
-	if h.ui == nil {
+	if h.uiBridge() == nil {
 		return sdk.HostCallResponse{Error: "modal: not supported by host"}
 	}
 	var params struct {
@@ -525,12 +588,12 @@ func (h *Host) handleModal(req sdk.HostCallRequest) sdk.HostCallResponse {
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("modal: %v", err)}
 	}
-	h.ui.ShowModal(params.Text)
+	h.uiBridge().ShowModal(params.Text)
 	return sdk.HostCallResponse{}
 }
 
 func (h *Host) handleAppendSystemPrompt(req sdk.HostCallRequest) sdk.HostCallResponse {
-	if h.ui == nil {
+	if h.uiBridge() == nil {
 		return sdk.HostCallResponse{Error: "append_system_prompt: not supported by host"}
 	}
 	var params struct {
@@ -539,12 +602,12 @@ func (h *Host) handleAppendSystemPrompt(req sdk.HostCallRequest) sdk.HostCallRes
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("append_system_prompt: %v", err)}
 	}
-	h.ui.AppendSystemPrompt(params.Text)
+	h.uiBridge().AppendSystemPrompt(params.Text)
 	return sdk.HostCallResponse{}
 }
 
 func (h *Host) handleSetSystemPrompt(req sdk.HostCallRequest) sdk.HostCallResponse {
-	if h.ui == nil {
+	if h.uiBridge() == nil {
 		return sdk.HostCallResponse{Error: "set_system_prompt: not supported by host"}
 	}
 	var params struct {
@@ -553,7 +616,7 @@ func (h *Host) handleSetSystemPrompt(req sdk.HostCallRequest) sdk.HostCallRespon
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("set_system_prompt: %v", err)}
 	}
-	h.ui.SetSystemPrompt(params.Prompt)
+	h.uiBridge().SetSystemPrompt(params.Prompt)
 	return sdk.HostCallResponse{}
 }
 
@@ -561,7 +624,7 @@ func (h *Host) handleExec(ctx context.Context, ext *Extension, req sdk.HostCallR
 	if ext == nil || !ext.HasPermission(sdk.PermExec) {
 		return sdk.HostCallResponse{Error: "exec: permission denied: requires exec"}
 	}
-	if h.capabilities == nil {
+	if h.capabilityProvider() == nil {
 		return sdk.HostCallResponse{Error: "exec: not supported by host"}
 	}
 	var params struct {
@@ -571,7 +634,7 @@ func (h *Host) handleExec(ctx context.Context, ext *Extension, req sdk.HostCallR
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("exec: %v", err)}
 	}
-	output, err := h.capabilities.Exec(ctx, params.Command, params.Dir, nil)
+	output, err := h.capabilityProvider().Exec(ctx, params.Command, params.Dir, nil)
 	if err != nil {
 		result, _ := json.Marshal(map[string]string{"output": output, "error": err.Error()})
 		return sdk.HostCallResponse{Result: result}
@@ -581,7 +644,7 @@ func (h *Host) handleExec(ctx context.Context, ext *Extension, req sdk.HostCallR
 }
 
 func (h *Host) handleGetEnv(ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
-	if h.capabilities == nil {
+	if h.capabilityProvider() == nil {
 		return sdk.HostCallResponse{Error: "get_env: not supported by host"}
 	}
 	var params struct {
@@ -590,7 +653,7 @@ func (h *Host) handleGetEnv(ext *Extension, req sdk.HostCallRequest) sdk.HostCal
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("get_env: %v", err)}
 	}
-	output, err := h.capabilities.GetEnv(params.Name)
+	output, err := h.capabilityProvider().GetEnv(params.Name)
 	if err != nil {
 		return sdk.HostCallResponse{Error: err.Error()}
 	}
@@ -602,7 +665,7 @@ func (h *Host) handleReadFile(ext *Extension, req sdk.HostCallRequest) sdk.HostC
 	if ext == nil || !ext.HasPermission(sdk.PermFileRead) {
 		return sdk.HostCallResponse{Error: "read_file: permission denied: requires file_read"}
 	}
-	if h.capabilities == nil {
+	if h.capabilityProvider() == nil {
 		return sdk.HostCallResponse{Error: "read_file: not supported by host"}
 	}
 	var params struct {
@@ -614,7 +677,7 @@ func (h *Host) handleReadFile(ext *Extension, req sdk.HostCallRequest) sdk.HostC
 	if params.Path == "" {
 		return sdk.HostCallResponse{Error: "read_file: path is required"}
 	}
-	content, err := h.capabilities.ReadFile(params.Path)
+	content, err := h.capabilityProvider().ReadFile(params.Path)
 	if err != nil {
 		return sdk.HostCallResponse{Error: err.Error()}
 	}
@@ -626,7 +689,7 @@ func (h *Host) handleWriteFile(ext *Extension, req sdk.HostCallRequest) sdk.Host
 	if ext == nil || !ext.HasPermission(sdk.PermFileWrite) {
 		return sdk.HostCallResponse{Error: "write_file: permission denied: requires file_write"}
 	}
-	if h.capabilities == nil {
+	if h.capabilityProvider() == nil {
 		return sdk.HostCallResponse{Error: "write_file: not supported by host"}
 	}
 	var params struct {
@@ -639,7 +702,7 @@ func (h *Host) handleWriteFile(ext *Extension, req sdk.HostCallRequest) sdk.Host
 	if params.Path == "" {
 		return sdk.HostCallResponse{Error: "write_file: path is required"}
 	}
-	if err := h.capabilities.WriteFile(params.Path, params.Content); err != nil {
+	if err := h.capabilityProvider().WriteFile(params.Path, params.Content); err != nil {
 		return sdk.HostCallResponse{Error: err.Error()}
 	}
 	result, _ := json.Marshal(map[string]string{"written": params.Path})
@@ -650,7 +713,7 @@ func (h *Host) handleHTTPPost(ext *Extension, req sdk.HostCallRequest) sdk.HostC
 	if ext == nil || !ext.HasPermission(sdk.PermNetworkWrite) {
 		return sdk.HostCallResponse{Error: "http_post: permission denied: requires network_write"}
 	}
-	if h.capabilities == nil {
+	if h.capabilityProvider() == nil {
 		return sdk.HostCallResponse{Error: "http_post: not supported by host"}
 	}
 	var params struct {
@@ -664,7 +727,7 @@ func (h *Host) handleHTTPPost(ext *Extension, req sdk.HostCallRequest) sdk.HostC
 	if params.URL == "" {
 		return sdk.HostCallResponse{Error: "http_post: url is required"}
 	}
-	statusCode, respBody, err := h.capabilities.HTTPPost(params.URL, params.Headers, params.Body)
+	statusCode, respBody, err := h.capabilityProvider().HTTPPost(params.URL, params.Headers, params.Body)
 	if err != nil {
 		return sdk.HostCallResponse{Error: err.Error()}
 	}
@@ -673,14 +736,14 @@ func (h *Host) handleHTTPPost(ext *Extension, req sdk.HostCallRequest) sdk.HostC
 }
 
 func (h *Host) handleConfigRead(ext *Extension) sdk.HostCallResponse {
-	if h.capabilities == nil {
+	if h.capabilityProvider() == nil {
 		return sdk.HostCallResponse{Error: "config_read: not supported by host"}
 	}
 	group := ""
 	if ext != nil {
 		group = ext.name
 	}
-	data, err := h.capabilities.ConfigRead(group)
+	data, err := h.capabilityProvider().ConfigRead(group)
 	if err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("config_read: %v", err)}
 	}
@@ -727,8 +790,8 @@ func (h *Host) handleToolResult(req sdk.HostCallRequest) sdk.HostCallResponse {
 		ch <- toolResult{Result: params.Result, IsError: params.IsError}
 	}
 
-	if h.ui != nil {
-		h.ui.ToolResult(params.ToolCallID, params.Result, params.IsError)
+	if h.uiBridge() != nil {
+		h.uiBridge().ToolResult(params.ToolCallID, params.Result, params.IsError)
 	}
 	return sdk.HostCallResponse{}
 }
@@ -767,7 +830,7 @@ func (h *Host) handleStoreGet(ext *Extension, req sdk.HostCallRequest) sdk.HostC
 }
 
 func (h *Host) handleAgentSpawn(req sdk.HostCallRequest) sdk.HostCallResponse {
-	if h.agents == nil {
+	if h.agentBridge() == nil {
 		return sdk.HostCallResponse{Error: "agent_spawn: not supported by host"}
 	}
 	var params struct {
@@ -781,7 +844,7 @@ func (h *Host) handleAgentSpawn(req sdk.HostCallRequest) sdk.HostCallResponse {
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("agent_spawn: %v", err)}
 	}
-	if err := h.agents.Spawn(context.Background(), SpawnRequest{
+	if err := h.agentBridge().Spawn(context.Background(), SpawnRequest{
 		ID:             params.ID,
 		Name:           params.Name,
 		SystemPrompt:   params.SystemPrompt,
@@ -796,7 +859,7 @@ func (h *Host) handleAgentSpawn(req sdk.HostCallRequest) sdk.HostCallResponse {
 }
 
 func (h *Host) handleAgentClose(req sdk.HostCallRequest) sdk.HostCallResponse {
-	if h.agents == nil {
+	if h.agentBridge() == nil {
 		return sdk.HostCallResponse{Error: "agent_close: not supported by host"}
 	}
 	var params struct {
@@ -805,14 +868,14 @@ func (h *Host) handleAgentClose(req sdk.HostCallRequest) sdk.HostCallResponse {
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("agent_close: %v", err)}
 	}
-	if err := h.agents.Close(params.ID); err != nil {
+	if err := h.agentBridge().Close(params.ID); err != nil {
 		return sdk.HostCallResponse{Error: err.Error()}
 	}
 	return sdk.HostCallResponse{}
 }
 
 func (h *Host) handleAgentSendMessage(req sdk.HostCallRequest) sdk.HostCallResponse {
-	if h.agents == nil {
+	if h.agentBridge() == nil {
 		return sdk.HostCallResponse{Error: "agent_send_message: not supported by host"}
 	}
 	var params struct {
@@ -822,14 +885,14 @@ func (h *Host) handleAgentSendMessage(req sdk.HostCallRequest) sdk.HostCallRespo
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("agent_send_message: %v", err)}
 	}
-	if err := h.agents.SendMessage(params.ID, params.Message); err != nil {
+	if err := h.agentBridge().SendMessage(params.ID, params.Message); err != nil {
 		return sdk.HostCallResponse{Error: err.Error()}
 	}
 	return sdk.HostCallResponse{}
 }
 
 func (h *Host) handleAgentRun(req sdk.HostCallRequest) sdk.HostCallResponse {
-	if h.agents == nil {
+	if h.agentBridge() == nil {
 		return sdk.HostCallResponse{Error: "agent_run: not supported by host"}
 	}
 	var params struct {
@@ -838,17 +901,17 @@ func (h *Host) handleAgentRun(req sdk.HostCallRequest) sdk.HostCallResponse {
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("agent_run: %v", err)}
 	}
-	if err := h.agents.Run(params.ID); err != nil {
+	if err := h.agentBridge().Run(params.ID); err != nil {
 		return sdk.HostCallResponse{Error: err.Error()}
 	}
 	return sdk.HostCallResponse{}
 }
 
 func (h *Host) handleAgentList() sdk.HostCallResponse {
-	if h.agents == nil {
+	if h.agentBridge() == nil {
 		return sdk.HostCallResponse{Error: "agent_list: not supported by host"}
 	}
-	agents, err := h.agents.List()
+	agents, err := h.agentBridge().List()
 	if err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("agent_list: %v", err)}
 	}
@@ -857,16 +920,16 @@ func (h *Host) handleAgentList() sdk.HostCallResponse {
 }
 
 func (h *Host) handleAgentTokenCount() sdk.HostCallResponse {
-	if h.agents == nil {
+	if h.agentBridge() == nil {
 		return sdk.HostCallResponse{Error: "agent_token_count: not supported by host"}
 	}
-	count := h.agents.TokenCount()
+	count := h.agentBridge().TokenCount()
 	result, _ := json.Marshal(map[string]int64{"count": count})
 	return sdk.HostCallResponse{Result: result}
 }
 
 func (h *Host) handleTeamCreate(req sdk.HostCallRequest) sdk.HostCallResponse {
-	if h.teams == nil {
+	if h.teamBridge() == nil {
 		return sdk.HostCallResponse{Error: "team_create: not supported by host"}
 	}
 	var params struct {
@@ -876,7 +939,7 @@ func (h *Host) handleTeamCreate(req sdk.HostCallRequest) sdk.HostCallResponse {
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("team_create: %v", err)}
 	}
-	if err := h.teams.Create(params.ID, params.Name); err != nil {
+	if err := h.teamBridge().Create(params.ID, params.Name); err != nil {
 		return sdk.HostCallResponse{Error: err.Error()}
 	}
 	result, _ := json.Marshal(map[string]string{"team_id": params.ID, "status": "created"})
@@ -884,7 +947,7 @@ func (h *Host) handleTeamCreate(req sdk.HostCallRequest) sdk.HostCallResponse {
 }
 
 func (h *Host) handleTeamClose(req sdk.HostCallRequest) sdk.HostCallResponse {
-	if h.teams == nil {
+	if h.teamBridge() == nil {
 		return sdk.HostCallResponse{Error: "team_close: not supported by host"}
 	}
 	var params struct {
@@ -893,14 +956,14 @@ func (h *Host) handleTeamClose(req sdk.HostCallRequest) sdk.HostCallResponse {
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("team_close: %v", err)}
 	}
-	if err := h.teams.Close(context.Background(), params.ID); err != nil {
+	if err := h.teamBridge().Close(context.Background(), params.ID); err != nil {
 		return sdk.HostCallResponse{Error: err.Error()}
 	}
 	return sdk.HostCallResponse{}
 }
 
 func (h *Host) handleTeamAddMember(req sdk.HostCallRequest) sdk.HostCallResponse {
-	if h.teams == nil {
+	if h.teamBridge() == nil {
 		return sdk.HostCallResponse{Error: "team_add_member: not supported by host"}
 	}
 	var params struct {
@@ -910,14 +973,14 @@ func (h *Host) handleTeamAddMember(req sdk.HostCallRequest) sdk.HostCallResponse
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("team_add_member: %v", err)}
 	}
-	if err := h.teams.AddMember(params.TeamID, params.AgentID); err != nil {
+	if err := h.teamBridge().AddMember(params.TeamID, params.AgentID); err != nil {
 		return sdk.HostCallResponse{Error: err.Error()}
 	}
 	return sdk.HostCallResponse{}
 }
 
 func (h *Host) handleTeamRemoveMember(req sdk.HostCallRequest) sdk.HostCallResponse {
-	if h.teams == nil {
+	if h.teamBridge() == nil {
 		return sdk.HostCallResponse{Error: "team_remove_member: not supported by host"}
 	}
 	var params struct {
@@ -927,14 +990,14 @@ func (h *Host) handleTeamRemoveMember(req sdk.HostCallRequest) sdk.HostCallRespo
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("team_remove_member: %v", err)}
 	}
-	if err := h.teams.RemoveMember(params.TeamID, params.AgentID); err != nil {
+	if err := h.teamBridge().RemoveMember(params.TeamID, params.AgentID); err != nil {
 		return sdk.HostCallResponse{Error: err.Error()}
 	}
 	return sdk.HostCallResponse{}
 }
 
 func (h *Host) handleTeamGetInfo(req sdk.HostCallRequest) sdk.HostCallResponse {
-	if h.teams == nil {
+	if h.teamBridge() == nil {
 		return sdk.HostCallResponse{Error: "team_get_info: not supported by host"}
 	}
 	var params struct {
@@ -946,7 +1009,7 @@ func (h *Host) handleTeamGetInfo(req sdk.HostCallRequest) sdk.HostCallResponse {
 	if params.TeamID == "" {
 		return sdk.HostCallResponse{Error: "team_get_info: team_id is required"}
 	}
-	members, err := h.teams.GetMembers(params.TeamID)
+	members, err := h.teamBridge().GetMembers(params.TeamID)
 	if err != nil {
 		return sdk.HostCallResponse{Error: err.Error()}
 	}
@@ -955,10 +1018,10 @@ func (h *Host) handleTeamGetInfo(req sdk.HostCallRequest) sdk.HostCallResponse {
 }
 
 func (h *Host) handleTeamList() sdk.HostCallResponse {
-	if h.teams == nil {
+	if h.teamBridge() == nil {
 		return sdk.HostCallResponse{Error: "team_list: not supported by host"}
 	}
-	teams, err := h.teams.List()
+	teams, err := h.teamBridge().List()
 	if err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("team_list: %v", err)}
 	}
@@ -967,26 +1030,26 @@ func (h *Host) handleTeamList() sdk.HostCallResponse {
 }
 
 func (h *Host) handleShowPicker(req sdk.HostCallRequest) sdk.HostCallResponse {
-	if h.ui == nil {
+	if h.uiBridge() == nil {
 		return sdk.HostCallResponse{Error: "show_picker: not supported by host"}
 	}
 	var params sdk.ShowPickerParams
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("show_picker: %v", err)}
 	}
-	h.ui.ShowPicker(params.Title, params.Items, params.Callback)
+	h.uiBridge().ShowPicker(params.Title, params.Items, params.Callback)
 	return sdk.HostCallResponse{}
 }
 
 func (h *Host) handleAgentResetHistory(req sdk.HostCallRequest) sdk.HostCallResponse {
-	if h.ui == nil {
+	if h.uiBridge() == nil {
 		return sdk.HostCallResponse{Error: "agent_reset_history: not supported by host"}
 	}
 	var params sdk.AgentResetHistoryParams
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("agent_reset_history: %v", err)}
 	}
-	if err := h.ui.ResetHistory(params.Messages); err != nil {
+	if err := h.uiBridge().ResetHistory(params.Messages); err != nil {
 		return sdk.HostCallResponse{Error: err.Error()}
 	}
 	return sdk.HostCallResponse{}
@@ -996,7 +1059,7 @@ func (h *Host) handleMCPSpawn(ext *Extension, req sdk.HostCallRequest) sdk.HostC
 	if ext == nil || !ext.HasPermission(sdk.PermExec) {
 		return sdk.HostCallResponse{Error: "mcp_spawn: permission denied: requires exec"}
 	}
-	if h.mcp == nil {
+	if h.mcpBridge() == nil {
 		return sdk.HostCallResponse{Error: "mcp_spawn: not supported by host"}
 	}
 	var params struct {
@@ -1008,7 +1071,7 @@ func (h *Host) handleMCPSpawn(ext *Extension, req sdk.HostCallRequest) sdk.HostC
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("mcp_spawn: %v", err)}
 	}
-	if err := h.mcp.Spawn(params.ID, params.Command, params.Args, params.Env); err != nil {
+	if err := h.mcpBridge().Spawn(params.ID, params.Command, params.Args, params.Env); err != nil {
 		return sdk.HostCallResponse{Error: err.Error()}
 	}
 	result, _ := json.Marshal(map[string]string{"id": params.ID, "status": "spawned"})
@@ -1016,7 +1079,7 @@ func (h *Host) handleMCPSpawn(ext *Extension, req sdk.HostCallRequest) sdk.HostC
 }
 
 func (h *Host) handleMCPClose(req sdk.HostCallRequest) sdk.HostCallResponse {
-	if h.mcp == nil {
+	if h.mcpBridge() == nil {
 		return sdk.HostCallResponse{Error: "mcp_close: not supported by host"}
 	}
 	var params struct {
@@ -1025,14 +1088,14 @@ func (h *Host) handleMCPClose(req sdk.HostCallRequest) sdk.HostCallResponse {
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("mcp_close: %v", err)}
 	}
-	if err := h.mcp.Close(params.ID); err != nil {
+	if err := h.mcpBridge().Close(params.ID); err != nil {
 		return sdk.HostCallResponse{Error: err.Error()}
 	}
 	return sdk.HostCallResponse{}
 }
 
 func (h *Host) handleMCPSend(req sdk.HostCallRequest) sdk.HostCallResponse {
-	if h.mcp == nil {
+	if h.mcpBridge() == nil {
 		return sdk.HostCallResponse{Error: "mcp_send: not supported by host"}
 	}
 	var params struct {
@@ -1042,14 +1105,14 @@ func (h *Host) handleMCPSend(req sdk.HostCallRequest) sdk.HostCallResponse {
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("mcp_send: %v", err)}
 	}
-	if err := h.mcp.Send(params.ID, []byte(params.Data)); err != nil {
+	if err := h.mcpBridge().Send(params.ID, []byte(params.Data)); err != nil {
 		return sdk.HostCallResponse{Error: err.Error()}
 	}
 	return sdk.HostCallResponse{}
 }
 
 func (h *Host) handleMCPRead(req sdk.HostCallRequest) sdk.HostCallResponse {
-	if h.mcp == nil {
+	if h.mcpBridge() == nil {
 		return sdk.HostCallResponse{Error: "mcp_read: not supported by host"}
 	}
 	var params struct {
@@ -1058,7 +1121,7 @@ func (h *Host) handleMCPRead(req sdk.HostCallRequest) sdk.HostCallResponse {
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("mcp_read: %v", err)}
 	}
-	data, err := h.mcp.Read(params.ID)
+	data, err := h.mcpBridge().Read(params.ID)
 	if err != nil {
 		return sdk.HostCallResponse{Error: err.Error()}
 	}
@@ -1209,8 +1272,8 @@ func (h *Host) RegisterNativeTool(tool sdk.Tool, fn func(ctx context.Context, in
 	h.registeredTools[tool.Name] = tool
 	h.mu.Unlock()
 
-	if h.ui != nil {
-		_ = h.ui.RegisterTool(tool)
+	if h.uiBridge() != nil {
+		_ = h.uiBridge().RegisterTool(tool)
 	}
 }
 
@@ -1224,8 +1287,8 @@ func (h *Host) RegisterToolSchema(tool sdk.Tool) {
 		h.registeredTools[tool.Name] = tool
 	}
 	h.mu.Unlock()
-	if h.ui != nil {
-		_ = h.ui.RegisterTool(tool)
+	if h.uiBridge() != nil {
+		_ = h.uiBridge().RegisterTool(tool)
 	}
 }
 
@@ -1273,8 +1336,8 @@ func (h *Host) ExecuteTool(
 		afterEvt := sdk.Event{Type: sdk.EventAfterToolCall, Payload: afterPayload}
 		_, _ = h.DispatchEvent(ctx, afterEvt)
 
-		if h.ui != nil {
-			h.ui.AfterToolCall(toolCallID, toolName, result, isError)
+		if h.uiBridge() != nil {
+			h.uiBridge().AfterToolCall(toolCallID, toolName, result, isError)
 		}
 		return tr, nil
 	}
@@ -1310,9 +1373,9 @@ func (h *Host) ExecuteTool(
 		afterEvt := sdk.Event{Type: sdk.EventAfterToolCall, Payload: afterPayload}
 		_, _ = h.DispatchEvent(ctx, afterEvt)
 
-		// Invoke the harness callback if set.
-		if h.ui != nil {
-			h.ui.AfterToolCall(toolCallID, toolName, result.Result, result.IsError)
+		// Notify the UI bridge so the TUI can update the tool call display.
+		if ui := h.uiBridge(); ui != nil {
+			ui.AfterToolCall(toolCallID, toolName, result.Result, result.IsError)
 		}
 		return result, nil
 	case <-ctx.Done():
@@ -1339,8 +1402,8 @@ func (h *Host) SendToolResult(toolCallID, result string, isError bool) {
 		ch <- toolResult{Result: result, IsError: isError}
 	}
 
-	if h.ui != nil {
-		h.ui.ToolResult(toolCallID, result, isError)
+	if h.uiBridge() != nil {
+		h.uiBridge().ToolResult(toolCallID, result, isError)
 	}
 }
 
@@ -1545,19 +1608,26 @@ func readNullTerminatedOrJSON(mem api.Memory, ptr uint32) []byte {
 
 // Reload closes all extensions and reloads them from the given paths.
 func (h *Host) Reload(ctx context.Context, paths []string) error {
+	// Snapshot native tool names before acquiring h.mu to avoid lock-order
+	// inversion with RegisterNativeTool (which acquires nativeToolsMu then h.mu).
+	h.nativeToolsMu.RLock()
+	nativeNames := make(map[string]struct{}, len(h.nativeTools))
+	for name := range h.nativeTools {
+		nativeNames[name] = struct{}{}
+	}
+	h.nativeToolsMu.RUnlock()
+
 	h.mu.Lock()
 	old := h.extensions
 	h.extensions = nil
 	// Preserve native tools — they are registered once at startup and must
 	// survive reloads. Only clear WASM-owned tool registrations.
 	preserved := make(map[string]sdk.Tool)
-	h.nativeToolsMu.RLock()
 	for name, tool := range h.registeredTools {
-		if _, isNative := h.nativeTools[name]; isNative {
+		if _, isNative := nativeNames[name]; isNative {
 			preserved[name] = tool
 		}
 	}
-	h.nativeToolsMu.RUnlock()
 	h.registeredTools = preserved
 	h.toolOwners = make(map[string]string)
 	h.mu.Unlock()
@@ -1613,12 +1683,12 @@ func (h *Host) handleGetOS() sdk.HostCallResponse {
 }
 
 func (h *Host) handleGetStatusInfo() sdk.HostCallResponse {
-	if h.ui == nil {
+	if h.uiBridge() == nil {
 		// Return a minimal empty response if the UI bridge hasn't been set yet.
 		result, _ := json.Marshal(sdk.StatusInfo{Statuses: map[string]string{}})
 		return sdk.HostCallResponse{Result: result}
 	}
-	info := h.ui.GetStatusInfo()
+	info := h.uiBridge().GetStatusInfo()
 	result, _ := json.Marshal(info)
 	return sdk.HostCallResponse{Result: result}
 }
@@ -1630,8 +1700,8 @@ func (h *Host) handleSetStatusLine(req sdk.HostCallRequest) sdk.HostCallResponse
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("set_status_line: %v", err)}
 	}
-	if h.ui != nil {
-		h.ui.SetStatus("_override", params.Text)
+	if h.uiBridge() != nil {
+		h.uiBridge().SetStatus("_override", params.Text)
 	}
 	return sdk.HostCallResponse{}
 }

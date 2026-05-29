@@ -3,7 +3,6 @@ package sdk
 
 // NOTE: Any changes to this file must be reflected in the corresponding SPECS.md or NOTES.md.
 
-
 // EventType identifies a lifecycle event dispatched to extensions.
 type EventType string
 

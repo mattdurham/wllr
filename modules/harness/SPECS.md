@@ -34,10 +34,11 @@ func New(pool *agent.AgentPool, mainAgentID string, h *extension.Host) Model
 
 - `pool` may be nil for tests that do not exercise agent interaction; SubmitMsg is accepted but not forwarded.
 - `mainAgentID` is the pool-registered ID of the primary agent.
-- `h` may be nil; extension callbacks are skipped when nil.
+- `h` may be nil; extension bridge installation is skipped when nil.
 - Reads `pool.ProviderName()` at construction to initialise the status bar.
 - Registers built-in commands (`/help`, `/clear`, `/reload`, `/model`) and a `/prompt` command (when pool is non-nil) that shows the accumulated base system prompt in a modal.
-- Wires `h.OnRegisterCommand` immediately (before `SetProgram`) so extensions that register commands during `_init` are captured.
+- Immediately installs an `earlyUIBridge` on the extension host so that extensions can register commands during `_init` (before `SetProgram`).
+- Immediately installs an `earlyAgentBridge` stub on the extension host so that extensions calling `agent_spawn` during `_init` receive a clear error instead of a nil-pointer dereference.
 
 ---
 
@@ -47,41 +48,32 @@ func New(pool *agent.AgentPool, mainAgentID string, h *extension.Host) Model
 func (m *Model) SetProgram(p *tea.Program)
 ```
 
-Must be called after creating the bubbletea program and before calling `prog.Run()`. Not thread-safe. Wires all extension host callbacks and the main agent's token/done callbacks.
+Must be called after creating the bubbletea program and before calling `prog.Run()`. Not thread-safe. Constructs the three harness bridge implementations and installs them on the extension host, then wires the main agent's token/done callbacks.
 
-### Extension host callbacks wired in SetProgram
+### Bridge construction in SetProgram
 
-| Callback                 | Action                                                                 |
-|--------------------------|------------------------------------------------------------------------|
-| `OnSetStatus`            | `p.Send(StatusUpdateMsg{Key, Value})`                                  |
-| `OnNotify`               | `p.Send(NotifyMsg{Text})`                                              |
-| `OnSendMessage`          | `p.Send(SubmitMsg{Content})` or with compact display for skill XML     |
-| `OnAbort`                | `p.Send(abortStreamMsg{})`                                             |
-| `OnAfterToolCall`        | `p.Send(ToolCallDoneMsg{ID, IsError, Output})`                         |
-| `OnModal`                | `p.Send(ShowModalMsg{Text})`                                           |
-| `OnSetSystemPrompt`      | Calls `pool.SetBaseSystemPrompt(prompt)` (if pool non-nil)             |
-| `OnAppendSystemPrompt`   | Calls `pool.AppendBaseSystemPrompt(text)` (if pool non-nil)            |
-| `OnAgentSpawn`           | Creates agent in pool, wires batched token callback, wires tool/done   |
-| `OnAgentClose`           | Calls `pool.Close(id)`                                                 |
-| `OnAgentRun`             | Sends `agentWakeupMsg{}` (main agent only), calls `pool.Send(id, "[process pending inbox messages]")` |
-| `OnAgentSendMessage`     | Calls `pool.Send(id, message)`                                         |
-| `OnAgentList`            | Returns `pool.ListAgents()` as `[]AgentInfo`                           |
-| `OnAgentTokenCount`      | Returns `pool.TokenCount()`                                            |
-| `OnTeamCreate`           | Calls `pool.CreateTeam(id)`                                            |
-| `OnTeamClose`            | Calls `pool.CloseTeam(ctx, id)`                                        |
-| `OnTeamAddMember`        | Calls `pool.GetTeam(teamID).AddMember(agentID)`                        |
-| `OnTeamRemoveMember`     | Calls `pool.GetTeam(teamID).RemoveMember(agentID)` (no error on nil)   |
+`SetProgram` creates an `agent.Spawner` and constructs three bridge structs that implement the extension host's bridge interfaces:
 
-**Invariant:** `OnSetSystemPrompt` and `OnAppendSystemPrompt` both route through the `AgentPool`, which propagates the prompt to all current and future agents. They do NOT set the prompt on the extension host or the harness model itself.
+| Bridge struct           | Installed via            | Replaces          |
+|------------------------|--------------------------|-------------------|
+| `harnessAgentBridge`   | `h.SetAgentBridge`       | `earlyAgentBridge` stub |
+| `harnessTeamBridge`    | `h.SetTeamBridge`        | (none; first install)   |
+| `harnessUIBridge`      | `h.SetUIBridge`          | `earlyUIBridge` stub    |
+
+`harnessAgentBridge` wraps an `agent.Spawner` (which owns sub-agent lifecycle) and the pool (for close/send/list). `harnessTeamBridge` delegates directly to the pool. `harnessUIBridge` sends bubbletea messages to `p` for all UI operations.
+
+`CapabilityProvider` and `MCPBridge` are NOT installed by SetProgram — `CapabilityProvider` is installed by `cmd/main.go` via `h.SetCapabilities`, and `MCPBridge` is not currently used.
+
+**Invariant:** `harnessUIBridge.SetSystemPrompt` and `harnessUIBridge.AppendSystemPrompt` both route through the `AgentPool`, which propagates the prompt to all current and future agents. They do NOT set the prompt on the extension host or the harness model itself.
 
 ### Main agent callbacks wired in SetProgram
 
 - `SetOnToken`: a batched token callback (see §5).
 - `SetOnDone`: calls flush on the batcher, then `p.Send(StreamDoneMsg{Err})`.
-- `SetToolsFn`: returns `BuildFantasyTools(extHost, "main", logFn)`.
+- `SetToolsFn`: returns `tools.BuildFantasyTools(extHost, "main", logFn)`.
 - `SetOnToolCall`: `p.Send(ToolCallStartMsg{ID, ToolName, Input})`.
 
-Sub-agents spawned via `OnAgentSpawn` receive identical wiring except `agentID` is the spawned agent's ID.
+Sub-agents spawned via `harnessAgentBridge.Spawn` (delegated to `agent.Spawner`) receive similar wiring with the spawned agent's ID.
 
 ---
 

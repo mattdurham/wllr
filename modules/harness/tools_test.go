@@ -4,16 +4,16 @@ package harness_test
 
 // The sdkToolAdapter and related functions have moved to github.com/mattdurham/wllr/tools.
 // Coverage for ParseInputSchema, NewSDKToolAdapter, and BuildFantasyTools lives in tools/adapter_test.go.
-// This file verifies that harness.BuildFantasyTools delegates correctly.
+// This file verifies that tools.BuildFantasyTools works with a nil host (delegated from harness).
 
 import (
 	"testing"
 
-	"github.com/mattdurham/wllr/modules/harness"
+	"github.com/mattdurham/wllr/modules/tools"
 )
 
 func TestBuildFantasyTools_NilHost(t *testing.T) {
-	result := harness.BuildFantasyTools(nil, "agent1", nil)
+	result := tools.BuildFantasyTools(nil, "agent1", nil)
 	if result != nil {
 		t.Errorf("expected nil for nil host, got %v", result)
 	}

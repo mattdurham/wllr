@@ -218,17 +218,54 @@ After a turn, if the API returns a context-too-long error (`isContextTooLong`), 
 
 ```go
 type SpawnOpts struct {
-    SystemPrompt string
-    Tools        []fantasy.AgentTool
+    InheritBasePrompt *bool
+    SystemPrompt      string
+    Name              string
+    ModelName         string
+    Tools             []fantasy.AgentTool
+    ThinkingBudget    int
+    ProviderOptions   fantasy.ProviderOptions
+    NotifyParentID    string
+    TurnTimeout       time.Duration
 }
 ```
 
-- `SystemPrompt` is the agent-specific prompt appended after the base prompt on every turn.
-- `Tools` is the static tool list. If `SetToolsFn` is called on the agent, the dynamic function takes priority over `Tools`.
+- `InheritBasePrompt`: if nil or pointing to `true`, the agent inherits the pool's accumulated base system prompt (AGENTS.md, tool list, action rules). Set to `false` for focused sub-agents that don't need the full orchestration context.
+- `SystemPrompt`: the agent-specific prompt appended after the base prompt on every turn.
+- `Name`: human-readable display name for the agent; used in logs and agent list responses.
+- `ModelName`: overrides the pool's default model name for context-window sizing during compaction. If empty, the pool default is used.
+- `Tools`: static tool list. If `SetToolsFn` is called on the agent after spawn, the dynamic function takes priority over `Tools`.
+- `ThinkingBudget`: enables extended thinking with the given token budget. Only supported on Anthropic models. Zero means disabled.
+- `ProviderOptions`: passed directly to `fantasy.WithProviderOptions` on each turn. Used for provider-specific settings such as extended thinking.
+- `NotifyParentID`: if non-empty, the pool automatically sends a completion message to this agent ID when the spawned agent's final turn ends, giving the parent a guaranteed wakeup.
+- `TurnTimeout`: overrides the per-turn context deadline. Zero uses the default (30 minutes). Negative disables the timeout entirely.
+
+## 12. Spawner
+
+```go
+type Spawner struct { ... }
+
+func NewSpawner(pool *AgentPool, toolsFn ToolsFn, notifyFn NotifyFn) *Spawner
+func (s *Spawner) Spawn(ctx context.Context, req extension.SpawnRequest) error
+```
+
+`Spawner` creates sub-agents in a pool with appropriate callbacks and conventions. It encapsulates:
+- Agent-identity system prompt suffix injection (`## Your Agent Identity` section with agent ID).
+- Parent ID derivation from the `/` convention in `req.ID` (e.g. `"main/coder"` → parent `"main"`).
+- Provider-option construction for extended thinking (`ThinkingBudget > 0`).
+- Token suppression for sub-agents (sub-agent tokens are never forwarded to the main chat).
+- OnDone wiring: sub-agent errors are logged, the notify function is called, and a failure message is sent to the main agent.
+- ToolsFn wiring: the dynamic tool function is called on each sub-agent turn.
+
+**Invariant:** `Spawn` returns an error immediately if `s.pool == nil`.
+
+**Invariant:** If `req.InitialPrompt` is non-empty, `pool.Send(req.ID, req.InitialPrompt)` is called immediately after spawn to start the first turn.
+
+**Invariant:** Sub-agent error notifications call `pool.Send("main", ...)` to surface failures to the orchestrator. Errors from this `Send` that are not `ErrAgentNotFound` are logged at error level.
 
 ---
 
-## 12. Error Variables
+## 13. Error Variables
 
 | Error              | Returned by                    | Condition                                |
 |--------------------|-------------------------------|------------------------------------------|

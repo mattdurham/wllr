@@ -134,99 +134,69 @@ type Handler func(ctx context.Context, evt sdk.Event) error
 
 The full set of dispatched methods is:
 
-| Method constant                | Handler                        |
-|-------------------------------|--------------------------------|
-| `MethodSubscribe`             | `handleSubscribe`              |
-| `MethodRegisterTool`          | `handleRegisterTool`           |
-| `MethodRegisterCommand`       | `handleRegisterCommand`        |
-| `MethodSendMessage`           | `handleSendMessage`            |
-| `MethodSetStatus`             | `handleSetStatus`              |
-| `MethodNotify`                | `handleNotify`                 |
-| `MethodToolResult`            | `handleToolResult`             |
-| `MethodStoreSet`              | `handleStoreSet`               |
-| `MethodStoreGet`              | `handleStoreGet`               |
-| `MethodAbort`                 | calls `OnAbort` directly       |
-| `MethodRequestPermission`     | `handleRequestPermission`      |
-| `MethodModal`                 | `handleModal`                  |
-| `MethodSetSystemPrompt`       | `handleSetSystemPrompt`        |
-| `MethodAppendSystemPrompt`    | `handleAppendSystemPrompt`     |
-| `MethodExec`                  | `handleExec`                   |
-| `MethodGetEnv`                | `handleGetEnv`                 |
-| `MethodConfigRead`            | `handleConfigRead`             |
-| `MethodAgentSpawn`            | `handleAgentSpawn`             |
-| `MethodAgentClose`            | `handleAgentClose`             |
-| `MethodAgentSendMessage`      | `handleAgentSendMessage`       |
-| `MethodAgentList`             | `handleAgentList`              |
-| `MethodAgentTokenCount`       | `handleAgentTokenCount`        |
-| `MethodTeamCreate`            | `handleTeamCreate`             |
-| `MethodTeamClose`             | `handleTeamClose`              |
-| `MethodTeamAddMember`         | `handleTeamAddMember`          |
-| `MethodTeamRemoveMember`      | `handleTeamRemoveMember`       |
-| `MethodMCPSpawn`              | `handleMCPSpawn`               |
-| `MethodMCPClose`              | `handleMCPClose`               |
-| `MethodMCPSend`               | `handleMCPSend`                |
-| `MethodMCPRead`               | `handleMCPRead`                |
+| Method constant                | Handler                                         |
+|-------------------------------|--------------------------------------------------|
+| `MethodSubscribe`             | `handleSubscribe`                                |
+| `MethodRegisterTool`          | `handleRegisterTool`                             |
+| `MethodRegisterCommand`       | `handleRegisterCommand`                          |
+| `MethodSendMessage`           | `handleSendMessage`                              |
+| `MethodSetStatus`             | `handleSetStatus`                                |
+| `MethodNotify`                | `handleNotify`                                   |
+| `MethodToolResult`            | `handleToolResult`                               |
+| `MethodStoreSet`              | `handleStoreSet`                                 |
+| `MethodStoreGet`              | `handleStoreGet`                                 |
+| `MethodAbort`                 | calls `h.ui.Abort()` via UIBridge                |
+| `MethodRequestPermission`     | `handleRequestPermission`                        |
+| `MethodModal`                 | `handleModal`                                    |
+| `MethodSetSystemPrompt`       | `handleSetSystemPrompt`                          |
+| `MethodAppendSystemPrompt`    | `handleAppendSystemPrompt`                       |
+| `MethodExec`                  | `handleExec`                                     |
+| `MethodGetEnv`                | `handleGetEnv`                                   |
+| `MethodReadFile`              | `handleReadFile`                                 |
+| `MethodWriteFile`             | `handleWriteFile`                                |
+| `MethodHTTPPost`              | `handleHTTPPost`                                 |
+| `MethodConfigRead`            | `handleConfigRead`                               |
+| `MethodAgentSpawn`            | `handleAgentSpawn`                               |
+| `MethodAgentClose`            | `handleAgentClose`                               |
+| `MethodAgentSendMessage`      | `handleAgentSendMessage`                         |
+| `MethodAgentRun`              | `handleAgentRun`                                 |
+| `MethodAgentList`             | `handleAgentList`                                |
+| `MethodAgentTokenCount`       | `handleAgentTokenCount`                          |
+| `MethodAgentResetHistory`     | `handleAgentResetHistory`                        |
+| `MethodTeamCreate`            | `handleTeamCreate`                               |
+| `MethodTeamClose`             | `handleTeamClose`                                |
+| `MethodTeamAddMember`         | `handleTeamAddMember`                            |
+| `MethodTeamRemoveMember`      | `handleTeamRemoveMember`                         |
+| `MethodTeamGetInfo`           | `handleTeamGetInfo`                              |
+| `MethodTeamList`              | `handleTeamList`                                 |
+| `MethodShowPicker`            | `handleShowPicker`                               |
+| `MethodMCPSpawn`              | `handleMCPSpawn`                                 |
+| `MethodMCPClose`              | `handleMCPClose`                                 |
+| `MethodMCPSend`               | `handleMCPSend`                                  |
+| `MethodMCPRead`               | `handleMCPRead`                                  |
+| `MethodGetOS`                 | `handleGetOS`                                    |
+| `MethodGetStatusInfo`         | `handleGetStatusInfo`                            |
+| `MethodSetStatusLine`         | `handleSetStatusLine`                            |
 
 ---
 
-## 7. Host Callback Fields
+## 7. Host Interface Bridges
 
-`Host` exposes a set of function fields that the harness wires at startup. Each field is nil-checked before invocation; missing callbacks result in an error response.
+`Host` exposes five interface fields, each set once at startup via a corresponding `Set*` method. All `Set*` methods acquire `h.mu.Lock()` to protect against concurrent WASM dispatch. Dispatch handlers snapshot each field under `h.mu.RLock()` before use. A nil bridge results in an error response to the extension.
 
-### Harness callbacks
+| Field          | Interface           | Setter                  | Purpose                                                        |
+|---------------|---------------------|-------------------------|----------------------------------------------------------------|
+| `agents`      | `AgentBridge`       | `SetAgentBridge`        | Spawn, close, message, run, list agents and manage history     |
+| `teams`       | `TeamBridge`        | `SetTeamBridge`         | Create, close, add/remove members, list teams                  |
+| `ui`          | `UIBridge`          | `SetUIBridge`           | Notify, modal, picker, status, send message, system prompt     |
+| `capabilities`| `CapabilityProvider`| `SetCapabilities`       | Exec, GetEnv, ReadFile, WriteFile, HTTPPost, ConfigRead        |
+| `mcp`         | `MCPBridge`         | `SetMCPBridge`          | Spawn, close, send, read MCP server subprocesses               |
 
-| Field                  | Signature                                            | Purpose                                                  |
-|-----------------------|------------------------------------------------------|----------------------------------------------------------|
-| `OnSendMessage`       | `func(msg sdk.Message)`                              | Inject a message into the conversation                   |
-| `OnSetStatus`         | `func(key, value string)`                            | Update a keyed status in the TUI status bar              |
-| `OnRegisterTool`      | `func(tool sdk.Tool) error`                          | Called when an extension registers a tool                |
-| `OnRegisterCommand`   | `func(name, desc string)`                            | Called when an extension registers a slash command       |
-| `OnNotify`            | `func(text string)`                                  | Show a notification in the chat view                     |
-| `OnAbort`             | `func()`                                             | Cancel the current agent turn                            |
-| `OnToolResult`        | `func(toolCallID, result string, isError bool)`      | Called when `tool_result` is received (all paths)        |
-| `OnAfterToolCall`     | `func(toolCallID, toolName, result string, isError bool)` | Called after `EventAfterToolCall` dispatch           |
-| `OnModal`             | `func(text string)`                                  | Display text in a modal overlay                          |
-| `OnSetSystemPrompt`   | `func(prompt string)`                                | Replace the base system prompt on all agents             |
-| `OnAppendSystemPrompt`| `func(text string)`                                  | Append to the base system prompt on all agents           |
-| `OnExec`              | `func(ctx context.Context, command, dir string, onLine func(string)) (string, error)` | Execute a shell command (requires PermExec). `ctx` propagates cancellation. `onLine` is called for each output line as it arrives; may be nil. |
-| `OnConsoleOutput`     | `func(line string)`                                  | Called for each output line streamed from OnExec; nil-safe.          |
-| `OnConsoleClear`      | `func()`                                             | Called at the start of each OnExec to signal the console should be cleared. |
-| `OnGetEnv`            | `func(name string) (string, error)`                  | Read a host environment variable                         |
-| `OnConfigRead`        | `func(group string) (json.RawMessage, error)`        | Read config for the named extension group                |
+**Invariant:** All `Set*` methods must be called before loading extensions (before `Load` or `LoadBytes`). The `earlyUIBridge` and `earlyAgentBridge` stubs installed in `harness.New()` satisfy this for command registration and agent calls that arrive during `_init`.
 
-### Agent management callbacks
+**Invariant:** Dispatch handlers snapshot the bridge field under `h.mu.RLock()` via internal getter methods (`h.agentBridge()`, `h.uiBridge()`, etc.) so that the field transition from early stub to full implementation is race-free.
 
-| Field                  | Signature                                                    | Purpose                                         |
-|-----------------------|--------------------------------------------------------------|-------------------------------------------------|
-| `OnAgentSpawn`        | `func(id, name, systemPrompt, modelName, initialPrompt string) error` | Create and register a new sub-agent; if initialPrompt is non-empty, calls `pool.Send` to start the first turn immediately |
-| `OnAgentClose`        | `func(id string) error`                                      | Cancel and remove a sub-agent                   |
-| `OnAgentSendMessage`  | `func(id, message string) error`                             | Send a message to a named agent                 |
-| `OnAgentList`         | `func() ([]AgentInfo, error)`                                | Return all live agent IDs and names             |
-| `OnAgentTokenCount`   | `func() int64`                                               | Return total token count across all agents      |
-
-### Team management callbacks
-
-| Field                  | Signature                                        | Purpose                                      |
-|-----------------------|--------------------------------------------------|----------------------------------------------|
-| `OnTeamCreate`        | `func(id, name string) error`                    | Create a new named team                      |
-| `OnTeamClose`         | `func(id string) error`                          | Cancel all members and remove the team       |
-| `OnTeamAddMember`     | `func(teamID, agentID string) error`             | Add an agent to a team                       |
-| `OnTeamRemoveMember`  | `func(teamID, agentID string) error`             | Remove an agent from a team (no cancel); no-op if team does not exist |
-| `OnTeamGetInfo`      | `func(teamID string) ([]string, error)`          | Return member agent IDs for a team           |
-| `OnTeamList`         | `func() ([]string, error)`                       | Return all registered team IDs               |
-
-### MCP bridge callbacks
-
-| Field          | Signature                                                      | Purpose                                      |
-|---------------|----------------------------------------------------------------|----------------------------------------------|
-| `OnMCPSpawn`  | `func(id, command string, args []string, env map[string]string) error` | Spawn an MCP server subprocess    |
-| `OnMCPClose`  | `func(id string) error`                                        | Terminate an MCP server subprocess           |
-| `OnMCPSend`   | `func(id string, data []byte) error`                           | Write JSON-RPC data to MCP stdin             |
-| `OnMCPRead`   | `func(id string) (json.RawMessage, error)`                     | Read a JSON-RPC response from MCP stdout     |
-
-**Invariant:** `OnMCPSpawn` requires the calling extension to hold `PermExec`. If the extension is nil or lacks `PermExec`, the call returns a permission-denied error.
-
-**Invariant:** `OnExec` requires the calling extension to hold `PermExec`. Executions by trusted extensions always pass the permission check.
+**Invariant:** `PermExec` is required for `agent_spawn` (via `AgentBridge.Spawn`), `exec`, `read_file`, `write_file`, `http_post`, and `mcp_spawn`. If the extension is nil or lacks the required permission, the call returns a permission-denied error response.
 
 ---
 
@@ -336,14 +306,14 @@ Each `Extension` carries:
 1. Acquires `nativeToolsMu.RLock()` and looks up `toolName` in `nativeTools`.
 2. If found, calls the native function directly (no WASM dispatch, no `pendingTools` channel).
 3. Dispatches `EventAfterToolCall` so WASM extensions that observe results stay informed.
-4. Calls `OnAfterToolCall` if set, then returns.
+4. Calls `h.ui.AfterToolCall(toolCallID, toolName, result, isError)` via UIBridge (if set), then returns.
 
 **WASM dispatch path (when no native handler is registered):**
 
 1. Creates a `chan toolResult{1}` buffered channel keyed by `toolCallID` in `h.pendingTools`.
 2. Dispatches `EventBeforeToolCall` with `BeforeToolCallPayload{AgentID, ToolCallID, ToolName, Input}`.
 3. Blocks on `select { case result := <-ch: ...; case <-ctx.Done(): ... }`.
-4. On result: dispatches `EventAfterToolCall` with `AfterToolCallPayload{AgentID, ToolCallID, ToolName, Result, IsError}`, then calls `OnAfterToolCall` if set.
+4. On result: dispatches `EventAfterToolCall` with `AfterToolCallPayload{AgentID, ToolCallID, ToolName, Result, IsError}`, then calls `h.ui.AfterToolCall(toolCallID, toolName, result, isError)` via UIBridge (if set).
 
 **Invariants:**
 - Native tools are checked before WASM; a tool registered via `RegisterNativeTool` is never dispatched through WASM.
@@ -352,7 +322,7 @@ Each `Extension` carries:
 - The WASM channel is registered in `pendingTools` **before** dispatching the event.
 - `AgentID` is included in both `BeforeToolCallPayload` and `AfterToolCallPayload` so extensions can correlate tool calls with the originating agent.
 - On context cancellation (WASM path), the pending entry is cleaned up before returning.
-- `handleToolResult` always calls `OnToolResult` in addition to signalling any pending channel.
+- `handleToolResult` always calls `h.ui.ToolResult(toolCallID, result, isError)` via UIBridge in addition to signalling any pending channel.
 - `EventAfterToolCall` is dispatched only on the success path; it is **not** dispatched when `ctx` is cancelled (WASM path).
 
 `Host.RegisterNativeTool(tool sdk.Tool, fn func(ctx, input) (string, bool))` registers a tool schema in `registeredTools` (so the LLM sees it) and stores the handler in `nativeTools` under `nativeToolsMu`. Calls `OnRegisterTool` if set.
@@ -377,6 +347,23 @@ When instantiating a WASM module, the host configures:
 
 ---
 
+## 18. Reload Semantics
+
+`Host.Reload(ctx, paths)` performs a full replacement:
+
+1. Snapshots native tool names under `h.nativeToolsMu.RLock()` (before acquiring `h.mu`) to avoid lock-order inversion with `RegisterNativeTool`.
+2. Under `h.mu.Lock()`, captures the current `h.extensions`, sets it to `nil`, resets `h.registeredTools` to preserve only native tools, and clears `h.toolOwners`.
+3. Closes each old extension's module (errors logged at warn level).
+4. Calls `Load(path)` for each new path; individual failures are logged but do not abort the reload.
+
+**Invariant:** After `Reload`, previously loaded modules are always closed regardless of whether reloading any new module succeeds.
+
+**Invariant:** `h.registeredTools` and `h.toolOwners` are both cleared on reload (native tools are preserved).
+
+**Invariant:** Lock order is always `nativeToolsMu` before `h.mu`. Snapshot native tool names under `nativeToolsMu` before acquiring `h.mu` in `Reload` to prevent deadlock with `RegisterNativeTool`.
+
+---
+
 ## 19. ABI Documentation Invariant
 
 `docs/extensions.md` is the authoritative public reference for the WASM extension author API. It must be kept in sync with the code.
@@ -387,17 +374,3 @@ Files that trigger this requirement when modified:
 - `extension/host.go` — `host_call` dispatch map and method implementations
 - `sdk/types.go` — event types, payload structs, permission constants
 - Any file that adds or removes constants under `sdk.Method*` or `sdk.Event*`
-
----
-
-## 18. Reload Semantics
-
-`Host.Reload(ctx, paths)` performs a full replacement:
-
-1. Under `h.mu.Lock()`, captures the current `h.extensions`, sets it to `nil`, resets `h.registeredTools` and `h.toolOwners` to empty maps.
-2. Closes each old extension's module (errors logged at warn level).
-3. Calls `Load(path)` for each new path; individual failures are logged but do not abort the reload.
-
-**Invariant:** After `Reload`, previously loaded modules are always closed regardless of whether reloading any new module succeeds.
-
-**Invariant:** `h.registeredTools` and `h.toolOwners` are both cleared on reload.
