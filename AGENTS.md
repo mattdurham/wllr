@@ -1,5 +1,86 @@
 # wllr — Agent Guidelines
 
+## Project Overview
+
+wllr is a terminal AI coding assistant built with bubbletea. It has two primary extension points:
+1. **WASM extensions** — loaded from `~/.wllr/extensions/`, written in any WASM-capable language
+2. **Go modules** — the core subsystems in `modules/`, each with a typed interface boundary
+
+### Module Map
+
+```
+modules/
+  sdk/        — shared wire types and ABI constants (leaf, no wllr deps)
+  agent/      — LLM turn execution, agent pool, sub-agent spawning
+  extension/  — WASM host, event dispatch, 5 bridge interfaces
+  tools/      — sdk.Tool → fantasy.AgentTool adapter
+  session/    — subsystem wiring, lifecycle, liveState
+  harness/    — bubbletea TUI, rendering, input, Renderer interface
+  mcp/        — MCP server subprocess bridge
+  testutil/   — fake LM/provider for tests
+cmd/          — binary entry point
+extensions/   — bundled WASM extensions (agents, history, statusline, …)
+```
+
+### Subsystem Interfaces
+
+Extensions communicate with the host via 5 typed interfaces (defined in `modules/extension/interfaces.go`):
+- `AgentBridge` — spawn, close, message agents
+- `TeamBridge` — create and manage agent teams
+- `UIBridge` — notify, modal, picker, status bar
+- `CapabilityProvider` — exec, file I/O, HTTP, env
+- `MCPBridge` — MCP server subprocess management
+
+The TUI is decoupled from subsystems via `harness.Renderer` (defined in `modules/harness/renderer.go`).
+To swap the TUI: implement `Renderer` + `UIBridge`, call `session.Wire(host, pool, mainID, yourRenderer)`.
+
+---
+
+## Spec-Driven Development
+
+Every module in `modules/` is **spec-driven**. This means:
+
+### The Invariant
+
+Every non-test `.go` file in a spec-driven module carries:
+```go
+// NOTE: Any changes to this file must be reflected in the corresponding SPECS.md or NOTES.md.
+```
+
+This is a hard rule. Do not remove it. If you add a new file to a module, add this comment.
+
+### The Four Spec Files
+
+Each module has four living documentation files:
+
+| File | Purpose |
+|------|---------|
+| `SPECS.md` | Interface contracts, invariants, behavioral guarantees. The source of truth for what the module promises. |
+| `NOTES.md` | Design decisions with dated entries (append-only). WHY things are the way they are. |
+| `TESTS.md` | Test specifications: scenarios, setup, assertions. Maps to actual test functions. |
+| `BENCHMARKS.md` | Benchmark specs with metric targets. |
+
+### What Must Be Updated
+
+**Any code change in a spec-driven module MUST be accompanied by:**
+- `SPECS.md` — if the public API, invariants, or behavior changes
+- `NOTES.md` — if a non-obvious design decision was made (add a new dated entry)
+- `TESTS.md` — if new tests were added or existing test intent changed
+- `BENCHMARKS.md` — if performance characteristics changed
+
+**NOTES.md rules:**
+- Each entry: `## N. Title`, `*Added: YYYY-MM-DD*`, **Decision:**, **Rationale:**, **Consequence:**
+- Never delete entries — add `*Addendum (date):*` if a decision is reversed
+- New decisions go in new numbered sections at the end
+
+### What Does NOT Need Updating
+
+- Pure refactors with no behavior change (rename, move, reformat) — no spec update needed
+- Adding a test that was already specified in TESTS.md
+- Bug fixes where the fix makes behavior match the existing spec
+
+---
+
 ## WASM Extension API Documentation
 
 `docs/extensions.md` is the authoritative reference for the WASM extension author API.

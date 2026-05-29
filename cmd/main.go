@@ -15,11 +15,12 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	fantasy "charm.land/fantasy"
-	"github.com/mattdurham/wllr/agent"
-	"github.com/mattdurham/wllr/extension"
-	"github.com/mattdurham/wllr/harness"
-	"github.com/mattdurham/wllr/mcp"
-	"github.com/mattdurham/wllr/sdk"
+	"github.com/mattdurham/wllr/modules/agent"
+	"github.com/mattdurham/wllr/modules/extension"
+	"github.com/mattdurham/wllr/modules/harness"
+	"github.com/mattdurham/wllr/modules/mcp"
+	"github.com/mattdurham/wllr/modules/sdk"
+	"github.com/mattdurham/wllr/modules/tools"
 )
 
 // Built-in extension WASM modules embedded at compile time.
@@ -64,53 +65,21 @@ func main() {
 		pool.SetContextWindow(cfg.ContextWindow)
 	}
 
-	if _, spawnErr := pool.Spawn("main", langModel, agent.SpawnOpts{TurnTimeout: -1}); spawnErr != nil {
+	if _, spawnErr := pool.Spawn(agent.MainAgentID, langModel, agent.SpawnOpts{TurnTimeout: -1}); spawnErr != nil {
 		fmt.Fprintf(os.Stderr, "wllr: spawn main agent: %v\n", spawnErr)
 		os.Exit(1)
 	}
 
 	// Build extension host — extension logs flow through slog with "extension" attribute.
 	h := extension.NewHost(nil)
-	h.OnExec =
 
-		// Wire host capabilities.
-		makeExecHandler(h)
-
-	h.OnGetEnv = func(name string) (string, error) {
-		if name != "" {
-			return os.Getenv(name), nil
-		}
-		vars := os.Environ()
-		data, _ := json.Marshal(vars)
-		return string(data), nil
-	}
-	h.OnReadFile = func(path string) (string, error) {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return "", err
-		}
-		return string(data), nil
-	}
-	h.OnWriteFile = func(path, content string) error {
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return err
-		}
-		return os.WriteFile(path, []byte(content), 0o600)
-	}
-	h.OnHTTPPost = httpPost
-	h.OnConfigRead = loadConfigGroup
-	// Apply system prompt changes to ALL agents so sub-agents stay in sync.
-	h.OnSetSystemPrompt = func(prompt string) {
-		pool.SetBaseSystemPrompt(prompt)
-	}
-	h.OnAppendSystemPrompt = func(text string) {
-		pool.AppendBaseSystemPrompt(text)
-	}
+	// Wire OS capabilities via the CapabilityProvider interface.
+	h.SetCapabilities(newOSCapabilityProvider(pool))
 
 	// Create the harness model BEFORE loading extensions so that
 	// OnRegisterCommand (wired in harness.New) is set when _init and
 	// session_start handlers call register_command.
-	m := harness.New(pool, "main", h)
+	m := harness.New(pool, agent.MainAgentID, h)
 
 	// Register stateless tools as native Go functions — bypasses WASM entirely.
 	registerNativeTools(h)
@@ -274,7 +243,7 @@ func startMCPBridge(ctx context.Context, h *extension.Host) func() {
 // It builds a one-shot fantasy agent, streams the response to stdout, and calls
 // os.Exit(1) on error.
 func runExecMode(ctx context.Context, h *extension.Host, langModel fantasy.LanguageModel, prompt string) {
-	fantasyTools := harness.BuildFantasyTools(h, "exec", func(level int, msg string) {
+	fantasyTools := tools.BuildFantasyTools(h, "exec", func(level int, msg string) {
 		slog.Log(
 			ctx,
 			[]slog.Level{slog.LevelDebug, slog.LevelInfo, slog.LevelWarn, slog.LevelError}[min(level, 3)],
