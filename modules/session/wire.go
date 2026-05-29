@@ -15,8 +15,9 @@ import (
 
 // ConversationSession implements Session.
 // It manages the lifecycle of a single conversation session: start, submit,
-// cancel, reload, and close. Subsystem wiring (bridge setters on the extension
-// host) is assumed to have been performed by the caller before Wire is invoked.
+// cancel, reload, and close. Bridge installation on the extension host is
+// performed by the harness (earlyUIBridge/earlyAgentBridge in New, full bridges
+// in SetProgram) and by cmd/main.go (CapabilityProvider). Wire itself is passive.
 type ConversationSession struct {
 	host     *extension.Host
 	pool     *agent.AgentPool
@@ -24,9 +25,8 @@ type ConversationSession struct {
 	renderer harness.Renderer
 }
 
-// Wire creates and returns a Session.
-// The host's interface bridges must be installed before calling Wire.
-// Wire does not install any callbacks itself; that is the caller's responsibility.
+// Wire creates and returns a Session. Wire does not install any interface bridges
+// on the host; that is the caller's responsibility (see harness.Model.SetProgram).
 func Wire(host *extension.Host, pool *agent.AgentPool, mainAgentID string, renderer harness.Renderer) Session {
 	return &ConversationSession{
 		host:     host,
@@ -36,7 +36,8 @@ func Wire(host *extension.Host, pool *agent.AgentPool, mainAgentID string, rende
 	}
 }
 
-// Start fires session_start events and assembles the initial system prompt.
+// Start fires session_start events to all loaded extensions.
+// System prompt assembly occurs in the harness sessionStartDoneMsg handler, not here.
 // Must be called once before Submit.
 func (s *ConversationSession) Start(ctx context.Context) error {
 	if s.host == nil {

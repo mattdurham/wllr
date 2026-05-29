@@ -64,6 +64,12 @@ func (s *liveState) setModel(model string) {
 	s.mu.Unlock()
 }
 
+func (s *liveState) setProvider(provider string) {
+	s.mu.Lock()
+	s.provider = provider
+	s.mu.Unlock()
+}
+
 func (s *liveState) setTokens(n int) {
 	s.mu.Lock()
 	s.tokens = n
@@ -71,11 +77,11 @@ func (s *liveState) setTokens(n int) {
 }
 
 func (s *liveState) setStatuses(statuses map[string]string) {
+	s.mu.Lock()
 	cp := make(map[string]string, len(statuses))
 	for k, v := range statuses {
 		cp[k] = v
 	}
-	s.mu.Lock()
 	s.statuses = cp
 	s.mu.Unlock()
 }
@@ -174,11 +180,12 @@ func New(pool *agent.AgentPool, mainAgentID string, h *extension.Host) Model {
 		})
 	}
 
-	// Wire a minimal UIBridge for command registration during _init (before SetProgram).
-	// The full UIBridge is wired in SetProgram once the tea.Program is available.
+	// Wire a minimal UIBridge and stub AgentBridge for _init (before SetProgram).
+	// The full bridges are wired in SetProgram once the tea.Program is available.
 	if h != nil {
 		cmds := m.commands
 		h.SetUIBridge(&earlyUIBridge{cmds: cmds})
+		h.SetAgentBridge(&earlyAgentBridge{})
 	}
 
 	return m
@@ -274,7 +281,7 @@ func (m *Model) wireMainAgentCallbacks(p *tea.Program) {
 	extHost := m.extHost
 	logFn := m.logFn
 	a.SetToolsFn(func() []fantasy.AgentTool {
-		return BuildFantasyTools(extHost, "main", logFn)
+		return tools.BuildFantasyTools(extHost, agent.MainAgentID, logFn)
 	})
 	a.SetOnToolCall(func(id, toolName, input string) {
 		p.Send(ToolCallStartMsg{ID: id, ToolName: toolName, Input: input})

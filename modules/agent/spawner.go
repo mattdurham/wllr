@@ -4,12 +4,14 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 
 	"charm.land/fantasy"
 	anthropicprovider "charm.land/fantasy/providers/anthropic"
+	"github.com/mattdurham/wllr/modules/extension"
 )
 
 // ToolsFn is a function that returns the current tool list for an agent.
@@ -41,9 +43,10 @@ func NewSpawner(pool *AgentPool, toolsFn ToolsFn, notifyFn NotifyFn) *Spawner {
 // Spawn creates and registers a sub-agent with the given parameters.
 // It applies the agent-identity suffix to SystemPrompt and derives the parent ID
 // from the "/" convention in req.ID (e.g. "main/coder" → parent "main").
-// If req.InitialPrompt is non-empty, the agent's first turn is started immediately.
+// If req.InitialPrompt is non-empty, the agent's first turn is queued asynchronously
+// via pool.Send (non-blocking; the turn runs in a goroutine).
 // If req.ThinkingBudget > 0, Anthropic extended-thinking provider options are applied.
-func (s *Spawner) Spawn(ctx context.Context, req SpawnRequest) error {
+func (s *Spawner) Spawn(ctx context.Context, req extension.SpawnRequest) error {
 	if s.pool == nil {
 		return fmt.Errorf("no agent pool")
 	}
@@ -97,9 +100,11 @@ func (s *Spawner) Spawn(ctx context.Context, req SpawnRequest) error {
 			notifyFn(fmt.Sprintf("sub-agent %s: %v", subID, e))
 		}
 		// Surface the error to the main agent so the orchestrator can react.
-		if main := pool.Get("main"); main != nil {
+		if main := pool.Get(MainAgentID); main != nil {
 			msg := fmt.Sprintf("[sub-agent '%s' failed: %v — you should handle this or try a different approach]", subID, e)
-			_ = pool.Send("main", msg)
+			if err := pool.Send(MainAgentID, msg); err != nil && !errors.Is(err, ErrAgentNotFound) {
+				slog.Error("sub-agent: failed to notify main of error", "agent", subID, "sendErr", err)
+			}
 		}
 	})
 

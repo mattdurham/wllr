@@ -20,6 +20,7 @@ import (
 	"github.com/mattdurham/wllr/modules/harness"
 	"github.com/mattdurham/wllr/modules/mcp"
 	"github.com/mattdurham/wllr/modules/sdk"
+	"github.com/mattdurham/wllr/modules/tools"
 )
 
 // Built-in extension WASM modules embedded at compile time.
@@ -64,7 +65,7 @@ func main() {
 		pool.SetContextWindow(cfg.ContextWindow)
 	}
 
-	if _, spawnErr := pool.Spawn("main", langModel, agent.SpawnOpts{TurnTimeout: -1}); spawnErr != nil {
+	if _, spawnErr := pool.Spawn(agent.MainAgentID, langModel, agent.SpawnOpts{TurnTimeout: -1}); spawnErr != nil {
 		fmt.Fprintf(os.Stderr, "wllr: spawn main agent: %v\n", spawnErr)
 		os.Exit(1)
 	}
@@ -78,7 +79,7 @@ func main() {
 	// Create the harness model BEFORE loading extensions so that
 	// OnRegisterCommand (wired in harness.New) is set when _init and
 	// session_start handlers call register_command.
-	m := harness.New(pool, "main", h)
+	m := harness.New(pool, agent.MainAgentID, h)
 
 	// Register stateless tools as native Go functions — bypasses WASM entirely.
 	registerNativeTools(h)
@@ -242,7 +243,7 @@ func startMCPBridge(ctx context.Context, h *extension.Host) func() {
 // It builds a one-shot fantasy agent, streams the response to stdout, and calls
 // os.Exit(1) on error.
 func runExecMode(ctx context.Context, h *extension.Host, langModel fantasy.LanguageModel, prompt string) {
-	fantasyTools := harness.BuildFantasyTools(h, "exec", func(level int, msg string) {
+	fantasyTools := tools.BuildFantasyTools(h, "exec", func(level int, msg string) {
 		slog.Log(
 			ctx,
 			[]slog.Level{slog.LevelDebug, slog.LevelInfo, slog.LevelWarn, slog.LevelError}[min(level, 3)],
