@@ -1,5 +1,7 @@
 package extension
 
+// NOTE: Any changes to this file must be reflected in the corresponding SPECS.md or NOTES.md.
+
 import "github.com/mattdurham/wllr/modules/sdk"
 
 // RegisteredToolInfo pairs a registered tool with the name of the extension

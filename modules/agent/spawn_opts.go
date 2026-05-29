@@ -1,5 +1,7 @@
 package agent
 
+// NOTE: Any changes to this file must be reflected in the corresponding SPECS.md or NOTES.md.
+
 // SpawnOpts configures a new agent at spawn time.
 
 // InheritBasePrompt controls whether this agent inherits the pool's

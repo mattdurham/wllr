@@ -1,5 +1,7 @@
 package sdk
 
+// NOTE: Any changes to this file must be reflected in the corresponding SPECS.md or NOTES.md.
+
 // StatusInfo is returned by the get_status_info host_call.
 // It gives extensions a read-only snapshot of the current status bar state
 // so they can compose a fully custom status line.
