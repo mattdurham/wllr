@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -23,11 +24,60 @@ import (
 // liveState holds fields that change frequently and must be readable by
 // OnGetStatusInfo closures. Since Model is a value type, closures cannot
 // capture fields directly — they capture this shared pointer instead.
+// mu protects all fields; OnGetStatusInfo runs on the WASM goroutine
+// concurrently with Update() on the bubbletea goroutine.
 type liveState struct {
+	mu          sync.RWMutex
 	streaming   bool
 	streamStart time.Time
 	width       int
 	hasError    bool
+	tokens      int
+	provider    string
+	model       string
+	statuses    map[string]string
+}
+
+func (s *liveState) setStreaming(v bool, start time.Time, hasErr bool) {
+	s.mu.Lock()
+	s.streaming = v
+	if v {
+		s.streamStart = start
+		s.hasError = false
+	} else {
+		if hasErr {
+			s.hasError = true
+		}
+	}
+	s.mu.Unlock()
+}
+
+func (s *liveState) setWidth(w int) {
+	s.mu.Lock()
+	s.width = w
+	s.mu.Unlock()
+}
+
+func (s *liveState) setModel(model string) {
+	s.mu.Lock()
+	s.model = model
+	s.mu.Unlock()
+}
+
+func (s *liveState) setTokens(n int) {
+	s.mu.Lock()
+	s.tokens = n
+	s.mu.Unlock()
+}
+
+func (s *liveState) setStatuses(statuses map[string]string) {
+	cp := make(map[string]string, len(statuses))
+	for k, v := range statuses {
+		cp[k] = v
+	}
+	s.mu.Lock()
+	s.statuses = cp
+	s.mu.Unlock()
 }
 
 // Model is the root bubbletea v2 model for the bob TUI.
@@ -101,7 +151,7 @@ func New(pool *agent.AgentPool, mainAgentID string, h *extension.Host) Model {
 		mainAgentID: mainAgentID,
 		extHost:     h,
 		console:     NewConsoleView(),
-		live:        &liveState{},
+		live:        &liveState{provider: provName},
 	}
 
 	registerBuiltins(m.commands)
@@ -154,21 +204,40 @@ func (m *Model) SetProgram(p *tea.Program) {
 		}
 		live := m.live
 		statusInfoPool := m.agentPool
-		sbRef := &m.statusBar
 		m.extHost.OnGetStatusInfo = func() sdk.StatusInfo {
-			info := sbRef.StatusInfo(live.streaming)
-			if live.streaming {
-				info.ElapsedMs = time.Since(live.streamStart).Milliseconds()
+			live.mu.RLock()
+			streaming := live.streaming
+			streamStart := live.streamStart
+			width := live.width
+			hasError := live.hasError
+			tokens := live.tokens
+			provider := live.provider
+			modelName := live.model
+			statuses := make(map[string]string, len(live.statuses))
+			for k, v := range live.statuses {
+				statuses[k] = v
+			}
+			live.mu.RUnlock()
+
+			info := sdk.StatusInfo{
+				Provider: provider,
+				Model:    modelName,
+				Tokens:   tokens,
+				Working:  streaming,
+				Statuses: statuses,
+				Width:    width,
+				HasError: hasError,
+			}
+			if streaming {
+				info.ElapsedMs = time.Since(streamStart).Milliseconds()
 			}
 			if statusInfoPool != nil {
-				n := len(statusInfoPool.ListAgents()) - 1 // subtract main agent
+				n := len(statusInfoPool.ListAgents()) - 1
 				if n < 0 {
 					n = 0
 				}
 				info.ActiveAgents = n
 			}
-			info.Width = live.width
-			info.HasError = live.hasError
 			return info
 		}
 		m.extHost.OnNotify = func(text string) {
@@ -534,7 +603,7 @@ func (m Model) updateWindow(msg tea.Msg) (Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
-		m.live.width = msg.Width
+		m.live.setWidth(msg.Width)
 		m.height = msg.Height
 		m.chat.SetSize(msg.Width, m.chatHeight())
 		m.picker.SetSize(msg.Width, m.chatHeight())
@@ -723,9 +792,7 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 			m.streaming = true
 			m.streamStart = time.Now()
 			m.statusBar.statuses["stream"] = "working."
-			m.live.streaming = true
-			m.live.streamStart = m.streamStart
-			m.live.hasError = false
+			m.live.setStreaming(true, m.streamStart, false)
 		}
 		return m, tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return streamTickMsg{} }), true
 
@@ -746,10 +813,12 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 	case StreamDoneMsg:
 		cmds := make([]tea.Cmd, 0, 2)
 		m.streaming = false
-		m.live.streaming = false
+		m.live.setStreaming(false, time.Time{}, false)
 		m.consoleVisible = false
 		if m.agentPool != nil {
-			m.statusBar.totalTokens = int(m.agentPool.TokenCount())
+			n := int(m.agentPool.TokenCount())
+			m.statusBar.totalTokens = n
+			m.live.setTokens(n)
 		}
 		if msg.Err != nil {
 			if errors.Is(msg.Err, context.Canceled) {
@@ -758,7 +827,7 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 				slog.Error("stream error", "err", msg.Err)
 				m.chat.AddNotification(fmt.Sprintf("⚠ %v", msg.Err))
 				m.statusBar.statuses["stream"] = "error"
-				m.live.hasError = true
+				m.live.setStreaming(false, time.Time{}, true)
 			}
 		} else {
 			slog.Info("stream done", "tokens", m.agentPool.TokenCount())
@@ -846,6 +915,7 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 	case setModelMsg:
 		m.activeModel = msg.Model
 		m.statusBar.modelName = msg.Model
+		m.live.setModel(msg.Model)
 		m.chat.AddNotification(fmt.Sprintf("Model set to: %s", msg.Model))
 		return m, nil, true
 
@@ -919,8 +989,6 @@ func (m Model) updateExtension(msg tea.Msg) (Model, tea.Cmd, bool) {
 		if !m.streaming && m.statusBar.statuses["stream"] == "queuing…" {
 			delete(m.statusBar.statuses, "stream")
 		}
-		// Refresh autocomplete in case extensions registered new commands.
-		m.updateSuggestions()
 		return m, nil, true
 
 	case ReloadMsg:
@@ -965,9 +1033,7 @@ func (m Model) submitToAgent(content, display string) (tea.Model, tea.Cmd) {
 	}
 	m.streamStart = time.Now()
 	m.statusBar.statuses["stream"] = "working."
-	m.live.streaming = true
-	m.live.streamStart = m.streamStart
-	m.live.hasError = false
+	m.live.setStreaming(true, m.streamStart, false)
 
 	pool := m.agentPool
 	mainAgentID := m.mainAgentID
