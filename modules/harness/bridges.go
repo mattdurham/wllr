@@ -2,10 +2,16 @@ package harness
 
 // NOTE: Any changes to this file must be reflected in the corresponding SPECS.md or NOTES.md.
 
-// harnessAgentBridge and harnessTeamBridge are unexported bridge adapter structs
-// that implement the extension.AgentBridge and extension.TeamBridge interfaces
-// by delegating to the agent pool. They are constructed in SetProgram and
-// installed on the extension host via the Set* methods.
+// This file contains the four bridge adapter types installed on the extension host:
+//   - earlyUIBridge: stub UIBridge installed in New() before the tea.Program exists;
+//     supports command registration during extension _init.
+//   - earlyAgentBridge: stub AgentBridge installed in New() before the tea.Program exists;
+//     returns descriptive errors for any agent operation during _init.
+//   - harnessAgentBridge: full AgentBridge installed in SetProgram; delegates to
+//     agent.Spawner and the agent pool.
+//   - harnessTeamBridge: full TeamBridge installed in SetProgram; delegates to the pool.
+//   - harnessUIBridge: full UIBridge installed in SetProgram; sends bubbletea messages
+//     to the running tea.Program for all UI operations.
 
 import (
 	"context"
@@ -26,13 +32,15 @@ type earlyUIBridge struct {
 	cmds *Registry
 }
 
-func (e *earlyUIBridge) Notify(_ string)                                                  {}
-func (e *earlyUIBridge) ShowModal(_ string)                                               {}
-func (e *earlyUIBridge) ShowPicker(_ string, _ []sdk.ShowPickerItem, _ string)            {}
-func (e *earlyUIBridge) Abort()                                                           {}
-func (e *earlyUIBridge) SetStatus(_, _ string)                                            {}
-func (e *earlyUIBridge) GetStatusInfo() sdk.StatusInfo                                    { return sdk.StatusInfo{Statuses: map[string]string{}} }
-func (e *earlyUIBridge) SendMessage(_ sdk.Message)                                        {}
+func (e *earlyUIBridge) Notify(_ string)                                       {}
+func (e *earlyUIBridge) ShowModal(_ string)                                    {}
+func (e *earlyUIBridge) ShowPicker(_ string, _ []sdk.ShowPickerItem, _ string) {}
+func (e *earlyUIBridge) Abort()                                                {}
+func (e *earlyUIBridge) SetStatus(_, _ string)                                 {}
+func (e *earlyUIBridge) GetStatusInfo() sdk.StatusInfo {
+	return sdk.StatusInfo{Statuses: map[string]string{}}
+}
+func (e *earlyUIBridge) SendMessage(_ sdk.Message) {}
 func (e *earlyUIBridge) RegisterCommand(name, desc string) error {
 	e.cmds.Register(Command{
 		Name: name,
@@ -45,17 +53,37 @@ func (e *earlyUIBridge) RegisterCommand(name, desc string) error {
 	})
 	return nil
 }
-func (e *earlyUIBridge) RegisterTool(_ sdk.Tool) error                { return nil }
-func (e *earlyUIBridge) SetSystemPrompt(_ string)                     {}
-func (e *earlyUIBridge) AppendSystemPrompt(_ string)                  {}
-func (e *earlyUIBridge) ResetHistory(_ []sdk.Message) error           { return nil }
-func (e *earlyUIBridge) ToolResult(_, _ string, _ bool)               {}
-func (e *earlyUIBridge) AfterToolCall(_, _, _ string, _ bool)         {}
-func (e *earlyUIBridge) ConsoleOutput(_ string)                       {}
-func (e *earlyUIBridge) ConsoleClear()                                {}
+func (e *earlyUIBridge) RegisterTool(_ sdk.Tool) error        { return nil }
+func (e *earlyUIBridge) SetSystemPrompt(_ string)             {}
+func (e *earlyUIBridge) AppendSystemPrompt(_ string)          {}
+func (e *earlyUIBridge) ResetHistory(_ []sdk.Message) error   { return nil }
+func (e *earlyUIBridge) ToolResult(_, _ string, _ bool)       {}
+func (e *earlyUIBridge) AfterToolCall(_, _, _ string, _ bool) {}
+func (e *earlyUIBridge) ConsoleOutput(_ string)               {}
+func (e *earlyUIBridge) ConsoleClear()                        {}
 
 // Verify earlyUIBridge satisfies the interface at compile time.
 var _ extension.UIBridge = (*earlyUIBridge)(nil)
+
+// earlyAgentBridge is installed before SetProgram is called so that extensions
+// that call agent_spawn during _init receive a clear error rather than a nil
+// pointer dereference. All methods return descriptive errors.
+type earlyAgentBridge struct{}
+
+func (e *earlyAgentBridge) Spawn(_ context.Context, _ extension.SpawnRequest) error {
+	return fmt.Errorf("agent_spawn: session not yet started")
+}
+func (e *earlyAgentBridge) Close(_ string) error                 { return fmt.Errorf("not started") }
+func (e *earlyAgentBridge) SendMessage(_, _ string) error        { return fmt.Errorf("not started") }
+func (e *earlyAgentBridge) Run(_ string) error                   { return fmt.Errorf("not started") }
+func (e *earlyAgentBridge) List() ([]extension.AgentInfo, error) { return nil, nil }
+func (e *earlyAgentBridge) TokenCount() int64                    { return 0 }
+func (e *earlyAgentBridge) SetHistory(_ string, _ []sdk.Message) error {
+	return fmt.Errorf("not started")
+}
+
+// Verify earlyAgentBridge satisfies the interface at compile time.
+var _ extension.AgentBridge = (*earlyAgentBridge)(nil)
 
 // harnessAgentBridge implements extension.AgentBridge by delegating to the
 // agent.AgentPool and agent.Spawner.
@@ -67,14 +95,10 @@ type harnessAgentBridge struct {
 }
 
 func (b *harnessAgentBridge) Spawn(ctx context.Context, req extension.SpawnRequest) error {
-	return b.spawner.Spawn(ctx, agent.SpawnRequest{
-		ID:             req.ID,
-		Name:           req.Name,
-		SystemPrompt:   req.SystemPrompt,
-		ModelName:      req.ModelName,
-		InitialPrompt:  req.InitialPrompt,
-		ThinkingBudget: req.ThinkingBudget,
-	})
+	if b.spawner == nil {
+		return fmt.Errorf("agent_spawn: spawner not initialized")
+	}
+	return b.spawner.Spawn(ctx, req)
 }
 
 func (b *harnessAgentBridge) Close(id string) error {
@@ -100,7 +124,7 @@ func (b *harnessAgentBridge) Run(id string) error {
 	}
 	// Send agentWakeupMsg to set streaming=true for the TUI indicator.
 	// Only fire for the main agent — sub-agents don't have TUI streaming state.
-	if id == b.mainID {
+	if id == b.mainID && b.prog != nil {
 		b.prog.Send(agentWakeupMsg{})
 	}
 	return b.pool.Send(id, "[process pending inbox messages]")
@@ -141,6 +165,8 @@ type harnessTeamBridge struct {
 	pool *agent.AgentPool
 }
 
+// Create creates a new team with the given id. The name parameter is accepted
+// by the TeamBridge interface but is not used by the pool's CreateTeam implementation.
 func (b *harnessTeamBridge) Create(id, _ string) error {
 	if b.pool == nil {
 		return fmt.Errorf("no agent pool")
@@ -149,11 +175,11 @@ func (b *harnessTeamBridge) Create(id, _ string) error {
 	return err
 }
 
-func (b *harnessTeamBridge) Close(_ context.Context, id string) error {
+func (b *harnessTeamBridge) Close(ctx context.Context, id string) error {
 	if b.pool == nil {
 		return nil
 	}
-	return b.pool.CloseTeam(context.Background(), id)
+	return b.pool.CloseTeam(ctx, id)
 }
 
 func (b *harnessTeamBridge) AddMember(teamID, agentID string) error {
@@ -204,22 +230,37 @@ type harnessUIBridge struct {
 }
 
 func (b *harnessUIBridge) Notify(text string) {
+	if b.prog == nil {
+		return
+	}
 	b.prog.Send(NotifyMsg{Text: text})
 }
 
 func (b *harnessUIBridge) ShowModal(text string) {
+	if b.prog == nil {
+		return
+	}
 	b.prog.Send(ShowModalMsg{Text: text})
 }
 
 func (b *harnessUIBridge) ShowPicker(title string, items []sdk.ShowPickerItem, callback string) {
+	if b.prog == nil {
+		return
+	}
 	b.prog.Send(ShowPickerMsg{Title: title, Items: items, Callback: callback})
 }
 
 func (b *harnessUIBridge) Abort() {
+	if b.prog == nil {
+		return
+	}
 	b.prog.Send(abortStreamMsg{})
 }
 
 func (b *harnessUIBridge) SetStatus(key, value string) {
+	if b.prog == nil {
+		return
+	}
 	b.prog.Send(StatusUpdateMsg{Key: key, Value: value})
 }
 
@@ -262,6 +303,9 @@ func (b *harnessUIBridge) GetStatusInfo() sdk.StatusInfo {
 }
 
 func (b *harnessUIBridge) SendMessage(msg sdk.Message) {
+	if b.prog == nil {
+		return
+	}
 	sm := SubmitMsg{Content: msg.Content}
 	if strings.HasPrefix(strings.TrimSpace(msg.Content), "<skill ") {
 		sm.Display = skillDisplayName(msg.Content)
@@ -307,7 +351,9 @@ func (b *harnessUIBridge) ResetHistory(messages []sdk.Message) error {
 	if err := b.pool.SetAgentHistory(b.mainID, messages); err != nil {
 		return err
 	}
-	b.prog.Send(ResetHistoryMsg{Messages: messages})
+	if b.prog != nil {
+		b.prog.Send(ResetHistoryMsg{Messages: messages})
+	}
 	return nil
 }
 
@@ -319,13 +365,22 @@ func (b *harnessUIBridge) ToolResult(toolCallID, result string, isError bool) {
 }
 
 func (b *harnessUIBridge) AfterToolCall(id, _, result string, isError bool) {
+	if b.prog == nil {
+		return
+	}
 	b.prog.Send(ToolCallDoneMsg{ID: id, IsError: isError, Output: result})
 }
 
 func (b *harnessUIBridge) ConsoleOutput(line string) {
+	if b.prog == nil {
+		return
+	}
 	b.prog.Send(ConsoleMsg{Line: line})
 }
 
 func (b *harnessUIBridge) ConsoleClear() {
+	if b.prog == nil {
+		return
+	}
 	b.prog.Send(ConsoleMsg{Clear: true})
 }

@@ -459,9 +459,8 @@ func (a *Agent) finishTurn(err error, ctxErr error, onDone func(error)) {
 			for _, m := range pending {
 				a.AppendInbox(m)
 			}
-			if onDone != nil {
-				onDone(nil)
-			}
+			// Do NOT fire onDone here: the drain sub-turn's finishTurn will fire it
+			// when the inbox is finally empty, preventing a double StreamDoneMsg.
 			a.Submit(context.Background(), "")
 			return
 		}

@@ -102,22 +102,14 @@ func TestSubmit_ConcurrentCallQueuesContent(t *testing.T) {
 	// Release the first turn.
 	lm.Release()
 
-	// Wait for first turn to complete.
+	// Wait for the final onDone — fired once after both turns complete.
+	// After the fix for double-StreamDoneMsg (H1), onDone is NOT fired on the
+	// intermediate drain branch; only the final drain turn fires it when the inbox
+	// is confirmed empty. This means one onDone per logical session, not per turn.
 	select {
 	case err := <-doneCh:
 		if err != nil {
-			t.Fatalf("first turn error: %v", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("first turn did not complete")
-	}
-
-	// The drain-until-empty loop should process the queued "second content".
-	// Wait for the second turn to complete.
-	select {
-	case err := <-doneCh:
-		if err != nil {
-			t.Fatalf("second turn error: %v", err)
+			t.Fatalf("turn error: %v", err)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("second turn (from drain) did not complete")
