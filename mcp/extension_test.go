@@ -9,6 +9,40 @@ import (
 	"github.com/mattdurham/wllr/sdk"
 )
 
+// testUIBridge is a minimal UIBridge for mcp tests.
+type testUIBridge struct {
+	onRegisterTool func(tool sdk.Tool) error
+	onToolResult   func(id, result string, isError bool)
+}
+
+func (b *testUIBridge) Notify(_ string)                                                {}
+func (b *testUIBridge) ShowModal(_ string)                                             {}
+func (b *testUIBridge) ShowPicker(_ string, _ []sdk.ShowPickerItem, _ string)          {}
+func (b *testUIBridge) Abort()                                                         {}
+func (b *testUIBridge) SetStatus(_, _ string)                                          {}
+func (b *testUIBridge) GetStatusInfo() sdk.StatusInfo                                  { return sdk.StatusInfo{} }
+func (b *testUIBridge) SendMessage(_ sdk.Message)                                      {}
+func (b *testUIBridge) RegisterCommand(_, _ string) error                              { return nil }
+func (b *testUIBridge) RegisterTool(tool sdk.Tool) error {
+	if b.onRegisterTool != nil {
+		return b.onRegisterTool(tool)
+	}
+	return nil
+}
+func (b *testUIBridge) SetSystemPrompt(_ string)                  {}
+func (b *testUIBridge) AppendSystemPrompt(_ string)               {}
+func (b *testUIBridge) ResetHistory(_ []sdk.Message) error        { return nil }
+func (b *testUIBridge) ToolResult(id, result string, isError bool) {
+	if b.onToolResult != nil {
+		b.onToolResult(id, result, isError)
+	}
+}
+func (b *testUIBridge) AfterToolCall(_, _, _ string, _ bool) {}
+func (b *testUIBridge) ConsoleOutput(_ string)               {}
+func (b *testUIBridge) ConsoleClear()                        {}
+
+var _ extension.UIBridge = (*testUIBridge)(nil)
+
 // TestExtension_NewExtension verifies the constructor wires bridge and host.
 func TestExtension_NewExtension(t *testing.T) {
 	host := extension.NewHost(nil)
@@ -60,10 +94,10 @@ func TestExtension_RegisterTool_UsesHostCallback(t *testing.T) {
 	defer host.Close(context.Background())
 
 	var registered []sdk.Tool
-	host.OnRegisterTool = func(tool sdk.Tool) error {
+	host.SetUIBridge(&testUIBridge{onRegisterTool: func(tool sdk.Tool) error {
 		registered = append(registered, tool)
 		return nil
-	}
+	}})
 
 	ext := NewExtension(host)
 	tool := sdk.Tool{Name: "my_tool", Description: "does stuff", InputSchema: json.RawMessage(`{}`)}
@@ -110,9 +144,9 @@ func TestExtension_HandleToolCall_NotMCPTool(t *testing.T) {
 
 	// Should return nil and not call SendToolResult.
 	var toolResultCalled bool
-	host.OnToolResult = func(id, result string, isError bool) {
+	host.SetUIBridge(&testUIBridge{onToolResult: func(id, result string, isError bool) {
 		toolResultCalled = true
-	}
+	}})
 
 	if err := ext.handleToolCall(context.Background(), evt); err != nil {
 		t.Fatalf("handleToolCall: %v", err)
@@ -142,11 +176,11 @@ func TestExtension_HandleToolCall_MCPTool(t *testing.T) {
 
 	var gotID, gotResult string
 	var gotError bool
-	host.OnToolResult = func(id, result string, isError bool) {
+	host.SetUIBridge(&testUIBridge{onToolResult: func(id, result string, isError bool) {
 		gotID = id
 		gotResult = result
 		gotError = isError
-	}
+	}})
 
 	payload, _ := json.Marshal(sdk.BeforeToolCallPayload{
 		AgentID:    "agent-1",
