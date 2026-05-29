@@ -1454,6 +1454,7 @@ func TestHost_HandleAgentRun_NilCallback_ReturnsError(t *testing.T) {
 		t.Fatal("expected error when OnAgentRun is nil, got empty")
 	}
 }
+
 func TestHost_OnExec_AcceptsContextAndOnLine(t *testing.T) {
 	called := false
 	h := NewHost(nil)
@@ -1468,6 +1469,7 @@ func TestHost_OnExec_AcceptsContextAndOnLine(t *testing.T) {
 		t.Fatal("OnExec was not called")
 	}
 }
+
 func TestHost_HandleExec_PassesContext(t *testing.T) {
 	ctxCalled := false
 	h := NewHost(nil)

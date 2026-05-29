@@ -4,10 +4,11 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"github.com/mattdurham/wllr/extension"
 	"io"
 	"os/exec"
 	"sync"
+
+	"github.com/mattdurham/wllr/extension"
 )
 
 func makeExecHandler(h *extension.Host) func(ctx context.Context, command, dir string, onLine func(string)) (string, error) {
@@ -26,7 +27,7 @@ func makeExecHandler(h *extension.Host) func(ctx context.Context, command, dir s
 		}
 		stderr, err := cmd.StderrPipe()
 		if err != nil {
-			stdout.Close()
+			_ = stdout.Close()
 			return "", err
 		}
 		if err := cmd.Start(); err != nil {
