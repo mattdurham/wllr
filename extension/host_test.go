@@ -22,6 +22,262 @@ func writeWASM(t *testing.T, name string, data []byte) string {
 	return path
 }
 
+// --- Test bridge helpers ---
+// These allow tests to provide callback-like functions via interface implementations.
+
+// testAgentBridge implements AgentBridge using optional callback fields.
+type testAgentBridge struct {
+	onSpawn       func(ctx context.Context, req SpawnRequest) error
+	onClose       func(id string) error
+	onSendMessage func(id, message string) error
+	onRun         func(id string) error
+	onList        func() ([]AgentInfo, error)
+	onTokenCount  func() int64
+	onSetHistory  func(id string, messages []sdk.Message) error
+}
+
+func (b *testAgentBridge) Spawn(ctx context.Context, req SpawnRequest) error {
+	if b.onSpawn != nil {
+		return b.onSpawn(ctx, req)
+	}
+	return nil
+}
+func (b *testAgentBridge) Close(id string) error {
+	if b.onClose != nil {
+		return b.onClose(id)
+	}
+	return nil
+}
+func (b *testAgentBridge) SendMessage(id, message string) error {
+	if b.onSendMessage != nil {
+		return b.onSendMessage(id, message)
+	}
+	return nil
+}
+func (b *testAgentBridge) Run(id string) error {
+	if b.onRun != nil {
+		return b.onRun(id)
+	}
+	return nil
+}
+func (b *testAgentBridge) List() ([]AgentInfo, error) {
+	if b.onList != nil {
+		return b.onList()
+	}
+	return nil, nil
+}
+func (b *testAgentBridge) TokenCount() int64 {
+	if b.onTokenCount != nil {
+		return b.onTokenCount()
+	}
+	return 0
+}
+func (b *testAgentBridge) SetHistory(id string, messages []sdk.Message) error {
+	if b.onSetHistory != nil {
+		return b.onSetHistory(id, messages)
+	}
+	return nil
+}
+
+// testTeamBridge implements TeamBridge using optional callback fields.
+type testTeamBridge struct {
+	onCreate       func(id, name string) error
+	onClose        func(ctx context.Context, id string) error
+	onAddMember    func(teamID, agentID string) error
+	onRemoveMember func(teamID, agentID string) error
+	onGetMembers   func(teamID string) ([]string, error)
+	onList         func() ([]string, error)
+}
+
+func (b *testTeamBridge) Create(id, name string) error {
+	if b.onCreate != nil {
+		return b.onCreate(id, name)
+	}
+	return nil
+}
+func (b *testTeamBridge) Close(ctx context.Context, id string) error {
+	if b.onClose != nil {
+		return b.onClose(ctx, id)
+	}
+	return nil
+}
+func (b *testTeamBridge) AddMember(teamID, agentID string) error {
+	if b.onAddMember != nil {
+		return b.onAddMember(teamID, agentID)
+	}
+	return nil
+}
+func (b *testTeamBridge) RemoveMember(teamID, agentID string) error {
+	if b.onRemoveMember != nil {
+		return b.onRemoveMember(teamID, agentID)
+	}
+	return nil
+}
+func (b *testTeamBridge) GetMembers(teamID string) ([]string, error) {
+	if b.onGetMembers != nil {
+		return b.onGetMembers(teamID)
+	}
+	return nil, nil
+}
+func (b *testTeamBridge) List() ([]string, error) {
+	if b.onList != nil {
+		return b.onList()
+	}
+	return nil, nil
+}
+
+// testUIBridge implements UIBridge using optional callback fields.
+type testUIBridge struct {
+	onNotify          func(text string)
+	onShowModal       func(text string)
+	onShowPicker      func(title string, items []sdk.ShowPickerItem, callback string)
+	onAbort           func()
+	onSetStatus       func(key, value string)
+	onGetStatusInfo   func() sdk.StatusInfo
+	onSendMessage     func(msg sdk.Message)
+	onRegisterCommand func(name, desc string) error
+	onRegisterTool    func(tool sdk.Tool) error
+	onSetSystemPrompt func(prompt string)
+	onAppendSP        func(text string)
+	onResetHistory    func(messages []sdk.Message) error
+	onToolResult      func(toolCallID, result string, isError bool)
+	onAfterToolCall   func(toolCallID, toolName, result string, isError bool)
+	onConsoleOutput   func(line string)
+	onConsoleClear    func()
+}
+
+func (b *testUIBridge) Notify(text string) {
+	if b.onNotify != nil {
+		b.onNotify(text)
+	}
+}
+func (b *testUIBridge) ShowModal(text string) {
+	if b.onShowModal != nil {
+		b.onShowModal(text)
+	}
+}
+func (b *testUIBridge) ShowPicker(title string, items []sdk.ShowPickerItem, callback string) {
+	if b.onShowPicker != nil {
+		b.onShowPicker(title, items, callback)
+	}
+}
+func (b *testUIBridge) Abort() {
+	if b.onAbort != nil {
+		b.onAbort()
+	}
+}
+func (b *testUIBridge) SetStatus(key, value string) {
+	if b.onSetStatus != nil {
+		b.onSetStatus(key, value)
+	}
+}
+func (b *testUIBridge) GetStatusInfo() sdk.StatusInfo {
+	if b.onGetStatusInfo != nil {
+		return b.onGetStatusInfo()
+	}
+	return sdk.StatusInfo{}
+}
+func (b *testUIBridge) SendMessage(msg sdk.Message) {
+	if b.onSendMessage != nil {
+		b.onSendMessage(msg)
+	}
+}
+func (b *testUIBridge) RegisterCommand(name, desc string) error {
+	if b.onRegisterCommand != nil {
+		return b.onRegisterCommand(name, desc)
+	}
+	return nil
+}
+func (b *testUIBridge) RegisterTool(tool sdk.Tool) error {
+	if b.onRegisterTool != nil {
+		return b.onRegisterTool(tool)
+	}
+	return nil
+}
+func (b *testUIBridge) SetSystemPrompt(prompt string) {
+	if b.onSetSystemPrompt != nil {
+		b.onSetSystemPrompt(prompt)
+	}
+}
+func (b *testUIBridge) AppendSystemPrompt(text string) {
+	if b.onAppendSP != nil {
+		b.onAppendSP(text)
+	}
+}
+func (b *testUIBridge) ResetHistory(messages []sdk.Message) error {
+	if b.onResetHistory != nil {
+		return b.onResetHistory(messages)
+	}
+	return nil
+}
+func (b *testUIBridge) ToolResult(toolCallID, result string, isError bool) {
+	if b.onToolResult != nil {
+		b.onToolResult(toolCallID, result, isError)
+	}
+}
+func (b *testUIBridge) AfterToolCall(toolCallID, toolName, result string, isError bool) {
+	if b.onAfterToolCall != nil {
+		b.onAfterToolCall(toolCallID, toolName, result, isError)
+	}
+}
+func (b *testUIBridge) ConsoleOutput(line string) {
+	if b.onConsoleOutput != nil {
+		b.onConsoleOutput(line)
+	}
+}
+func (b *testUIBridge) ConsoleClear() {
+	if b.onConsoleClear != nil {
+		b.onConsoleClear()
+	}
+}
+
+// testCapabilityProvider implements CapabilityProvider using optional callback fields.
+type testCapabilityProvider struct {
+	onExec       func(ctx context.Context, command, dir string, onLine func(string)) (string, error)
+	onGetEnv     func(name string) (string, error)
+	onReadFile   func(path string) (string, error)
+	onWriteFile  func(path, content string) error
+	onHTTPPost   func(url string, headers map[string]string, body []byte) (int, []byte, error)
+	onConfigRead func(group string) (json.RawMessage, error)
+}
+
+func (p *testCapabilityProvider) Exec(ctx context.Context, command, dir string, onLine func(string)) (string, error) {
+	if p.onExec != nil {
+		return p.onExec(ctx, command, dir, onLine)
+	}
+	return "", nil
+}
+func (p *testCapabilityProvider) GetEnv(name string) (string, error) {
+	if p.onGetEnv != nil {
+		return p.onGetEnv(name)
+	}
+	return "", nil
+}
+func (p *testCapabilityProvider) ReadFile(path string) (string, error) {
+	if p.onReadFile != nil {
+		return p.onReadFile(path)
+	}
+	return "", nil
+}
+func (p *testCapabilityProvider) WriteFile(path, content string) error {
+	if p.onWriteFile != nil {
+		return p.onWriteFile(path, content)
+	}
+	return nil
+}
+func (p *testCapabilityProvider) HTTPPost(url string, headers map[string]string, body []byte) (int, []byte, error) {
+	if p.onHTTPPost != nil {
+		return p.onHTTPPost(url, headers, body)
+	}
+	return 200, nil, nil
+}
+func (p *testCapabilityProvider) ConfigRead(group string) (json.RawMessage, error) {
+	if p.onConfigRead != nil {
+		return p.onConfigRead(group)
+	}
+	return nil, nil
+}
+
 func TestHost_Load_MinimalWASM(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
@@ -224,10 +480,10 @@ func TestHost_Callbacks_SetStatus(t *testing.T) {
 	defer h.Close(ctx)
 
 	var gotKey, gotValue string
-	h.OnSetStatus = func(k, v string) {
+	h.SetUIBridge(&testUIBridge{onSetStatus: func(k, v string) {
 		gotKey = k
 		gotValue = v
-	}
+	}})
 
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
 	if err := h.Load(ctx, path); err != nil {
@@ -503,9 +759,9 @@ func TestHost_ExecuteTool_CallbackInvoked(t *testing.T) {
 	const toolResult = "hello"
 
 	resultCh := make(chan string, 1)
-	h.OnToolResult = func(id, result string, isError bool) {
+	h.SetUIBridge(&testUIBridge{onToolResult: func(id, result string, isError bool) {
 		resultCh <- result
-	}
+	}})
 
 	// Register the tool.
 	h.mu.Lock()
@@ -597,13 +853,13 @@ func TestHost_ExecuteTool_AfterToolCallDispatched(t *testing.T) {
 	const toolName = "mytool"
 	const toolResultStr = "done"
 
-	// Track whether OnAfterToolCall was invoked (proves EventAfterToolCall path ran).
+	// Track whether AfterToolCall was invoked (proves EventAfterToolCall path ran).
 	afterCh := make(chan struct{}, 1)
-	h.OnAfterToolCall = func(id, name, result string, isError bool) {
+	h.SetUIBridge(&testUIBridge{onAfterToolCall: func(id, name, result string, isError bool) {
 		if id == toolCallID && name == toolName && result == toolResultStr && !isError {
 			afterCh <- struct{}{}
 		}
-	}
+	}})
 
 	h.mu.Lock()
 	h.registeredTools[toolName] = sdk.Tool{Name: toolName}
@@ -625,12 +881,12 @@ func TestHost_ExecuteTool_AfterToolCallDispatched(t *testing.T) {
 		t.Errorf("ExecuteTool result: got %q, want %q", resp.Result, toolResultStr)
 	}
 
-	// OnAfterToolCall must have been invoked (proves EventAfterToolCall dispatch happened).
+	// AfterToolCall must have been invoked (proves EventAfterToolCall dispatch happened).
 	select {
 	case <-afterCh:
 		// Good.
 	default:
-		t.Error("expected OnAfterToolCall to be called after ExecuteTool completed")
+		t.Error("expected AfterToolCall to be called after ExecuteTool completed")
 	}
 }
 
@@ -650,9 +906,9 @@ func TestHost_OnAfterToolCall_Callback(t *testing.T) {
 		isError bool
 	}
 	gotCh := make(chan callArgs, 1)
-	h.OnAfterToolCall = func(id, name, result string, isError bool) {
+	h.SetUIBridge(&testUIBridge{onAfterToolCall: func(id, name, result string, isError bool) {
 		gotCh <- callArgs{id, name, result, isError}
-	}
+	}})
 
 	h.mu.Lock()
 	h.registeredTools[toolName] = sdk.Tool{Name: toolName}
@@ -771,10 +1027,10 @@ func TestHost_HandleAgentSpawn_CallbackInvoked(t *testing.T) {
 		thinkingBudget                                   int
 	}
 	got := make(chan spawnArgs, 1)
-	h.OnAgentSpawn = func(id, name, systemPrompt, modelName, initialPrompt string, thinkingBudget int) error {
-		got <- spawnArgs{id, name, systemPrompt, modelName, initialPrompt, thinkingBudget}
+	h.SetAgentBridge(&testAgentBridge{onSpawn: func(_ context.Context, req SpawnRequest) error {
+		got <- spawnArgs{req.ID, req.Name, req.SystemPrompt, req.ModelName, req.InitialPrompt, req.ThinkingBudget}
 		return nil
-	}
+	}})
 
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
 	if err := h.Load(ctx, path); err != nil {
@@ -795,12 +1051,12 @@ func TestHost_HandleAgentSpawn_CallbackInvoked(t *testing.T) {
 		if args.id != "a1" || args.name != "worker" || args.systemPrompt != "you are helpful" ||
 			args.modelName != "claude-3" {
 			t.Errorf(
-				"OnAgentSpawn got %+v, want id=a1 name=worker systemPrompt='you are helpful' modelName=claude-3",
+				"AgentBridge.Spawn got %+v, want id=a1 name=worker systemPrompt='you are helpful' modelName=claude-3",
 				args,
 			)
 		}
 	default:
-		t.Fatal("OnAgentSpawn was not called")
+		t.Fatal("AgentBridge.Spawn was not called")
 	}
 }
 
@@ -830,10 +1086,10 @@ func TestHost_HandleAgentClose_CallbackInvoked(t *testing.T) {
 	defer h.Close(ctx)
 
 	closedID := make(chan string, 1)
-	h.OnAgentClose = func(id string) error {
+	h.SetAgentBridge(&testAgentBridge{onClose: func(id string) error {
 		closedID <- id
 		return nil
-	}
+	}})
 
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
 	if err := h.Load(ctx, path); err != nil {
@@ -852,10 +1108,10 @@ func TestHost_HandleAgentClose_CallbackInvoked(t *testing.T) {
 	select {
 	case id := <-closedID:
 		if id != "a1" {
-			t.Errorf("OnAgentClose got id=%q, want a1", id)
+			t.Errorf("AgentBridge.Close got id=%q, want a1", id)
 		}
 	default:
-		t.Fatal("OnAgentClose was not called")
+		t.Fatal("AgentBridge.Close was not called")
 	}
 }
 
@@ -866,10 +1122,10 @@ func TestHost_HandleAgentSendMessage_CallbackInvoked(t *testing.T) {
 
 	type msgArgs struct{ id, message string }
 	got := make(chan msgArgs, 1)
-	h.OnAgentSendMessage = func(id, message string) error {
+	h.SetAgentBridge(&testAgentBridge{onSendMessage: func(id, message string) error {
 		got <- msgArgs{id, message}
 		return nil
-	}
+	}})
 
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
 	if err := h.Load(ctx, path); err != nil {
@@ -888,10 +1144,10 @@ func TestHost_HandleAgentSendMessage_CallbackInvoked(t *testing.T) {
 	select {
 	case args := <-got:
 		if args.id != "a1" || args.message != "hello agent" {
-			t.Errorf("OnAgentSendMessage got %+v, want id=a1 message='hello agent'", args)
+			t.Errorf("AgentBridge.SendMessage got %+v, want id=a1 message='hello agent'", args)
 		}
 	default:
-		t.Fatal("OnAgentSendMessage was not called")
+		t.Fatal("AgentBridge.SendMessage was not called")
 	}
 }
 
@@ -900,12 +1156,12 @@ func TestHost_HandleAgentList_ReturnsAgents(t *testing.T) {
 	h := NewHost(nil)
 	defer h.Close(ctx)
 
-	h.OnAgentList = func() ([]AgentInfo, error) {
+	h.SetAgentBridge(&testAgentBridge{onList: func() ([]AgentInfo, error) {
 		return []AgentInfo{
 			{ID: "a1", Name: "worker"},
 			{ID: "a2", Name: "reviewer"},
 		}, nil
-	}
+	}})
 
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
 	if err := h.Load(ctx, path); err != nil {
@@ -929,7 +1185,7 @@ func TestHost_HandleAgentTokenCount_ReturnsCount(t *testing.T) {
 	h := NewHost(nil)
 	defer h.Close(ctx)
 
-	h.OnAgentTokenCount = func() int64 { return 42 }
+	h.SetAgentBridge(&testAgentBridge{onTokenCount: func() int64 { return 42 }})
 
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
 	if err := h.Load(ctx, path); err != nil {
@@ -957,10 +1213,10 @@ func TestHost_HandleTeamCreate_CallbackInvoked(t *testing.T) {
 
 	type createArgs struct{ id, name string }
 	got := make(chan createArgs, 1)
-	h.OnTeamCreate = func(id, name string) error {
+	h.SetTeamBridge(&testTeamBridge{onCreate: func(id, name string) error {
 		got <- createArgs{id, name}
 		return nil
-	}
+	}})
 
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
 	if err := h.Load(ctx, path); err != nil {
@@ -979,10 +1235,10 @@ func TestHost_HandleTeamCreate_CallbackInvoked(t *testing.T) {
 	select {
 	case args := <-got:
 		if args.id != "t1" || args.name != "alpha" {
-			t.Errorf("OnTeamCreate got %+v, want id=t1 name=alpha", args)
+			t.Errorf("TeamBridge.Create got %+v, want id=t1 name=alpha", args)
 		}
 	default:
-		t.Fatal("OnTeamCreate was not called")
+		t.Fatal("TeamBridge.Create was not called")
 	}
 }
 
@@ -992,10 +1248,10 @@ func TestHost_HandleTeamClose_CallbackInvoked(t *testing.T) {
 	defer h.Close(ctx)
 
 	closedID := make(chan string, 1)
-	h.OnTeamClose = func(id string) error {
+	h.SetTeamBridge(&testTeamBridge{onClose: func(_ context.Context, id string) error {
 		closedID <- id
 		return nil
-	}
+	}})
 
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
 	if err := h.Load(ctx, path); err != nil {
@@ -1014,10 +1270,10 @@ func TestHost_HandleTeamClose_CallbackInvoked(t *testing.T) {
 	select {
 	case id := <-closedID:
 		if id != "t1" {
-			t.Errorf("OnTeamClose got id=%q, want t1", id)
+			t.Errorf("TeamBridge.Close got id=%q, want t1", id)
 		}
 	default:
-		t.Fatal("OnTeamClose was not called")
+		t.Fatal("TeamBridge.Close was not called")
 	}
 }
 
@@ -1028,10 +1284,10 @@ func TestHost_HandleTeamAddMember_CallbackInvoked(t *testing.T) {
 
 	type addArgs struct{ teamID, agentID string }
 	got := make(chan addArgs, 1)
-	h.OnTeamAddMember = func(teamID, agentID string) error {
+	h.SetTeamBridge(&testTeamBridge{onAddMember: func(teamID, agentID string) error {
 		got <- addArgs{teamID, agentID}
 		return nil
-	}
+	}})
 
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
 	if err := h.Load(ctx, path); err != nil {
@@ -1050,10 +1306,10 @@ func TestHost_HandleTeamAddMember_CallbackInvoked(t *testing.T) {
 	select {
 	case args := <-got:
 		if args.teamID != "t1" || args.agentID != "a1" {
-			t.Errorf("OnTeamAddMember got %+v, want teamID=t1 agentID=a1", args)
+			t.Errorf("TeamBridge.AddMember got %+v, want teamID=t1 agentID=a1", args)
 		}
 	default:
-		t.Fatal("OnTeamAddMember was not called")
+		t.Fatal("TeamBridge.AddMember was not called")
 	}
 }
 
@@ -1064,10 +1320,10 @@ func TestHost_HandleTeamRemoveMember_CallbackInvoked(t *testing.T) {
 
 	type removeArgs struct{ teamID, agentID string }
 	got := make(chan removeArgs, 1)
-	h.OnTeamRemoveMember = func(teamID, agentID string) error {
+	h.SetTeamBridge(&testTeamBridge{onRemoveMember: func(teamID, agentID string) error {
 		got <- removeArgs{teamID, agentID}
 		return nil
-	}
+	}})
 
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
 	if err := h.Load(ctx, path); err != nil {
@@ -1086,10 +1342,10 @@ func TestHost_HandleTeamRemoveMember_CallbackInvoked(t *testing.T) {
 	select {
 	case args := <-got:
 		if args.teamID != "t1" || args.agentID != "a1" {
-			t.Errorf("OnTeamRemoveMember got %+v, want teamID=t1 agentID=a1", args)
+			t.Errorf("TeamBridge.RemoveMember got %+v, want teamID=t1 agentID=a1", args)
 		}
 	default:
-		t.Fatal("OnTeamRemoveMember was not called")
+		t.Fatal("TeamBridge.RemoveMember was not called")
 	}
 }
 
@@ -1098,12 +1354,12 @@ func TestHost_HandleTeamGetInfo_CallbackInvoked(t *testing.T) {
 	h := NewHost(nil)
 	defer h.Close(ctx)
 
-	h.OnTeamGetInfo = func(teamID string) ([]string, error) {
+	h.SetTeamBridge(&testTeamBridge{onGetMembers: func(teamID string) ([]string, error) {
 		if teamID == "team-1" {
 			return []string{"agent-a", "agent-b"}, nil
 		}
 		return nil, fmt.Errorf("team not found: %s", teamID)
-	}
+	}})
 
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
 	if err := h.Load(ctx, path); err != nil {
@@ -1137,9 +1393,9 @@ func TestHost_HandleTeamGetInfo_UnknownTeam_ReturnsError(t *testing.T) {
 	h := NewHost(nil)
 	defer h.Close(ctx)
 
-	h.OnTeamGetInfo = func(teamID string) ([]string, error) {
+	h.SetTeamBridge(&testTeamBridge{onGetMembers: func(teamID string) ([]string, error) {
 		return nil, fmt.Errorf("team not found: %s", teamID)
-	}
+	}})
 
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
 	if err := h.Load(ctx, path); err != nil {
@@ -1161,9 +1417,9 @@ func TestHost_HandleTeamGetInfo_MissingTeamID_ReturnsError(t *testing.T) {
 	h := NewHost(nil)
 	defer h.Close(ctx)
 
-	h.OnTeamGetInfo = func(teamID string) ([]string, error) {
+	h.SetTeamBridge(&testTeamBridge{onGetMembers: func(teamID string) ([]string, error) {
 		return nil, nil
-	}
+	}})
 
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
 	if err := h.Load(ctx, path); err != nil {
@@ -1185,9 +1441,9 @@ func TestHost_HandleTeamList_CallbackInvoked(t *testing.T) {
 	h := NewHost(nil)
 	defer h.Close(ctx)
 
-	h.OnTeamList = func() ([]string, error) {
+	h.SetTeamBridge(&testTeamBridge{onList: func() ([]string, error) {
 		return []string{"team-alpha", "team-beta"}, nil
-	}
+	}})
 
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
 	if err := h.Load(ctx, path); err != nil {
@@ -1217,9 +1473,9 @@ func TestHost_HandleTeamList_EmptyList(t *testing.T) {
 	h := NewHost(nil)
 	defer h.Close(ctx)
 
-	h.OnTeamList = func() ([]string, error) {
+	h.SetTeamBridge(&testTeamBridge{onList: func() ([]string, error) {
 		return []string{}, nil
-	}
+	}})
 
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
 	if err := h.Load(ctx, path); err != nil {
@@ -1289,9 +1545,9 @@ func TestHost_HandleTeamGetInfo_ReturnsMembers(t *testing.T) {
 	h := NewHost(nil)
 	defer h.Close(ctx)
 
-	h.OnTeamGetInfo = func(teamID string) ([]string, error) {
+	h.SetTeamBridge(&testTeamBridge{onGetMembers: func(teamID string) ([]string, error) {
 		return []string{"a1", "a2"}, nil
-	}
+	}})
 
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
 	if err := h.Load(ctx, path); err != nil {
@@ -1332,9 +1588,9 @@ func TestHost_HandleTeamList_ReturnsTeams(t *testing.T) {
 	h := NewHost(nil)
 	defer h.Close(ctx)
 
-	h.OnTeamList = func() ([]string, error) {
+	h.SetTeamBridge(&testTeamBridge{onList: func() ([]string, error) {
 		return []string{"t1", "t2"}, nil
-	}
+	}})
 
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
 	if err := h.Load(ctx, path); err != nil {
@@ -1375,7 +1631,7 @@ func TestHost_HandleTeamCreate_ReturnsTeamID(t *testing.T) {
 	h := NewHost(nil)
 	defer h.Close(ctx)
 
-	h.OnTeamCreate = func(id, name string) error { return nil }
+	h.SetTeamBridge(&testTeamBridge{onCreate: func(id, name string) error { return nil }})
 
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
 	if err := h.Load(ctx, path); err != nil {
@@ -1410,10 +1666,10 @@ func TestHost_HandleAgentRun_CallbackInvoked(t *testing.T) {
 	defer h.Close(ctx)
 
 	var calledWith string
-	h.OnAgentRun = func(id string) error {
+	h.SetAgentBridge(&testAgentBridge{onRun: func(id string) error {
 		calledWith = id
 		return nil
-	}
+	}})
 
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
 	if err := h.Load(ctx, path); err != nil {
@@ -1429,7 +1685,7 @@ func TestHost_HandleAgentRun_CallbackInvoked(t *testing.T) {
 		t.Fatalf("agent_run: %s", resp.Error)
 	}
 	if calledWith != "worker-1" {
-		t.Errorf("OnAgentRun called with %q, want %q", calledWith, "worker-1")
+		t.Errorf("AgentBridge.Run called with %q, want %q", calledWith, "worker-1")
 	}
 }
 
@@ -1453,33 +1709,64 @@ func TestHost_HandleAgentRun_NilCallback_ReturnsError(t *testing.T) {
 		t.Fatal("expected error when OnAgentRun is nil, got empty")
 	}
 }
-func TestHost_OnExec_AcceptsContextAndOnLine(t *testing.T) {
+func TestHost_CapabilityProvider_Exec_AcceptsContext(t *testing.T) {
 	called := false
 	h := NewHost(nil)
 	ctx := context.Background()
 	defer h.Close(ctx)
-	h.OnExec = func(_ctx context.Context, _command, _dir string, _onLine func(string)) (string, error) {
+
+	path := writeWASM(t, "minimal.wasm", minimalWASM)
+	if err := h.Load(ctx, path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	ext := h.extensions[0]
+	ext.trusted = true // bypass permission check
+
+	h.SetCapabilities(&testCapabilityProvider{onExec: func(_ctx context.Context, _command, _dir string, _onLine func(string)) (string, error) {
 		called = true
 		return "ok", nil
+	}})
+
+	resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+		Method: sdk.MethodExec,
+		Params: []byte(`{"command":"echo test","dir":""}`),
+	})
+	if resp.Error != "" {
+		t.Fatalf("exec: %s", resp.Error)
 	}
-	_, _ = h.OnExec(ctx, "echo test", "", nil)
 	if !called {
-		t.Fatal("OnExec was not called")
+		t.Fatal("CapabilityProvider.Exec was not called")
 	}
 }
+
 func TestHost_HandleExec_PassesContext(t *testing.T) {
 	ctxCalled := false
 	h := NewHost(nil)
 	ctx := context.Background()
 	defer h.Close(ctx)
-	h.OnExec = func(c context.Context, _cmd, _dir string, _onLine func(string)) (string, error) {
+
+	path := writeWASM(t, "minimal.wasm", minimalWASM)
+	if err := h.Load(ctx, path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	ext := h.extensions[0]
+	ext.trusted = true // bypass permission check
+
+	h.SetCapabilities(&testCapabilityProvider{onExec: func(c context.Context, _cmd, _dir string, _onLine func(string)) (string, error) {
 		if c != nil {
 			ctxCalled = true
 		}
 		return "", nil
+	}})
+
+	resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+		Method: sdk.MethodExec,
+		Params: []byte(`{"command":"ls","dir":""}`),
+	})
+	if resp.Error != "" {
+		t.Fatalf("exec: %s", resp.Error)
 	}
-	_, _ = h.OnExec(ctx, "ls", "", nil)
 	if !ctxCalled {
-		t.Fatal("ctx was nil when OnExec was called")
+		t.Fatal("ctx was nil when Exec was called")
 	}
 }

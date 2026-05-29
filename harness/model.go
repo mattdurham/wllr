@@ -14,11 +14,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/fantasy"
-	anthropicprovider "charm.land/fantasy/providers/anthropic"
 	lipgloss "charm.land/lipgloss/v2"
 	"github.com/mattdurham/wllr/agent"
 	"github.com/mattdurham/wllr/extension"
 	"github.com/mattdurham/wllr/sdk"
+	"github.com/mattdurham/wllr/tools"
 )
 
 // liveState holds fields that change frequently and must be readable by
@@ -174,286 +174,47 @@ func New(pool *agent.AgentPool, mainAgentID string, h *extension.Host) Model {
 		})
 	}
 
-	// Wire OnRegisterCommand here so extensions can register slash commands
-	// during _init (before SetProgram is called).
+	// Wire a minimal UIBridge for command registration during _init (before SetProgram).
+	// The full UIBridge is wired in SetProgram once the tea.Program is available.
 	if h != nil {
 		cmds := m.commands
-		h.OnRegisterCommand = func(name, desc string) {
-			cmds.Register(Command{
-				Name: name,
-				Desc: desc,
-				Handler: func(args []string) tea.Cmd {
-					return func() tea.Msg {
-						return dispatchOnCommandMsg{Name: name, Args: args}
-					}
-				},
-			})
-		}
+		h.SetUIBridge(&earlyUIBridge{cmds: cmds})
 	}
 
 	return m
 }
 
 // SetProgram stores the bubbletea program reference so goroutines can call Send.
-// It also wires the main agent's onToken and onDone callbacks to the program.
+// It also wires the main agent's onToken and onDone callbacks to the program,
+// and installs the interface bridges on the extension host.
 func (m *Model) SetProgram(p *tea.Program) {
 	m.program = p
 	if m.extHost != nil {
-		m.extHost.OnSetStatus = func(k, v string) {
-			p.Send(StatusUpdateMsg{Key: k, Value: v})
-		}
-		live := m.live
-		statusInfoPool := m.agentPool
-		m.extHost.OnGetStatusInfo = func() sdk.StatusInfo {
-			live.mu.RLock()
-			streaming := live.streaming
-			streamStart := live.streamStart
-			width := live.width
-			hasError := live.hasError
-			tokens := live.tokens
-			provider := live.provider
-			modelName := live.model
-			statuses := make(map[string]string, len(live.statuses))
-			for k, v := range live.statuses {
-				statuses[k] = v
-			}
-			live.mu.RUnlock()
-
-			info := sdk.StatusInfo{
-				Provider: provider,
-				Model:    modelName,
-				Tokens:   tokens,
-				Working:  streaming,
-				Statuses: statuses,
-				Width:    width,
-				HasError: hasError,
-			}
-			if streaming {
-				info.ElapsedMs = time.Since(streamStart).Milliseconds()
-			}
-			if statusInfoPool != nil {
-				n := len(statusInfoPool.ListAgents()) - 1
-				if n < 0 {
-					n = 0
-				}
-				info.ActiveAgents = n
-			}
-			return info
-		}
-		m.extHost.OnNotify = func(text string) {
-			p.Send(NotifyMsg{Text: text})
-		}
-		m.extHost.OnSendMessage = func(msg sdk.Message) {
-			sm := SubmitMsg{Content: msg.Content}
-			// For skill XML blocks, show a compact indicator in the chat
-			// instead of the raw XML so the UI stays clean and responsive.
-			if strings.HasPrefix(strings.TrimSpace(msg.Content), "<skill ") {
-				sm.Display = skillDisplayName(msg.Content)
-			}
-			p.Send(sm)
-		}
-		m.extHost.OnAbort = func() {
-			p.Send(abortStreamMsg{})
-		}
-		m.extHost.OnAfterToolCall = func(id, _, result string, isError bool) {
-			p.Send(ToolCallDoneMsg{ID: id, IsError: isError, Output: result})
-		}
-		m.extHost.OnModal = func(text string) {
-			p.Send(ShowModalMsg{Text: text})
-		}
-		m.extHost.OnShowPicker = func(title string, items []sdk.ShowPickerItem, callback string) {
-			p.Send(ShowPickerMsg{Title: title, Items: items, Callback: callback})
-		}
-		poolRef := m.agentPool
-		mainID := m.mainAgentID
-		m.extHost.OnAgentResetHistory = func(messages []sdk.Message) error {
-			if poolRef == nil {
-				return fmt.Errorf("no agent pool")
-			}
-			if err := poolRef.SetAgentHistory(mainID, messages); err != nil {
-				return err
-			}
-			p.Send(ResetHistoryMsg{Messages: messages})
-			return nil
-		}
-
-		// Wire agent and team management — all agent-pool operations belong in
-		// the harness so cmd/main.go stays minimal.
 		pool := m.agentPool
-		m.extHost.OnAgentSpawn = func(id, name, systemPrompt, modelName, initialPrompt string, thinkingBudget int) error {
-			if pool == nil {
-				return fmt.Errorf("no agent pool")
-			}
-			lm, err := pool.LanguageModelForModel(context.Background(), modelName)
-			if err != nil {
-				return fmt.Errorf("spawn agent %q: get model %q: %w", id, modelName, err)
-			}
-			fullSystemPrompt := systemPrompt + "\n\n## Your Agent Identity\nYour agent ID is: " + id + "\nTo report results back to the orchestrator, call send_message with agent_id=\"main\"."
-			// Derive parent ID from the scoped agent ID (e.g. "main/coder" → parent "main").
-			parentID := ""
-			if slash := strings.LastIndex(id, "/"); slash > 0 {
-				parentID = id[:slash]
-			}
-			spawnOpts := agent.SpawnOpts{SystemPrompt: fullSystemPrompt, Name: name, NotifyParentID: parentID, TurnTimeout: -1}
-			if thinkingBudget > 0 {
-				spawnOpts.ProviderOptions = fantasy.ProviderOptions{
-					anthropicprovider.Name: &anthropicprovider.ProviderOptions{
-						Thinking: &anthropicprovider.ThinkingProviderOption{
-							BudgetTokens: int64(thinkingBudget),
-						},
-					},
-				}
-			}
-			a, err := pool.Spawn(id, lm, spawnOpts)
-			if err != nil {
-				return fmt.Errorf("spawn agent %q: %w", id, err)
-			}
-			// Sub-agent tokens are NOT routed to the main chat — only the
-			// orchestrating agent's output is shown. Sub-agents report results
-			// via send_message which queues to the orchestrator's inbox.
-			a.SetOnToken(func(_ string) {})
-			subID := id
-			mainID := m.mainAgentID
-			a.SetOnDone(func(e error) {
-				if e != nil {
-					slog.Error("sub-agent error", "agent", subID, "err", e)
-					// Show the error in the TUI immediately so the user knows.
-					p.Send(NotifyMsg{Text: fmt.Sprintf("⚠ sub-agent %s: %v", subID, e)})
-					// Surface the error to the main agent so the orchestrator
-					// knows something went wrong and can react.
-					if main := pool.Get(mainID); main != nil {
-						msg := fmt.Sprintf("[sub-agent '%s' failed: %v — you should handle this or try a different approach]", subID, e)
-						pool.Send(mainID, msg) //nolint:errcheck
-					}
-				}
-			})
-			// Give sub-agents identical wiring to the main agent.
-			agentID := id
-			extHostRef := m.extHost
-			logFnRef := m.logFn
-			a.SetToolsFn(func() []fantasy.AgentTool {
-				return BuildFantasyTools(extHostRef, agentID, logFnRef)
-			})
-			a.SetOnToolCall(func(_, _, _ string) {}) // sub-agent tool calls are silent
-			// If an initial prompt was provided, start the agent's first turn immediately.
-			// pool.Send is non-blocking — the turn runs in a goroutine.
-			if initialPrompt != "" {
-				if err := pool.Send(id, initialPrompt); err != nil {
-					slog.Warn("sub-agent: initial turn start failed", "agent", id, "err", err)
-				}
-			}
-			return nil
-		}
-		m.extHost.OnAgentClose = func(id string) error {
-			if pool == nil {
-				return nil
-			}
-			return pool.Close(id)
-		}
-		m.extHost.OnAgentSendMessage = func(id, message string) error {
-			if pool == nil {
-				return fmt.Errorf("no agent pool")
-			}
-			if strings.TrimSpace(message) == "" {
-				return fmt.Errorf("send_message: message must be non-empty")
-			}
-			return pool.SendMessage(id, sdk.Message{Role: sdk.RoleUser, Content: message})
-		}
-		m.extHost.OnAgentRun = func(id string) error {
-			if pool == nil {
-				return fmt.Errorf("no agent pool")
-			}
-			// Send agentWakeupMsg to set m.streaming=true for the TUI indicator.
-			// Only fire for the main agent — sub-agents don't have TUI streaming state.
-			// See harness/NOTES.md §19.
-			if id == mainID {
-				p.Send(agentWakeupMsg{})
-			}
-			// Use a non-empty sentinel as belt-and-suspenders even after Fix 1 (inbox append).
-			// If OnAgentRun is called when the inbox is empty (edge case), an empty
-			// prompt would still fail. The sentinel signals intent. See harness/NOTES.md §18.
-			return pool.Send(id, "[process pending inbox messages]")
-		}
-		m.extHost.OnAgentList = func() ([]extension.AgentInfo, error) {
-			if pool == nil {
-				return nil, nil
-			}
-			ids := pool.ListAgents()
-			infos := make([]extension.AgentInfo, 0, len(ids))
-			for _, id := range ids {
-				agentName := id
-				if a := pool.Get(id); a != nil {
-					agentName = a.Name()
-				}
-				infos = append(infos, extension.AgentInfo{ID: id, Name: agentName})
-			}
-			return infos, nil
-		}
-		m.extHost.OnAgentTokenCount = func() int64 {
-			if pool == nil {
-				return 0
-			}
-			return pool.TokenCount()
-		}
-		m.extHost.OnTeamCreate = func(id, _ string) error {
-			if pool == nil {
-				return fmt.Errorf("no agent pool")
-			}
-			_, err := pool.CreateTeam(id)
-			return err
-		}
-		m.extHost.OnTeamClose = func(id string) error {
-			if pool == nil {
-				return nil
-			}
-			return pool.CloseTeam(context.Background(), id)
-		}
-		m.extHost.OnTeamAddMember = func(teamID, agentID string) error {
-			if pool == nil {
-				return fmt.Errorf("no agent pool")
-			}
-			t := pool.GetTeam(teamID)
-			if t == nil {
-				return fmt.Errorf("team not found: %s", teamID)
-			}
-			return t.AddMember(agentID)
-		}
-		m.extHost.OnTeamRemoveMember = func(teamID, agentID string) error {
-			if pool == nil {
-				return nil
-			}
-			t := pool.GetTeam(teamID)
-			if t == nil {
-				// No-op: team not found is not an error for remove operations.
-				// SPECS.md Section 5: RemoveMember is a no-op if agent is not a member.
-				// Extending that: removing from a non-existent team is also a no-op.
-				return nil
-			}
-			t.RemoveMember(agentID)
-			return nil
-		}
-		m.extHost.OnTeamGetInfo = func(teamID string) ([]string, error) {
-			if pool == nil {
-				return nil, fmt.Errorf("no agent pool")
-			}
-			members, err := pool.GetTeamMembers(teamID)
-			if err != nil {
-				return nil, err
-			}
-			return members, nil
-		}
-		m.extHost.OnTeamList = func() ([]string, error) {
-			if pool == nil {
-				return nil, nil
-			}
-			return pool.ListTeams(), nil
-		}
-		m.extHost.OnConsoleOutput = func(line string) {
-			p.Send(ConsoleMsg{Line: line})
-		}
-		m.extHost.OnConsoleClear = func() {
-			p.Send(ConsoleMsg{Clear: true})
-		}
+		extHostRef := m.extHost
+		logFnRef := m.logFn
+		mainID := m.mainAgentID
+
+		spawner := agent.NewSpawner(pool, func(agentID string) []fantasy.AgentTool {
+			return tools.BuildFantasyTools(extHostRef, agentID, logFnRef)
+		}, func(text string) {
+			p.Send(NotifyMsg{Text: "⚠ " + text})
+		})
+
+		m.extHost.SetAgentBridge(&harnessAgentBridge{
+			pool:    pool,
+			spawner: spawner,
+			mainID:  mainID,
+			prog:    p,
+		})
+		m.extHost.SetTeamBridge(&harnessTeamBridge{pool: pool})
+		m.extHost.SetUIBridge(&harnessUIBridge{
+			pool:   pool,
+			prog:   p,
+			live:   m.live,
+			mainID: mainID,
+			cmds:   m.commands,
+		})
 	}
 
 	m.wireMainAgentCallbacks(p)

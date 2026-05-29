@@ -71,41 +71,9 @@ func main() {
 
 	// Build extension host — extension logs flow through slog with "extension" attribute.
 	h := extension.NewHost(nil)
-	h.OnExec =
 
-		// Wire host capabilities.
-		makeExecHandler(h)
-
-	h.OnGetEnv = func(name string) (string, error) {
-		if name != "" {
-			return os.Getenv(name), nil
-		}
-		vars := os.Environ()
-		data, _ := json.Marshal(vars)
-		return string(data), nil
-	}
-	h.OnReadFile = func(path string) (string, error) {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return "", err
-		}
-		return string(data), nil
-	}
-	h.OnWriteFile = func(path, content string) error {
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return err
-		}
-		return os.WriteFile(path, []byte(content), 0o600)
-	}
-	h.OnHTTPPost = httpPost
-	h.OnConfigRead = loadConfigGroup
-	// Apply system prompt changes to ALL agents so sub-agents stay in sync.
-	h.OnSetSystemPrompt = func(prompt string) {
-		pool.SetBaseSystemPrompt(prompt)
-	}
-	h.OnAppendSystemPrompt = func(text string) {
-		pool.AppendBaseSystemPrompt(text)
-	}
+	// Wire OS capabilities via the CapabilityProvider interface.
+	h.SetCapabilities(newOSCapabilityProvider(pool))
 
 	// Create the harness model BEFORE loading extensions so that
 	// OnRegisterCommand (wired in harness.New) is set when _init and
