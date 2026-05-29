@@ -3,6 +3,8 @@
 // preset responses without hitting any real API.
 package testutil
 
+// NOTE: Any changes to this file must be reflected in the corresponding SPECS.md or NOTES.md.
+
 import (
 	"context"
 	"strings"

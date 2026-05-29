@@ -1,5 +1,7 @@
 package sdk
 
+// NOTE: Any changes to this file must be reflected in the corresponding SPECS.md or NOTES.md.
+
 import "encoding/json"
 
 // Tool is a function the LLM may call.

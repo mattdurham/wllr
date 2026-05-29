@@ -1,5 +1,7 @@
 package sdk
 
+// NOTE: Any changes to this file must be reflected in the corresponding SPECS.md or NOTES.md.
+
 // ExtensionManifest is loaded from the JSON file alongside a .wasm extension.
 // It declares the permissions the extension requires and its dispatch priority.
 type ExtensionManifest struct {

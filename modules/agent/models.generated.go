@@ -7,6 +7,8 @@
 
 package agent
 
+// NOTE: Any changes to this file must be reflected in the corresponding SPECS.md or NOTES.md.
+
 // modelContextWindows maps exact model IDs to their input context window.
 // contextWindowForModel does a substring match against this table.
 var modelContextWindows = map[string]int64{

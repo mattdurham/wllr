@@ -1,5 +1,7 @@
 package harness
 
+// NOTE: Any changes to this file must be reflected in the corresponding SPECS.md or NOTES.md.
+
 import "charm.land/bubbles/v2/viewport"
 
 // ChatView renders the conversation history in a scrollable viewport.
