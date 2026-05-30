@@ -137,7 +137,7 @@ func init() {
 	)
 	RegisterTool(
 		"wait_for_all",
-		`Block until all specified agents complete their work. Returns status="complete" with summaries, status="interrupted" if a user message arrives (agents keep running — call wait_for_all again with pending list), or status="timeout". End your turn immediately after this call.`,
+		`Block until all specified agents complete their work. Returns status="complete" with summaries, status="interrupted" if a user message arrives (agents keep running — call wait_for_all again with pending list), or status="timeout" (agents in pending are STILL RUNNING — call wait_for_all again, do NOT shut them down). End your turn immediately after this call.`,
 		json.RawMessage(`{"type":"object","properties":{"agent_ids":{"type":"array","items":{"type":"string"},"description":"Agent IDs to wait for"},"timeout_ms":{"type":"integer","description":"Timeout in milliseconds (default 300000 = 5 minutes)"}},"required":["agent_ids"]}`),
 	)
 
@@ -292,15 +292,18 @@ Use wait_for_all to run agents in parallel and block until all are done:
     → wait_for_all(result.pending)  ← resume waiting for remaining agents
 
   if result.status == "timeout":
-    → result.results has partial output; result.pending lists who didn't finish
+    → agents in result.pending are STILL RUNNING — timeout does NOT mean they failed
+    → call wait_for_all(result.pending) again to keep waiting
+    → only diagnose with get_agent_status if wait_for_all times out 3+ times in a row
+    → NEVER shut down an agent just because wait_for_all timed out
 
 wait_for_all suspends your turn until it returns. After it returns, process
 results and call shutdown_agent. Do not make other tool calls between
 create_agent and wait_for_all — they run in the background already.
 
-If an agent seems stuck (no notification after several minutes):
+If an agent seems stuck (no notification after 3+ consecutive timeouts):
   get_agent_status("main/coder", 20)  ← diagnose ONCE
-  If is_running=true: still working — wait.
+  If is_running=true: still working — call wait_for_all(result.pending) again.
   If is_running=false with no useful output: nudge it.
     → send_message("main/coder", "Please report your current status.")
 
