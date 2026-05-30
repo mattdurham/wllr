@@ -3,9 +3,11 @@ package agent
 // NOTE: Any changes to this file must be reflected in the corresponding SPECS.md or NOTES.md.
 
 import (
-	"charm.land/fantasy"
 	"sync"
 	"sync/atomic"
+
+	"charm.land/fantasy"
+	"github.com/mattdurham/wllr/modules/sdk"
 )
 
 // AgentPool manages all live agents and a shared token counter.
@@ -17,8 +19,17 @@ type AgentPool struct {
 	providerName       string
 	defaultModelName   string
 	baseSystemPrompt   string
-	contextWindow      int64
-	tokenCount         atomic.Int64
-	mu                 sync.RWMutex
+	// contextUsageDispatcher, when set, is called after each completed turn on any
+	// agent so the harness can forward EventContextUsage to WASM extensions without
+	// a circular import between the agent and extension packages.
+	// Set via SetContextUsageDispatcher; safe to call before any Submit.
+	contextUsageDispatcher func(cu sdk.ContextUsage, compacted bool)
+	// compactConfig controls the percentage-based compaction trigger.
+	// Initialized from WLLR_COMPACT_THRESHOLD in NewPool; override via SetCompactConfig.
+	compactConfig CompactConfig
+	contextWindow int64
+	tokenCount    atomic.Int64
+	mu            sync.RWMutex
 	baseSystemPromptMu sync.RWMutex
+	dispatchMu    sync.RWMutex
 }

@@ -222,6 +222,16 @@ func (m *Model) SetProgram(p *tea.Program) {
 			mainID: mainID,
 			cmds:   m.commands,
 		})
+
+		// Wire context-usage dispatcher so agent turns forward EventContextUsage
+		// to WASM extensions without a circular import between agent and extension.
+		if pool != nil {
+			pool.SetContextUsageDispatcher(func(cu sdk.ContextUsage, compacted bool) {
+				payload, _ := json.Marshal(sdk.ContextUsagePayload{Usage: cu, Compacted: compacted})
+				evt := sdk.Event{Type: sdk.EventContextUsage, Payload: payload}
+				_, _ = extHostRef.DispatchEvent(context.Background(), evt)
+			})
+		}
 	}
 
 	m.wireMainAgentCallbacks(p)
@@ -587,6 +597,13 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 			n := int(m.agentPool.TokenCount())
 			m.statusBar.totalTokens = n
 			m.live.setTokens(n)
+			// Update context-usage percentage from real API token counts.
+			cu := m.agentPool.MainAgentContextUsage()
+			if cu.ContextWindow > 0 {
+				m.statusBar.statuses["ctx"] = fmt.Sprintf("%.0f%%", cu.Percent)
+			} else {
+				delete(m.statusBar.statuses, "ctx")
+			}
 		}
 		if msg.Err != nil {
 			if errors.Is(msg.Err, context.Canceled) {
@@ -876,8 +893,17 @@ func (m Model) cmdDispatchAfterProviderResponse() tea.Cmd {
 		return nil
 	}
 	extHost := m.extHost
+	// Snapshot current usage so the closure captures consistent values.
+	var usageStats sdk.UsageStats
+	if m.agentPool != nil {
+		cu := m.agentPool.MainAgentContextUsage()
+		usageStats = sdk.UsageStats{
+			InputTokens:  int(cu.InputTokens),
+			OutputTokens: int(cu.OutputTokens),
+		}
+	}
 	return func() tea.Msg {
-		payload, _ := json.Marshal(sdk.AfterProviderResponsePayload{})
+		payload, _ := json.Marshal(sdk.AfterProviderResponsePayload{Usage: usageStats})
 		evt := sdk.Event{Type: sdk.EventAfterProviderResponse, Payload: payload}
 		results, err := extHost.DispatchEvent(context.Background(), evt)
 		return ExtensionEventResultMsg{Results: results, Err: err}

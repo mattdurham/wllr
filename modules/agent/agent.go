@@ -41,6 +41,12 @@ type Agent struct {
 	// compactHistory as priorSummary on subsequent compaction calls so the model
 	// can build an incremental summary. Protected by lastSummaryMu.
 	lastSummary string
+
+	// lastUsage is the token usage from the most recently completed turn.
+	// Zero-valued before the first turn or when the last turn returned an error.
+	// Protected by lastUsageMu.
+	lastUsage   fantasy.Usage
+	lastUsageMu sync.RWMutex
 	opts        SpawnOpts
 	inbox       []sdk.Message
 
@@ -199,6 +205,22 @@ func (a *Agent) SetLastSummary(s string) {
 	a.lastSummaryMu.Unlock()
 }
 
+// LastUsage returns the token usage from the most recently completed turn.
+// The returned value is zero-valued before the first turn or when the last
+// turn returned an error.
+func (a *Agent) LastUsage() fantasy.Usage {
+	a.lastUsageMu.RLock()
+	defer a.lastUsageMu.RUnlock()
+	return a.lastUsage
+}
+
+// setLastUsage stores the usage from the most recently completed turn.
+func (a *Agent) setLastUsage(u fantasy.Usage) {
+	a.lastUsageMu.Lock()
+	a.lastUsage = u
+	a.lastUsageMu.Unlock()
+}
+
 // ID returns the agent's unique identifier within its pool.
 func (a *Agent) ID() string { return a.id }
 
@@ -325,42 +347,8 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 			return
 		}
 
-		// Resolve tools: prefer dynamic toolsFn, fall back to opts.Tools.
-		tools := opts.Tools
-		if toolsFn != nil {
-			tools = toolsFn()
-		}
-
-		// Combine base (dynamic) and agent-specific (SpawnOpts) system prompts.
-		a.systemPromptMu.RLock()
-		base := a.systemPrompt
-		a.systemPromptMu.RUnlock()
-		specific := opts.SystemPrompt
-		var sysPrompt string
-		switch {
-		case base != "" && specific != "":
-			sysPrompt = base + "\n\n" + specific
-		case base != "":
-			sysPrompt = base
-		default:
-			sysPrompt = specific
-		}
-
-		// Build fantasy agent options.
-		var agentOpts []fantasy.AgentOption
-		if len(tools) > 0 {
-			agentOpts = append(agentOpts, fantasy.WithTools(tools...))
-		}
-		if sysPrompt != "" {
-			agentOpts = append(agentOpts, fantasy.WithSystemPrompt(sysPrompt))
-		}
-
-		if len(opts.ProviderOptions) > 0 {
-			agentOpts = append(agentOpts, fantasy.WithProviderOptions(opts.ProviderOptions))
-		}
-
-		agentOpts = append(agentOpts, fantasy.WithMaxRetries(6))
-		fa := fantasy.NewAgent(lm, agentOpts...)
+		// Build the fantasy agent with resolved tools and system prompt.
+		sysPrompt, fa := a.buildFantasyAgent(lm, opts, toolsFn)
 
 		// Proactive compaction: if the estimated context is close to the model's
 		// limit, summarize old history BEFORE sending, avoiding a 400 error.
@@ -373,7 +361,10 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 			contextWindow = contextWindowForModel(a.modelName)
 		}
 		history := priorHistory
-		if shouldCompact(history, sysPrompt, content, contextWindow) {
+		// compactedThisTurn is set true when compaction runs successfully this turn.
+		// It is passed to the EventContextUsage payload so extensions can react.
+		compactedThisTurn := false
+		if shouldRunProactiveCompaction(a, pool, history, sysPrompt, content, contextWindow) {
 			if onToken != nil {
 				onToken("[Compacting context…]\n\n")
 			}
@@ -385,6 +376,7 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 			}
 			compacted, summaryText, cerr := compactHistory(childCtx, lm, history, priorSummary, keepRecent)
 			if cerr == nil {
+				compactedThisTurn = true
 				history = compacted
 				a.historyMu.Lock()
 				a.history = compacted
@@ -397,7 +389,7 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 			}
 		}
 
-		collectedText, err := streamTurn(childCtx, fa, history, content, pool, onToken, onToolCall)
+		collectedText, usage, err := streamTurn(childCtx, fa, history, content, pool, onToken, onToolCall)
 
 		// Reactive fallback: if we still hit a context error, trim and retry once.
 		if err != nil && isContextTooLong(err) {
@@ -410,39 +402,101 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 				a.history = history
 				a.historyMu.Unlock()
 			}
-			collectedText, err = streamTurn(childCtx, fa, history, content, pool, onToken, onToolCall)
+			collectedText, usage, err = streamTurn(childCtx, fa, history, content, pool, onToken, onToolCall)
 		}
 
-		// Always record what the user said and the assistant response.
-		// Providers require strictly alternating user/assistant messages —
-		// leaving history ending with a lone user message causes "text content
-		// cannot be empty" on the next turn.
-		assistantText := collectedText
-		if assistantText == "" {
-			if childCtx.Err() != nil {
-				assistantText = "[response cancelled]"
-			} else {
-				// Tool-only turn: no text produced. Use a placeholder so the
-				// user message is never silently dropped from history.
-				assistantText = "[tool calls only]"
-			}
-		}
-		// Record this turn to history. When content is empty (drain-until-empty
-		// path), use the inbox messages instead so we never write an empty user
-		// message — Anthropic rejects empty text content blocks.
-		a.historyMu.Lock()
-		if content != "" {
-			a.history = append(a.history, sdk.Message{Role: sdk.RoleUser, Content: content})
-		} else {
-			for _, m := range inboxMsgs {
-				a.history = append(a.history, m)
-			}
-		}
-		a.history = append(a.history, sdk.Message{Role: sdk.RoleAssistant, Content: assistantText})
-		a.historyMu.Unlock()
+		// Store the real usage from this turn (zero-valued on error).
+		a.setLastUsage(usage)
 
+		// Dispatch EventContextUsage after each successful turn so extensions and the
+		// harness can track real context window consumption. Only fires on success —
+		// matches the existing pattern where events are not dispatched on error.
+		if err == nil && pool != nil {
+			cu := sdk.ContextUsageFromFantasy(usage, contextWindow)
+			pool.dispatchContextUsage(cu, compactedThisTurn)
+		}
+
+		// Record this turn to history and complete the turn lifecycle.
+		a.recordTurnHistory(content, collectedText, inboxMsgs, childCtx.Err())
 		a.finishTurn(err, childCtx.Err(), onDone)
 	}()
+}
+
+// buildFantasyAgent resolves tools and system prompt, then creates and returns
+// the fantasy.Agent for the current turn along with the effective system prompt string.
+// Extracted from Submit to reduce its cyclomatic complexity.
+func (a *Agent) buildFantasyAgent(
+	lm fantasy.LanguageModel,
+	opts SpawnOpts,
+	toolsFn func() []fantasy.AgentTool,
+) (sysPrompt string, fa fantasy.Agent) {
+	// Resolve tools: prefer dynamic toolsFn, fall back to opts.Tools.
+	tools := opts.Tools
+	if toolsFn != nil {
+		tools = toolsFn()
+	}
+
+	// Combine base (dynamic) and agent-specific (SpawnOpts) system prompts.
+	a.systemPromptMu.RLock()
+	base := a.systemPrompt
+	a.systemPromptMu.RUnlock()
+	specific := opts.SystemPrompt
+	switch {
+	case base != "" && specific != "":
+		sysPrompt = base + "\n\n" + specific
+	case base != "":
+		sysPrompt = base
+	default:
+		sysPrompt = specific
+	}
+
+	// Build fantasy agent options.
+	var agentOpts []fantasy.AgentOption
+	if len(tools) > 0 {
+		agentOpts = append(agentOpts, fantasy.WithTools(tools...))
+	}
+	if sysPrompt != "" {
+		agentOpts = append(agentOpts, fantasy.WithSystemPrompt(sysPrompt))
+	}
+	if len(opts.ProviderOptions) > 0 {
+		agentOpts = append(agentOpts, fantasy.WithProviderOptions(opts.ProviderOptions))
+	}
+	agentOpts = append(agentOpts, fantasy.WithMaxRetries(6))
+	fa = fantasy.NewAgent(lm, agentOpts...)
+	return sysPrompt, fa
+}
+
+// recordTurnHistory appends the user message and assistant response to the agent's
+// conversation history. Extracted from Submit to reduce its cyclomatic complexity.
+//
+//   - content is the user prompt (may be empty on drain-only turns).
+//   - collectedText is the raw assistant response text from the turn.
+//   - inboxMsgs are the inbox messages delivered at turn start.
+//   - ctxErr is childCtx.Err(), used to determine cancel-placeholder text.
+func (a *Agent) recordTurnHistory(content, collectedText string, inboxMsgs []sdk.Message, ctxErr error) {
+	// Providers require strictly alternating user/assistant messages.
+	// A tool-only or cancelled turn produces no text — use a placeholder so the
+	// user message is never silently dropped from history.
+	assistantText := collectedText
+	if assistantText == "" {
+		if ctxErr != nil {
+			assistantText = "[response cancelled]"
+		} else {
+			assistantText = "[tool calls only]"
+		}
+	}
+	// When content is empty (drain-until-empty path), use the inbox messages so
+	// we never write an empty user message — Anthropic rejects empty text content.
+	a.historyMu.Lock()
+	if content != "" {
+		a.history = append(a.history, sdk.Message{Role: sdk.RoleUser, Content: content})
+	} else {
+		for _, m := range inboxMsgs {
+			a.history = append(a.history, m)
+		}
+	}
+	a.history = append(a.history, sdk.Message{Role: sdk.RoleAssistant, Content: assistantText})
+	a.historyMu.Unlock()
 }
 
 // finishTurn releases isRunning and either fires onDone or starts the next drain turn.
@@ -479,7 +533,24 @@ func (a *Agent) finishTurn(err error, ctxErr error, onDone func(error)) {
 	}
 }
 
+// shouldRunProactiveCompaction returns true when proactive context compaction
+// should run before the next API call. It first checks the percentage-based
+// trigger (real API usage vs configured threshold) and falls back to the
+// chars/4 heuristic when no usage data exists (first turn) or when the pool
+// has not configured percentage-based compaction.
+func shouldRunProactiveCompaction(a *Agent, pool *AgentPool, history []sdk.Message, sysPrompt, content string, contextWindow int64) bool {
+	if pool != nil {
+		cfg := pool.CompactConfig()
+		if cfg.Enabled && shouldCompactByUsage(a.LastUsage(), contextWindow, cfg.ThresholdPct) {
+			return true
+		}
+	}
+	return shouldCompact(history, sysPrompt, content, contextWindow)
+}
+
 // streamTurn sends history+content to fa and collects the full text response.
+// It returns the collected text, the token usage reported by the provider, and
+// any error. On error, the returned Usage is zero-valued.
 // Extracted from Submit to keep its cyclomatic complexity below threshold.
 func streamTurn(
 	ctx context.Context,
@@ -489,9 +560,9 @@ func streamTurn(
 	pool *AgentPool,
 	onToken func(string),
 	onToolCall func(id, name, input string),
-) (string, error) {
+) (string, fantasy.Usage, error) {
 	var collected string
-	_, err := fa.Stream(ctx, fantasy.AgentStreamCall{
+	result, err := fa.Stream(ctx, fantasy.AgentStreamCall{
 		Messages: sdkToFantasyMessages(history),
 		Prompt:   content,
 		OnTextDelta: func(_, text string) error {
@@ -519,7 +590,14 @@ func streamTurn(
 			return nil
 		},
 	})
-	return collected, err
+	if err != nil {
+		return collected, fantasy.Usage{}, err
+	}
+	var usage fantasy.Usage
+	if result != nil {
+		usage = result.TotalUsage
+	}
+	return collected, usage, nil
 }
 
 // isContextTooLong returns true when the API rejected the request because the

@@ -61,6 +61,10 @@ type AgentBridge interface {
 	// status="interrupted" and the message put back into callerID's inbox.
 	// timeoutMs of 0 uses a default of 5 minutes.
 	WaitForAll(callerID string, agentIDs []string, timeoutMs int) (WaitResult, error)
+	// MainAgentContextUsage returns the current context window usage for the main agent.
+	// Returns a zero-valued ContextUsage before the first turn completes or when no
+	// context window has been configured.
+	MainAgentContextUsage() sdk.ContextUsage
 }
 
 // TeamBridge is the interface extensions call to manage teams.
