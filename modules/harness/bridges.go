@@ -73,11 +73,15 @@ type earlyAgentBridge struct{}
 func (e *earlyAgentBridge) Spawn(_ context.Context, _ extension.SpawnRequest) error {
 	return fmt.Errorf("agent_spawn: session not yet started")
 }
-func (e *earlyAgentBridge) Close(_ string) error                 { return fmt.Errorf("not started") }
-func (e *earlyAgentBridge) SendMessage(_, _ string) error        { return fmt.Errorf("not started") }
-func (e *earlyAgentBridge) Run(_ string) error                   { return fmt.Errorf("not started") }
+func (e *earlyAgentBridge) Close(_ string) error { return fmt.Errorf("not started") }
+
+func (e *earlyAgentBridge) SendMessage(_, _ string) error { return fmt.Errorf("not started") }
+
+func (e *earlyAgentBridge) Run(_ string) error { return fmt.Errorf("not started") }
+
 func (e *earlyAgentBridge) List() ([]extension.AgentInfo, error) { return nil, nil }
-func (e *earlyAgentBridge) TokenCount() int64                    { return 0 }
+
+func (e *earlyAgentBridge) TokenCount() int64 { return 0 }
 func (e *earlyAgentBridge) SetHistory(_ string, _ []sdk.Message) error {
 	return fmt.Errorf("not started")
 }
