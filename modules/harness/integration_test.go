@@ -1,6 +1,8 @@
 package harness
 
 import (
+	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -179,5 +181,69 @@ func TestOnAgentRun_NonEmptyPromptPreventsError(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("second turn timed out")
+	}
+}
+
+// TestAfterProviderResponseUsagePopulated verifies that the EventAfterProviderResponse
+// event dispatched after a turn contains non-zero usage from the real API call.
+func TestAfterProviderResponseUsagePopulated(t *testing.T) {
+	pool := agent.NewPool()
+	pool.SetContextWindow(200_000)
+	lm := newUsageMockLM(1500, 42, "hello world")
+	a, err := pool.Spawn(agent.MainAgentID, lm, agent.SpawnOpts{})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	h := extension.NewHost(nil)
+	m := New(pool, agent.MainAgentID, h)
+
+	// Subscribe to EventAfterProviderResponse via the host's bus.
+	received := make(chan sdk.AfterProviderResponsePayload, 1)
+	h.Bus.Subscribe(sdk.EventAfterProviderResponse, func(_ context.Context, evt sdk.Event) error {
+		var p sdk.AfterProviderResponsePayload
+		if err := json.Unmarshal(evt.Payload, &p); err != nil {
+			return err
+		}
+		select {
+		case received <- p:
+		default:
+		}
+		return nil
+	})
+
+	// Run a turn to populate LastUsage.
+	done := make(chan error, 1)
+	a.SetOnDone(func(e error) { done <- e })
+	a.Submit(context.Background(), "query")
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("turn error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for turn")
+	}
+
+	// Process StreamDoneMsg — this should dispatch EventAfterProviderResponse.
+	m, cmd := callUpdate(m, StreamDoneMsg{Err: nil})
+	_ = m
+
+	// Execute the cmd (dispatches the event).
+	if cmd != nil {
+		cmd()
+	}
+
+	// Wait for the event to arrive on the bus.
+	select {
+	case payload := <-received:
+		if payload.Usage.InputTokens <= 0 {
+			t.Errorf("AfterProviderResponse.Usage.InputTokens = %d, want > 0", payload.Usage.InputTokens)
+		}
+		if payload.Usage.OutputTokens <= 0 {
+			t.Errorf("AfterProviderResponse.Usage.OutputTokens = %d, want > 0", payload.Usage.OutputTokens)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for EventAfterProviderResponse")
 	}
 }

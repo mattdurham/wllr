@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/mattdurham/wllr/modules/agent"
@@ -507,5 +508,68 @@ func TestModel_chatHeight_AccountsForConsole(t *testing.T) {
 	h2 := m.chatHeight()
 	if h1-h2 != consolePaneLines {
 		t.Errorf("chatHeight diff: got %d, want %d (consolePaneLines)", h1-h2, consolePaneLines)
+	}
+}
+
+// TestStatusBarCtxPercent verifies that after a StreamDoneMsg, when the pool's main
+// agent has real usage and the context window is set, statuses["ctx"] shows a percent.
+func TestStatusBarCtxPercent(t *testing.T) {
+	pool := agent.NewPool()
+	pool.SetContextWindow(200_000)
+	// 50k / 200k = 25%
+	lm := newUsageMockLM(50_000, 500, "response")
+	a, err := pool.Spawn(agent.MainAgentID, lm, agent.SpawnOpts{})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	m := New(pool, agent.MainAgentID, nil)
+
+	// Run a turn to populate LastUsage.
+	done := make(chan error, 1)
+	a.SetOnDone(func(e error) { done <- e })
+	a.Submit(context.Background(), "query")
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("turn error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for turn")
+	}
+
+	// Simulate StreamDoneMsg — this should update ctx% in status bar.
+	m, _ = callUpdate(m, StreamDoneMsg{Err: nil})
+
+	ctx, ok := m.statusBar.statuses["ctx"]
+	if !ok {
+		t.Fatal("expected statuses[ctx] to be present after StreamDoneMsg with non-zero usage")
+	}
+	if ctx == "" {
+		t.Error("statuses[ctx] should not be empty")
+	}
+	// 50k/200k = 25.0%
+	if ctx != "25%" {
+		t.Errorf("statuses[ctx] = %q, want %q", ctx, "25%")
+	}
+}
+
+// TestStatusBarCtxPercentZero verifies that when ContextWindow is 0, ctx key is absent.
+func TestStatusBarCtxPercentZero(t *testing.T) {
+	pool := agent.NewPool()
+	// No SetContextWindow — window defaults to 0.
+	lm := newUsageMockLM(50_000, 500, "response")
+	_, err := pool.Spawn(agent.MainAgentID, lm, agent.SpawnOpts{})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	m := New(pool, agent.MainAgentID, nil)
+
+	// StreamDoneMsg with zero context window — ctx key should not appear.
+	m, _ = callUpdate(m, StreamDoneMsg{Err: nil})
+
+	if _, ok := m.statusBar.statuses["ctx"]; ok {
+		t.Errorf("statuses[ctx] should be absent when ContextWindow is 0, got %q", m.statusBar.statuses["ctx"])
 	}
 }

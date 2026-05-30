@@ -85,6 +85,8 @@ func (e *earlyAgentBridge) WaitForAll(_ string, _ []string, _ int) (extension.Wa
 	return extension.WaitResult{Status: "error"}, fmt.Errorf("not started")
 }
 
+func (e *earlyAgentBridge) MainAgentContextUsage() sdk.ContextUsage { return sdk.ContextUsage{} }
+
 // Verify earlyAgentBridge satisfies the interface at compile time.
 var _ extension.AgentBridge = (*earlyAgentBridge)(nil)
 
@@ -161,6 +163,15 @@ func (b *harnessAgentBridge) SetHistory(id string, messages []sdk.Message) error
 		return fmt.Errorf("no agent pool")
 	}
 	return b.pool.SetAgentHistory(id, messages)
+}
+
+// MainAgentContextUsage returns the context window usage for the main agent.
+// Delegates to the pool so host calls can expose usage to WASM extensions.
+func (b *harnessAgentBridge) MainAgentContextUsage() sdk.ContextUsage {
+	if b.pool == nil {
+		return sdk.ContextUsage{}
+	}
+	return b.pool.MainAgentContextUsage()
 }
 
 // WaitForAll blocks until all agentIDs have completed their final turn, or until

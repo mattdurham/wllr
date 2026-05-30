@@ -81,6 +81,9 @@ func (b *testAgentBridge) SetHistory(id string, messages []sdk.Message) error {
 func (b *testAgentBridge) WaitForAll(_ string, _ []string, _ int) (WaitResult, error) {
 	return WaitResult{Status: "complete", Results: map[string]string{}}, nil
 }
+func (b *testAgentBridge) MainAgentContextUsage() sdk.ContextUsage {
+	return sdk.ContextUsage{}
+}
 
 // testTeamBridge implements TeamBridge using optional callback fields.
 type testTeamBridge struct {
@@ -1773,3 +1776,98 @@ func TestHost_HandleExec_PassesContext(t *testing.T) {
 		t.Fatal("ctx was nil when Exec was called")
 	}
 }
+
+// TestGetContextUsageHostCall verifies that get_context_usage returns the usage
+// from the agent bridge as a JSON-encoded ContextUsage.
+func TestGetContextUsageHostCall(t *testing.T) {
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer h.Close(ctx)
+
+	path := writeWASM(t, "minimal.wasm", minimalWASM)
+	if err := h.Load(ctx, path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	ext := h.extensions[0]
+
+	// Install a bridge that returns known usage.
+	want := sdk.ContextUsage{
+		InputTokens:   50_000,
+		OutputTokens:  500,
+		ContextWindow: 200_000,
+		Percent:       25.0,
+	}
+	h.SetAgentBridge(&testAgentBridge{
+		onTokenCount: func() int64 { return 0 },
+	})
+	// Override MainAgentContextUsage via a custom bridge.
+	h.SetAgentBridge(&contextUsageAgentBridge{usage: want})
+
+	resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+		Method: sdk.MethodGetContextUsage,
+	})
+	if resp.Error != "" {
+		t.Fatalf("get_context_usage: %s", resp.Error)
+	}
+
+	var got sdk.ContextUsage
+	if err := json.Unmarshal(resp.Result, &got); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if got.InputTokens != want.InputTokens {
+		t.Errorf("InputTokens = %d, want %d", got.InputTokens, want.InputTokens)
+	}
+	if got.ContextWindow != want.ContextWindow {
+		t.Errorf("ContextWindow = %d, want %d", got.ContextWindow, want.ContextWindow)
+	}
+	if got.Percent != want.Percent {
+		t.Errorf("Percent = %f, want %f", got.Percent, want.Percent)
+	}
+}
+
+// TestGetContextUsageNoPoolBridge verifies that get_context_usage returns a zero
+// ContextUsage (not an error) when no agent bridge is configured.
+func TestGetContextUsageNoPoolBridge(t *testing.T) {
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer h.Close(ctx)
+
+	path := writeWASM(t, "minimal.wasm", minimalWASM)
+	if err := h.Load(ctx, path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	ext := h.extensions[0]
+	// No agent bridge set.
+
+	resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+		Method: sdk.MethodGetContextUsage,
+	})
+	if resp.Error != "" {
+		t.Fatalf("expected no error with nil bridge, got: %s", resp.Error)
+	}
+
+	var got sdk.ContextUsage
+	if err := json.Unmarshal(resp.Result, &got); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if got.InputTokens != 0 || got.ContextWindow != 0 || got.Percent != 0 {
+		t.Errorf("expected zero ContextUsage with no bridge, got %+v", got)
+	}
+}
+
+// contextUsageAgentBridge is a test bridge that returns a fixed ContextUsage.
+type contextUsageAgentBridge struct {
+	usage sdk.ContextUsage
+}
+
+func (b *contextUsageAgentBridge) Spawn(_ context.Context, _ SpawnRequest) error { return nil }
+func (b *contextUsageAgentBridge) Close(_ string) error                           { return nil }
+func (b *contextUsageAgentBridge) SendMessage(_, _ string) error                  { return nil }
+func (b *contextUsageAgentBridge) Run(_ string) error                             { return nil }
+func (b *contextUsageAgentBridge) List() ([]AgentInfo, error)                     { return nil, nil }
+func (b *contextUsageAgentBridge) TokenCount() int64                              { return 0 }
+func (b *contextUsageAgentBridge) SetHistory(_ string, _ []sdk.Message) error     { return nil }
+func (b *contextUsageAgentBridge) WaitForAll(_ string, _ []string, _ int) (WaitResult, error) {
+	return WaitResult{Status: "complete", Results: map[string]string{}}, nil
+}
+func (b *contextUsageAgentBridge) MainAgentContextUsage() sdk.ContextUsage { return b.usage }
