@@ -81,6 +81,9 @@ func (e *earlyAgentBridge) TokenCount() int64                    { return 0 }
 func (e *earlyAgentBridge) SetHistory(_ string, _ []sdk.Message) error {
 	return fmt.Errorf("not started")
 }
+func (e *earlyAgentBridge) WaitForAll(_ string, _ []string, _ int) (extension.WaitResult, error) {
+	return extension.WaitResult{Status: "error"}, fmt.Errorf("not started")
+}
 
 // Verify earlyAgentBridge satisfies the interface at compile time.
 var _ extension.AgentBridge = (*earlyAgentBridge)(nil)
@@ -158,6 +161,104 @@ func (b *harnessAgentBridge) SetHistory(id string, messages []sdk.Message) error
 		return fmt.Errorf("no agent pool")
 	}
 	return b.pool.SetAgentHistory(id, messages)
+}
+
+// WaitForAll blocks until all agentIDs have completed their final turn, or until
+// an interrupt or timeout occurs. It watches callerID's inbox every 200ms:
+//   - Completion notifications from waited agents are consumed and tracked.
+//   - Any other message (user input, unrelated agent) triggers an early return with
+//     status="interrupted"; the message is put back into callerID's inbox so it is
+//     processed when the caller's current turn ends.
+//
+// This allows the orchestrator's LLM to issue a single blocking tool call that
+// resolves when all workers are done, eliminating the need for polling loops.
+func (b *harnessAgentBridge) WaitForAll(callerID string, agentIDs []string, timeoutMs int) (extension.WaitResult, error) {
+	if b.pool == nil {
+		return extension.WaitResult{Status: "error"}, fmt.Errorf("no agent pool")
+	}
+	if timeoutMs <= 0 {
+		timeoutMs = 300_000 // 5 minutes default
+	}
+
+	remaining := make(map[string]bool, len(agentIDs))
+	for _, id := range agentIDs {
+		remaining[id] = true
+	}
+	results := make(map[string]string, len(agentIDs))
+	deadline := time.Now().Add(time.Duration(timeoutMs) * time.Millisecond)
+
+	for time.Now().Before(deadline) {
+		time.Sleep(200 * time.Millisecond)
+
+		// Drain the caller's inbox and classify each message.
+		caller := b.pool.Get(callerID)
+		if caller != nil {
+			msgs := caller.DrainInbox()
+			var unrelated []sdk.Message
+			for _, m := range msgs {
+				matched := false
+				for id := range remaining {
+					// Completion notifications contain the agent ID and "turn complete".
+					if strings.Contains(m.Content, id) && strings.Contains(m.Content, "turn complete") {
+						a := b.pool.Get(id)
+						summary := m.Content
+						if a != nil {
+							hist := a.History()
+							for i := len(hist) - 1; i >= 0; i-- {
+								if hist[i].Role == sdk.RoleAssistant {
+									s := hist[i].Content
+									if r := []rune(s); len(r) > 300 {
+										s = string(r[:300]) + "…"
+									}
+									summary = s
+									break
+								}
+							}
+						}
+						results[id] = summary
+						delete(remaining, id)
+						matched = true
+						break
+					}
+				}
+				if !matched {
+					unrelated = append(unrelated, m)
+				}
+			}
+			// Put unrelated messages back — they belong to the caller's next turn.
+			for _, m := range unrelated {
+				caller.AppendInbox(m)
+			}
+			// If any unrelated message arrived, return interrupted so the orchestrator
+			// can process it before resuming the wait.
+			if len(unrelated) > 0 {
+				pending := make([]string, 0, len(remaining))
+				for id := range remaining {
+					pending = append(pending, id)
+				}
+				return extension.WaitResult{
+					Status:  "interrupted",
+					Results: results,
+					Pending: pending,
+				}, nil
+			}
+		}
+
+		if len(remaining) == 0 {
+			return extension.WaitResult{Status: "complete", Results: results}, nil
+		}
+	}
+
+	// Timeout — return what we have.
+	pending := make([]string, 0, len(remaining))
+	for id := range remaining {
+		pending = append(pending, id)
+	}
+	return extension.WaitResult{
+		Status:  "timeout",
+		Results: results,
+		Pending: pending,
+	}, nil
 }
 
 // harnessTeamBridge implements extension.TeamBridge by delegating to the agent pool.

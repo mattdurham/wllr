@@ -78,6 +78,9 @@ func (b *testAgentBridge) SetHistory(id string, messages []sdk.Message) error {
 	}
 	return nil
 }
+func (b *testAgentBridge) WaitForAll(_ string, _ []string, _ int) (WaitResult, error) {
+	return WaitResult{Status: "complete", Results: map[string]string{}}, nil
+}
 
 // testTeamBridge implements TeamBridge using optional callback fields.
 type testTeamBridge struct {
