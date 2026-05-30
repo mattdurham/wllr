@@ -3,9 +3,10 @@ package extension
 // NOTE: Any changes to this file must be reflected in the corresponding SPECS.md or NOTES.md.
 
 import (
+	"sync"
+
 	"github.com/mattdurham/wllr/modules/sdk"
 	"github.com/tetratelabs/wazero/api"
-	"sync"
 )
 
 // Extension wraps a loaded WASM module.

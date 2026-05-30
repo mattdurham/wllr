@@ -18,7 +18,7 @@ func (f *fakeAgentBridge) SendMessage(_, _ string) error                        
 func (f *fakeAgentBridge) Run(_ string) error                                      { return nil }
 func (f *fakeAgentBridge) List() ([]extension.AgentInfo, error)                    { return nil, nil }
 func (f *fakeAgentBridge) TokenCount() int64                                       { return 0 }
-func (f *fakeAgentBridge) SetHistory(_ string, _ []sdk.Message) error { return nil }
+func (f *fakeAgentBridge) SetHistory(_ string, _ []sdk.Message) error              { return nil }
 func (f *fakeAgentBridge) WaitForAll(_ string, _ []string, _ int) (extension.WaitResult, error) {
 	return extension.WaitResult{Status: "complete", Results: map[string]string{}}, nil
 }
