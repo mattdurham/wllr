@@ -81,6 +81,7 @@ func (e *earlyAgentBridge) TokenCount() int64                    { return 0 }
 func (e *earlyAgentBridge) SetHistory(_ string, _ []sdk.Message) error {
 	return fmt.Errorf("not started")
 }
+
 func (e *earlyAgentBridge) WaitForAll(_ string, _ []string, _ int) (extension.WaitResult, error) {
 	return extension.WaitResult{Status: "error"}, fmt.Errorf("not started")
 }
@@ -95,8 +96,8 @@ var _ extension.AgentBridge = (*earlyAgentBridge)(nil)
 type harnessAgentBridge struct {
 	pool    *agent.AgentPool
 	spawner *agent.Spawner
-	mainID  string
 	prog    *tea.Program
+	mainID  string
 }
 
 func (b *harnessAgentBridge) Spawn(ctx context.Context, req extension.SpawnRequest) error {
@@ -337,8 +338,8 @@ type harnessUIBridge struct {
 	pool   *agent.AgentPool
 	prog   *tea.Program
 	live   *liveState
-	mainID string
 	cmds   *Registry
+	mainID string
 }
 
 func (b *harnessUIBridge) Notify(text string) {

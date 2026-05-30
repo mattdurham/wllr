@@ -241,9 +241,11 @@ func (s *successThenErrLM) Stream(_ context.Context, _ fantasy.Call) (fantasy.St
 func (s *successThenErrLM) Generate(_ context.Context, _ fantasy.Call) (*fantasy.Response, error) {
 	return &fantasy.Response{}, nil
 }
+
 func (s *successThenErrLM) GenerateObject(_ context.Context, _ fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
 	return nil, nil
 }
+
 func (s *successThenErrLM) StreamObject(_ context.Context, _ fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
 	return nil, nil
 }

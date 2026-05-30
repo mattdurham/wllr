@@ -478,6 +478,7 @@ func TestModel_Update_ConsoleMsg_AppendsToConsole(t *testing.T) {
 		t.Fatal("console should not be empty after ConsoleMsg{Line}")
 	}
 }
+
 func TestModel_Update_ConsoleMsg_Clear_ResetsConsole(t *testing.T) {
 	m := newTestModel()
 	m, _ = callUpdate(m, ConsoleMsg{Line: "old"})
@@ -489,6 +490,7 @@ func TestModel_Update_ConsoleMsg_Clear_ResetsConsole(t *testing.T) {
 		t.Fatal("consoleVisible should be false after ConsoleMsg{Clear}")
 	}
 }
+
 func TestModel_Update_StreamDoneMsg_HidesConsole(t *testing.T) {
 	m := newTestModel()
 	m.streaming = true
@@ -498,6 +500,7 @@ func TestModel_Update_StreamDoneMsg_HidesConsole(t *testing.T) {
 		t.Fatal("consoleVisible should be false after StreamDoneMsg")
 	}
 }
+
 func TestModel_chatHeight_AccountsForConsole(t *testing.T) {
 	m := newTestModel()
 	m.width = 120

@@ -10,9 +10,9 @@ type StatusInfo struct {
 	Provider     string            `json:"provider"`
 	Model        string            `json:"model"`
 	Tokens       int               `json:"tokens"`
-	Working      bool              `json:"working"`
 	ElapsedMs    int64             `json:"elapsed_ms"`    // ms since current stream started; 0 when idle
 	ActiveAgents int               `json:"active_agents"` // number of sub-agents currently in the pool
 	Width        int               `json:"width"`         // terminal width in columns
-	HasError     bool              `json:"has_error"`     // true when last stream ended with an error
+	Working      bool              `json:"working"`
+	HasError     bool              `json:"has_error"` // true when last stream ended with an error
 }

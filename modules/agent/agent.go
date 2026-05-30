@@ -42,15 +42,16 @@ type Agent struct {
 	// can build an incremental summary. Protected by lastSummaryMu.
 	lastSummary string
 
+	opts  SpawnOpts
+	inbox []sdk.Message
+
+	history []sdk.Message
+
 	// lastUsage is the token usage from the most recently completed turn.
 	// Zero-valued before the first turn or when the last turn returned an error.
 	// Protected by lastUsageMu.
 	lastUsage   fantasy.Usage
 	lastUsageMu sync.RWMutex
-	opts        SpawnOpts
-	inbox       []sdk.Message
-
-	history []sdk.Message
 
 	// onToken is called per text delta. Set via SetOnToken before calling Submit.
 	onTokenMu sync.RWMutex
@@ -77,14 +78,14 @@ type Agent struct {
 	// cancelMu protects the cancel function for the current active turn.
 	cancelMu sync.Mutex
 
+	// history is the conversation history for this agent (all completed turns).
+	historyMu sync.Mutex
+
 	// isRunning is set to true while Submit's goroutine is active. A second
 	// Submit call that arrives while a turn is running appends content to the
 	// inbox instead of starting a new goroutine. The running goroutine drains
 	// inbox on completion (drain-until-empty pattern). See NOTES.md §17.
 	isRunning atomic.Bool
-
-	// history is the conversation history for this agent (all completed turns).
-	historyMu sync.Mutex
 }
 
 // SetOnToken sets the callback invoked for each text delta during streaming.
@@ -491,9 +492,7 @@ func (a *Agent) recordTurnHistory(content, collectedText string, inboxMsgs []sdk
 	if content != "" {
 		a.history = append(a.history, sdk.Message{Role: sdk.RoleUser, Content: content})
 	} else {
-		for _, m := range inboxMsgs {
-			a.history = append(a.history, m)
-		}
+		a.history = append(a.history, inboxMsgs...)
 	}
 	a.history = append(a.history, sdk.Message{Role: sdk.RoleAssistant, Content: assistantText})
 	a.historyMu.Unlock()

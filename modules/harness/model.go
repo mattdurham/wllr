@@ -27,15 +27,15 @@ import (
 // mu protects all fields; OnGetStatusInfo runs on the WASM goroutine
 // concurrently with Update() on the bubbletea goroutine.
 type liveState struct {
-	mu          sync.RWMutex
-	streaming   bool
 	streamStart time.Time
-	width       int
-	hasError    bool
-	tokens      int
+	statuses    map[string]string
 	provider    string
 	model       string
-	statuses    map[string]string
+	width       int
+	tokens      int
+	mu          sync.RWMutex
+	streaming   bool
+	hasError    bool
 }
 
 func (s *liveState) setStreaming(v bool, start time.Time, hasErr bool) {
@@ -44,10 +44,8 @@ func (s *liveState) setStreaming(v bool, start time.Time, hasErr bool) {
 	if v {
 		s.streamStart = start
 		s.hasError = false
-	} else {
-		if hasErr {
-			s.hasError = true
-		}
+	} else if hasErr {
+		s.hasError = true
 	}
 	s.mu.Unlock()
 }
@@ -64,25 +62,9 @@ func (s *liveState) setModel(model string) {
 	s.mu.Unlock()
 }
 
-func (s *liveState) setProvider(provider string) {
-	s.mu.Lock()
-	s.provider = provider
-	s.mu.Unlock()
-}
-
 func (s *liveState) setTokens(n int) {
 	s.mu.Lock()
 	s.tokens = n
-	s.mu.Unlock()
-}
-
-func (s *liveState) setStatuses(statuses map[string]string) {
-	s.mu.Lock()
-	cp := make(map[string]string, len(statuses))
-	for k, v := range statuses {
-		cp[k] = v
-	}
-	s.statuses = cp
 	s.mu.Unlock()
 }
 
@@ -103,8 +85,6 @@ type Model struct {
 	// If nil, warnings are silently dropped.
 	logFn func(int, string)
 
-	statusBar StatusBar
-
 	mainAgentID string
 	activeModel string
 
@@ -112,13 +92,17 @@ type Model struct {
 	modalContent string
 	input        InputArea
 
-	chat ChatView
-
 	// Loaded extension paths for reload.
 	extPaths []string
 
 	// Autocomplete dropdown state.
 	suggestions []Command
+
+	console ConsoleView
+
+	statusBar StatusBar
+
+	chat ChatView
 
 	picker PickerView
 
@@ -129,7 +113,6 @@ type Model struct {
 
 	modalScroll    int
 	streaming      bool
-	console        ConsoleView
 	consoleVisible bool
 }
 
@@ -1240,6 +1223,7 @@ func (m Model) consoleHeight() int {
 	}
 	return consolePaneLines
 }
+
 func (m Model) renderConsole() string {
 	width := m.width
 	if width < 20 {
