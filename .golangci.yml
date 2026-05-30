@@ -147,6 +147,12 @@ linters:
         linters:
           - revive
 
+      # extension/interfaces.go defines all public bridge interfaces and their
+      # associated request/result types in one file for discoverability.
+      - path: extension/interfaces\.go
+        linters:
+          - revive
+
       # Pure message-type and protocol-type files are intentionally multi-struct.
       - path: harness/messages\.go
         linters:

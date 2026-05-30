@@ -13,6 +13,7 @@ func TestConsoleView_Append_SingleLine(t *testing.T) {
 		t.Fatal("View(80,3) should contain hello")
 	}
 }
+
 func TestConsoleView_Append_RingBuffer_EvictsOldest(t *testing.T) {
 	c := NewConsoleView()
 	c.Append("first")
@@ -28,6 +29,7 @@ func TestConsoleView_Append_RingBuffer_EvictsOldest(t *testing.T) {
 		t.Fatal("last should appear in view")
 	}
 }
+
 func TestConsoleView_Clear_EmptiesBuffer(t *testing.T) {
 	c := NewConsoleView()
 	c.Append("line1")
@@ -36,6 +38,7 @@ func TestConsoleView_Clear_EmptiesBuffer(t *testing.T) {
 		t.Fatal("IsEmpty should be true after Clear")
 	}
 }
+
 func TestConsoleView_View_WidthClamped(t *testing.T) {
 	c := NewConsoleView()
 	c.Append(strings.Repeat("x", 100))
@@ -44,6 +47,7 @@ func TestConsoleView_View_WidthClamped(t *testing.T) {
 		t.Fatal("View width not clamped: line exceeds width 20")
 	}
 }
+
 func TestConsoleView_Empty_ViewIsEmpty(t *testing.T) {
 	c := NewConsoleView()
 	if !c.IsEmpty() {
@@ -54,6 +58,7 @@ func TestConsoleView_Empty_ViewIsEmpty(t *testing.T) {
 		t.Fatalf("View(80,0) should be empty, got %q", got)
 	}
 }
+
 func TestConsoleView_Visible_AfterAppend(t *testing.T) {
 	c := NewConsoleView()
 	if !c.IsEmpty() {
