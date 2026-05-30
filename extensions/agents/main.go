@@ -306,30 +306,28 @@ If an agent seems stuck (no notification after several minutes):
 
 ---
 
-### NEVER do this — async waiting anti-patterns
+### NEVER do this — these block your turn without waiting correctly
 
 WRONG — do NOT poll or sleep while waiting for a sub-agent:
   create_agent("researcher", ...)
-  exec sleep 10           ← WRONG: wastes a turn, blocks the LLM
-  get_agent_status(...)   ← WRONG: busy-wait, same turn, same turn
-  get_agent_status(...)   ← WRONG: still in same turn, accomplishes nothing
+  exec sleep 10           ← WRONG: wastes a tool call, doesn't actually wait
+  get_agent_status(...)   ← WRONG: same turn as above, agent state unchanged
+  get_agent_status(...)   ← WRONG: still in the same turn, still useless
 
 WRONG — do NOT call get_agent_status multiple times in one turn:
   get_agent_status("main/coder-1")  ← first call
-  get_agent_status("main/coder-1")  ← second call — redundant, agent hasn't changed
-  get_agent_status("main/coder-1")  ← third call — WRONG, end your turn instead
+  get_agent_status("main/coder-1")  ← WRONG: same turn, no time has passed
+  get_agent_status("main/coder-1")  ← WRONG: still the same snapshot
 
-RIGHT — end your turn and let the message wake you:
-  create_agent("researcher", "...", "...When done call send_message(\"main\", summary).")
-  (end turn — the researcher's send_message call wakes you automatically)
+RIGHT — use wait_for_all to block until agents are done:
+  create_agent("researcher", ...)
+  result = wait_for_all(["main/researcher"])  ← blocks until done
+  (process result.results["main/researcher"], then shutdown_agent)
 
-RIGHT — check status ONCE if agent seems stuck (no send_message after minutes):
+RIGHT — if agent seems genuinely stuck after wait_for_all times out:
   get_agent_status("main/coder-1", 20)  ← check ONCE with high history_limit
-  (read recent history to understand the situation)
-  (end turn — either it is still running, or send it a nudge)
-
-Completion notifications fire automatically when a sub-agent finishes.
-Your next turn starts immediately — you never need to poll, sleep, or check.`
+  (read "recent" history to understand the situation)
+  send_message("main/coder-1", "Please report your status.")  ← nudge it`
 
 	AppendSystemPrompt(guidance)
 }
