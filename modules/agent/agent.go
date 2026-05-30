@@ -42,10 +42,11 @@ type Agent struct {
 	// can build an incremental summary. Protected by lastSummaryMu.
 	lastSummary string
 
-	opts  SpawnOpts
 	inbox []sdk.Message
 
 	history []sdk.Message
+
+	opts SpawnOpts
 
 	// lastUsage is the token usage from the most recently completed turn.
 	// Zero-valued before the first turn or when the last turn returned an error.
