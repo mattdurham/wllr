@@ -515,11 +515,12 @@ func TestModel_chatHeight_AccountsForConsole(t *testing.T) {
 }
 
 // TestStatusBarCtxPercent verifies that after a StreamDoneMsg, when the pool's main
-// agent has real usage and the context window is set, statuses["ctx"] shows a percent.
+// agent has real usage and the context window is set, statuses["ctx rem"] shows remaining
+// headroom until compaction (threshold% - current%).
 func TestStatusBarCtxPercent(t *testing.T) {
 	pool := agent.NewPool()
 	pool.SetContextWindow(200_000)
-	// 50k / 200k = 25%
+	// 50k / 200k = 25%; default threshold 80% → rem = 55%
 	lm := newUsageMockLM(50_000, 500, "response")
 	a, err := pool.Spawn(agent.MainAgentID, lm, agent.SpawnOpts{})
 	if err != nil {
@@ -541,23 +542,20 @@ func TestStatusBarCtxPercent(t *testing.T) {
 		t.Fatal("timeout waiting for turn")
 	}
 
-	// Simulate StreamDoneMsg — this should update ctx% in status bar.
+	// Simulate StreamDoneMsg — this should update ctx rem in status bar.
 	m, _ = callUpdate(m, StreamDoneMsg{Err: nil})
 
-	ctx, ok := m.statusBar.statuses["ctx"]
+	rem, ok := m.statusBar.statuses["ctx rem"]
 	if !ok {
-		t.Fatal("expected statuses[ctx] to be present after StreamDoneMsg with non-zero usage")
+		t.Fatal("expected statuses[ctx rem] to be present after StreamDoneMsg with non-zero usage")
 	}
-	if ctx == "" {
-		t.Error("statuses[ctx] should not be empty")
-	}
-	// 50k/200k = 25.0%
-	if ctx != "25%" {
-		t.Errorf("statuses[ctx] = %q, want %q", ctx, "25%")
+	// threshold=80%, current=25% → rem=55%
+	if rem != "55%" {
+		t.Errorf("statuses[ctx rem] = %q, want %q", rem, "55%")
 	}
 }
 
-// TestStatusBarCtxPercentZero verifies that when ContextWindow is 0, ctx key is absent.
+// TestStatusBarCtxPercentZero verifies that when ContextWindow is 0, ctx rem key is absent.
 func TestStatusBarCtxPercentZero(t *testing.T) {
 	pool := agent.NewPool()
 	// No SetContextWindow — window defaults to 0.
@@ -569,10 +567,10 @@ func TestStatusBarCtxPercentZero(t *testing.T) {
 
 	m := New(pool, agent.MainAgentID, nil)
 
-	// StreamDoneMsg with zero context window — ctx key should not appear.
+	// StreamDoneMsg with zero context window — ctx rem key should not appear.
 	m, _ = callUpdate(m, StreamDoneMsg{Err: nil})
 
-	if _, ok := m.statusBar.statuses["ctx"]; ok {
-		t.Errorf("statuses[ctx] should be absent when ContextWindow is 0, got %q", m.statusBar.statuses["ctx"])
+	if _, ok := m.statusBar.statuses["ctx rem"]; ok {
+		t.Errorf("statuses[ctx rem] should be absent when ContextWindow is 0, got %q", m.statusBar.statuses["ctx rem"])
 	}
 }
