@@ -583,9 +583,11 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 			// Update context-usage percentage from real API token counts.
 			cu := m.agentPool.MainAgentContextUsage()
 			if cu.ContextWindow > 0 {
-				m.statusBar.statuses["ctx"] = fmt.Sprintf("%.0f%%", cu.Percent)
+				cfg := m.agentPool.CompactConfig()
+				rem := cfg.ThresholdPct*100 - cu.Percent
+				m.statusBar.statuses["ctx rem"] = fmt.Sprintf("%.0f%%", rem)
 			} else {
-				delete(m.statusBar.statuses, "ctx")
+				delete(m.statusBar.statuses, "ctx rem")
 			}
 		}
 		if msg.Err != nil {
