@@ -456,3 +456,113 @@ func (c *captureLM) GenerateObject(_ context.Context, _ fantasy.ObjectCall) (*fa
 func (c *captureLM) StreamObject(_ context.Context, _ fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
 	return nil, nil
 }
+
+// ---- shouldCompactByUsage ----
+
+// TestShouldCompactByUsage_BelowThreshold verifies that usage below the threshold returns false.
+func TestShouldCompactByUsage_BelowThreshold(t *testing.T) {
+	// 79% of window with 0.80 threshold: should not compact.
+	u := fantasy.Usage{InputTokens: 158_000, OutputTokens: 100}
+	got := shouldCompactByUsage(u, 200_000, 0.80)
+	if got {
+		t.Error("expected false at 79% with threshold 0.80, got true")
+	}
+}
+
+// TestShouldCompactByUsage_AtThreshold verifies that usage at exactly the threshold returns true.
+func TestShouldCompactByUsage_AtThreshold(t *testing.T) {
+	// 80% of window with 0.80 threshold: should compact.
+	u := fantasy.Usage{InputTokens: 160_000, OutputTokens: 100}
+	got := shouldCompactByUsage(u, 200_000, 0.80)
+	if !got {
+		t.Error("expected true at 80% with threshold 0.80, got false")
+	}
+}
+
+// TestShouldCompactByUsage_ZeroUsage verifies that zero InputTokens always returns false.
+func TestShouldCompactByUsage_ZeroUsage(t *testing.T) {
+	// First turn before any usage is recorded: InputTokens is 0.
+	u := fantasy.Usage{}
+	got := shouldCompactByUsage(u, 200_000, 0.80)
+	if got {
+		t.Error("expected false when InputTokens is zero, got true")
+	}
+}
+
+// TestShouldCompactByUsage_ZeroContextWindow verifies that a zero window returns false.
+func TestShouldCompactByUsage_ZeroContextWindow(t *testing.T) {
+	// No context window configured — fall back to heuristic.
+	u := fantasy.Usage{InputTokens: 500_000, OutputTokens: 100}
+	got := shouldCompactByUsage(u, 0, 0.80)
+	if got {
+		t.Error("expected false when ContextWindow is zero, got true")
+	}
+}
+
+// TestAutoCompactEnvDefault verifies that NewPool reads WLLR_COMPACT_THRESHOLD and
+// sets a threshold of 0.80 when the env var is unset.
+func TestAutoCompactEnvDefault(t *testing.T) {
+	t.Setenv("WLLR_COMPACT_THRESHOLD", "")
+	p := NewPool()
+	cfg := p.CompactConfig()
+	if cfg.ThresholdPct != 0.80 {
+		t.Errorf("default ThresholdPct = %f, want 0.80", cfg.ThresholdPct)
+	}
+	if !cfg.Enabled {
+		t.Error("expected Enabled to be true by default")
+	}
+}
+
+// TestAutoCompactEnvCustom verifies that WLLR_COMPACT_THRESHOLD=90 sets threshold to 0.90.
+func TestAutoCompactEnvCustom(t *testing.T) {
+	t.Setenv("WLLR_COMPACT_THRESHOLD", "90")
+	p := NewPool()
+	cfg := p.CompactConfig()
+	if cfg.ThresholdPct != 0.90 {
+		t.Errorf("ThresholdPct = %f, want 0.90", cfg.ThresholdPct)
+	}
+}
+
+// TestAutoCompactEnvFraction verifies that WLLR_COMPACT_THRESHOLD=0.90 (fraction, ≤1) is
+// accepted as-is without the divide-by-100 conversion.
+func TestAutoCompactEnvFraction(t *testing.T) {
+	t.Setenv("WLLR_COMPACT_THRESHOLD", "0.90")
+	p := NewPool()
+	cfg := p.CompactConfig()
+	if cfg.ThresholdPct != 0.90 {
+		t.Errorf("ThresholdPct = %f, want 0.90", cfg.ThresholdPct)
+	}
+}
+
+// TestAutoCompactEnvNegative verifies that a negative WLLR_COMPACT_THRESHOLD falls back
+// to the default 0.80 (rejected by the parsed > 0 guard).
+func TestAutoCompactEnvNegative(t *testing.T) {
+	t.Setenv("WLLR_COMPACT_THRESHOLD", "-5")
+	p := NewPool()
+	cfg := p.CompactConfig()
+	if cfg.ThresholdPct != 0.80 {
+		t.Errorf("ThresholdPct = %f, want 0.80 (default)", cfg.ThresholdPct)
+	}
+}
+
+// TestAutoCompactEnvInvalid verifies that an unparseable WLLR_COMPACT_THRESHOLD falls
+// back to the default 0.80.
+func TestAutoCompactEnvInvalid(t *testing.T) {
+	t.Setenv("WLLR_COMPACT_THRESHOLD", "abc")
+	p := NewPool()
+	cfg := p.CompactConfig()
+	if cfg.ThresholdPct != 0.80 {
+		t.Errorf("ThresholdPct = %f, want 0.80 (default)", cfg.ThresholdPct)
+	}
+}
+
+// TestAutoCompactEnvOutOfRange verifies that WLLR_COMPACT_THRESHOLD=200 (which becomes
+// 2.0 after divide-by-100) is rejected with a warning and falls back to 0.80.
+func TestAutoCompactEnvOutOfRange(t *testing.T) {
+	t.Setenv("WLLR_COMPACT_THRESHOLD", "200")
+	p := NewPool()
+	cfg := p.CompactConfig()
+	if cfg.ThresholdPct != 0.80 {
+		t.Errorf("ThresholdPct = %f, want 0.80 (default after out-of-range rejection)", cfg.ThresholdPct)
+	}
+}

@@ -333,6 +333,24 @@ Built-in commands registered at startup:
 - `View()` returns lipgloss-styled text; not currently used in the main view (status is embedded in the input box border).
 - Token count is updated live from `m.agentPool.TokenCount()` on every render; the status bar's own `totalTokens` field is also updated from `StreamDoneMsg`.
 
+### Context Usage Percentage (`ctx%`)
+
+On each `StreamDoneMsg` (successful or not), the `StreamDoneMsg` handler calls
+`m.agentPool.MainAgentContextUsage()` and updates `statuses["ctx"]`:
+
+- When `cu.ContextWindow > 0`: `statuses["ctx"] = fmt.Sprintf("%.0f%%", cu.Percent)`.
+  The result is shown in the status bar as `ctx:N%`.
+- When `cu.ContextWindow == 0`: `delete(statuses, "ctx")`. The key is absent — no `ctx:0%`
+  shown for unconfigured or first-turn sessions.
+
+**Invariant:** The `ctx` key is only present in the status bar when a real context window has
+been configured via `WLLR_CONTEXT_WINDOW` or `pool.SetContextWindow()` and at least one turn
+has completed successfully.
+
+**Invariant:** `ctx%` reflects the input token count of the most recently completed turn as a
+fraction of the configured context window. It is updated once per `StreamDoneMsg`, not
+continuously during streaming.
+
 ---
 
 ## 19. Message Types

@@ -70,3 +70,61 @@ func (m *mockLM) StreamObject(_ context.Context, _ fantasy.ObjectCall) (fantasy.
 
 func (m *mockLM) Provider() string { return m.provider }
 func (m *mockLM) Model() string    { return m.modelID }
+
+// usageMockLM is a test double that emits fixed tokens plus a finish part with usage.
+type usageMockLM struct {
+	tokens       []string
+	inputTokens  int64
+	outputTokens int64
+}
+
+var _ fantasy.LanguageModel = (*usageMockLM)(nil)
+
+func newUsageMockLM(inputTokens, outputTokens int64, tokens ...string) *usageMockLM {
+	return &usageMockLM{
+		tokens:       tokens,
+		inputTokens:  inputTokens,
+		outputTokens: outputTokens,
+	}
+}
+
+func (u *usageMockLM) Generate(_ context.Context, _ fantasy.Call) (*fantasy.Response, error) {
+	return &fantasy.Response{}, nil
+}
+
+func (u *usageMockLM) Stream(ctx context.Context, _ fantasy.Call) (fantasy.StreamResponse, error) {
+	toks := u.tokens
+	usage := fantasy.Usage{
+		InputTokens:  u.inputTokens,
+		OutputTokens: u.outputTokens,
+		TotalTokens:  u.inputTokens + u.outputTokens,
+	}
+	return func(yield func(fantasy.StreamPart) bool) {
+		for _, tok := range toks {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, Delta: tok}) {
+				return
+			}
+		}
+		yield(fantasy.StreamPart{
+			Type:         fantasy.StreamPartTypeFinish,
+			FinishReason: fantasy.FinishReasonStop,
+			Usage:        usage,
+		})
+	}, nil
+}
+
+func (u *usageMockLM) GenerateObject(_ context.Context, _ fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
+	return nil, nil
+}
+
+func (u *usageMockLM) StreamObject(_ context.Context, _ fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
+	return nil, nil
+}
+
+func (u *usageMockLM) Provider() string { return "usage-mock" }
+func (u *usageMockLM) Model() string    { return "usage-mock-model" }

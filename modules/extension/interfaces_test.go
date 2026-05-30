@@ -22,6 +22,7 @@ func (f *fakeAgentBridge) SetHistory(_ string, _ []sdk.Message) error { return n
 func (f *fakeAgentBridge) WaitForAll(_ string, _ []string, _ int) (extension.WaitResult, error) {
 	return extension.WaitResult{Status: "complete", Results: map[string]string{}}, nil
 }
+func (f *fakeAgentBridge) MainAgentContextUsage() sdk.ContextUsage { return sdk.ContextUsage{} }
 
 // compile-time check
 var _ extension.AgentBridge = (*fakeAgentBridge)(nil)

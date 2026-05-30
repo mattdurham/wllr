@@ -31,11 +31,13 @@ These types cross the host/WASM boundary via JSON; their wire format is stable a
 | `EventBeforeToolCall`         | `"before_tool_call"`        | Dispatched to the extension that implements a tool; extension MUST call `tool_result` |
 | `EventAfterToolCall`          | `"after_tool_call"`         | Dispatched after a tool execution completes                  |
 | `EventOnCommand`              | `"on_command"`              | User invoked a slash command registered by an extension      |
+| `EventTick`                   | `"tick"`                    | Periodic heartbeat dispatched by the host at a configured interval |
+| `EventContextUsage`           | `"context_usage"`           | Dispatched after each completed turn with context window usage |
 
 **Invariants:**
 - The set of `EventType` string values must not change between ABI versions without a version bump.
 - An unknown `EventType` must be silently ignored by extensions (forward-compatibility).
-- There are exactly 12 defined event types.
+- There are exactly 14 defined event types.
 
 ---
 
@@ -66,7 +68,7 @@ All fields are `omitempty`.
 
 ---
 
-## Payload Types (12 total)
+## Payload Types (14 total)
 
 ### SessionStartPayload (`EventSessionStart`)
 
@@ -157,6 +159,19 @@ All fields are `omitempty`.
 | `name` | string   | The command name (without leading `/`)                         |
 | `args` | []string | Arguments the user typed after the command name                |
 
+### TickPayload (`EventTick`)
+
+No payload fields — the event carries no structured data beyond the event type itself. The payload is `null`.
+
+### ContextUsagePayload (`EventContextUsage`)
+
+| Field       | Type         | Description                                                                     |
+|-------------|--------------|---------------------------------------------------------------------------------|
+| `usage`     | ContextUsage | Context window usage for the turn (see ContextUsage type in Supporting Types)  |
+| `compacted` | bool         | `true` when `compactHistory` ran and succeeded during the turn                  |
+
+**Note for extension authors:** `ContextUsage.Percent` is expressed as a percentage (0–100, e.g. 75.4 means 75.4% full). This is distinct from the pool's internal `ThresholdPct`, which is a fraction (0.0–1.0). Do not compare `Percent` directly to `ThresholdPct`; convert as needed.
+
 ---
 
 ## Permission Model
@@ -199,6 +214,17 @@ All fields are `omitempty`.
 |-----------------|------|------------------------|
 | `input_tokens`  | int  | Prompt tokens used     |
 | `output_tokens` | int  | Completion tokens used |
+
+### ContextUsage
+
+| Field           | Type    | Description                                                                 |
+|-----------------|---------|-----------------------------------------------------------------------------|
+| `InputTokens`   | int64   | Total input tokens for the last turn                                        |
+| `OutputTokens`  | int64   | Total output tokens for the last turn                                       |
+| `ContextWindow` | int64   | Model's maximum context window (from `WLLR_CONTEXT_WINDOW` or model default) |
+| `Percent`       | float64 | `InputTokens / ContextWindow × 100`; `0` if `ContextWindow == 0`           |
+
+Note: Percent is 0–100. CompactConfig.ThresholdPct is a fraction 0.0–1.0.
 
 ### Role Constants
 
@@ -343,3 +369,7 @@ Returned as `int32` from the `host_call` WASM import (not the JSON layer).
 8. Error codes are `int32` and exist only at the WASM boundary; they do not appear in the JSON layer.
 9. `BeforeToolCallPayload` and `AfterToolCallPayload` both include `agent_id` to allow extensions to correlate tool calls with the originating agent.
 10. `OnCommandPayload` is the payload for `EventOnCommand`, dispatched when a user invokes an extension-registered slash command.
+11. `ContextUsage.Percent` is always `InputTokens / ContextWindow * 100`; when `ContextWindow == 0` the value is exactly `0.0` (never NaN or Inf).
+12. `ContextUsagePayload.Compacted` is `true` only when `compactHistory` ran and succeeded during the turn that produced the event.
+13. `EventContextUsage` (`"context_usage"`) is fired once per completed turn, after the turn's usage is stored, only on success (not on error or cancellation).
+14. `MethodGetContextUsage` (`"get_context_usage"`) requires no permission; it returns a zero-valued `ContextUsage` when the agent bridge is unavailable.

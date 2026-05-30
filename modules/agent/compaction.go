@@ -13,6 +13,33 @@ import (
 	"github.com/mattdurham/wllr/modules/sdk"
 )
 
+// CompactConfig controls the percentage-based compaction trigger.
+// When Enabled is true and ThresholdPct > 0, shouldCompactByUsage is consulted
+// before the heuristic shouldCompact. ThresholdPct is expressed as a fraction
+// (0.80 = 80%); it is set from WLLR_COMPACT_THRESHOLD at pool creation.
+type CompactConfig struct {
+	// Enabled is true by default; set to false to disable the percentage trigger.
+	Enabled bool
+	// ThresholdPct is the fraction of the context window at which compaction fires.
+	// Default is 0.80 (80%). Must be in (0, 1] for the trigger to be active.
+	ThresholdPct float64
+}
+
+// shouldCompactByUsage returns true when the last real usage exceeds thresholdPct
+// of the context window. Returns false when usage or window is zero (caller falls
+// back to the heuristic shouldCompact for the first turn or when unconfigured).
+//
+// Note: thresholdPct is a fraction in (0, 1] (e.g. 0.80 = 80%). This is a different
+// scale from ContextUsage.Percent, which is a percentage in [0, 100]. Do not compare
+// ContextUsage.Percent directly to thresholdPct without converting.
+func shouldCompactByUsage(lastUsage fantasy.Usage, contextWindow int64, thresholdPct float64) bool {
+	if lastUsage.InputTokens == 0 || contextWindow == 0 || thresholdPct <= 0 {
+		return false
+	}
+	pct := float64(lastUsage.InputTokens) / float64(contextWindow)
+	return pct >= thresholdPct
+}
+
 const (
 	// defaultContextWindow is the fallback when no explicit window is configured.
 	// Modern models (Claude 4.x, Gemini 2.x) all support >= 1M tokens; set
