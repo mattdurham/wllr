@@ -195,6 +195,86 @@ After a turn, if the API returns a context-too-long error (`isContextTooLong`), 
 
 **Invariant:** The reactive retry happens at most once per turn. If the retry also fails with a context error, the error is reported to `onDone` and the turn ends.
 
+### Percentage-Based Compaction Trigger
+
+In addition to the chars/4 heuristic, `Submit` checks a percentage-based trigger before falling
+back to the heuristic. The trigger uses the real API token counts from the most recently completed
+turn (`a.lastUsage`) rather than an estimate.
+
+`shouldCompactByUsage(lastUsage fantasy.Usage, contextWindow int64, thresholdPct float64) bool`:
+- Returns `true` when `lastUsage.InputTokens / contextWindow >= thresholdPct`.
+- Returns `false` when `lastUsage.InputTokens == 0` (first turn — no prior usage data).
+- Returns `false` when `contextWindow == 0` (window not configured).
+- Returns `false` when `thresholdPct <= 0`.
+
+The check order in `Submit` is:
+1. If `pool.CompactConfig().Enabled` and `shouldCompactByUsage(a.LastUsage(), contextWindow, cfg.ThresholdPct)` → compact.
+2. Else if `shouldCompact(history, sysPrompt, content, contextWindow)` → compact (chars/4 heuristic).
+3. Else → no proactive compaction.
+
+**Invariant:** The first turn always uses the heuristic because `lastUsage` is zero-valued until
+the first `streamTurn` call completes. This is the chicken-and-egg bootstrap case.
+
+**Invariant:** If compaction fails, the original history is used unchanged and the turn
+proceeds normally. (Inherited from §9.)
+
+### AutoCompact Configuration
+
+`CompactConfig` holds the percentage-based trigger configuration:
+```go
+type CompactConfig struct {
+    Enabled      bool    // default true
+    ThresholdPct float64 // fraction (0.0–1.0); default 0.80
+}
+```
+
+`AgentPool` reads `WLLR_COMPACT_THRESHOLD` at construction:
+- Unset or empty → `ThresholdPct = 0.80`, `Enabled = true`.
+- Numeric string (e.g. `"90"` or `"0.90"`) → parsed as percentage if > 1 (divide by 100), else as fraction.
+- Unparseable → default 0.80.
+
+`SetCompactConfig(cfg CompactConfig)` replaces the configuration at any time (thread-safe via `p.mu`).
+
+**Invariant:** `WLLR_COMPACT_THRESHOLD` is read once at `NewPool()` time. Changing the env var
+after pool creation has no effect.
+
+### lastUsage — Real API Token Tracking
+
+`Agent` stores the token usage from the most recently completed turn:
+```go
+lastUsage   fantasy.Usage
+lastUsageMu sync.RWMutex
+```
+
+`setLastUsage(u fantasy.Usage)` is called in the `Submit` goroutine after every `streamTurn`
+call — including the reactive retry. On error, `setLastUsage(fantasy.Usage{})` stores a zero
+value so a failed turn does not contaminate the next turn's compaction decision.
+
+`LastUsage() fantasy.Usage` is a read-safe accessor used by `MainAgentContextUsage()` and
+the percentage-based compaction check.
+
+**Invariant:** `LastUsage()` returns a zero-valued `fantasy.Usage` before the first turn
+completes or when the last turn returned an error.
+
+**Invariant:** `lastUsage` is only written from inside the `Submit` goroutine, preventing
+concurrent writes.
+
+### EventContextUsage Dispatch
+
+After each successful turn, the pool's `contextUsageDispatcher` callback is invoked:
+```go
+pool.dispatchContextUsage(cu sdk.ContextUsage, compacted bool)
+```
+
+The callback is set by the harness via `pool.SetContextUsageDispatcher` and forwards
+`EventContextUsage` to WASM extensions via the extension host, avoiding a circular import
+between the `agent` and `extension` packages.
+
+`compacted` is `true` when `compactHistory` ran successfully during the turn.
+
+**Invariant:** `dispatchContextUsage` is only called on successful turns (`err == nil`).
+On error or cancellation it is not called, consistent with the pattern for other events.
+
 ### streamTurn Helper
 
 `streamTurn` is the internal helper extracted from `Submit` to keep cyclomatic complexity below threshold. It:
@@ -202,7 +282,8 @@ After a turn, if the API returns a context-too-long error (`isContextTooLong`), 
 2. Counts each text delta as one token via `pool.addTokens(1)`.
 3. Forwards text deltas to `onToken` (if set).
 4. Forwards tool calls to `onToolCall` (if set), skipping provider-executed tool calls (`toolCall.ProviderExecuted == true`).
-5. Returns the collected text and any error.
+5. Returns the collected text, real `fantasy.Usage` from `result.TotalUsage`, and any error.
+6. On error, returns a zero-valued `fantasy.Usage`.
 
 ---
 

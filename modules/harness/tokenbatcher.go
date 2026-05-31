@@ -3,10 +3,11 @@ package harness
 // NOTE: Any changes to this file must be reflected in the corresponding SPECS.md or NOTES.md.
 
 import (
-	tea "charm.land/bubbletea/v2"
 	"strings"
 	"sync"
 	"time"
+
+	tea "charm.land/bubbletea/v2"
 )
 
 type tokenBatcher struct {

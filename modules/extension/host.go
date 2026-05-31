@@ -485,6 +485,9 @@ func (h *Host) buildDispatch() map[string]func(ctx context.Context, ext *Extensi
 		sdk.MethodSetStatusLine: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleSetStatusLine(req)
 		},
+		sdk.MethodGetContextUsage: func(_ context.Context, _ *Extension, _ sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleGetContextUsage()
+		},
 	}
 }
 
@@ -1731,4 +1734,17 @@ func (h *Host) handleSetStatusLine(req sdk.HostCallRequest) sdk.HostCallResponse
 		h.uiBridge().SetStatus("_override", params.Text)
 	}
 	return sdk.HostCallResponse{}
+}
+
+// handleGetContextUsage returns the current context window usage for the main agent.
+// Returns a zero-valued ContextUsage when no agent bridge is configured, consistent
+// with how handleGetStatusInfo handles a missing UI bridge.
+// No permission check required — this is read-only observability data.
+func (h *Host) handleGetContextUsage() sdk.HostCallResponse {
+	var cu sdk.ContextUsage
+	if h.agentBridge() != nil {
+		cu = h.agentBridge().MainAgentContextUsage()
+	}
+	result, _ := json.Marshal(cu)
+	return sdk.HostCallResponse{Result: result}
 }

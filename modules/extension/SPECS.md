@@ -177,6 +177,7 @@ The full set of dispatched methods is:
 | `MethodGetOS`                 | `handleGetOS`                                    |
 | `MethodGetStatusInfo`         | `handleGetStatusInfo`                            |
 | `MethodSetStatusLine`         | `handleSetStatusLine`                            |
+| `MethodGetContextUsage`       | `handleGetContextUsage`                          |
 
 ---
 
@@ -197,6 +198,15 @@ The full set of dispatched methods is:
 **Invariant:** Dispatch handlers snapshot the bridge field under `h.mu.RLock()` via internal getter methods (`h.agentBridge()`, `h.uiBridge()`, etc.) so that the field transition from early stub to full implementation is race-free.
 
 **Invariant:** `PermExec` is required for `agent_spawn` (via `AgentBridge.Spawn`), `exec`, `read_file`, `write_file`, `http_post`, and `mcp_spawn`. If the extension is nil or lacks the required permission, the call returns a permission-denied error response.
+
+**Invariant:** `get_context_usage` (`MethodGetContextUsage`) requires no permission. It is a
+read-only observability call. When the `AgentBridge` is nil or not yet installed, the handler
+returns a zero-valued `sdk.ContextUsage` (all fields zero) rather than an error, consistent
+with how `get_status_info` behaves when the `UIBridge` is unavailable.
+
+`AgentBridge.MainAgentContextUsage()` is the sole method that returns context window usage.
+It must return a zero-valued `sdk.ContextUsage` before the first turn completes or when no
+context window has been configured — it must never panic or block.
 
 ---
 
