@@ -19,10 +19,10 @@ import (
 // performed by the harness (earlyUIBridge/earlyAgentBridge in New, full bridges
 // in SetProgram) and by cmd/main.go (CapabilityProvider). Wire itself is passive.
 type ConversationSession struct {
+	renderer harness.Renderer
 	host     *extension.Host
 	pool     *agent.AgentPool
 	mainID   string
-	renderer harness.Renderer
 }
 
 // Wire creates and returns a Session. Wire does not install any interface bridges

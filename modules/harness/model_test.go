@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/mattdurham/wllr/modules/agent"
@@ -477,6 +478,7 @@ func TestModel_Update_ConsoleMsg_AppendsToConsole(t *testing.T) {
 		t.Fatal("console should not be empty after ConsoleMsg{Line}")
 	}
 }
+
 func TestModel_Update_ConsoleMsg_Clear_ResetsConsole(t *testing.T) {
 	m := newTestModel()
 	m, _ = callUpdate(m, ConsoleMsg{Line: "old"})
@@ -488,6 +490,7 @@ func TestModel_Update_ConsoleMsg_Clear_ResetsConsole(t *testing.T) {
 		t.Fatal("consoleVisible should be false after ConsoleMsg{Clear}")
 	}
 }
+
 func TestModel_Update_StreamDoneMsg_HidesConsole(t *testing.T) {
 	m := newTestModel()
 	m.streaming = true
@@ -497,6 +500,7 @@ func TestModel_Update_StreamDoneMsg_HidesConsole(t *testing.T) {
 		t.Fatal("consoleVisible should be false after StreamDoneMsg")
 	}
 }
+
 func TestModel_chatHeight_AccountsForConsole(t *testing.T) {
 	m := newTestModel()
 	m.width = 120
@@ -507,5 +511,66 @@ func TestModel_chatHeight_AccountsForConsole(t *testing.T) {
 	h2 := m.chatHeight()
 	if h1-h2 != consolePaneLines {
 		t.Errorf("chatHeight diff: got %d, want %d (consolePaneLines)", h1-h2, consolePaneLines)
+	}
+}
+
+// TestStatusBarCtxPercent verifies that after a StreamDoneMsg, when the pool's main
+// agent has real usage and the context window is set, statuses["ctx rem"] shows remaining
+// headroom until compaction (threshold% - current%).
+func TestStatusBarCtxPercent(t *testing.T) {
+	pool := agent.NewPool()
+	pool.SetContextWindow(200_000)
+	// 50k / 200k = 25%; default threshold 80% → rem = 55%
+	lm := newUsageMockLM(50_000, 500, "response")
+	a, err := pool.Spawn(agent.MainAgentID, lm, agent.SpawnOpts{})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	m := New(pool, agent.MainAgentID, nil)
+
+	// Run a turn to populate LastUsage.
+	done := make(chan error, 1)
+	a.SetOnDone(func(e error) { done <- e })
+	a.Submit(context.Background(), "query")
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("turn error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for turn")
+	}
+
+	// Simulate StreamDoneMsg — this should update ctx rem in status bar.
+	m, _ = callUpdate(m, StreamDoneMsg{Err: nil})
+
+	rem, ok := m.statusBar.statuses["ctx rem"]
+	if !ok {
+		t.Fatal("expected statuses[ctx rem] to be present after StreamDoneMsg with non-zero usage")
+	}
+	// threshold=80%, current=25% → rem=55%
+	if rem != "55%" {
+		t.Errorf("statuses[ctx rem] = %q, want %q", rem, "55%")
+	}
+}
+
+// TestStatusBarCtxPercentZero verifies that when ContextWindow is 0, ctx rem key is absent.
+func TestStatusBarCtxPercentZero(t *testing.T) {
+	pool := agent.NewPool()
+	// No SetContextWindow — window defaults to 0.
+	lm := newUsageMockLM(50_000, 500, "response")
+	_, err := pool.Spawn(agent.MainAgentID, lm, agent.SpawnOpts{})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	m := New(pool, agent.MainAgentID, nil)
+
+	// StreamDoneMsg with zero context window — ctx rem key should not appear.
+	m, _ = callUpdate(m, StreamDoneMsg{Err: nil})
+
+	if _, ok := m.statusBar.statuses["ctx rem"]; ok {
+		t.Errorf("statuses[ctx rem] should be absent when ContextWindow is 0, got %q", m.statusBar.statuses["ctx rem"])
 	}
 }

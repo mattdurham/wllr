@@ -26,6 +26,9 @@ const (
 	// EventOnCommand is dispatched when the user invokes a slash command registered
 	// by an extension via register_command.
 	EventOnCommand EventType = "on_command"
+	// EventContextUsage is dispatched after each completed turn with the current
+	// context window usage as a ContextUsagePayload.
+	EventContextUsage EventType = "context_usage"
 )
 
 // Event is dispatched to extensions via _on_event.
@@ -191,6 +194,10 @@ const (
 	// build a custom status line. Returns StatusInfo JSON.
 	// No permission required — this is read-only observability.
 	MethodGetStatusInfo = "get_status_info"
+
+	// MethodGetContextUsage returns the current context window usage as a
+	// ContextUsage JSON object. No permission required — this is read-only observability.
+	MethodGetContextUsage = "get_context_usage"
 
 	// MethodSetStatusLine replaces the entire status bar text with a custom
 	// string for this session. Pass an empty string to revert to the default

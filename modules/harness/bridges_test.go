@@ -137,4 +137,3 @@ func TestWaitForAll_MultipleAgents(t *testing.T) {
 		t.Errorf("expected 2 results, got %d", len(result.Results))
 	}
 }
-

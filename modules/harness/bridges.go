@@ -73,17 +73,24 @@ type earlyAgentBridge struct{}
 func (e *earlyAgentBridge) Spawn(_ context.Context, _ extension.SpawnRequest) error {
 	return fmt.Errorf("agent_spawn: session not yet started")
 }
-func (e *earlyAgentBridge) Close(_ string) error                 { return fmt.Errorf("not started") }
-func (e *earlyAgentBridge) SendMessage(_, _ string) error        { return fmt.Errorf("not started") }
-func (e *earlyAgentBridge) Run(_ string) error                   { return fmt.Errorf("not started") }
+func (e *earlyAgentBridge) Close(_ string) error { return fmt.Errorf("not started") }
+
+func (e *earlyAgentBridge) SendMessage(_, _ string) error { return fmt.Errorf("not started") }
+
+func (e *earlyAgentBridge) Run(_ string) error { return fmt.Errorf("not started") }
+
 func (e *earlyAgentBridge) List() ([]extension.AgentInfo, error) { return nil, nil }
-func (e *earlyAgentBridge) TokenCount() int64                    { return 0 }
+
+func (e *earlyAgentBridge) TokenCount() int64 { return 0 }
 func (e *earlyAgentBridge) SetHistory(_ string, _ []sdk.Message) error {
 	return fmt.Errorf("not started")
 }
+
 func (e *earlyAgentBridge) WaitForAll(_ string, _ []string, _ int) (extension.WaitResult, error) {
 	return extension.WaitResult{Status: "error"}, fmt.Errorf("not started")
 }
+
+func (e *earlyAgentBridge) MainAgentContextUsage() sdk.ContextUsage { return sdk.ContextUsage{} }
 
 // Verify earlyAgentBridge satisfies the interface at compile time.
 var _ extension.AgentBridge = (*earlyAgentBridge)(nil)
@@ -93,8 +100,8 @@ var _ extension.AgentBridge = (*earlyAgentBridge)(nil)
 type harnessAgentBridge struct {
 	pool    *agent.AgentPool
 	spawner *agent.Spawner
-	mainID  string
 	prog    *tea.Program
+	mainID  string
 }
 
 func (b *harnessAgentBridge) Spawn(ctx context.Context, req extension.SpawnRequest) error {
@@ -161,6 +168,15 @@ func (b *harnessAgentBridge) SetHistory(id string, messages []sdk.Message) error
 		return fmt.Errorf("no agent pool")
 	}
 	return b.pool.SetAgentHistory(id, messages)
+}
+
+// MainAgentContextUsage returns the context window usage for the main agent.
+// Delegates to the pool so host calls can expose usage to WASM extensions.
+func (b *harnessAgentBridge) MainAgentContextUsage() sdk.ContextUsage {
+	if b.pool == nil {
+		return sdk.ContextUsage{}
+	}
+	return b.pool.MainAgentContextUsage()
 }
 
 // WaitForAll blocks until all agentIDs have completed their final turn, or until
@@ -326,8 +342,8 @@ type harnessUIBridge struct {
 	pool   *agent.AgentPool
 	prog   *tea.Program
 	live   *liveState
-	mainID string
 	cmds   *Registry
+	mainID string
 }
 
 func (b *harnessUIBridge) Notify(text string) {

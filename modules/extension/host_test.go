@@ -42,44 +42,55 @@ func (b *testAgentBridge) Spawn(ctx context.Context, req SpawnRequest) error {
 	}
 	return nil
 }
+
 func (b *testAgentBridge) Close(id string) error {
 	if b.onClose != nil {
 		return b.onClose(id)
 	}
 	return nil
 }
+
 func (b *testAgentBridge) SendMessage(id, message string) error {
 	if b.onSendMessage != nil {
 		return b.onSendMessage(id, message)
 	}
 	return nil
 }
+
 func (b *testAgentBridge) Run(id string) error {
 	if b.onRun != nil {
 		return b.onRun(id)
 	}
 	return nil
 }
+
 func (b *testAgentBridge) List() ([]AgentInfo, error) {
 	if b.onList != nil {
 		return b.onList()
 	}
 	return nil, nil
 }
+
 func (b *testAgentBridge) TokenCount() int64 {
 	if b.onTokenCount != nil {
 		return b.onTokenCount()
 	}
 	return 0
 }
+
 func (b *testAgentBridge) SetHistory(id string, messages []sdk.Message) error {
 	if b.onSetHistory != nil {
 		return b.onSetHistory(id, messages)
 	}
 	return nil
 }
+
 func (b *testAgentBridge) WaitForAll(_ string, _ []string, _ int) (WaitResult, error) {
 	return WaitResult{Status: "complete", Results: map[string]string{}}, nil
+}
+
+func (b *testAgentBridge) MainAgentContextUsage() sdk.ContextUsage {
+	return sdk.ContextUsage{}
 }
 
 // testTeamBridge implements TeamBridge using optional callback fields.
@@ -98,30 +109,35 @@ func (b *testTeamBridge) Create(id, name string) error {
 	}
 	return nil
 }
+
 func (b *testTeamBridge) Close(ctx context.Context, id string) error {
 	if b.onClose != nil {
 		return b.onClose(ctx, id)
 	}
 	return nil
 }
+
 func (b *testTeamBridge) AddMember(teamID, agentID string) error {
 	if b.onAddMember != nil {
 		return b.onAddMember(teamID, agentID)
 	}
 	return nil
 }
+
 func (b *testTeamBridge) RemoveMember(teamID, agentID string) error {
 	if b.onRemoveMember != nil {
 		return b.onRemoveMember(teamID, agentID)
 	}
 	return nil
 }
+
 func (b *testTeamBridge) GetMembers(teamID string) ([]string, error) {
 	if b.onGetMembers != nil {
 		return b.onGetMembers(teamID)
 	}
 	return nil, nil
 }
+
 func (b *testTeamBridge) List() ([]string, error) {
 	if b.onList != nil {
 		return b.onList()
@@ -154,80 +170,95 @@ func (b *testUIBridge) Notify(text string) {
 		b.onNotify(text)
 	}
 }
+
 func (b *testUIBridge) ShowModal(text string) {
 	if b.onShowModal != nil {
 		b.onShowModal(text)
 	}
 }
+
 func (b *testUIBridge) ShowPicker(title string, items []sdk.ShowPickerItem, callback string) {
 	if b.onShowPicker != nil {
 		b.onShowPicker(title, items, callback)
 	}
 }
+
 func (b *testUIBridge) Abort() {
 	if b.onAbort != nil {
 		b.onAbort()
 	}
 }
+
 func (b *testUIBridge) SetStatus(key, value string) {
 	if b.onSetStatus != nil {
 		b.onSetStatus(key, value)
 	}
 }
+
 func (b *testUIBridge) GetStatusInfo() sdk.StatusInfo {
 	if b.onGetStatusInfo != nil {
 		return b.onGetStatusInfo()
 	}
 	return sdk.StatusInfo{}
 }
+
 func (b *testUIBridge) SendMessage(msg sdk.Message) {
 	if b.onSendMessage != nil {
 		b.onSendMessage(msg)
 	}
 }
+
 func (b *testUIBridge) RegisterCommand(name, desc string) error {
 	if b.onRegisterCommand != nil {
 		return b.onRegisterCommand(name, desc)
 	}
 	return nil
 }
+
 func (b *testUIBridge) RegisterTool(tool sdk.Tool) error {
 	if b.onRegisterTool != nil {
 		return b.onRegisterTool(tool)
 	}
 	return nil
 }
+
 func (b *testUIBridge) SetSystemPrompt(prompt string) {
 	if b.onSetSystemPrompt != nil {
 		b.onSetSystemPrompt(prompt)
 	}
 }
+
 func (b *testUIBridge) AppendSystemPrompt(text string) {
 	if b.onAppendSP != nil {
 		b.onAppendSP(text)
 	}
 }
+
 func (b *testUIBridge) ResetHistory(messages []sdk.Message) error {
 	if b.onResetHistory != nil {
 		return b.onResetHistory(messages)
 	}
 	return nil
 }
+
 func (b *testUIBridge) ToolResult(toolCallID, result string, isError bool) {
 	if b.onToolResult != nil {
 		b.onToolResult(toolCallID, result, isError)
 	}
 }
+
 func (b *testUIBridge) AfterToolCall(toolCallID, toolName, result string, isError bool) {
 	if b.onAfterToolCall != nil {
 		b.onAfterToolCall(toolCallID, toolName, result, isError)
 	}
 }
+
 func (b *testUIBridge) ConsoleOutput(line string) {
 	if b.onConsoleOutput != nil {
 		b.onConsoleOutput(line)
 	}
 }
+
 func (b *testUIBridge) ConsoleClear() {
 	if b.onConsoleClear != nil {
 		b.onConsoleClear()
@@ -250,30 +281,35 @@ func (p *testCapabilityProvider) Exec(ctx context.Context, command, dir string, 
 	}
 	return "", nil
 }
+
 func (p *testCapabilityProvider) GetEnv(name string) (string, error) {
 	if p.onGetEnv != nil {
 		return p.onGetEnv(name)
 	}
 	return "", nil
 }
+
 func (p *testCapabilityProvider) ReadFile(path string) (string, error) {
 	if p.onReadFile != nil {
 		return p.onReadFile(path)
 	}
 	return "", nil
 }
+
 func (p *testCapabilityProvider) WriteFile(path, content string) error {
 	if p.onWriteFile != nil {
 		return p.onWriteFile(path, content)
 	}
 	return nil
 }
+
 func (p *testCapabilityProvider) HTTPPost(url string, headers map[string]string, body []byte) (int, []byte, error) {
 	if p.onHTTPPost != nil {
 		return p.onHTTPPost(url, headers, body)
 	}
 	return 200, nil, nil
 }
+
 func (p *testCapabilityProvider) ConfigRead(group string) (json.RawMessage, error) {
 	if p.onConfigRead != nil {
 		return p.onConfigRead(group)
@@ -1712,6 +1748,7 @@ func TestHost_HandleAgentRun_NilCallback_ReturnsError(t *testing.T) {
 		t.Fatal("expected error when OnAgentRun is nil, got empty")
 	}
 }
+
 func TestHost_CapabilityProvider_Exec_AcceptsContext(t *testing.T) {
 	called := false
 	h := NewHost(nil)
@@ -1773,3 +1810,98 @@ func TestHost_HandleExec_PassesContext(t *testing.T) {
 		t.Fatal("ctx was nil when Exec was called")
 	}
 }
+
+// TestGetContextUsageHostCall verifies that get_context_usage returns the usage
+// from the agent bridge as a JSON-encoded ContextUsage.
+func TestGetContextUsageHostCall(t *testing.T) {
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer h.Close(ctx)
+
+	path := writeWASM(t, "minimal.wasm", minimalWASM)
+	if err := h.Load(ctx, path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	ext := h.extensions[0]
+
+	// Install a bridge that returns known usage.
+	want := sdk.ContextUsage{
+		InputTokens:   50_000,
+		OutputTokens:  500,
+		ContextWindow: 200_000,
+		Percent:       25.0,
+	}
+	h.SetAgentBridge(&testAgentBridge{
+		onTokenCount: func() int64 { return 0 },
+	})
+	// Override MainAgentContextUsage via a custom bridge.
+	h.SetAgentBridge(&contextUsageAgentBridge{usage: want})
+
+	resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+		Method: sdk.MethodGetContextUsage,
+	})
+	if resp.Error != "" {
+		t.Fatalf("get_context_usage: %s", resp.Error)
+	}
+
+	var got sdk.ContextUsage
+	if err := json.Unmarshal(resp.Result, &got); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if got.InputTokens != want.InputTokens {
+		t.Errorf("InputTokens = %d, want %d", got.InputTokens, want.InputTokens)
+	}
+	if got.ContextWindow != want.ContextWindow {
+		t.Errorf("ContextWindow = %d, want %d", got.ContextWindow, want.ContextWindow)
+	}
+	if got.Percent != want.Percent {
+		t.Errorf("Percent = %f, want %f", got.Percent, want.Percent)
+	}
+}
+
+// TestGetContextUsageNoPoolBridge verifies that get_context_usage returns a zero
+// ContextUsage (not an error) when no agent bridge is configured.
+func TestGetContextUsageNoPoolBridge(t *testing.T) {
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer h.Close(ctx)
+
+	path := writeWASM(t, "minimal.wasm", minimalWASM)
+	if err := h.Load(ctx, path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	ext := h.extensions[0]
+	// No agent bridge set.
+
+	resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+		Method: sdk.MethodGetContextUsage,
+	})
+	if resp.Error != "" {
+		t.Fatalf("expected no error with nil bridge, got: %s", resp.Error)
+	}
+
+	var got sdk.ContextUsage
+	if err := json.Unmarshal(resp.Result, &got); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if got.InputTokens != 0 || got.ContextWindow != 0 || got.Percent != 0 {
+		t.Errorf("expected zero ContextUsage with no bridge, got %+v", got)
+	}
+}
+
+// contextUsageAgentBridge is a test bridge that returns a fixed ContextUsage.
+type contextUsageAgentBridge struct {
+	usage sdk.ContextUsage
+}
+
+func (b *contextUsageAgentBridge) Spawn(_ context.Context, _ SpawnRequest) error { return nil }
+func (b *contextUsageAgentBridge) Close(_ string) error                          { return nil }
+func (b *contextUsageAgentBridge) SendMessage(_, _ string) error                 { return nil }
+func (b *contextUsageAgentBridge) Run(_ string) error                            { return nil }
+func (b *contextUsageAgentBridge) List() ([]AgentInfo, error)                    { return nil, nil }
+func (b *contextUsageAgentBridge) TokenCount() int64                             { return 0 }
+func (b *contextUsageAgentBridge) SetHistory(_ string, _ []sdk.Message) error    { return nil }
+func (b *contextUsageAgentBridge) WaitForAll(_ string, _ []string, _ int) (WaitResult, error) {
+	return WaitResult{Status: "complete", Results: map[string]string{}}, nil
+}
+func (b *contextUsageAgentBridge) MainAgentContextUsage() sdk.ContextUsage { return b.usage }

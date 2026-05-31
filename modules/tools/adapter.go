@@ -16,12 +16,12 @@ import (
 // When Run is called by the fantasy agent, it dispatches the tool call
 // to the extension host via ExecuteTool and waits for the result.
 type sdkToolAdapter struct {
-	tool            sdk.Tool
 	host            *extension.Host
-	agentID         string
 	params          map[string]any
-	required        []string
 	providerOptions fantasy.ProviderOptions
+	agentID         string
+	required        []string
+	tool            sdk.Tool
 }
 
 // ParseInputSchema parses a JSON Schema object and extracts the properties

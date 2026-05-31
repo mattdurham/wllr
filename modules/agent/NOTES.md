@@ -265,3 +265,43 @@ are processed in order without concurrent goroutines.
 sequentially. The onDone callback fires after each sub-turn, so the TUI may see multiple
 StreamDoneMsg events from a single logical "agent wakeup." Each StreamDoneMsg finalizes
 one response chunk.
+
+## 18. Real API Token Tracking — Why Replace chars/4 Heuristic
+
+*Added: 2026-05-30*
+
+**Decision:** Replace the chars/4 token estimation for compaction decisions with real API
+token counts from `fantasy.AgentResult.TotalUsage`. Store the last turn's usage on `Agent`
+as `lastUsage fantasy.Usage` and expose it via `Agent.LastUsage()`. Expose context window
+usage to the harness and extensions via `AgentPool.MainAgentContextUsage()`, `sdk.ContextUsage`,
+and `EventContextUsage`.
+
+**Rationale:** The chars/4 heuristic systematically underestimates token counts for
+code-heavy conversations (identifiers and symbols cost more than 0.25 tokens/char on
+average) and can underestimate heavily by 30–50% in practice. Real API counts allow the
+percentage-based compaction trigger (`shouldCompactByUsage`) to fire at the correct time
+rather than too late, reducing context-length errors.
+
+**Consequence:** The first turn still uses the heuristic because `lastUsage` is zero before
+the first API call completes. This chicken-and-egg bootstrap is unavoidable and documented
+in SPECS.md §9. Subsequent turns use real counts, which are more accurate.
+
+---
+
+## 19. contextUsageDispatcher Callback — Why Not Direct DispatchEvent on Host
+
+*Added: 2026-05-30*
+
+**Decision:** After each completed agent turn, context window usage is forwarded to the harness
+via a `contextUsageDispatcher` callback registered on `AgentPool` (via `SetContextUsageDispatcher`),
+rather than by calling `DispatchEvent` directly on the extension host from within the agent package.
+
+**Rationale:** The agent package cannot import the extension package (which owns `DispatchEvent`)
+without creating a circular import: extension → agent (to get the pool) → extension. The callback
+pattern breaks this cycle: the harness or `cmd/main.go` wires the dispatcher at startup, passing a
+closure that holds a reference to the extension host. The agent package only depends on the `sdk`
+package (for `ContextUsage`), which has no dependency on extension or harness.
+
+**Consequence:** The dispatcher is an optional hook — if `SetContextUsageDispatcher` is never called,
+`dispatchContextUsage` is a no-op. This means tests that don't need extension dispatch don't need to
+wire one up. The harness is responsible for ensuring the dispatcher is set before the first agent turn.
