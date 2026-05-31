@@ -19,6 +19,8 @@ import (
 
 // Agent wraps a fantasy.LanguageModel with a message inbox and lifecycle management.
 // Each agent maintains its own conversation history and can run one turn at a time.
+//
+//betteralign:ignore
 type Agent struct {
 	lm   fantasy.LanguageModel
 	pool *AgentPool
