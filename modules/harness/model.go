@@ -92,8 +92,6 @@ type Model struct {
 	modalContent string
 	input        InputArea
 
-	chat ChatView
-
 	// OnMessageEnd is called after a completed assistant turn with the role
 	// and full content string. It is invoked on the bubbletea update goroutine.
 	// Nil means no callback. Set by cmd/main.go for session persistence.
@@ -103,7 +101,6 @@ type Model struct {
 	// sent to the agent. It is invoked on the bubbletea update goroutine.
 	// Nil means no callback. Set by cmd/main.go for session persistence.
 	OnUserMessage func(content string)
-
 
 	// Loaded extension paths for reload.
 	extPaths []string
