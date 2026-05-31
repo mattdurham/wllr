@@ -844,6 +844,7 @@ func (h *Host) handleAgentSpawn(req sdk.HostCallRequest) sdk.HostCallResponse {
 		ModelName      string `json:"model_name"`
 		InitialPrompt  string `json:"initial_prompt"`
 		ThinkingBudget int    `json:"thinking_budget"`
+		CallerID       string `json:"caller_id"`
 	}
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("agent_spawn: %v", err)}
@@ -855,6 +856,7 @@ func (h *Host) handleAgentSpawn(req sdk.HostCallRequest) sdk.HostCallResponse {
 		ModelName:      params.ModelName,
 		InitialPrompt:  params.InitialPrompt,
 		ThinkingBudget: params.ThinkingBudget,
+		CallerID:       params.CallerID,
 	}); err != nil {
 		return sdk.HostCallResponse{Error: err.Error()}
 	}
@@ -885,11 +887,23 @@ func (h *Host) handleAgentSendMessage(req sdk.HostCallRequest) sdk.HostCallRespo
 	var params struct {
 		ID      string `json:"id"`
 		Message string `json:"message"`
+		Type    string `json:"type,omitempty"` // optional: "system", "steering", or "" (normal)
 	}
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("agent_send_message: %v", err)}
 	}
-	if err := h.agentBridge().SendMessage(params.ID, params.Message); err != nil {
+	switch params.Type {
+	case "", "normal", "steering", "system":
+		// valid message types
+	default:
+		return sdk.HostCallResponse{Error: "agent_send_message: unknown message type: " + params.Type}
+	}
+	msg := sdk.Message{
+		Role:    sdk.RoleUser,
+		Content: params.Message,
+		Type:    sdk.MessageType(params.Type),
+	}
+	if err := h.agentBridge().SendMessage(params.ID, msg); err != nil {
 		return sdk.HostCallResponse{Error: err.Error()}
 	}
 	return sdk.HostCallResponse{}

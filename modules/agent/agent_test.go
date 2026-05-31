@@ -2,6 +2,7 @@ package agent_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"testing"
@@ -212,6 +213,141 @@ func TestAgent_Submit_InboxMessagesIncorporated(t *testing.T) {
 	}
 }
 
+// ---- system message filtering tests ----
+
+// spyLM captures the fantasy.Call.Prompt passed to Stream for inspection.
+type spyLM struct {
+	mu       sync.Mutex
+	calls    [][]fantasy.Message // captured prompts per call
+	response []string            // tokens to emit
+}
+
+func (s *spyLM) Model() string    { return "spy-model" }
+func (s *spyLM) Provider() string { return "test" }
+
+func (s *spyLM) Stream(_ context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
+	s.mu.Lock()
+	// call.Prompt is []fantasy.Message
+	msgs := make([]fantasy.Message, len(call.Prompt))
+	copy(msgs, call.Prompt)
+	s.calls = append(s.calls, msgs)
+	toks := s.response
+	s.mu.Unlock()
+
+	return func(yield func(fantasy.StreamPart) bool) {
+		for _, tok := range toks {
+			if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, Delta: tok}) {
+				return
+			}
+		}
+		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop})
+	}, nil
+}
+
+func (s *spyLM) Generate(_ context.Context, _ fantasy.Call) (*fantasy.Response, error) {
+	return &fantasy.Response{}, nil
+}
+
+func (s *spyLM) GenerateObject(_ context.Context, _ fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
+	return nil, nil
+}
+
+func (s *spyLM) StreamObject(_ context.Context, _ fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
+	return nil, nil
+}
+
+func (s *spyLM) capturedPrompts() [][]fantasy.Message {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result := make([][]fantasy.Message, len(s.calls))
+	copy(result, s.calls)
+	return result
+}
+
+func TestSubmit_SystemMessagesFilteredFromLLMContext(t *testing.T) {
+	pool := agent.NewPool()
+	spy := &spyLM{response: []string{"ok"}}
+	a, err := pool.Spawn("filter-test", spy, agent.SpawnOpts{})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	// Inject normal + system messages into inbox.
+	a.AppendInbox(sdk.Message{Role: sdk.RoleUser, Content: "normal inbox message"})
+	a.AppendInbox(sdk.Message{Role: sdk.RoleUser, Content: `{"event":"system_event"}`, Type: sdk.MessageTypeSystem})
+	a.AppendInbox(sdk.Message{Role: sdk.RoleUser, Content: "steering hint", Type: sdk.MessageTypeSteering})
+
+	done := make(chan error, 1)
+	a.SetOnDone(func(e error) { done <- e })
+	a.Submit(testCtx(t), "user prompt")
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("turn error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout")
+	}
+
+	prompts := spy.capturedPrompts()
+	if len(prompts) == 0 {
+		t.Fatal("spy received no calls")
+	}
+	// Check that the system and steering messages do NOT appear in the LLM context.
+	allMessages := prompts[0]
+	for _, m := range allMessages {
+		for _, part := range m.Content {
+			if tp, ok := part.(fantasy.TextPart); ok {
+				if tp.Text == `{"event":"system_event"}` {
+					t.Errorf("system message leaked to LLM context: %q", tp.Text)
+				}
+				if tp.Text == "steering hint" {
+					t.Errorf("steering message leaked to LLM context: %q", tp.Text)
+				}
+			}
+		}
+	}
+	// Normal inbox message SHOULD appear.
+	found := false
+	for _, m := range allMessages {
+		for _, part := range m.Content {
+			if tp, ok := part.(fantasy.TextPart); ok && tp.Text == "normal inbox message" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Error("normal inbox message was incorrectly filtered from LLM context")
+	}
+}
+
+func TestDrainInbox_SystemMessagesRetained(t *testing.T) {
+	// System messages should survive AppendInbox/DrainInbox — filtering happens
+	// at sdkToFantasyMessages time, not at drain time.
+	pool := agent.NewPool()
+	lm := newMockLM()
+	a, _ := pool.Spawn("drain-test", lm, agent.SpawnOpts{})
+
+	sysMsg := sdk.Message{Role: sdk.RoleUser, Content: `{"event":"test"}`, Type: sdk.MessageTypeSystem}
+	a.AppendInbox(sysMsg)
+	a.AppendInbox(sdk.Message{Role: sdk.RoleUser, Content: "normal"})
+
+	drained := a.DrainInbox()
+	if len(drained) != 2 {
+		t.Fatalf("expected 2 messages after drain, got %d", len(drained))
+	}
+	found := false
+	for _, m := range drained {
+		if m.Type == sdk.MessageTypeSystem && m.Content == sysMsg.Content {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("system message was removed during DrainInbox — it should only be filtered at LLM conversion time")
+	}
+}
+
 // ---- helper LM types ----
 
 // tokenStreamLM emits fixed tokens then a finish event.
@@ -399,5 +535,210 @@ func TestAgent_Cancel_PlaceholderAllowsNextTurn(t *testing.T) {
 
 	if got == "" {
 		t.Error("second turn produced no output")
+	}
+}
+
+// ---- finishTurn graceful shutdown tests ----
+
+// TestFinishTurn_ShutdownRequest_SendsAgentShutdownAndClosesSelf verifies that when
+// a system shutdown_request message arrives in the agent's inbox while a turn is running,
+// finishTurn sends an AGENT_SHUTDOWN system message to the creator and removes the
+// agent from the pool.
+func TestFinishTurn_ShutdownRequest_SendsAgentShutdownAndClosesSelf(t *testing.T) {
+	pool := agent.NewPool()
+	lm := newBlockingLM("response")
+
+	// Spawn orchestrator (creator) and worker (target of shutdown).
+	orch, err := pool.Spawn("main/orchestrator", newMockLM(), agent.SpawnOpts{})
+	if err != nil {
+		t.Fatalf("Spawn orchestrator: %v", err)
+	}
+	_, err = pool.Spawn("main/worker", lm, agent.SpawnOpts{CreatorID: "main/orchestrator"})
+	if err != nil {
+		t.Fatalf("Spawn worker: %v", err)
+	}
+
+	worker := pool.Get("main/worker")
+	if worker == nil {
+		t.Fatal("worker not found after spawn")
+	}
+
+	done := make(chan error, 1)
+	worker.SetOnDone(func(e error) { done <- e })
+
+	// Start a turn — the blocking LM will hold it open.
+	worker.Submit(testCtx(t), "hello")
+
+	// Wait until Stream has been entered before injecting inbox messages.
+	lm.WaitForStream(t)
+
+	// Inject the shutdown_request while the turn is in flight.
+	shutdownMsg, _ := json.Marshal(map[string]string{
+		"event": "shutdown_request",
+		"from":  "main/orchestrator",
+	})
+	worker.AppendInbox(sdk.Message{
+		Role:    sdk.RoleUser,
+		Content: string(shutdownMsg),
+		Type:    sdk.MessageTypeSystem,
+	})
+
+	// Release the blocking LM to let the turn complete.
+	lm.Release()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("worker turn error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for worker turn to complete")
+	}
+
+	// Worker should have been removed from pool.
+	if pool.Get("main/worker") != nil {
+		t.Error("worker should have been removed from pool after shutdown_request, but it's still present")
+	}
+
+	// Orchestrator's inbox should contain an AGENT_SHUTDOWN system message.
+	orchInbox := orch.DrainInbox()
+	if len(orchInbox) == 0 {
+		t.Fatal("orchestrator's inbox is empty — expected AGENT_SHUTDOWN system message")
+	}
+	found := false
+	for _, m := range orchInbox {
+		if m.Type != sdk.MessageTypeSystem {
+			continue
+		}
+		var evt struct {
+			Event   string `json:"event"`
+			AgentID string `json:"agent_id"`
+		}
+		if err := json.Unmarshal([]byte(m.Content), &evt); err == nil &&
+			evt.Event == "AGENT_SHUTDOWN" && evt.AgentID == "main/worker" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("AGENT_SHUTDOWN message not found in orchestrator inbox; got: %+v", orchInbox)
+	}
+}
+
+// TestFinishTurn_NormalMessagesProcessedBeforeShutdown verifies that if both a normal
+// message and a shutdown_request are pending in the inbox when finishTurn runs,
+// the normal message is processed first (drain-until-empty pattern) and shutdown
+// is deferred to the next drain turn.
+func TestFinishTurn_NormalMessagesProcessedBeforeShutdown(t *testing.T) {
+	pool := agent.NewPool()
+	lm := newBlockingLM("response")
+
+	orch, err := pool.Spawn("main/orchestrator", newMockLM(), agent.SpawnOpts{})
+	if err != nil {
+		t.Fatalf("Spawn orchestrator: %v", err)
+	}
+	_, err = pool.Spawn("main/worker", lm, agent.SpawnOpts{CreatorID: "main/orchestrator"})
+	if err != nil {
+		t.Fatalf("Spawn worker: %v", err)
+	}
+
+	worker := pool.Get("main/worker")
+	if worker == nil {
+		t.Fatal("worker not found")
+	}
+
+	done := make(chan error, 1)
+	worker.SetOnDone(func(e error) { done <- e })
+
+	// Start a turn (blocking LM holds it open).
+	worker.Submit(testCtx(t), "initial task")
+
+	// Wait until Stream has been entered before injecting inbox messages.
+	lm.WaitForStream(t)
+
+	// Inject both a normal message AND a shutdown_request while in-flight.
+	worker.AppendInbox(sdk.Message{Role: sdk.RoleUser, Content: "do some work"})
+	shutdownPayload, _ := json.Marshal(map[string]string{
+		"event": "shutdown_request",
+		"from":  "main/orchestrator",
+	})
+	worker.AppendInbox(sdk.Message{
+		Role:    sdk.RoleUser,
+		Content: string(shutdownPayload),
+		Type:    sdk.MessageTypeSystem,
+	})
+
+	// Release the blocking LM — finishTurn should drain normal messages first
+	// (another turn via mockLM), then process shutdown on the next cycle.
+	lm.Release()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("worker turn error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout")
+	}
+
+	// Worker should have shut down after draining all normal messages.
+	if pool.Get("main/worker") != nil {
+		t.Error("worker should have been removed from pool after shutdown processing")
+	}
+
+	// Orchestrator should have received AGENT_SHUTDOWN.
+	orchInbox := orch.DrainInbox()
+	found := false
+	for _, m := range orchInbox {
+		if m.Type != sdk.MessageTypeSystem {
+			continue
+		}
+		var evt struct {
+			Event string `json:"event"`
+		}
+		if err := json.Unmarshal([]byte(m.Content), &evt); err == nil && evt.Event == "AGENT_SHUTDOWN" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("AGENT_SHUTDOWN not received by orchestrator after normal message processing")
+	}
+}
+
+// TestFinishTurn_NoShutdownRequest_Normal verifies that a normal turn with only
+// regular inbox messages calls onDone normally without closing the agent.
+func TestFinishTurn_NoShutdownRequest_Normal(t *testing.T) {
+	pool := agent.NewPool()
+	lm := newBlockingLM("response")
+
+	_, err := pool.Spawn("main/worker", lm, agent.SpawnOpts{CreatorID: "main/orchestrator"})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	worker := pool.Get("main/worker")
+
+	done := make(chan error, 1)
+	worker.SetOnDone(func(e error) { done <- e })
+
+	// Start a turn, inject only a normal message while it's running.
+	worker.Submit(testCtx(t), "task")
+
+	// Wait until Stream has been entered before injecting inbox messages.
+	lm.WaitForStream(t)
+	worker.AppendInbox(sdk.Message{Role: sdk.RoleUser, Content: "normal message"})
+	lm.Release()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("turn error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout")
+	}
+
+	// Worker should still be in pool — no shutdown was requested.
+	if pool.Get("main/worker") == nil {
+		t.Error("worker should still be in pool when no shutdown_request was sent")
 	}
 }

@@ -135,3 +135,15 @@ Append-only design decision log. Never delete entries; add an `*Addendum (date):
 **Rationale:** The MCP bridge extension needs to spawn, communicate with, and terminate MCP server subprocesses. These are I/O operations that require host access (process management, stdio pipes). Exposing them as host_call methods follows the existing pattern for restricted operations: the extension requests the operation, the host executes it with appropriate permissions. `mcp_spawn` requires `PermExec` because it runs an arbitrary command. `mcp_close/send/read` are allowed once the process is spawned (no additional permission check, as the exec permission was validated at spawn time).
 
 **Consequence:** Extensions that bridge MCP servers must declare `exec` in their manifest. The host is responsible for process lifecycle; the extension only sees JSON-RPC messages via `mcp_send` / `mcp_read`.
+
+---
+
+## 12. MessageType field added to Message for Go-level routing
+
+*Added: 2026-05-31*
+
+**Decision:** `sdk.Message` gains a `Type MessageType` field (`json:"type,omitempty"`). Three constants are defined: `MessageTypeNormal` (`"normal"`), `MessageTypeSteering` (`"steering"`), `MessageTypeSystem` (`"system"`).
+
+**Rationale:** Agent coordination requires messages that are not intended for the LLM but are instead consumed by the Go runtime (e.g. shutdown_request, AGENT_SHUTDOWN). Previously all messages were treated identically — user or assistant content sent to the provider. With multi-agent orchestration, there is a need for: (a) system-level control messages never sent to the LLM, and (b) steering messages visible in history but filtered from the provider context slice. The `type` field enables the `sdkToFantasyMessages` conversion to filter these without modifying the message store.
+
+**Consequence:** The `omitempty` tag preserves backward compatibility: existing serialized messages with no `type` field unmarshal to `Type == ""`, which is treated identically to `MessageTypeNormal` in all code paths. Extensions that do not set `Type` are unaffected. New code must not add `MessageTypeSystem` messages to the LLM context or history.
