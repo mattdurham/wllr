@@ -21,6 +21,10 @@ type SpawnRequest struct {
 	// default model name.
 	ModelName     string
 	InitialPrompt string
+	// CallerID is the agent ID that issued the create_agent call (i.e. the parent agent).
+	// Empty string for agents spawned directly by the host or in tests.
+	// Passed through to SpawnOpts.CreatorID so the Agent records its parent.
+	CallerID string
 	// ThinkingBudget enables extended thinking with the given token budget.
 	// Zero means disabled. Only supported on Anthropic models.
 	ThinkingBudget int
@@ -40,7 +44,7 @@ type SpawnRequest struct {
 type AgentBridge interface {
 	Spawn(ctx context.Context, req SpawnRequest) error
 	Close(id string) error
-	SendMessage(id, message string) error
+	SendMessage(id string, msg sdk.Message) error
 	Run(id string) error
 	List() ([]AgentInfo, error)
 	TokenCount() int64

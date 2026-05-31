@@ -166,3 +166,22 @@ linters:
         linters:
           - revive
 
+      # sdk/message.go defines MessageType (a string-kind type) and Message struct
+      # together — they are tightly coupled and belong in the same file.
+      - path: sdk/message\.go
+        linters:
+          - revive
+
+      # extension/interfaces.go defines SpawnRequest alongside the AgentBridge,
+      # TeamBridge, CapabilityProvider, UIBridge, and MCPBridge interfaces — all
+      # belong together as the extension API surface.
+      - path: extension/interfaces\.go
+        linters:
+          - revive
+
+      # agent/spawner.go defines ToolsFn and NotifyFn function types alongside the
+      # Spawner struct — tightly coupled factory types that belong in the same file.
+      - path: agent/spawner\.go
+        linters:
+          - revive
+
