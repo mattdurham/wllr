@@ -29,7 +29,7 @@ func writeWASM(t *testing.T, name string, data []byte) string {
 type testAgentBridge struct {
 	onSpawn       func(ctx context.Context, req SpawnRequest) error
 	onClose       func(id string) error
-	onSendMessage func(id, message string) error
+	onSendMessage func(id string, msg sdk.Message) error
 	onRun         func(id string) error
 	onList        func() ([]AgentInfo, error)
 	onTokenCount  func() int64
@@ -48,9 +48,9 @@ func (b *testAgentBridge) Close(id string) error {
 	}
 	return nil
 }
-func (b *testAgentBridge) SendMessage(id, message string) error {
+func (b *testAgentBridge) SendMessage(id string, msg sdk.Message) error {
 	if b.onSendMessage != nil {
-		return b.onSendMessage(id, message)
+		return b.onSendMessage(id, msg)
 	}
 	return nil
 }
@@ -1119,10 +1119,13 @@ func TestHost_HandleAgentSendMessage_CallbackInvoked(t *testing.T) {
 	h := NewHost(nil)
 	defer h.Close(ctx)
 
-	type msgArgs struct{ id, message string }
+	type msgArgs struct {
+		id  string
+		msg sdk.Message
+	}
 	got := make(chan msgArgs, 1)
-	h.SetAgentBridge(&testAgentBridge{onSendMessage: func(id, message string) error {
-		got <- msgArgs{id, message}
+	h.SetAgentBridge(&testAgentBridge{onSendMessage: func(id string, msg sdk.Message) error {
+		got <- msgArgs{id, msg}
 		return nil
 	}})
 
@@ -1142,8 +1145,8 @@ func TestHost_HandleAgentSendMessage_CallbackInvoked(t *testing.T) {
 
 	select {
 	case args := <-got:
-		if args.id != "a1" || args.message != "hello agent" {
-			t.Errorf("AgentBridge.SendMessage got %+v, want id=a1 message='hello agent'", args)
+		if args.id != "a1" || args.msg.Content != "hello agent" {
+			t.Errorf("AgentBridge.SendMessage got id=%q msg.Content=%q, want id=a1 message='hello agent'", args.id, args.msg.Content)
 		}
 	default:
 		t.Fatal("AgentBridge.SendMessage was not called")

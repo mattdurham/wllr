@@ -165,3 +165,31 @@ func TestSpawner_Spawn_NilToolsFn(t *testing.T) {
 		t.Fatalf("Spawn with nil toolsFn: %v", err)
 	}
 }
+
+func TestSpawner_Spawn_CallerIDPropagated(t *testing.T) {
+	prov := testutil.NewFakeProvider()
+	pool := agent.NewPool()
+	pool.SetProvider(prov)
+	pool.SetDefaultModelName("fake-model")
+
+	lm, _ := pool.LanguageModelForModel(context.Background(), "fake-model")
+	_, _ = pool.Spawn("main", lm, agent.SpawnOpts{})
+
+	spawner := agent.NewSpawner(pool, nil, nil)
+	err := spawner.Spawn(context.Background(), extension.SpawnRequest{
+		ID:        "main/worker",
+		ModelName: "fake-model",
+		CallerID:  "main",
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	a := pool.Get("main/worker")
+	if a == nil {
+		t.Fatal("expected agent 'main/worker' to exist in pool")
+	}
+	if got := a.CreatorID(); got != "main" {
+		t.Errorf("CreatorID = %q, want %q", got, "main")
+	}
+}

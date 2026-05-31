@@ -25,4 +25,8 @@ type SpawnOpts struct {
 	// TurnTimeout overrides the per-turn context deadline. Zero uses the default (30m).
 	// Set to a negative value to disable the timeout entirely (no deadline).
 	TurnTimeout time.Duration
+	// CreatorID is the ID of the agent that issued the create_agent call that spawned
+	// this agent. Empty string for top-level agents (spawned directly by the host or tests).
+	// Set by the Spawner when constructing SpawnOpts from an extension.SpawnRequest.
+	CreatorID string
 }
