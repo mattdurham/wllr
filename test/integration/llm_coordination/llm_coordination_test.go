@@ -71,9 +71,11 @@ func (s *scriptedLM) Release() { close(s.release) }
 func (s *scriptedLM) Generate(_ context.Context, _ fantasy.Call) (*fantasy.Response, error) {
 	return &fantasy.Response{}, nil
 }
+
 func (s *scriptedLM) GenerateObject(_ context.Context, _ fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
 	return &fantasy.ObjectResponse{}, nil
 }
+
 func (s *scriptedLM) StreamObject(_ context.Context, _ fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
 	return func(yield func(fantasy.ObjectStreamPart) bool) {}, nil
 }
@@ -104,9 +106,11 @@ func (m *instantLM) Stream(_ context.Context, call fantasy.Call) (fantasy.Stream
 func (m *instantLM) Generate(_ context.Context, _ fantasy.Call) (*fantasy.Response, error) {
 	return &fantasy.Response{}, nil
 }
+
 func (m *instantLM) GenerateObject(_ context.Context, _ fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
 	return &fantasy.ObjectResponse{}, nil
 }
+
 func (m *instantLM) StreamObject(_ context.Context, _ fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
 	return func(yield func(fantasy.ObjectStreamPart) bool) {}, nil
 }
@@ -352,7 +356,9 @@ func TestGracefulShutdown_WorkerFinishesCurrentTurn(t *testing.T) {
 		if m.Type != sdk.MessageTypeSystem {
 			continue
 		}
-		var evt struct{ Event string `json:"event"` }
+		var evt struct {
+			Event string `json:"event"`
+		}
 		if json.Unmarshal([]byte(m.Content), &evt) == nil && evt.Event == "AGENT_SHUTDOWN" {
 			found = true
 		}
@@ -407,7 +413,9 @@ func TestGracefulShutdown_AgentShutdownMessageType(t *testing.T) {
 	}
 	inbox := orch.DrainInbox()
 	for _, m := range inbox {
-		var evt struct{ Event string `json:"event"` }
+		var evt struct {
+			Event string `json:"event"`
+		}
 		if json.Unmarshal([]byte(m.Content), &evt) == nil && evt.Event == "AGENT_SHUTDOWN" {
 			if m.Type != sdk.MessageTypeSystem {
 				t.Errorf("AGENT_SHUTDOWN message has Type %q; want %q", m.Type, sdk.MessageTypeSystem)

@@ -33,6 +33,8 @@ type Agent struct {
 
 	toolsFn func() []fantasy.AgentTool
 
+	opts SpawnOpts
+
 	id           string
 	name         string
 	modelName    string // for context window lookup
@@ -43,8 +45,14 @@ type Agent struct {
 	// compactHistory as priorSummary on subsequent compaction calls so the model
 	// can build an incremental summary. Protected by lastSummaryMu.
 	lastSummary string
-	opts        SpawnOpts
-	inbox       []sdk.Message
+
+	// pendingShutdownFrom is set when a shutdown_request arrives alongside normal
+	// pending messages in finishTurn. The shutdown is deferred until all normal
+	// messages are drained (drain-until-empty pattern). Only accessed from
+	// finishTurn, which runs after isRunning transitions — no separate lock needed.
+	pendingShutdownFrom string
+
+	inbox []sdk.Message
 
 	history []sdk.Message
 
@@ -70,23 +78,17 @@ type Agent struct {
 	// inbox holds messages injected between turns via AppendInbox.
 	inboxMu sync.RWMutex
 
-	// pendingShutdownFrom is set when a shutdown_request arrives alongside normal
-	// pending messages in finishTurn. The shutdown is deferred until all normal
-	// messages are drained (drain-until-empty pattern). Only accessed from
-	// finishTurn, which runs after isRunning transitions — no separate lock needed.
-	pendingShutdownFrom string
-
 	// cancelMu protects the cancel function for the current active turn.
 	cancelMu sync.Mutex
+
+	// history is the conversation history for this agent (all completed turns).
+	historyMu sync.Mutex
 
 	// isRunning is set to true while Submit's goroutine is active. A second
 	// Submit call that arrives while a turn is running appends content to the
 	// inbox instead of starting a new goroutine. The running goroutine drains
 	// inbox on completion (drain-until-empty pattern). See NOTES.md §17.
 	isRunning atomic.Bool
-
-	// history is the conversation history for this agent (all completed turns).
-	historyMu sync.Mutex
 }
 
 // SetOnToken sets the callback invoked for each text delta during streaming.
@@ -339,136 +341,158 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 				}
 			}
 		}()
-
-		if lm == nil {
-			if onDone != nil {
-				onDone(fmt.Errorf("agent %s: no language model configured", a.id))
-			}
-			return
-		}
-
-		// Resolve tools: prefer dynamic toolsFn, fall back to opts.Tools.
-		tools := opts.Tools
-		if toolsFn != nil {
-			tools = toolsFn()
-		}
-
-		// Combine base (dynamic) and agent-specific (SpawnOpts) system prompts.
-		a.systemPromptMu.RLock()
-		base := a.systemPrompt
-		a.systemPromptMu.RUnlock()
-		specific := opts.SystemPrompt
-		var sysPrompt string
-		switch {
-		case base != "" && specific != "":
-			sysPrompt = base + "\n\n" + specific
-		case base != "":
-			sysPrompt = base
-		default:
-			sysPrompt = specific
-		}
-
-		// Build fantasy agent options.
-		var agentOpts []fantasy.AgentOption
-		if len(tools) > 0 {
-			agentOpts = append(agentOpts, fantasy.WithTools(tools...))
-		}
-		if sysPrompt != "" {
-			agentOpts = append(agentOpts, fantasy.WithSystemPrompt(sysPrompt))
-		}
-
-		if len(opts.ProviderOptions) > 0 {
-			agentOpts = append(agentOpts, fantasy.WithProviderOptions(opts.ProviderOptions))
-		}
-
-		agentOpts = append(agentOpts, fantasy.WithMaxRetries(6))
-		fa := fantasy.NewAgent(lm, agentOpts...)
-
-		// Proactive compaction: if the estimated context is close to the model's
-		// limit, summarize old history BEFORE sending, avoiding a 400 error.
-		// Use pool-configured context window if set; fall back to model-name lookup.
-		contextWindow := int64(0)
-		if pool != nil {
-			contextWindow = pool.ContextWindow()
-		}
-		if contextWindow == 0 {
-			contextWindow = contextWindowForModel(a.modelName)
-		}
-		history := priorHistory
-		if shouldCompact(history, sysPrompt, content, contextWindow) {
-			if onToken != nil {
-				onToken("[Compacting context…]\n\n")
-			}
-			// Keep 10% of the model's context window as recent history.
-			// This scales correctly: a 1M-token model keeps 100k, a 200k model keeps 20k.
-			keepRecent := contextWindow / 10
-			if keepRecent <= 0 {
-				keepRecent = defaultKeepRecentTokens
-			}
-			compacted, summaryText, cerr := compactHistory(childCtx, lm, history, priorSummary, keepRecent)
-			if cerr == nil {
-				history = compacted
-				a.historyMu.Lock()
-				a.history = compacted
-				a.historyMu.Unlock()
-				if summaryText != "" {
-					a.lastSummaryMu.Lock()
-					a.lastSummary = summaryText
-					a.lastSummaryMu.Unlock()
-				}
-			}
-		}
-
-		collectedText, err := streamTurn(childCtx, fa, history, content, pool, onToken, onToolCall)
-
-		// Reactive fallback: if we still hit a context error, trim and retry once.
-		if err != nil && isContextTooLong(err) {
-			if onToken != nil {
-				onToken("\n\n[Still too long — trimming and retrying…]\n\n")
-			}
-			if len(history) > keepMessages {
-				history = history[len(history)-keepMessages:]
-				a.historyMu.Lock()
-				a.history = history
-				a.historyMu.Unlock()
-			}
-			collectedText, err = streamTurn(childCtx, fa, history, content, pool, onToken, onToolCall)
-		}
-
-		// Always record what the user said and the assistant response.
-		// Providers require strictly alternating user/assistant messages —
-		// leaving history ending with a lone user message causes "text content
-		// cannot be empty" on the next turn.
-		assistantText := collectedText
-		if assistantText == "" {
-			if childCtx.Err() != nil {
-				assistantText = "[response cancelled]"
-			} else {
-				// Tool-only turn: no text produced. Use a placeholder so the
-				// user message is never silently dropped from history.
-				assistantText = "[tool calls only]"
-			}
-		}
-		// Record this turn to history. When content is empty (drain-until-empty
-		// path), use the inbox messages instead so we never write an empty user
-		// message — Anthropic rejects empty text content blocks.
-		a.historyMu.Lock()
-		if content != "" {
-			a.history = append(a.history, sdk.Message{Role: sdk.RoleUser, Content: content})
-		} else {
-			for _, m := range inboxMsgs {
-				// System messages are Go-level control messages — never record them
-				// in history so they cannot leak into future LLM context.
-				if m.Type != sdk.MessageTypeSystem {
-					a.history = append(a.history, m)
-				}
-			}
-		}
-		a.history = append(a.history, sdk.Message{Role: sdk.RoleAssistant, Content: assistantText})
-		a.historyMu.Unlock()
-
-		a.finishTurn(ctx, err, childCtx.Err(), onDone)
+		a.executeTurn(ctx, childCtx, content, inboxMsgs, priorHistory, priorSummary, lm, opts, pool, toolsFn, onToken, onToolCall, onDone)
 	}()
+}
+
+// executeTurn contains the core LLM interaction logic for a single turn.
+// Extracted from Submit to keep Submit's cyclomatic complexity below threshold.
+// It builds the fantasy agent, performs optional proactive compaction, streams
+// the turn, handles reactive fallback on context-too-long errors, records
+// history, and delegates to finishTurn for drain-until-empty / shutdown logic.
+func (a *Agent) executeTurn(
+	ctx context.Context,
+	childCtx context.Context,
+	content string,
+	inboxMsgs []sdk.Message,
+	priorHistory []sdk.Message,
+	priorSummary string,
+	lm fantasy.LanguageModel,
+	opts SpawnOpts,
+	pool *AgentPool,
+	toolsFn func() []fantasy.AgentTool,
+	onToken func(string),
+	onToolCall func(id, name, input string),
+	onDone func(error),
+) {
+	if lm == nil {
+		if onDone != nil {
+			onDone(fmt.Errorf("agent %s: no language model configured", a.id))
+		}
+		return
+	}
+
+	// Resolve tools: prefer dynamic toolsFn, fall back to opts.Tools.
+	tools := opts.Tools
+	if toolsFn != nil {
+		tools = toolsFn()
+	}
+
+	// Combine base (dynamic) and agent-specific (SpawnOpts) system prompts.
+	a.systemPromptMu.RLock()
+	base := a.systemPrompt
+	a.systemPromptMu.RUnlock()
+	specific := opts.SystemPrompt
+	var sysPrompt string
+	switch {
+	case base != "" && specific != "":
+		sysPrompt = base + "\n\n" + specific
+	case base != "":
+		sysPrompt = base
+	default:
+		sysPrompt = specific
+	}
+
+	// Build fantasy agent options.
+	var agentOpts []fantasy.AgentOption
+	if len(tools) > 0 {
+		agentOpts = append(agentOpts, fantasy.WithTools(tools...))
+	}
+	if sysPrompt != "" {
+		agentOpts = append(agentOpts, fantasy.WithSystemPrompt(sysPrompt))
+	}
+
+	if len(opts.ProviderOptions) > 0 {
+		agentOpts = append(agentOpts, fantasy.WithProviderOptions(opts.ProviderOptions))
+	}
+
+	agentOpts = append(agentOpts, fantasy.WithMaxRetries(6))
+	fa := fantasy.NewAgent(lm, agentOpts...)
+
+	// Proactive compaction: if the estimated context is close to the model's
+	// limit, summarize old history BEFORE sending, avoiding a 400 error.
+	// Use pool-configured context window if set; fall back to model-name lookup.
+	contextWindow := int64(0)
+	if pool != nil {
+		contextWindow = pool.ContextWindow()
+	}
+	if contextWindow == 0 {
+		contextWindow = contextWindowForModel(a.modelName)
+	}
+	history := priorHistory
+	if shouldCompact(history, sysPrompt, content, contextWindow) {
+		if onToken != nil {
+			onToken("[Compacting context…]\n\n")
+		}
+		// Keep 10% of the model's context window as recent history.
+		// This scales correctly: a 1M-token model keeps 100k, a 200k model keeps 20k.
+		keepRecent := contextWindow / 10
+		if keepRecent <= 0 {
+			keepRecent = defaultKeepRecentTokens
+		}
+		compacted, summaryText, cerr := compactHistory(childCtx, lm, history, priorSummary, keepRecent)
+		if cerr == nil {
+			history = compacted
+			a.historyMu.Lock()
+			a.history = compacted
+			a.historyMu.Unlock()
+			if summaryText != "" {
+				a.lastSummaryMu.Lock()
+				a.lastSummary = summaryText
+				a.lastSummaryMu.Unlock()
+			}
+		}
+	}
+
+	collectedText, err := streamTurn(childCtx, fa, history, content, pool, onToken, onToolCall)
+
+	// Reactive fallback: if we still hit a context error, trim and retry once.
+	if err != nil && isContextTooLong(err) {
+		if onToken != nil {
+			onToken("\n\n[Still too long — trimming and retrying…]\n\n")
+		}
+		if len(history) > keepMessages {
+			history = history[len(history)-keepMessages:]
+			a.historyMu.Lock()
+			a.history = history
+			a.historyMu.Unlock()
+		}
+		collectedText, err = streamTurn(childCtx, fa, history, content, pool, onToken, onToolCall)
+	}
+
+	// Always record what the user said and the assistant response.
+	// Providers require strictly alternating user/assistant messages —
+	// leaving history ending with a lone user message causes "text content
+	// cannot be empty" on the next turn.
+	assistantText := collectedText
+	if assistantText == "" {
+		if childCtx.Err() != nil {
+			assistantText = "[response cancelled]"
+		} else {
+			// Tool-only turn: no text produced. Use a placeholder so the
+			// user message is never silently dropped from history.
+			assistantText = "[tool calls only]"
+		}
+	}
+	// Record this turn to history. When content is empty (drain-until-empty
+	// path), use the inbox messages instead so we never write an empty user
+	// message — Anthropic rejects empty text content blocks.
+	a.historyMu.Lock()
+	if content != "" {
+		a.history = append(a.history, sdk.Message{Role: sdk.RoleUser, Content: content})
+	} else {
+		for _, m := range inboxMsgs {
+			// System messages are Go-level control messages — never record them
+			// in history so they cannot leak into future LLM context.
+			if m.Type != sdk.MessageTypeSystem {
+				a.history = append(a.history, m)
+			}
+		}
+	}
+	a.history = append(a.history, sdk.Message{Role: sdk.RoleAssistant, Content: assistantText})
+	a.historyMu.Unlock()
+
+	a.finishTurn(ctx, err, childCtx.Err(), onDone)
 }
 
 // finishTurn releases isRunning and either fires onDone or starts the next drain turn.
@@ -529,9 +553,9 @@ func (a *Agent) finishTurn(ctx context.Context, err error, ctxErr error, onDone 
 				a.AppendInbox(m)
 			}
 			// invariant: pendingShutdownFrom is only written and read from finishTurn,
-		// which runs after isRunning transitions to false. Submit must never access
-		// this field.
-		a.pendingShutdownFrom = shutdownFrom // "" if no shutdown pending
+			// which runs after isRunning transitions to false. Submit must never access
+			// this field.
+			a.pendingShutdownFrom = shutdownFrom // "" if no shutdown pending
 			// Do NOT fire onDone here: the drain sub-turn's finishTurn will fire it
 			// when the inbox is finally empty, preventing a double StreamDoneMsg.
 			// Pass the original ctx so harness shutdown can cancel drain turns.
