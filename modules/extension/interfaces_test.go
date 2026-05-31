@@ -82,7 +82,7 @@ func (f *fakeUIBridge) Abort()                                                {}
 func (f *fakeUIBridge) SetStatus(_, _ string)                                 {}
 func (f *fakeUIBridge) GetStatusInfo() sdk.StatusInfo                         { return sdk.StatusInfo{} }
 func (f *fakeUIBridge) SendMessage(_ sdk.Message)                             {}
-func (f *fakeUIBridge) RegisterCommand(_, _ string) error                     { return nil }
+func (f *fakeUIBridge) RegisterCommand(_, _ string, _ bool) error             { return nil }
 func (f *fakeUIBridge) RegisterTool(_ sdk.Tool) error                         { return nil }
 func (f *fakeUIBridge) SetSystemPrompt(_ string)                              {}
 func (f *fakeUIBridge) AppendSystemPrompt(_ string)                           {}

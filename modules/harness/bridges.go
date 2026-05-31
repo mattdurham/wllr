@@ -41,10 +41,11 @@ func (e *earlyUIBridge) GetStatusInfo() sdk.StatusInfo {
 	return sdk.StatusInfo{Statuses: map[string]string{}}
 }
 func (e *earlyUIBridge) SendMessage(_ sdk.Message) {}
-func (e *earlyUIBridge) RegisterCommand(name, desc string) error {
+func (e *earlyUIBridge) RegisterCommand(name, desc string, instant bool) error {
 	e.cmds.Register(Command{
-		Name: name,
-		Desc: desc,
+		Name:    name,
+		Desc:    desc,
+		Instant: instant,
 		Handler: func(args []string) tea.Cmd {
 			return func() tea.Msg {
 				return dispatchOnCommandMsg{Name: name, Args: args}
@@ -322,10 +323,11 @@ func (b *harnessUIBridge) SendMessage(msg sdk.Message) {
 	b.prog.Send(sm)
 }
 
-func (b *harnessUIBridge) RegisterCommand(name, desc string) error {
+func (b *harnessUIBridge) RegisterCommand(name, desc string, instant bool) error {
 	b.cmds.Register(Command{
-		Name: name,
-		Desc: desc,
+		Name:    name,
+		Desc:    desc,
+		Instant: instant,
 		Handler: func(args []string) tea.Cmd {
 			return func() tea.Msg {
 				return dispatchOnCommandMsg{Name: name, Args: args}
