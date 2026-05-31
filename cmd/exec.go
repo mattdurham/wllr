@@ -23,7 +23,7 @@ func runExec(ctx context.Context, command, dir string, onLine func(string)) (str
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		stdout.Close()
+		_ = stdout.Close()
 		return "", err
 	}
 	if err := cmd.Start(); err != nil {

@@ -27,15 +27,15 @@ import (
 // mu protects all fields; OnGetStatusInfo runs on the WASM goroutine
 // concurrently with Update() on the bubbletea goroutine.
 type liveState struct {
-	mu          sync.RWMutex
-	streaming   bool
 	streamStart time.Time
-	width       int
-	hasError    bool
-	tokens      int
+	statuses    map[string]string
 	provider    string
 	model       string
-	statuses    map[string]string
+	width       int
+	tokens      int
+	mu          sync.RWMutex
+	streaming   bool
+	hasError    bool
 }
 
 func (s *liveState) setStreaming(v bool, start time.Time, hasErr bool) {
@@ -44,10 +44,8 @@ func (s *liveState) setStreaming(v bool, start time.Time, hasErr bool) {
 	if v {
 		s.streamStart = start
 		s.hasError = false
-	} else {
-		if hasErr {
-			s.hasError = true
-		}
+	} else if hasErr {
+		s.hasError = true
 	}
 	s.mu.Unlock()
 }
@@ -64,25 +62,9 @@ func (s *liveState) setModel(model string) {
 	s.mu.Unlock()
 }
 
-func (s *liveState) setProvider(provider string) {
-	s.mu.Lock()
-	s.provider = provider
-	s.mu.Unlock()
-}
-
 func (s *liveState) setTokens(n int) {
 	s.mu.Lock()
 	s.tokens = n
-	s.mu.Unlock()
-}
-
-func (s *liveState) setStatuses(statuses map[string]string) {
-	s.mu.Lock()
-	cp := make(map[string]string, len(statuses))
-	for k, v := range statuses {
-		cp[k] = v
-	}
-	s.statuses = cp
 	s.mu.Unlock()
 }
 
@@ -103,8 +85,6 @@ type Model struct {
 	// If nil, warnings are silently dropped.
 	logFn func(int, string)
 
-	statusBar StatusBar
-
 	mainAgentID string
 	activeModel string
 
@@ -112,13 +92,17 @@ type Model struct {
 	modalContent string
 	input        InputArea
 
-	chat ChatView
-
 	// Loaded extension paths for reload.
 	extPaths []string
 
 	// Autocomplete dropdown state.
 	suggestions []Command
+
+	console ConsoleView
+
+	statusBar StatusBar
+
+	chat ChatView
 
 	picker PickerView
 
@@ -129,7 +113,6 @@ type Model struct {
 
 	modalScroll    int
 	streaming      bool
-	console        ConsoleView
 	consoleVisible bool
 }
 
@@ -222,6 +205,16 @@ func (m *Model) SetProgram(p *tea.Program) {
 			mainID: mainID,
 			cmds:   m.commands,
 		})
+
+		// Wire context-usage dispatcher so agent turns forward EventContextUsage
+		// to WASM extensions without a circular import between agent and extension.
+		if pool != nil {
+			pool.SetContextUsageDispatcher(func(cu sdk.ContextUsage, compacted bool) {
+				payload, _ := json.Marshal(sdk.ContextUsagePayload{Usage: cu, Compacted: compacted})
+				evt := sdk.Event{Type: sdk.EventContextUsage, Payload: payload}
+				_, _ = extHostRef.DispatchEvent(context.Background(), evt)
+			})
+		}
 	}
 
 	m.wireMainAgentCallbacks(p)
@@ -587,6 +580,15 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 			n := int(m.agentPool.TokenCount())
 			m.statusBar.totalTokens = n
 			m.live.setTokens(n)
+			// Update context-usage percentage from real API token counts.
+			cu := m.agentPool.MainAgentContextUsage()
+			if cu.ContextWindow > 0 {
+				cfg := m.agentPool.CompactConfig()
+				rem := cfg.ThresholdPct*100 - cu.Percent
+				m.statusBar.statuses["ctx rem"] = fmt.Sprintf("%.0f%%", rem)
+			} else {
+				delete(m.statusBar.statuses, "ctx rem")
+			}
 		}
 		if msg.Err != nil {
 			if errors.Is(msg.Err, context.Canceled) {
@@ -876,8 +878,17 @@ func (m Model) cmdDispatchAfterProviderResponse() tea.Cmd {
 		return nil
 	}
 	extHost := m.extHost
+	// Snapshot current usage so the closure captures consistent values.
+	var usageStats sdk.UsageStats
+	if m.agentPool != nil {
+		cu := m.agentPool.MainAgentContextUsage()
+		usageStats = sdk.UsageStats{
+			InputTokens:  int(cu.InputTokens),
+			OutputTokens: int(cu.OutputTokens),
+		}
+	}
 	return func() tea.Msg {
-		payload, _ := json.Marshal(sdk.AfterProviderResponsePayload{})
+		payload, _ := json.Marshal(sdk.AfterProviderResponsePayload{Usage: usageStats})
 		evt := sdk.Event{Type: sdk.EventAfterProviderResponse, Payload: payload}
 		results, err := extHost.DispatchEvent(context.Background(), evt)
 		return ExtensionEventResultMsg{Results: results, Err: err}
@@ -1214,6 +1225,7 @@ func (m Model) consoleHeight() int {
 	}
 	return consolePaneLines
 }
+
 func (m Model) renderConsole() string {
 	width := m.width
 	if width < 20 {

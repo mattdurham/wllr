@@ -14,25 +14,19 @@ import (
 	"github.com/mattdurham/wllr/modules/extension"
 )
 
-// ToolsFn is a function that returns the current tool list for an agent.
-type ToolsFn func(agentID string) []fantasy.AgentTool
-
-// NotifyFn is called when a sub-agent error occurs; it routes to the TUI via program.Send.
-type NotifyFn func(text string)
-
 // Spawner creates sub-agents in a pool with appropriate callbacks and conventions.
 // It encapsulates the parent-ID derivation, agent-identity system prompt suffix,
 // and provider-option construction that was previously inline in harness/model.go SetProgram.
 type Spawner struct {
 	pool     *AgentPool
-	toolsFn  ToolsFn
-	notifyFn NotifyFn
+	toolsFn  func(agentID string) []fantasy.AgentTool
+	notifyFn func(text string)
 }
 
 // NewSpawner creates a Spawner bound to the given pool.
-// toolsFn is called on each sub-agent turn to get its tool list.
-// notifyFn is called when a sub-agent errors; may be nil.
-func NewSpawner(pool *AgentPool, toolsFn ToolsFn, notifyFn NotifyFn) *Spawner {
+// toolsFn is called on each sub-agent turn to get its tool list (may be nil).
+// notifyFn is called when a sub-agent errors (may be nil).
+func NewSpawner(pool *AgentPool, toolsFn func(agentID string) []fantasy.AgentTool, notifyFn func(text string)) *Spawner {
 	return &Spawner{
 		pool:     pool,
 		toolsFn:  toolsFn,

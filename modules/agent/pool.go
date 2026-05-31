@@ -9,6 +9,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"os"
+	"strconv"
 	"strings"
 
 	"charm.land/fantasy"
@@ -51,11 +54,70 @@ var (
 // and applied to every agent (current and future) so all agents share the
 // same base context (AGENTS.md, skill list, etc.).
 
-// NewPool creates an empty AgentPool.
+// NewPool creates an empty AgentPool. It reads WLLR_COMPACT_THRESHOLD from the
+// environment to configure the percentage-based compaction trigger (default 0.80).
+// Values > 1 are treated as percentages and divided by 100 (e.g. "90" → 0.90).
+// Unparseable or empty values fall back to 0.80.
 func NewPool() *AgentPool {
+	threshold := 0.80
+	if v := os.Getenv("WLLR_COMPACT_THRESHOLD"); v != "" {
+		if parsed, err := strconv.ParseFloat(v, 64); err == nil && parsed > 0 {
+			if parsed > 1 {
+				parsed /= 100
+			}
+			if parsed > 1 {
+				slog.Warn("WLLR_COMPACT_THRESHOLD value out of range, using default 0.80", "value", v)
+				parsed = 0.80
+			}
+			threshold = parsed
+		}
+	}
 	return &AgentPool{
 		agents: make(map[string]*Agent),
 		teams:  make(map[string]*Team),
+		compactConfig: CompactConfig{
+			Enabled:      true,
+			ThresholdPct: threshold,
+		},
+	}
+}
+
+// CompactConfig returns the current compaction configuration.
+// Thread-safe.
+func (p *AgentPool) CompactConfig() CompactConfig {
+	p.mu.RLock()
+	cfg := p.compactConfig
+	p.mu.RUnlock()
+	return cfg
+}
+
+// SetCompactConfig replaces the pool's compaction configuration.
+// Thread-safe; may be called before or after agents are spawned.
+func (p *AgentPool) SetCompactConfig(cfg CompactConfig) {
+	p.mu.Lock()
+	p.compactConfig = cfg
+	p.mu.Unlock()
+}
+
+// SetContextUsageDispatcher installs a callback that is invoked after each completed
+// agent turn with the current context window usage. Use this to forward
+// EventContextUsage to WASM extensions from the harness layer without creating
+// a circular import between the agent and extension packages.
+// Thread-safe; may be called before or after agents are spawned.
+func (p *AgentPool) SetContextUsageDispatcher(fn func(cu sdk.ContextUsage, compacted bool)) {
+	p.dispatchMu.Lock()
+	p.contextUsageDispatcher = fn
+	p.dispatchMu.Unlock()
+}
+
+// dispatchContextUsage calls the registered contextUsageDispatcher, if any.
+// Called from agent goroutines after each completed turn.
+func (p *AgentPool) dispatchContextUsage(cu sdk.ContextUsage, compacted bool) {
+	p.dispatchMu.RLock()
+	fn := p.contextUsageDispatcher
+	p.dispatchMu.RUnlock()
+	if fn != nil {
+		fn(cu, compacted)
 	}
 }
 
@@ -78,6 +140,21 @@ func (p *AgentPool) ContextWindow() int64 {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.contextWindow
+}
+
+// MainAgentContextUsage returns the context window usage for the main agent.
+// If the main agent has not completed a turn yet, all fields are zero.
+// If no context window has been configured on the pool, ContextWindow and Percent
+// will be zero.
+func (p *AgentPool) MainAgentContextUsage() sdk.ContextUsage {
+	p.mu.RLock()
+	a := p.agents[MainAgentID]
+	window := p.contextWindow
+	p.mu.RUnlock()
+	if a == nil {
+		return sdk.ContextUsage{}
+	}
+	return sdk.ContextUsageFromFantasy(a.LastUsage(), window)
 }
 
 // SetBaseSystemPrompt replaces the base system prompt and applies it to all
