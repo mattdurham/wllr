@@ -29,3 +29,23 @@
 **Rationale:** The `Renderer` interface defines what the session layer calls to update the UI. Placing it in `harness` is correct because the concrete implementation (`programRenderer`) lives in harness. The session package is the consumer of the interface, so it must import harness.
 
 **Consequence:** If harness ever imports session (e.g., for `session.Wire`), the import would create a cycle. At that point, extract `Renderer` to a `tui/` or `render/` package.
+
+## 4. JSONL Journal: best-effort, no UI impact
+
+*Added: 2026-05-30*
+
+**Decision:** Journal write errors are silently dropped (logged via `slog`) and never propagated to the user or returned from `ConversationSession` methods.
+
+**Rationale:** Session persistence is a quality-of-life feature. A disk-full or permission error on the journal file must never interrupt a conversation. The user's primary goal is talking to the LLM, not persisting logs.
+
+**Consequence:** Silent data loss is possible if the journal write fails. This is acceptable given that the feature is opt-in and the failure mode is not data corruption — sessions simply stop being recorded.
+
+## 5. OnMessageEnd / OnUserMessage hooks on harness.Model
+
+*Added: 2026-05-30*
+
+**Decision:** Session persistence is wired via two exported function fields on `harness.Model`: `OnMessageEnd func(role, content string)` and `OnUserMessage func(content string)`. These are set by `cmd/main.go` after model creation.
+
+**Rationale:** The journal needs to intercept both user input and completed assistant turns. Wiring via exported callbacks on the Model avoids adding a `session` import to the `harness` package (which would create a dependency on the journal) and keeps the harness package focused on rendering.
+
+**Consequence:** `cmd/main.go` is responsible for setting these hooks. Callers that do not set them get nil callbacks (no-op path in the model, already guarded by nil checks).

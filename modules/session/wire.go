@@ -18,6 +18,10 @@ import (
 // cancel, reload, and close. Bridge installation on the extension host is
 // performed by the harness (earlyUIBridge/earlyAgentBridge in New, full bridges
 // in SetProgram) and by cmd/main.go (CapabilityProvider). Wire itself is passive.
+//
+// Journal persistence is handled externally by cmd/main.go via the harness
+// OnUserMessage and OnMessageEnd callbacks — ConversationSession does not hold
+// a journal reference.
 type ConversationSession struct {
 	renderer harness.Renderer
 	host     *extension.Host
@@ -81,6 +85,7 @@ func (s *ConversationSession) ReloadExtensions(ctx context.Context, paths []stri
 }
 
 // Close shuts down agents, extensions, and releases resources.
+// Close is idempotent: calling it multiple times does not error.
 func (s *ConversationSession) Close(ctx context.Context) error {
 	if s.pool != nil {
 		s.pool.CancelAll()

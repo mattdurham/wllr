@@ -531,14 +531,15 @@ func (h *Host) handleRegisterTool(ext *Extension, req sdk.HostCallRequest) sdk.H
 
 func (h *Host) handleRegisterCommand(req sdk.HostCallRequest) sdk.HostCallResponse {
 	var params struct {
-		Name string `json:"name"`
-		Desc string `json:"description"`
+		Name    string `json:"name"`
+		Desc    string `json:"description"`
+		Instant bool   `json:"instant"`
 	}
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("register_command: %v", err)}
 	}
 	if h.uiBridge() != nil {
-		_ = h.uiBridge().RegisterCommand(params.Name, params.Desc)
+		_ = h.uiBridge().RegisterCommand(params.Name, params.Desc, params.Instant)
 	}
 	return sdk.HostCallResponse{}
 }
