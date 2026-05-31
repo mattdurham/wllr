@@ -135,12 +135,6 @@ func init() {
 		"Send a message to an agent",
 		json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string","description":"Agent ID"},"message":{"type":"string","description":"Message text"}},"required":["agent_id","message"]}`),
 	)
-	RegisterTool(
-		"wait_for_all",
-		`Block until all specified agents complete their work. Returns status="complete" with summaries, status="interrupted" if a user message arrives (agents keep running — call wait_for_all again with pending list), or status="timeout" (agents in pending are STILL RUNNING — call wait_for_all again, do NOT shut them down). End your turn immediately after this call.`,
-		json.RawMessage(`{"type":"object","properties":{"agent_ids":{"type":"array","items":{"type":"string"},"description":"Agent IDs to wait for"},"timeout_ms":{"type":"integer","description":"Timeout in milliseconds (default 300000 = 5 minutes)"}},"required":["agent_ids"]}`),
-	)
-
 	RegisterCommandInstant("agents", "Show running sub-agents and their status")
 
 	OnSessionStart(onSessionStart)
@@ -270,24 +264,10 @@ notifications when agents finish — you do not need to poll or sleep.
 When woken, check what finished with list_agents() or get_agent_status(),
 process the results, then shutdown_agent for each completed agent.
 
-  if result.status == "interrupted":
-    → a user message arrived; agents are still running
-    → handle the user message, then:
-    → wait_for_all(result.pending)  ← resume waiting for remaining agents
-
-  if result.status == "timeout":
-    → agents in result.pending are STILL RUNNING — timeout does NOT mean they failed
-    → call wait_for_all(result.pending) again to keep waiting
-    → only diagnose with get_agent_status if wait_for_all times out 3+ times in a row
-    → NEVER shut down an agent just because wait_for_all timed out
-
-wait_for_all suspends your turn until it returns. After it returns, process
-results and call shutdown_agent. Do not make other tool calls between
-create_agent and wait_for_all — they run in the background already.
-
-If an agent seems stuck (no notification after 3+ consecutive timeouts):
-  get_agent_status("main/coder", 20)  ← diagnose ONCE
-  If is_running=true: still working — call wait_for_all(result.pending) again.
+If an agent seems stuck (you have been woken multiple times but it has not
+finished):
+  get_agent_status("main/coder", 20)  ← diagnose ONCE with high history_limit
+  If is_running=true: still working — end your turn again.
   If is_running=false with no useful output: nudge it.
     → send_message("main/coder", "Please report your current status.")
 
@@ -462,6 +442,7 @@ func handleCreateAgent(p beforeToolCallPayload) {
 		ModelName      string `json:"model_name"`
 		InitialPrompt  string `json:"initial_prompt"`
 		ThinkingBudget int    `json:"thinking_budget"`
+		CallerID       string `json:"caller_id"`
 	}
 	result := agentCall("agent_spawn", spawnParams{
 		ID:             agentID,
@@ -470,6 +451,7 @@ func handleCreateAgent(p beforeToolCallPayload) {
 		ModelName:      input.Model,
 		InitialPrompt:  input.Prompt,
 		ThinkingBudget: input.ThinkingBudget,
+		CallerID:       scope, // the calling agent's ID (p.AgentID or "main")
 	})
 
 	var resp struct {
@@ -498,11 +480,27 @@ func handleShutdownAgent(p beforeToolCallPayload) {
 		return
 	}
 
-	type closeParams struct {
-		ID string `json:"id"`
+	// Build a system shutdown_request message and send it to the target agent's inbox.
+	// The agent's finishTurn will detect it, send AGENT_SHUTDOWN back to the creator,
+	// and self-close. This avoids forcibly terminating a running agent.
+	callerID := p.AgentID
+	if callerID == "" {
+		callerID = "main"
 	}
-	result := agentCall("agent_close", closeParams{ID: input.AgentID})
-
+	payload, _ := json.Marshal(map[string]string{
+		"event": "shutdown_request",
+		"from":  callerID,
+	})
+	type sendParams struct {
+		ID      string `json:"id"`
+		Message string `json:"message"`
+		Type    string `json:"type"`
+	}
+	result := agentCall("agent_send_message", sendParams{
+		ID:      input.AgentID,
+		Message: string(payload),
+		Type:    "system",
+	})
 	var resp struct {
 		Error string `json:"error,omitempty"`
 	}
@@ -513,8 +511,14 @@ func handleShutdownAgent(p beforeToolCallPayload) {
 		ToolResult(p.ToolCallID, "shutdown_agent: "+resp.Error, true)
 		return
 	}
-	removeAgent(input.AgentID)
-	ToolResult(p.ToolCallID, `{"status":"closed"}`, false)
+
+	// Trigger the agent's next turn so it processes the shutdown_request immediately
+	// if it is currently idle. finishTurn handles the message after the turn completes.
+	agentCall("agent_run", map[string]string{"id": input.AgentID})
+
+	// Do NOT call removeAgent or agent_close here — the agent will self-close when
+	// finishTurn processes the shutdown_request and sends AGENT_SHUTDOWN back.
+	ToolResult(p.ToolCallID, `{"status":"shutdown_requested"}`, false)
 }
 
 func handleListAgents(p beforeToolCallPayload) {

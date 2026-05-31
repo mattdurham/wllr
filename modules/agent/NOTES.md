@@ -305,3 +305,27 @@ package (for `ContextUsage`), which has no dependency on extension or harness.
 **Consequence:** The dispatcher is an optional hook — if `SetContextUsageDispatcher` is never called,
 `dispatchContextUsage` is a no-op. This means tests that don't need extension dispatch don't need to
 wire one up. The harness is responsible for ensuring the dispatcher is set before the first agent turn.
+
+---
+
+## 20. MessageType filtering and CreatorID tracking
+
+*Added: 2026-05-31*
+
+**Decision:** Add `sdk.MessageType` support to `sdkToFantasyMessages` and history recording. Add `creatorID string` to `Agent` populated from `SpawnOpts.CreatorID`.
+
+**Rationale:** Agent coordination (shutdown, AGENT_SHUTDOWN) requires messages that must never reach the LLM. Previously all inbox messages were treated uniformly. The `MessageType` field (added to `sdk.Message`) allows `sdkToFantasyMessages` to skip `system` and `steering` type messages, and history recording to skip `system` messages on the drain-turn path. `CreatorID` is needed so the shutdown flow can route AGENT_SHUTDOWN back to the correct parent. It is set from `extension.SpawnRequest.CallerID`, which is populated by the WASM agents extension from the calling agent's ID.
+
+**Consequence:** `SpawnOpts.CreatorID string` is added. `Agent.CreatorID() string` accessor is exported. `extension.SpawnRequest.CallerID string` is added. `host.go` `handleAgentSpawn` parses `caller_id` from JSON. `extensions/agents/main.go` `handleCreateAgent` passes `scope` as `caller_id`. System messages in the drain-turn path are not written to `a.history`.
+
+---
+
+## 21. finishTurn graceful shutdown — pendingShutdownFrom field
+
+*Added: 2026-05-31*
+
+**Decision:** Add `Agent.pendingShutdownFrom string` field. When `finishTurn` finds a `shutdown_request` system message alongside normal pending messages, store the sender ID in `pendingShutdownFrom` and re-queue only the normal messages (not the shutdown_request itself). The next `finishTurn` cycle checks `pendingShutdownFrom` after draining normal work.
+
+**Rationale:** The drain-until-empty pattern (§17) means `Submit("")` is called for each batch of pending normal messages. At the top of `Submit`, `DrainInbox` is called, consuming everything in the inbox. If the shutdown_request were re-injected into the inbox alongside normal messages, `Submit`'s initial drain would consume it, and the drain turn's `finishTurn` would never see it. Storing the sender in a field on the `Agent` instead of re-queuing the message as an inbox entry keeps the shutdown request alive across drain turns without violating the inbox drain invariant. `pendingShutdownFrom` is only read and written in `finishTurn`, which runs after `isRunning.Store(false)` — at most one `finishTurn` call is active at any time, so no additional mutex is needed.
+
+**Consequence:** `Agent` struct gains `pendingShutdownFrom string`. `finishTurn` now has three exit paths: (a) normal drain-turn re-queue when normal messages are pending, (b) graceful shutdown when only a deferred shutdown_request remains, (c) the original error/cancel path. `onDone` is still called exactly once. `AgentBridge.SendMessage` signature changed from `(id, message string)` to `(id string, msg sdk.Message)` to allow the `type` field to be passed from WASM through the host bridge. `extensions/agents/main.go` `handleShutdownAgent` now sends a system message via `agent_send_message` (with `type: "system"`) and triggers `agent_run` instead of calling `agent_close` directly.

@@ -132,6 +132,99 @@ func TestMessageRoundTrip(t *testing.T) {
 	}
 }
 
+func TestMessageType_ZeroValueIsNormal(t *testing.T) {
+	// A Message with no Type set should marshal without a "type" field (omitempty),
+	// and unmarshal back to Type == "".
+	msg := sdk.Message{Role: sdk.RoleUser, Content: "hello"}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	// Verify no "type" key in JSON output.
+	raw := string(data)
+	if contains(raw, `"type"`) {
+		t.Errorf("zero-value MessageType must not appear in JSON, got: %s", raw)
+	}
+	var got sdk.Message
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.Type != "" {
+		t.Errorf("Type: got %q, want empty string", got.Type)
+	}
+}
+
+func TestMessageType_SystemRoundtrip(t *testing.T) {
+	msg := sdk.Message{Role: sdk.RoleUser, Content: `{"event":"test"}`, Type: sdk.MessageTypeSystem}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got sdk.Message
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.Type != sdk.MessageTypeSystem {
+		t.Errorf("Type: got %q, want %q", got.Type, sdk.MessageTypeSystem)
+	}
+}
+
+func TestMessageType_NormalRoundtrip(t *testing.T) {
+	msg := sdk.Message{Role: sdk.RoleUser, Content: "hello", Type: sdk.MessageTypeNormal}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got sdk.Message
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.Type != sdk.MessageTypeNormal {
+		t.Errorf("Type: got %q, want %q", got.Type, sdk.MessageTypeNormal)
+	}
+}
+
+func TestMessageType_SteeringRoundtrip(t *testing.T) {
+	msg := sdk.Message{Role: sdk.RoleUser, Content: "steer me", Type: sdk.MessageTypeSteering}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got sdk.Message
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.Type != sdk.MessageTypeSteering {
+		t.Errorf("Type: got %q, want %q", got.Type, sdk.MessageTypeSteering)
+	}
+}
+
+func TestMessageTypeConstants(t *testing.T) {
+	if sdk.MessageTypeNormal != "normal" {
+		t.Errorf("MessageTypeNormal = %q, want \"normal\"", sdk.MessageTypeNormal)
+	}
+	if sdk.MessageTypeSteering != "steering" {
+		t.Errorf("MessageTypeSteering = %q, want \"steering\"", sdk.MessageTypeSteering)
+	}
+	if sdk.MessageTypeSystem != "system" {
+		t.Errorf("MessageTypeSystem = %q, want \"system\"", sdk.MessageTypeSystem)
+	}
+}
+
+// contains is a local helper to avoid importing strings in the test file.
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsAt(s, substr))
+}
+
+func containsAt(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
 func TestToolInputSchemaPreservesRawJSON(t *testing.T) {
 	raw := `{"type":"object","properties":{"q":{"type":"string"}}}`
 	tool := sdk.Tool{
@@ -210,9 +303,11 @@ func TestEventTypeConstants(t *testing.T) {
 		sdk.EventShutdown,
 		sdk.EventBeforeToolCall,
 		sdk.EventAfterToolCall,
+		sdk.EventOnCommand,
+		sdk.EventTick,
 	}
-	if len(types) != 11 {
-		t.Errorf("expected 11 event types, got %d", len(types))
+	if len(types) != 13 {
+		t.Errorf("expected 13 event types, got %d", len(types))
 	}
 	for _, et := range types {
 		if et == "" {

@@ -246,13 +246,12 @@ func (p *AgentPool) Spawn(id string, lm fantasy.LanguageModel, opts SpawnOpts) (
 		modelName = opts.ModelName
 	}
 	a := &Agent{
-		id:             id,
-		name:           opts.Name,
-		lm:             lm,
-		opts:           opts,
-		pool:           p,
-		modelName:      modelName,
-		notifyParentID: opts.NotifyParentID,
+		id:        id,
+		name:      opts.Name,
+		lm:        lm,
+		opts:      opts,
+		pool:      p,
+		modelName: modelName,
 	}
 	// New agents inherit the base system prompt unless explicitly disabled.
 	// Sub-agents that don't need the full orchestration context can set

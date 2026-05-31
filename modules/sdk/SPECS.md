@@ -237,12 +237,28 @@ Note: Percent is 0–100. CompactConfig.ThresholdPct is a fraction 0.0–1.0.
 
 **Invariant:** Role string values must not change; extensions may hard-code them.
 
+### MessageType
+
+`MessageType` is a `string` typedef. Controls routing and LLM visibility of a `Message`.
+
+| Constant              | Wire value    | Meaning                                                              |
+|-----------------------|---------------|----------------------------------------------------------------------|
+| `MessageTypeNormal`   | `"normal"`    | Regular user/assistant message; included in LLM context             |
+| `MessageTypeSteering` | `"steering"`  | Guidance message; in history but filtered from LLM context slice    |
+| `MessageTypeSystem`   | `"system"`    | Go-level control message (e.g. shutdown_request); never sent to LLM, not written to history |
+
+**Invariants:**
+- An empty `Type` field (zero value) is treated as normal everywhere; it is omitted from JSON via `omitempty` for backward compatibility.
+- `MessageTypeSystem` messages carry non-empty JSON payloads in `Content`; they are never empty strings.
+- `MessageType` string values must not change across ABI versions.
+
 ### Message
 
-| Field     | Type   | Description                 |
-|-----------|--------|-----------------------------|
-| `role`    | Role   | `"user"` or `"assistant"`   |
-| `content` | string | Text content of the message |
+| Field     | Type        | JSON           | Description                                                   |
+|-----------|-------------|----------------|---------------------------------------------------------------|
+| `role`    | Role        | `"role"`       | `"user"` or `"assistant"`                                     |
+| `content` | string      | `"content"`    | Text content of the message                                   |
+| `type`    | MessageType | `"type,omitempty"` | Message classification; absent/empty means normal         |
 
 ### Tool
 
