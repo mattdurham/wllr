@@ -437,9 +437,6 @@ func (h *Host) buildDispatch() map[string]func(ctx context.Context, ext *Extensi
 		sdk.MethodAgentTokenCount: func(_ context.Context, _ *Extension, _ sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleAgentTokenCount()
 		},
-		sdk.MethodAgentWaitForAll: func(_ context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
-			return h.handleAgentWaitForAll(ext, req)
-		},
 		sdk.MethodTeamCreate: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleTeamCreate(req)
 		},
@@ -932,30 +929,6 @@ func (h *Host) handleAgentTokenCount() sdk.HostCallResponse {
 	count := h.agentBridge().TokenCount()
 	result, _ := json.Marshal(map[string]int64{"count": count})
 	return sdk.HostCallResponse{Result: result}
-}
-
-func (h *Host) handleAgentWaitForAll(ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
-	if h.agentBridge() == nil {
-		return sdk.HostCallResponse{Error: "wait_for_all: not supported by host"}
-	}
-	var params struct {
-		CallerID  string   `json:"caller_id"`
-		AgentIDs  []string `json:"agent_ids"`
-		TimeoutMs int      `json:"timeout_ms"`
-	}
-	if err := json.Unmarshal(req.Params, &params); err != nil || len(params.AgentIDs) == 0 {
-		return sdk.HostCallResponse{Error: "wait_for_all: agent_ids (non-empty array) is required"}
-	}
-	callerID := params.CallerID
-	if callerID == "" {
-		callerID = "main"
-	}
-	result, err := h.agentBridge().WaitForAll(callerID, params.AgentIDs, params.TimeoutMs)
-	if err != nil {
-		return sdk.HostCallResponse{Error: err.Error()}
-	}
-	out, _ := json.Marshal(result)
-	return sdk.HostCallResponse{Result: out}
 }
 
 func (h *Host) handleTeamCreate(req sdk.HostCallRequest) sdk.HostCallResponse {
