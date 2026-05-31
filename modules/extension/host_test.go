@@ -134,7 +134,7 @@ type testUIBridge struct {
 	onSetStatus       func(key, value string)
 	onGetStatusInfo   func() sdk.StatusInfo
 	onSendMessage     func(msg sdk.Message)
-	onRegisterCommand func(name, desc string) error
+	onRegisterCommand func(name, desc string, instant bool) error
 	onRegisterTool    func(tool sdk.Tool) error
 	onSetSystemPrompt func(prompt string)
 	onAppendSP        func(text string)
@@ -181,9 +181,9 @@ func (b *testUIBridge) SendMessage(msg sdk.Message) {
 		b.onSendMessage(msg)
 	}
 }
-func (b *testUIBridge) RegisterCommand(name, desc string) error {
+func (b *testUIBridge) RegisterCommand(name, desc string, instant bool) error {
 	if b.onRegisterCommand != nil {
-		return b.onRegisterCommand(name, desc)
+		return b.onRegisterCommand(name, desc, instant)
 	}
 	return nil
 }

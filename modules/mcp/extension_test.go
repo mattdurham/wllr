@@ -22,7 +22,7 @@ func (b *testUIBridge) Abort()                                                {}
 func (b *testUIBridge) SetStatus(_, _ string)                                 {}
 func (b *testUIBridge) GetStatusInfo() sdk.StatusInfo                         { return sdk.StatusInfo{} }
 func (b *testUIBridge) SendMessage(_ sdk.Message)                             {}
-func (b *testUIBridge) RegisterCommand(_, _ string) error                     { return nil }
+func (b *testUIBridge) RegisterCommand(_, _ string, _ bool) error             { return nil }
 func (b *testUIBridge) RegisterTool(tool sdk.Tool) error {
 	if b.onRegisterTool != nil {
 		return b.onRegisterTool(tool)

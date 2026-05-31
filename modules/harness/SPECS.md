@@ -305,6 +305,7 @@ type Registry struct { commands map[string]Command }
 
 func (r *Registry) Register(cmd Command)
 func (r *Registry) Dispatch(name string, args []string) tea.Cmd
+func (r *Registry) Get(name string) (Command, bool)
 func (r *Registry) List() []Command
 func (r *Registry) HelpText() string
 ```
@@ -313,15 +314,34 @@ func (r *Registry) HelpText() string
 - **Duplicate registration:** silently overwrites the existing entry with the same name.
 - **`/help`:** intercepted in `updateActions` before reaching `Registry.Dispatch` — displays `commands.HelpText()` via `ShowModalMsg`.
 
+### Command.Instant — Fast Path for Built-in Commands
+
+```go
+type Command struct {
+    Handler func(args []string) tea.Cmd
+    Name    string
+    Desc    string
+    Instant bool
+}
+```
+
+**Invariant:** Commands with `Instant=true` bypass the "queuing..." UI indicator in `updateActions`. When a `CommandMsg` for an Instant command arrives, `updateActions` invokes `cmd.Handler(msg.Args)` directly without setting `statusBar.statuses["stream"] = "queuing…"`.
+
+**Invariant:** All built-in commands (`/help`, `/clear`, `/reload`, `/model`, `/status`, `/tools`) have `Instant=true`. The zero value of `Command.Instant` is `false`. (The `/prompt` command is registered without `Instant=true` because it executes synchronously in the update loop via `ShowModalMsg`, not via WASM dispatch — it is intentionally excluded from the instant list.)
+
+**Invariant:** Extension-registered commands set `Instant` from the `instant bool` parameter passed to `UIBridge.RegisterCommand(name, desc, instant bool)`. When `instant=true`, the flag is stored on the `Command`, suppressing the "queuing…" status. The handler still routes through `dispatchOnCommandMsg` → `EventOnCommand`.
+
 Built-in commands registered at startup:
 
-| Command   | Effect                                              |
-|-----------|-----------------------------------------------------|
-| `/help`   | Shows `ShowModalMsg{Text: commands.HelpText()}`     |
-| `/clear`  | Emits `clearMsg{}`                                  |
-| `/reload` | Emits `ReloadMsg{}`                                 |
-| `/model <name>` | Emits `setModelMsg{Model: name}`             |
-| `/prompt` | Shows accumulated base system prompt in a modal     |
+| Command         | Instant | Effect                                                       |
+|-----------------|---------|--------------------------------------------------------------|
+| `/help`         | true    | Shows `ShowModalMsg{Text: commands.HelpText()}`              |
+| `/clear`        | true    | Emits `clearMsg{}`                                           |
+| `/reload`       | true    | Emits `ReloadMsg{}`                                          |
+| `/model <name>` | true    | Emits `setModelMsg{Model: name}`                             |
+| `/status`       | true    | Emits `StatusUpdateMsg{Key: "_override", Value: text}`       |
+| `/tools`        | true    | Emits `showToolsMsg{}`                                       |
+| `/prompt`       | false   | Shows accumulated base system prompt in a modal              |
 
 ---
 
@@ -454,3 +474,18 @@ Returns the current set of registered tools from `extHost.RegisteredTools()` as 
 **Invariant:** `consoleVisible` is set to `true` on `ConsoleMsg{Line: ...}` and to `false` on `StreamDoneMsg`.
 
 **Invariant:** `ConsoleMsg` never adds to `m.chat.messages`. Console lines are ephemeral and not part of the conversation history.
+
+## 25. Session Persistence Hooks
+
+`harness.Model` exposes two exported callback fields for session persistence:
+
+| Field | Type | Called when |
+|-------|------|-------------|
+| `OnUserMessage` | `func(content string)` | User submits input (in `submitToAgent`) |
+| `OnMessageEnd` | `func(role, content string)` | Assistant turn completes (after `FinalizeMessage`) |
+
+**Invariant:** Both callbacks are nil by default; nil callbacks are no-ops (guarded in model).
+
+**Invariant:** `OnMessageEnd` is called only when `responseContent != ""` (tool-only turns are excluded).
+
+**Invariant:** `OnUserMessage` is called only when `content != ""`.

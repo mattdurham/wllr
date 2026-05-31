@@ -147,6 +147,40 @@ func TestModel_Update_CommandMsg_Clear(t *testing.T) {
 	}
 }
 
+func TestInstantCommandSkipsQueueingStatus(t *testing.T) {
+	m := newTestModel()
+
+	// Dispatch a built-in Instant command (e.g. /clear).
+	m, _ = callUpdate(m, CommandMsg{Name: "clear", Args: nil})
+
+	// Instant commands must NOT set the "queuing…" status indicator.
+	if m.statusBar.statuses["stream"] == "queuing…" {
+		t.Error("Instant command should not set statusBar stream to 'queuing…'")
+	}
+}
+
+func TestNonInstantCommandSetsQueueingStatus(t *testing.T) {
+	m := newTestModel()
+
+	// Register a non-instant (WASM dispatch) command.
+	m.commands.Register(Command{
+		Name:    "wasm-cmd",
+		Desc:    "simulates a WASM-dispatched command",
+		Instant: false,
+		Handler: func(args []string) tea.Cmd {
+			return func() tea.Msg { return dispatchOnCommandMsg{Name: "wasm-cmd", Args: args} }
+		},
+	})
+
+	m, _ = callUpdate(m, CommandMsg{Name: "wasm-cmd", Args: nil})
+
+	// Non-instant commands should set the "queuing…" status indicator.
+	if m.statusBar.statuses["stream"] != "queuing…" {
+		t.Errorf("non-instant command should set statusBar stream to 'queuing…', got %q",
+			m.statusBar.statuses["stream"])
+	}
+}
+
 func TestModel_Update_CommandMsg_UnknownCommand(t *testing.T) {
 	m := newTestModel()
 	m, cmd := callUpdate(m, CommandMsg{Name: "nonexistent", Args: nil})

@@ -135,7 +135,13 @@ func init() {
 		"Send a message to an agent",
 		json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string","description":"Agent ID"},"message":{"type":"string","description":"Message text"}},"required":["agent_id","message"]}`),
 	)
-	RegisterCommand("agents", "Show running sub-agents and their status")
+	RegisterTool(
+		"wait_for_all",
+		`Block until all specified agents complete their work. Returns status="complete" with summaries, status="interrupted" if a user message arrives (agents keep running — call wait_for_all again with pending list), or status="timeout" (agents in pending are STILL RUNNING — call wait_for_all again, do NOT shut them down). End your turn immediately after this call.`,
+		json.RawMessage(`{"type":"object","properties":{"agent_ids":{"type":"array","items":{"type":"string"},"description":"Agent IDs to wait for"},"timeout_ms":{"type":"integer","description":"Timeout in milliseconds (default 300000 = 5 minutes)"}},"required":["agent_ids"]}`),
+	)
+
+	RegisterCommandInstant("agents", "Show running sub-agents and their status")
 
 	OnSessionStart(onSessionStart)
 	OnCommand("agents", onAgentsCommand)
@@ -264,10 +270,24 @@ notifications when agents finish — you do not need to poll or sleep.
 When woken, check what finished with list_agents() or get_agent_status(),
 process the results, then shutdown_agent for each completed agent.
 
-If an agent seems stuck (you have been woken multiple times but it has not
-finished):
-  get_agent_status("main/coder", 20)  ← diagnose ONCE with high history_limit
-  If is_running=true: still working — end your turn again.
+  if result.status == "interrupted":
+    → a user message arrived; agents are still running
+    → handle the user message, then:
+    → wait_for_all(result.pending)  ← resume waiting for remaining agents
+
+  if result.status == "timeout":
+    → agents in result.pending are STILL RUNNING — timeout does NOT mean they failed
+    → call wait_for_all(result.pending) again to keep waiting
+    → only diagnose with get_agent_status if wait_for_all times out 3+ times in a row
+    → NEVER shut down an agent just because wait_for_all timed out
+
+wait_for_all suspends your turn until it returns. After it returns, process
+results and call shutdown_agent. Do not make other tool calls between
+create_agent and wait_for_all — they run in the background already.
+
+If an agent seems stuck (no notification after 3+ consecutive timeouts):
+  get_agent_status("main/coder", 20)  ← diagnose ONCE
+  If is_running=true: still working — call wait_for_all(result.pending) again.
   If is_running=false with no useful output: nudge it.
     → send_message("main/coder", "Please report your current status.")
 
@@ -294,7 +314,39 @@ RIGHT — spawn agents and end your turn; the host notifies you when done:
 RIGHT — if agent seems genuinely stuck:
   get_agent_status("main/coder-1", 20)  ← check ONCE with high history_limit
   (read "recent" history to understand the situation)
-  send_message("main/coder-1", "Please report your status.")  ← nudge it`
+  send_message("main/coder-1", "Please report your status.")  ← nudge it
+
+---
+
+### Task-based coordination pattern
+
+Use this pattern when you want to distribute discrete tasks across workers without
+blocking on wait_for_all.
+
+**Orchestrator turn:**
+1. Call tasklist_create to create a task list (capture list_id and your agent_id).
+2. Call tasks_create for each task.
+3. Call create_agent for each worker, passing list_id and your agent_id in the system prompt.
+4. End your turn immediately — do NOT call wait_for_all.
+5. When a worker sends you a message (IDLE or TASK_DONE), wake up, call tasks_list(pending).
+   If empty and all tasks are completed, call shutdown_agent for each worker and wrap up.
+   If tasks remain, end your turn again and wait.
+
+**Worker turn:**
+1. Call tasks_list(list_id, status=pending) to find available tasks.
+2. If tasks found: call tasks_update(list_id, task_id, status=in_progress) to claim one.
+3. Do the work. Call tasks_update(list_id, task_id, status=completed) when done.
+4. Repeat from step 1.
+5. If tasks_list returns {"tasks": []} (empty): send send_message("main", "IDLE: no more tasks").
+   Then end your turn.
+
+**Note:** Two workers may try to claim the same task. Always re-read the task after claiming
+to confirm you own it (tasks_get). If the status is already in_progress by another worker,
+skip to the next task.
+
+**Why not wait_for_all?**
+wait_for_all blocks the orchestrator's WASM thread during the wait. For long-running tasks
+this wastes resources and can cause timeouts. The IDLE signal pattern is fully event-driven.`
 
 	AppendSystemPrompt(guidance)
 }
