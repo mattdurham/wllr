@@ -49,6 +49,10 @@ type AgentBridge interface {
 	List() ([]AgentInfo, error)
 	TokenCount() int64
 	SetHistory(id string, messages []sdk.Message) error
+	// MainAgentContextUsage returns the current context window usage for the main agent.
+	// Returns a zero-valued ContextUsage before the first turn completes or when no
+	// main agent is registered.
+	MainAgentContextUsage() sdk.ContextUsage
 }
 
 // TeamBridge is the interface extensions call to manage teams.

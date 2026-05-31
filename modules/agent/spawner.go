@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 
 	"charm.land/fantasy"
 	anthropicprovider "charm.land/fantasy/providers/anthropic"
@@ -56,12 +55,6 @@ func (s *Spawner) Spawn(ctx context.Context, req extension.SpawnRequest) error {
 	}
 	fullSystemPrompt += "## Your Agent Identity\nYour agent ID is: " + req.ID +
 		"\nTo report results back to the orchestrator, call send_message with agent_id=\"main\"."
-
-	// Derive parent ID: "main/coder" → "main"; "main/team/worker" → "main/team"; "toplevel" → "".
-	parentID := ""
-	if slash := strings.LastIndex(req.ID, "/"); slash > 0 {
-		parentID = req.ID[:slash]
-	}
 
 	opts := SpawnOpts{
 		SystemPrompt: fullSystemPrompt,
