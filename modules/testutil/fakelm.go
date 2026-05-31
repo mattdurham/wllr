@@ -11,12 +11,12 @@ type FakeLM struct {
 	provider  string
 	responses []string
 	calls     []RecordedCall
-	callIdx   int
-	mu        sync.Mutex
 
 	// script holds queued scripted turns. When non-empty, Stream pops the
 	// first entry and emits it instead of the preset text responses.
-	script []ScriptedTurn
+	script  []ScriptedTurn
+	callIdx int
+	mu      sync.Mutex
 }
 
 // NewFakeLM creates a FakeLM with no preset responses and an empty script.

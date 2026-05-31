@@ -174,7 +174,7 @@ func TestInstantCommandsMarkedInstant(t *testing.T) {
 }
 
 func TestNonInstantCommandDefaultsFalse(t *testing.T) {
-	cmd := Command{Name: "foo", Desc: "bar"}
+	cmd := Command{Desc: "bar"}
 	if cmd.Instant {
 		t.Error("Command zero value should have Instant=false")
 	}
