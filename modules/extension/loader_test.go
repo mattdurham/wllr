@@ -93,14 +93,14 @@ var missingFreeWASM = []byte{
 func TestValidateExports_AllPresent(t *testing.T) {
 	ctx := context.Background()
 	r := wazero.NewRuntime(ctx)
-	defer r.Close(ctx)
+	defer func() { _ = r.Close(ctx) }()
 
 	mod, err := r.InstantiateWithConfig(ctx, minimalWASM,
 		wazero.NewModuleConfig().WithName("test-validate").WithStartFunctions())
 	if err != nil {
 		t.Fatalf("instantiate: %v", err)
 	}
-	defer mod.Close(ctx)
+	defer func() { _ = mod.Close(ctx) }()
 
 	if err := validateExports(mod); err != nil {
 		t.Errorf("validateExports returned unexpected error: %v", err)
@@ -110,14 +110,14 @@ func TestValidateExports_AllPresent(t *testing.T) {
 func TestValidateExports_MissingFree(t *testing.T) {
 	ctx := context.Background()
 	r := wazero.NewRuntime(ctx)
-	defer r.Close(ctx)
+	defer func() { _ = r.Close(ctx) }()
 
 	mod, err := r.InstantiateWithConfig(ctx, missingFreeWASM,
 		wazero.NewModuleConfig().WithName("test-missing-free").WithStartFunctions())
 	if err != nil {
 		t.Fatalf("instantiate: %v", err)
 	}
-	defer mod.Close(ctx)
+	defer func() { _ = mod.Close(ctx) }()
 
 	err = validateExports(mod)
 	if err == nil {
@@ -128,14 +128,14 @@ func TestValidateExports_MissingFree(t *testing.T) {
 func TestCallInit_ReturnsZero(t *testing.T) {
 	ctx := context.Background()
 	r := wazero.NewRuntime(ctx)
-	defer r.Close(ctx)
+	defer func() { _ = r.Close(ctx) }()
 
 	mod, err := r.InstantiateWithConfig(ctx, minimalWASM,
 		wazero.NewModuleConfig().WithName("test-callinit").WithStartFunctions())
 	if err != nil {
 		t.Fatalf("instantiate: %v", err)
 	}
-	defer mod.Close(ctx)
+	defer func() { _ = mod.Close(ctx) }()
 
 	if err := callInit(ctx, mod); err != nil {
 		t.Errorf("callInit returned unexpected error: %v", err)

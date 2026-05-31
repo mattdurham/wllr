@@ -46,7 +46,7 @@ var _ extension.UIBridge = (*testUIBridge)(nil)
 // TestExtension_NewExtension verifies the constructor wires bridge and host.
 func TestExtension_NewExtension(t *testing.T) {
 	host := extension.NewHost(nil)
-	defer host.Close(context.Background())
+	defer func() { _ = host.Close(context.Background()) }()
 
 	ext := NewExtension(host)
 	if ext == nil {
@@ -68,7 +68,7 @@ func TestExtension_Start_NoServers(t *testing.T) {
 	t.Setenv("WLLR_CONFIG", t.TempDir()+"/nonexistent.json")
 
 	host := extension.NewHost(nil)
-	defer host.Close(context.Background())
+	defer func() { _ = host.Close(context.Background()) }()
 
 	ext := NewExtension(host)
 	if err := ext.Start(context.Background()); err != nil {
@@ -79,7 +79,7 @@ func TestExtension_Start_NoServers(t *testing.T) {
 // TestExtension_Close_Empty verifies Close is safe on an extension that was never started.
 func TestExtension_Close_Empty(t *testing.T) {
 	host := extension.NewHost(nil)
-	defer host.Close(context.Background())
+	defer func() { _ = host.Close(context.Background()) }()
 
 	ext := NewExtension(host)
 	if err := ext.Close(); err != nil {
@@ -91,7 +91,7 @@ func TestExtension_Close_Empty(t *testing.T) {
 // invokes OnRegisterTool on the host.
 func TestExtension_RegisterTool_UsesHostCallback(t *testing.T) {
 	host := extension.NewHost(nil)
-	defer host.Close(context.Background())
+	defer func() { _ = host.Close(context.Background()) }()
 
 	var registered []sdk.Tool
 	host.SetUIBridge(&testUIBridge{onRegisterTool: func(tool sdk.Tool) error {
@@ -116,7 +116,7 @@ func TestExtension_RegisterTool_UsesHostCallback(t *testing.T) {
 // TestExtension_RegisterTool_NilCallback is safe when OnRegisterTool is not set.
 func TestExtension_RegisterTool_NilCallback(t *testing.T) {
 	host := extension.NewHost(nil)
-	defer host.Close(context.Background())
+	defer func() { _ = host.Close(context.Background()) }()
 	// OnRegisterTool is nil by default.
 
 	ext := NewExtension(host)
@@ -129,7 +129,7 @@ func TestExtension_RegisterTool_NilCallback(t *testing.T) {
 // TestExtension_HandleToolCall_NotMCPTool verifies that non-MCP tools are ignored.
 func TestExtension_HandleToolCall_NotMCPTool(t *testing.T) {
 	host := extension.NewHost(nil)
-	defer host.Close(context.Background())
+	defer func() { _ = host.Close(context.Background()) }()
 
 	ext := NewExtension(host)
 
@@ -159,7 +159,7 @@ func TestExtension_HandleToolCall_NotMCPTool(t *testing.T) {
 // TestExtension_HandleToolCall_MCPTool routes an MCP tool call to the bridge.
 func TestExtension_HandleToolCall_MCPTool(t *testing.T) {
 	host := extension.NewHost(nil)
-	defer host.Close(context.Background())
+	defer func() { _ = host.Close(context.Background()) }()
 
 	ext := NewExtension(host)
 
@@ -207,7 +207,7 @@ func TestExtension_HandleToolCall_MCPTool(t *testing.T) {
 // TestExtension_HandleToolCall_InvalidPayload returns an error for bad JSON.
 func TestExtension_HandleToolCall_InvalidPayload(t *testing.T) {
 	host := extension.NewHost(nil)
-	defer host.Close(context.Background())
+	defer func() { _ = host.Close(context.Background()) }()
 
 	ext := NewExtension(host)
 

@@ -1,3 +1,5 @@
+//go:build wasip1
+
 package main
 
 // Message is a chat message for AgentResetHistory.
