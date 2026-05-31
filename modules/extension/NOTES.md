@@ -244,3 +244,24 @@ program, while the exec closure in cmd/exec.go calls them directly.
 the old signature must be updated. As of this change, the only caller is `cmd/exec.go`
 (extracted from `cmd/main.go`). The SPECS.md §7 table is updated. Callers compiled against
 the old ABI will fail to compile.
+
+---
+
+## 20. AgentBridge.WaitForAll and WaitResult Removed
+
+*Added: 2026-05-31*
+
+**Decision:** `AgentBridge.WaitForAll` and the associated `WaitResult` type were removed
+from `interfaces.go`. Multi-agent coordination is now provided by the native `wait_for_all`
+tool in `modules/tools` rather than as a method on the `AgentBridge` interface.
+
+**Rationale:** `WaitForAll` was originally implemented inside `modules/harness/bridges.go`
+as a method on `harnessAgentBridge`. Moving the functionality to a dedicated native tool
+keeps the `AgentBridge` interface focused on agent lifecycle management (spawn, close, send,
+run, list) and removes polling logic from the bridge layer entirely. The native tool approach
+is also easier to test in isolation and more transparent to extensions calling it.
+
+**Consequence:** Any implementation of `AgentBridge` no longer needs to provide `WaitForAll`.
+Extensions that previously relied on this bridge method must use the `wait_for_all` tool
+instead. This is a breaking change to the `AgentBridge` interface for any out-of-tree
+implementations.
