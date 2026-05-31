@@ -154,7 +154,9 @@ func registerTaskTools(_ *testing.T, host *extension.Host, store *taskStore) {
 		Description: "Create a task list",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`),
 	}, func(_ context.Context, input json.RawMessage) (string, bool) {
-		var in struct{ Name string `json:"name"` }
+		var in struct {
+			Name string `json:"name"`
+		}
 		if err := json.Unmarshal(input, &in); err != nil {
 			return "bad input: " + err.Error(), true
 		}
@@ -275,6 +277,7 @@ func (b *poolAgentBridge) Close(id string) error { return b.pool.Close(id) }
 func (b *poolAgentBridge) SendMessage(id, message string) error {
 	return b.pool.SendMessage(id, sdk.Message{Role: sdk.RoleUser, Content: message})
 }
+
 func (b *poolAgentBridge) Run(id string) error {
 	a := b.pool.Get(id)
 	if a == nil {
@@ -283,6 +286,7 @@ func (b *poolAgentBridge) Run(id string) error {
 	a.Submit(b.ctx, "")
 	return nil
 }
+
 func (b *poolAgentBridge) List() ([]extension.AgentInfo, error) {
 	ids := b.pool.ListAgents()
 	out := make([]extension.AgentInfo, len(ids))
@@ -291,7 +295,7 @@ func (b *poolAgentBridge) List() ([]extension.AgentInfo, error) {
 	}
 	return out, nil
 }
-func (b *poolAgentBridge) TokenCount() int64              { return b.pool.TokenCount() }
+func (b *poolAgentBridge) TokenCount() int64                          { return b.pool.TokenCount() }
 func (b *poolAgentBridge) SetHistory(_ string, _ []sdk.Message) error { return nil }
 func (b *poolAgentBridge) WaitForAll(_ string, _ []string, _ int) (extension.WaitResult, error) {
 	return extension.WaitResult{Status: "ok"}, nil
