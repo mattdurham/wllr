@@ -33,8 +33,9 @@ type taskStore struct {
 }
 
 type taskList struct {
-	id    string
-	tasks map[string]*task
+	id           string
+	tasks        map[string]*task
+	ownerAgentID string // if set, receives TASK_DONE notification on completion/blocking
 }
 
 type task struct {
@@ -47,12 +48,12 @@ func newTaskStore() *taskStore {
 	return &taskStore{lists: make(map[string]*taskList)}
 }
 
-func (s *taskStore) createList(name string) string {
+func (s *taskStore) createList(name, ownerAgentID string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.listSeq++
 	id := fmt.Sprintf("list-%d", s.listSeq)
-	s.lists[id] = &taskList{id: id, tasks: make(map[string]*task)}
+	s.lists[id] = &taskList{id: id, tasks: make(map[string]*task), ownerAgentID: ownerAgentID}
 	_ = name
 	return id
 }
@@ -70,19 +71,34 @@ func (s *taskStore) createTask(listID, title string) (string, error) {
 	return id, nil
 }
 
-func (s *taskStore) updateTask(listID, taskID, status string) error {
+// updateTaskResult carries the side-effect notification info back to the handler.
+type updateTaskResult struct {
+	ownerAgentID string
+	taskID       string
+	taskTitle    string
+	notified     bool // true if a notification should be sent
+}
+
+func (s *taskStore) updateTask(listID, taskID, status string) (updateTaskResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	l, ok := s.lists[listID]
 	if !ok {
-		return fmt.Errorf("list %q not found", listID)
+		return updateTaskResult{}, fmt.Errorf("list %q not found", listID)
 	}
 	t, ok := l.tasks[taskID]
 	if !ok {
-		return fmt.Errorf("task %q not found", taskID)
+		return updateTaskResult{}, fmt.Errorf("task %q not found", taskID)
 	}
+	oldStatus := t.status
 	t.status = status
-	return nil
+	notify := l.ownerAgentID != "" && (status == "completed" || status == "blocked") && oldStatus != status
+	return updateTaskResult{
+		ownerAgentID: l.ownerAgentID,
+		taskID:       t.id,
+		taskTitle:    t.title,
+		notified:     notify,
+	}, nil
 }
 
 func (s *taskStore) listByStatus(listID, statusFilter string) ([]*task, error) {
@@ -120,7 +136,7 @@ func newCoordEnv(t *testing.T) *coordEnv {
 
 	host.SetAgentBridge(&poolAgentBridge{pool: pool, ctx: ctx})
 
-	registerTaskTools(t, host, store)
+	registerTaskTools(t, host, store, pool)
 	registerSendMessageTool(t, host, pool)
 
 	t.Cleanup(func() { host.Close(ctx) })
@@ -148,19 +164,20 @@ func (e *coordEnv) spawn(t *testing.T, id string, lm *testutil.FakeLM) *agent.Ag
 
 // ─── Native tool registrations ────────────────────────────────────────────────
 
-func registerTaskTools(_ *testing.T, host *extension.Host, store *taskStore) {
+func registerTaskTools(_ *testing.T, host *extension.Host, store *taskStore, pool *agent.AgentPool) {
 	host.RegisterNativeTool(sdk.Tool{
 		Name:        "tasklist_create",
 		Description: "Create a task list",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`),
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"},"owner_agent_id":{"type":"string"}},"required":["name"]}`),
 	}, func(_ context.Context, input json.RawMessage) (string, bool) {
 		var in struct {
-			Name string `json:"name"`
+			Name         string `json:"name"`
+			OwnerAgentID string `json:"owner_agent_id"`
 		}
 		if err := json.Unmarshal(input, &in); err != nil {
 			return "bad input: " + err.Error(), true
 		}
-		id := store.createList(in.Name)
+		id := store.createList(in.Name, in.OwnerAgentID)
 		b, _ := json.Marshal(map[string]string{"list_id": id})
 		return string(b), false
 	})
@@ -198,8 +215,14 @@ func registerTaskTools(_ *testing.T, host *extension.Host, store *taskStore) {
 		if err := json.Unmarshal(input, &in); err != nil {
 			return "bad input: " + err.Error(), true
 		}
-		if err := store.updateTask(in.ListID, in.TaskID, in.Status); err != nil {
+		result, err := store.updateTask(in.ListID, in.TaskID, in.Status)
+		if err != nil {
 			return err.Error(), true
+		}
+		// Mirror the WASM tasks extension: notify owner on completion or blocking.
+		if result.notified {
+			msg := fmt.Sprintf("TASK_DONE: %s %s", result.taskID, result.taskTitle)
+			_ = pool.SendMessage(result.ownerAgentID, sdk.Message{Role: sdk.RoleUser, Content: msg})
 		}
 		b, _ := json.Marshal(map[string]bool{"success": true})
 		return string(b), false
@@ -321,7 +344,7 @@ func TestAgentCoordination_WorkerCompletesTasksAndSignalsIdle(t *testing.T) {
 	env := newCoordEnv(t)
 
 	// Pre-populate task list.
-	listID := env.store.createList("work")
+	listID := env.store.createList("work", "")
 	taskAID, err := env.store.createTask(listID, "Task A")
 	if err != nil {
 		t.Fatalf("createTask A: %v", err)
@@ -468,7 +491,7 @@ func TestAgentCoordination_WorkerCompletesTasksAndSignalsIdle(t *testing.T) {
 // worker finding no pending tasks immediately sends the IDLE signal.
 func TestAgentCoordination_EmptyTaskList_IdleSignaledImmediately(t *testing.T) {
 	env := newCoordEnv(t)
-	listID := env.store.createList("empty-work")
+	listID := env.store.createList("empty-work", "")
 
 	marshalInput := func(v any) json.RawMessage {
 		b, _ := json.Marshal(v)
@@ -569,7 +592,7 @@ func TestAgentCoordination_EmptyTaskList_IdleSignaledImmediately(t *testing.T) {
 // change the in-process task store state.
 func TestAgentCoordination_WorkerToolCallsExecuted(t *testing.T) {
 	env := newCoordEnv(t)
-	listID := env.store.createList("exec-work")
+	listID := env.store.createList("exec-work", "")
 	taskID, err := env.store.createTask(listID, "Executable Task")
 	if err != nil {
 		t.Fatalf("createTask: %v", err)
@@ -622,5 +645,103 @@ func TestAgentCoordination_WorkerToolCallsExecuted(t *testing.T) {
 	calls := workerLM.Calls()
 	if len(calls) < 1 {
 		t.Errorf("workerLM: expected ≥1 call, got %d", len(calls))
+	}
+}
+
+// TestTaskNotification_FiresOnCompletion verifies that when a worker calls
+// tasks_update(completed) on a list with an owner_agent_id, the owner's inbox
+// automatically receives a TASK_DONE: message — without the worker explicitly
+// calling send_message. This tests the task notification side-effect that mirrors
+// the WASM tasks extension's handleTasksUpdate behavior.
+func TestTaskNotification_FiresOnCompletion(t *testing.T) {
+	env := newCoordEnv(t)
+
+	// Create list owned by "main" so completion notifications fire automatically.
+	listID := env.store.createList("notify-work", "main")
+	taskID, err := env.store.createTask(listID, "Important Task")
+	if err != nil {
+		t.Fatalf("createTask: %v", err)
+	}
+
+	marshalInput := func(v any) json.RawMessage {
+		b, _ := json.Marshal(v)
+		return b
+	}
+
+	// Worker script: claim task, complete it — NO explicit send_message call.
+	workerLM := testutil.NewFakeLM()
+	workerLM.SetScript([]testutil.ScriptedTurn{
+		{
+			ToolCalls: []testutil.ScriptedToolCall{
+				{ID: "tu1", Name: "tasks_update", Input: marshalInput(map[string]string{
+					"list_id": listID, "task_id": taskID, "status": "in_progress",
+				})},
+				{ID: "tu2", Name: "tasks_update", Input: marshalInput(map[string]string{
+					"list_id": listID, "task_id": taskID, "status": "completed",
+				})},
+			},
+		},
+	})
+
+	// Spawn main as the owner so its inbox can be checked.
+	orchLM := testutil.NewFakeLMWithResponses("done")
+	orch := env.spawn(t, "main", orchLM)
+	worker := env.spawn(t, "worker", workerLM)
+
+	// Run orchestrator turn 1 so it's registered in the pool.
+	orchDone := make(chan error, 1)
+	orch.SetOnDone(func(e error) { orchDone <- e })
+	orch.Submit(env.ctx, "Waiting for tasks.")
+	select {
+	case err := <-orchDone:
+		if err != nil {
+			t.Fatalf("orch turn 1: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout: orch turn 1")
+	}
+
+	// Run worker: completes task, triggering automatic TASK_DONE notification.
+	workerDone := make(chan error, 1)
+	worker.SetOnDone(func(e error) { workerDone <- e })
+	worker.Submit(env.ctx, "Work.")
+	select {
+	case err := <-workerDone:
+		if err != nil {
+			t.Fatalf("worker: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout: worker")
+	}
+
+	// The TASK_DONE notification must have arrived in orch's inbox automatically —
+	// the worker never called send_message explicitly.
+	inbox := orch.DrainInbox()
+	var taskDoneMsg *sdk.Message
+	for _, m := range inbox {
+		if strings.Contains(m.Content, "TASK_DONE:") {
+			mc := m
+			taskDoneMsg = &mc
+			break
+		}
+	}
+	if taskDoneMsg == nil {
+		t.Fatalf("orchestrator inbox missing automatic TASK_DONE notification; inbox: %+v", inbox)
+	}
+	if !strings.Contains(taskDoneMsg.Content, taskID) {
+		t.Errorf("TASK_DONE message %q does not contain task ID %q", taskDoneMsg.Content, taskID)
+	}
+	t.Logf("Automatic TASK_DONE notification received: %q", taskDoneMsg.Content)
+
+	// in_progress transition must NOT send a notification.
+	// Verify only one notification was sent (for completed, not in_progress).
+	notifyCount := 0
+	for _, m := range inbox {
+		if strings.Contains(m.Content, "TASK_DONE:") {
+			notifyCount++
+		}
+	}
+	if notifyCount != 1 {
+		t.Errorf("expected exactly 1 TASK_DONE notification, got %d", notifyCount)
 	}
 }
