@@ -1,3 +1,5 @@
+//go:build wasip1
+
 package main
 
 // StatusInfo holds a snapshot of the current status bar state.
