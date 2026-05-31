@@ -163,10 +163,6 @@ const (
 	MethodAgentRun        = "agent_run"
 	MethodAgentList       = "agent_list"
 	MethodAgentTokenCount = "agent_token_count"
-	// MethodAgentWaitForAll blocks the caller's host_call until all specified
-	// agents complete their work or a timeout/user-interrupt occurs.
-	MethodAgentWaitForAll = "agent_wait_for_all"
-
 	// Team management host_call methods.
 	MethodTeamCreate       = "team_create"
 	MethodTeamClose        = "team_close"

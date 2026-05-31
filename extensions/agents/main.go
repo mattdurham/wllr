@@ -135,12 +135,6 @@ func init() {
 		"Send a message to an agent",
 		json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string","description":"Agent ID"},"message":{"type":"string","description":"Message text"}},"required":["agent_id","message"]}`),
 	)
-	RegisterTool(
-		"wait_for_all",
-		`Block until all specified agents complete their work. Returns status="complete" with summaries, status="interrupted" if a user message arrives (agents keep running — call wait_for_all again with pending list), or status="timeout" (agents in pending are STILL RUNNING — call wait_for_all again, do NOT shut them down). End your turn immediately after this call.`,
-		json.RawMessage(`{"type":"object","properties":{"agent_ids":{"type":"array","items":{"type":"string"},"description":"Agent IDs to wait for"},"timeout_ms":{"type":"integer","description":"Timeout in milliseconds (default 300000 = 5 minutes)"}},"required":["agent_ids"]}`),
-	)
-
 	RegisterCommand("agents", "Show running sub-agents and their status")
 
 	OnSessionStart(onSessionStart)
@@ -163,27 +157,24 @@ Spawn a sub-agent and send its first task. The agent starts immediately.
 Its output does NOT appear in your chat — it works silently in the background.
 - name: short label shown in /agents status (e.g. "researcher", "coder-1")
 - system_prompt: the agent's role, constraints, and output format — be explicit
-- prompt: the first task. ALWAYS end the prompt with an explicit instruction:
-    "When all your work is done, call send_message(\"main\", \"[summary]\")."
-  Without this, the agent completes silently and you never receive a wakeup.
+- prompt: the first task. Sub-agents are detected as done automatically when they
+  go idle (finish all turns and have no pending work).
+
+  Sub-agents may call send_message("main", result) to pass structured results
+  back to the orchestrator for richer output.
 - model: optional; defaults to the current session model
 
-Sub-agents MUST call send_message("main", result) when they finish. This is
-the ONLY wakeup mechanism. If you do not require it in the prompt, the agent
-will go idle and you will never know it is done.
-
-Sub-agents MUST restate their task when reporting back:
+Sub-agents should restate their task when reporting back for clarity:
   GOOD: "I was researching X. I found that Y and Z."
   BAD:  "Here are the results."
-This is required for one-shot spawning AND multi-turn conversations.
 
 **send_message(agent_id, message)**
 Send a message to an agent and trigger its next turn immediately.
 - Use for multi-turn conversations: send follow-up questions or additional tasks.
-- Completion notifications are sent automatically by the system — you do not
-  need to ask agents to call send_message when they finish.
-- Sub-agents can still call send_message("main", result) for richer summaries,
-  but it is no longer required for the wakeup to work.
+- Sub-agents are detected as complete when they go idle (not running, no pending
+  messages). No send_message is required for the orchestrator to be notified.
+- Sub-agents may still call send_message for richer summaries — the message content
+  will appear in the caller's conversation but is not needed for wakeup.
 
 **shutdown_agent(agent_id)**
 Stop an agent and free its resources. Always shut down agents when their
@@ -191,19 +182,6 @@ task is complete. Leaked agents continue consuming memory.
 
 **list_agents()**
 Returns all running agent IDs and names.
-
-**wait_for_all(agent_ids, timeout_ms?)**
-Block until all specified agents complete. This is the standard way to wait
-for sub-agents — replaces all polling and sleep loops.
-
-Returns JSON with:
-- status="complete": all agents done; results map has each agent's last output
-- status="interrupted": a user message arrived while waiting; agents are still
-  running — handle the user message, then call wait_for_all(pending) to resume
-- status="timeout": timed out with partial results
-
-wait_for_all suspends your turn until it returns. End your turn after it —
-process results, call shutdown_agent for each agent, then stop.
 
 **get_agent_status(agent_id, history_limit?)**
 Diagnostic tool — returns is_running (true if mid-turn), turn_count, and
@@ -276,40 +254,26 @@ Both agents accumulate history across every exchange — neither forgets.
 
 ### Parallel work pattern
 
-Use wait_for_all to run agents in parallel and block until all are done:
+Spawn agents and end your turn. The host wakes you via TASK_DONE or IDLE
+notifications when agents finish — you do not need to poll or sleep.
 
   create_agent("researcher", "...", "Research X.")
   create_agent("coder", "...", "Implement Y.")
-  result = wait_for_all(["main/researcher", "main/coder"])
+  ← end your turn here; you will be woken when agents complete
 
-  if result.status == "complete":
-    → result.results has each agent's output — process it
-    → shutdown_agent("main/researcher"), shutdown_agent("main/coder")
+When woken, check what finished with list_agents() or get_agent_status(),
+process the results, then shutdown_agent for each completed agent.
 
-  if result.status == "interrupted":
-    → a user message arrived; agents are still running
-    → handle the user message, then:
-    → wait_for_all(result.pending)  ← resume waiting for remaining agents
-
-  if result.status == "timeout":
-    → agents in result.pending are STILL RUNNING — timeout does NOT mean they failed
-    → call wait_for_all(result.pending) again to keep waiting
-    → only diagnose with get_agent_status if wait_for_all times out 3+ times in a row
-    → NEVER shut down an agent just because wait_for_all timed out
-
-wait_for_all suspends your turn until it returns. After it returns, process
-results and call shutdown_agent. Do not make other tool calls between
-create_agent and wait_for_all — they run in the background already.
-
-If an agent seems stuck (no notification after 3+ consecutive timeouts):
-  get_agent_status("main/coder", 20)  ← diagnose ONCE
-  If is_running=true: still working — call wait_for_all(result.pending) again.
+If an agent seems stuck (you have been woken multiple times but it has not
+finished):
+  get_agent_status("main/coder", 20)  ← diagnose ONCE with high history_limit
+  If is_running=true: still working — end your turn again.
   If is_running=false with no useful output: nudge it.
     → send_message("main/coder", "Please report your current status.")
 
 ---
 
-### NEVER do this — these block your turn without waiting correctly
+### NEVER do this — these do not correctly wait for sub-agents
 
 WRONG — do NOT poll or sleep while waiting for a sub-agent:
   create_agent("researcher", ...)
@@ -322,12 +286,12 @@ WRONG — do NOT call get_agent_status multiple times in one turn:
   get_agent_status("main/coder-1")  ← WRONG: same turn, no time has passed
   get_agent_status("main/coder-1")  ← WRONG: still the same snapshot
 
-RIGHT — use wait_for_all to block until agents are done:
+RIGHT — spawn agents and end your turn; the host notifies you when done:
   create_agent("researcher", ...)
-  result = wait_for_all(["main/researcher"])  ← blocks until done
-  (process result.results["main/researcher"], then shutdown_agent)
+  ← end your turn; you will be woken by TASK_DONE or IDLE notification
+  (on next turn: read results, then shutdown_agent)
 
-RIGHT — if agent seems genuinely stuck after wait_for_all times out:
+RIGHT — if agent seems genuinely stuck:
   get_agent_status("main/coder-1", 20)  ← check ONCE with high history_limit
   (read "recent" history to understand the situation)
   send_message("main/coder-1", "Please report your status.")  ← nudge it`
@@ -407,8 +371,6 @@ func onBeforeToolCall(payload json.RawMessage) {
 		handleShutdownTeam(p)
 	case "send_message":
 		handleSendMessage(p)
-	case "wait_for_all":
-		handleWaitForAll(p)
 	}
 }
 
@@ -710,44 +672,6 @@ func handleSendMessage(p beforeToolCallPayload) {
 	}
 	upsertAgent(input.AgentID, "", "", "← "+truncate(input.Message, 60))
 	ToolResult(p.ToolCallID, `{"status":"sent"}`, false)
-}
-
-func handleWaitForAll(p beforeToolCallPayload) {
-	var input struct {
-		AgentIDs  []string `json:"agent_ids"`
-		TimeoutMs int      `json:"timeout_ms"`
-	}
-	if err := json.Unmarshal(p.Input, &input); err != nil || len(input.AgentIDs) == 0 {
-		ToolResult(p.ToolCallID, "wait_for_all: agent_ids (non-empty array) is required", true)
-		return
-	}
-
-	type waitParams struct {
-		CallerID  string   `json:"caller_id"`
-		AgentIDs  []string `json:"agent_ids"`
-		TimeoutMs int      `json:"timeout_ms"`
-	}
-	result := agentCall("agent_wait_for_all", waitParams{
-		CallerID:  p.AgentID,
-		AgentIDs:  input.AgentIDs,
-		TimeoutMs: input.TimeoutMs,
-	})
-
-	var resp struct {
-		Error string `json:"error,omitempty"`
-	}
-	if result != "" {
-		_ = json.Unmarshal([]byte(result), &resp)
-	}
-	if resp.Error != "" {
-		ToolResult(p.ToolCallID, "wait_for_all: "+resp.Error, true)
-		return
-	}
-
-	for _, id := range input.AgentIDs {
-		upsertAgent(id, "", "", "⏳ waiting")
-	}
-	ToolResult(p.ToolCallID, result, false)
 }
 
 func main() {}

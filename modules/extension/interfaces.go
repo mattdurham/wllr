@@ -26,16 +26,6 @@ type SpawnRequest struct {
 	ThinkingBudget int
 }
 
-// WaitResult is returned by AgentBridge.WaitForAll.
-type WaitResult struct {
-	// Status is "complete", "interrupted", or "timeout".
-	Status string `json:"status"`
-	// Results holds the last-message summary for each completed agent, keyed by agent ID.
-	Results map[string]string `json:"results"`
-	// Pending lists agent IDs that had not yet completed when the call returned.
-	Pending []string `json:"pending,omitempty"`
-}
-
 // AgentBridge is the interface extensions call to manage agents.
 // Set once on Host at startup via Host.SetAgentBridge; replaces the
 // OnAgentSpawn, OnAgentClose, OnAgentSendMessage, OnAgentRun,
@@ -55,16 +45,6 @@ type AgentBridge interface {
 	List() ([]AgentInfo, error)
 	TokenCount() int64
 	SetHistory(id string, messages []sdk.Message) error
-	// WaitForAll blocks until all agentIDs complete or until an interrupt occurs.
-	// It watches callerID's inbox: completion notifications are consumed silently;
-	// any other message (user input, other agent) causes an early return with
-	// status="interrupted" and the message put back into callerID's inbox.
-	// timeoutMs of 0 uses a default of 5 minutes.
-	WaitForAll(callerID string, agentIDs []string, timeoutMs int) (WaitResult, error)
-	// MainAgentContextUsage returns the current context window usage for the main agent.
-	// Returns a zero-valued ContextUsage before the first turn completes or when no
-	// context window has been configured.
-	MainAgentContextUsage() sdk.ContextUsage
 }
 
 // TeamBridge is the interface extensions call to manage teams.
