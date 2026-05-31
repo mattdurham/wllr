@@ -111,7 +111,7 @@ type UIBridge interface {
 	SetStatus(key, value string)
 	GetStatusInfo() sdk.StatusInfo
 	SendMessage(msg sdk.Message)
-	RegisterCommand(name, desc string) error
+	RegisterCommand(name, desc string, instant bool) error
 	RegisterTool(tool sdk.Tool) error
 	SetSystemPrompt(prompt string)
 	AppendSystemPrompt(text string)

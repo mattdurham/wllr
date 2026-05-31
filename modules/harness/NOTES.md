@@ -279,3 +279,27 @@ is `pool.Get(mainID).History()`.
 `pool.Get(mainID).History()`. The `ResetHistoryMsg` handler now sets agent history via
 `pool.SetAgentHistory` and rebuilds the chat from the provided messages, without maintaining
 a separate `m.history` copy.
+
+---
+
+## 21. OnMessageEnd / OnUserMessage — Exported Callback Fields for Persistence
+
+*Added: 2026-05-30*
+
+**Decision:** Added two exported function fields to `harness.Model`: `OnMessageEnd func(role, content string)` and `OnUserMessage func(content string)`. Both are nil by default and are set by `cmd/main.go` when session persistence is enabled.
+
+**Rationale:** The harness model is the authoritative source of message lifecycle events (user submission in `submitToAgent`, assistant turn completion in the `StreamDoneMsg` handler). Exposing callbacks on the model struct avoids creating an import dependency from `harness` on the `session` package and keeps each package at its proper abstraction level.
+
+**Consequence:** Any caller that creates a `harness.Model` and wants message-level hooks must set these fields before the program starts. Fields are guarded by nil checks in the model; no panic occurs if they are not set.
+
+---
+
+## 22. Command.Instant — Fast-Path Flag for Built-in Commands
+
+*Added: 2026-05-30*
+
+**Decision:** `Command` gains an `Instant bool` field. All built-in commands (`/clear`, `/reload`, `/model`, `/status`, `/tools`, `/help`) are registered with `Instant: true`. `updateActions` checks this flag first: if `cmd.Instant`, it calls `cmd.Handler(msg.Args)` directly without setting the `"queuing…"` status. The `UIBridge.RegisterCommand` signature is updated to `RegisterCommand(name, desc string, instant bool)` so extension-registered commands can also opt in.
+
+**Rationale:** Built-in commands execute synchronously in the bubbletea update loop and do not touch WASM. Setting `"queuing…"` before them caused a brief flicker of the status indicator for commands like `/clear` that complete in the same frame. The `Instant` flag makes the distinction between "executes immediately in Go" and "routes through WASM dispatch" explicit and testable.
+
+**Consequence:** Any command registered with `instant=true` suppresses the "queuing…" status indicator. For WASM-backed instant commands (e.g. `/agents` from the agents extension), the handler still routes through `dispatchOnCommandMsg` → `EventOnCommand` — the flag only affects the UI status, not the dispatch path.

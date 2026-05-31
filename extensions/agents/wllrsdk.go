@@ -123,6 +123,18 @@ func RegisterCommand(name, description string) {
 	})
 }
 
+// RegisterCommandInstant registers a slash command that is dispatched instantly,
+// bypassing the WASM dispatch queue. Use for commands that should respond without delay.
+func RegisterCommandInstant(name, description string) {
+	_sdkInitHooks = append(_sdkInitHooks, func() {
+		_sdkCall("register_command", map[string]any{
+			"name":        name,
+			"description": description,
+			"instant":     true,
+		})
+	})
+}
+
 // ─── Event handler registration ───────────────────────────────────────────────
 
 // OnToolCall registers a handler for tool calls.
