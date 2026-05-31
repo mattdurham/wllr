@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 
 	"charm.land/fantasy"
 	anthropicprovider "charm.land/fantasy/providers/anthropic"
@@ -57,17 +56,10 @@ func (s *Spawner) Spawn(ctx context.Context, req extension.SpawnRequest) error {
 	fullSystemPrompt += "## Your Agent Identity\nYour agent ID is: " + req.ID +
 		"\nTo report results back to the orchestrator, call send_message with agent_id=\"main\"."
 
-	// Derive parent ID: "main/coder" → "main"; "main/team/worker" → "main/team"; "toplevel" → "".
-	parentID := ""
-	if slash := strings.LastIndex(req.ID, "/"); slash > 0 {
-		parentID = req.ID[:slash]
-	}
-
 	opts := SpawnOpts{
-		SystemPrompt:   fullSystemPrompt,
-		Name:           req.Name,
-		NotifyParentID: parentID,
-		TurnTimeout:    -1,
+		SystemPrompt: fullSystemPrompt,
+		Name:         req.Name,
+		TurnTimeout:  -1,
 	}
 
 	if req.ThinkingBudget > 0 {
@@ -77,6 +69,10 @@ func (s *Spawner) Spawn(ctx context.Context, req extension.SpawnRequest) error {
 	a, err := s.pool.Spawn(req.ID, lm, opts)
 	if err != nil {
 		return fmt.Errorf("spawn agent %q: %w", req.ID, err)
+	}
+	// Set creatorID directly (not via SpawnOpts to avoid increasing SpawnOpts GC scan span).
+	if req.CallerID != "" {
+		a.creatorID = req.CallerID
 	}
 
 	// Sub-agent tokens are NOT routed to the main chat.
