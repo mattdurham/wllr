@@ -151,3 +151,51 @@ func TestRegistry_ExtensionCommand_Callable(t *testing.T) {
 		t.Errorf("expected args [world], got %v", gotArgs)
 	}
 }
+
+func TestInstantCommandsMarkedInstant(t *testing.T) {
+	r := NewRegistry()
+	registerBuiltins(r)
+	for _, name := range []string{"clear", "reload", "model", "status", "tools"} {
+		cmds := r.List()
+		found := false
+		for _, c := range cmds {
+			if c.Name == name {
+				found = true
+				if !c.Instant {
+					t.Errorf("command %q should be Instant=true", name)
+				}
+				break
+			}
+		}
+		if !found {
+			t.Errorf("command %q not found in registry", name)
+		}
+	}
+}
+
+func TestNonInstantCommandDefaultsFalse(t *testing.T) {
+	cmd := Command{Name: "foo", Desc: "bar"}
+	if cmd.Instant {
+		t.Error("Command zero value should have Instant=false")
+	}
+}
+
+func TestRegistry_Get_ReturnsCommand(t *testing.T) {
+	r := NewRegistry()
+	r.Register(Command{Name: "myfoo", Desc: "test", Instant: true, Handler: func(_ []string) tea.Cmd { return nil }})
+	cmd, ok := r.Get("myfoo")
+	if !ok {
+		t.Fatal("expected to find command 'myfoo'")
+	}
+	if !cmd.Instant {
+		t.Error("expected Instant=true")
+	}
+}
+
+func TestRegistry_Get_MissingCommand(t *testing.T) {
+	r := NewRegistry()
+	_, ok := r.Get("nonexistent")
+	if ok {
+		t.Error("expected ok=false for nonexistent command")
+	}
+}

@@ -9,4 +9,7 @@ type Command struct {
 	Handler func(args []string) tea.Cmd
 	Name    string
 	Desc    string
+	// Instant marks commands whose handler is invoked directly in the update loop,
+	// bypassing the WASM extension dispatch path. Built-in commands are always Instant.
+	Instant bool
 }
