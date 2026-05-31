@@ -311,7 +311,7 @@ func (p *testCapabilityProvider) ConfigRead(group string) (json.RawMessage, erro
 func TestHost_Load_MinimalWASM(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
 	if err := h.Load(ctx, path); err != nil {
@@ -325,7 +325,7 @@ func TestHost_Load_MinimalWASM(t *testing.T) {
 func TestHost_Load_FileNotFound(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	err := h.Load(ctx, "/nonexistent/path/to/extension.wasm")
 	if err == nil {
@@ -336,7 +336,7 @@ func TestHost_Load_FileNotFound(t *testing.T) {
 func TestHost_Load_MissingExport(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	path := writeWASM(t, "missing-free.wasm", missingFreeWASM)
 	err := h.Load(ctx, path)
@@ -350,7 +350,7 @@ func TestHost_DispatchEvent_NotSubscribed(t *testing.T) {
 
 	var onEventCalled bool
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
 	if err := h.Load(ctx, path); err != nil {
@@ -375,7 +375,7 @@ func TestHost_DispatchEvent_NotSubscribed(t *testing.T) {
 func TestHost_DispatchEvent_Subscribed(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
 	if err := h.Load(ctx, path); err != nil {
@@ -399,7 +399,7 @@ func TestHost_DispatchEvent_Subscribed(t *testing.T) {
 func TestHost_Subscribe_ViaHostCall(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
 	if err := h.Load(ctx, path); err != nil {
@@ -424,7 +424,7 @@ func TestHost_Subscribe_ViaHostCall(t *testing.T) {
 func TestHost_Store_SetGet(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
 	if err := h.Load(ctx, path); err != nil {
@@ -458,7 +458,7 @@ func TestHost_Store_SetGet(t *testing.T) {
 func TestHost_Store_GetMiss(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
 	if err := h.Load(ctx, path); err != nil {
@@ -478,7 +478,7 @@ func TestHost_Store_GetMiss(t *testing.T) {
 func TestHost_RegisterTool_DuplicateRejected(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
 	if err := h.Load(ctx, path); err != nil {
@@ -507,7 +507,7 @@ func TestHost_RegisterTool_DuplicateRejected(t *testing.T) {
 func TestHost_Callbacks_SetStatus(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	var gotKey, gotValue string
 	h.SetUIBridge(&testUIBridge{onSetStatus: func(k, v string) {
@@ -536,7 +536,7 @@ func TestHost_Callbacks_SetStatus(t *testing.T) {
 func TestHost_Reload(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
 	if err := h.Load(ctx, path); err != nil {
@@ -558,7 +558,7 @@ func TestHost_Reload(t *testing.T) {
 func TestHost_Multiple_Extensions(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	// Load the same WASM twice under different names.
 	path1 := writeWASM(t, "ext1.wasm", minimalWASM)
@@ -598,7 +598,7 @@ func TestHost_EchoWASM_SkipIfMissing(t *testing.T) {
 
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	if err := h.Load(ctx, echoPath); err != nil {
 		t.Fatalf("Load echo.wasm: %v", err)
@@ -613,7 +613,7 @@ func TestHost_EchoWASM_SkipIfMissing(t *testing.T) {
 func TestHost_Permission_TrustedGrantedAll(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	// LoadBytes makes the extension trusted — all permissions granted.
 	if err := h.LoadBytes(ctx, "trusted.wasm", minimalWASM, true); err != nil {
@@ -639,7 +639,7 @@ func TestHost_Permission_TrustedGrantedAll(t *testing.T) {
 func TestHost_Permission_UntrustedDeclared(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	if err := h.LoadBytes(ctx, "untrusted.wasm", minimalWASM, false); err != nil {
 		t.Fatalf("LoadBytes untrusted: %v", err)
@@ -664,7 +664,7 @@ func TestHost_Permission_UntrustedDeclared(t *testing.T) {
 func TestHost_Permission_RequestPermission_Granted(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	if err := h.LoadBytes(ctx, "ext.wasm", minimalWASM, false); err != nil {
 		t.Fatalf("LoadBytes: %v", err)
@@ -685,7 +685,7 @@ func TestHost_Permission_RequestPermission_Granted(t *testing.T) {
 func TestHost_Permission_RequestPermission_Denied(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	if err := h.LoadBytes(ctx, "ext.wasm", minimalWASM, false); err != nil {
 		t.Fatalf("LoadBytes: %v", err)
@@ -708,7 +708,7 @@ func TestHost_Permission_RequestPermission_Denied(t *testing.T) {
 func TestHost_LoadBytes_TrustedExtension(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	if err := h.LoadBytes(ctx, "builtin.wasm", minimalWASM, true); err != nil {
 		t.Fatalf("LoadBytes: %v", err)
@@ -724,7 +724,7 @@ func TestHost_LoadBytes_TrustedExtension(t *testing.T) {
 func TestHost_LoadBytes_UntrustedExtension(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	if err := h.LoadBytes(ctx, "user.wasm", minimalWASM, false); err != nil {
 		t.Fatalf("LoadBytes: %v", err)
@@ -742,7 +742,7 @@ func TestHost_LoadBytes_UntrustedExtension(t *testing.T) {
 func TestHost_RegisterTool_OverrideAllowed(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
 	if err := h.Load(ctx, path); err != nil {
@@ -781,7 +781,7 @@ func TestHost_RegisterTool_OverrideAllowed(t *testing.T) {
 func TestHost_ExecuteTool_CallbackInvoked(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	// Register a tool with a callback.
 	const toolCallID = "call-1"
@@ -823,7 +823,7 @@ func TestHost_ExecuteTool_CallbackInvoked(t *testing.T) {
 func TestHost_ExecuteTool_ErrorResult(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	const toolCallID = "call-err"
 	const toolName = "broken"
@@ -854,7 +854,7 @@ func TestHost_ExecuteTool_ErrorResult(t *testing.T) {
 func TestHost_ExecuteTool_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	h := NewHost(nil)
-	defer h.Close(context.Background())
+	defer func() { _ = h.Close(context.Background()) }()
 
 	const toolCallID = "call-cancel"
 	const toolName = "slow"
@@ -877,7 +877,7 @@ func TestHost_ExecuteTool_ContextCancelled(t *testing.T) {
 func TestHost_ExecuteTool_AfterToolCallDispatched(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	const toolCallID = "call-after"
 	const toolName = "mytool"
@@ -923,7 +923,7 @@ func TestHost_ExecuteTool_AfterToolCallDispatched(t *testing.T) {
 func TestHost_OnAfterToolCall_Callback(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	const toolCallID = "call-cb"
 	const toolName = "cbool"
@@ -978,7 +978,7 @@ func TestHost_OnAfterToolCall_Callback(t *testing.T) {
 func TestHost_RegisteredTools_WithOwner(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
 	if err := h.Load(ctx, path); err != nil {
@@ -1014,7 +1014,7 @@ func TestHost_RegisteredTools_WithOwner(t *testing.T) {
 func TestHost_GetRegisteredTools(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
 	if err := h.Load(ctx, path); err != nil {
@@ -1050,7 +1050,7 @@ func TestHost_GetRegisteredTools(t *testing.T) {
 func TestHost_HandleAgentSpawn_CallbackInvoked(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	type spawnArgs struct {
 		id, name, systemPrompt, modelName, initialPrompt string
@@ -1093,7 +1093,7 @@ func TestHost_HandleAgentSpawn_CallbackInvoked(t *testing.T) {
 func TestHost_HandleAgentSpawn_NilCallback(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
 	if err := h.Load(ctx, path); err != nil {
@@ -1113,7 +1113,7 @@ func TestHost_HandleAgentSpawn_NilCallback(t *testing.T) {
 func TestHost_HandleAgentClose_CallbackInvoked(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	closedID := make(chan string, 1)
 	h.SetAgentBridge(&testAgentBridge{onClose: func(id string) error {
@@ -1148,7 +1148,7 @@ func TestHost_HandleAgentClose_CallbackInvoked(t *testing.T) {
 func TestHost_HandleAgentSendMessage_CallbackInvoked(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	type msgArgs struct {
 		id  string
@@ -1187,7 +1187,7 @@ func TestHost_HandleAgentSendMessage_CallbackInvoked(t *testing.T) {
 func TestHost_HandleAgentList_ReturnsAgents(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	h.SetAgentBridge(&testAgentBridge{onList: func() ([]AgentInfo, error) {
 		return []AgentInfo{
@@ -1216,7 +1216,7 @@ func TestHost_HandleAgentList_ReturnsAgents(t *testing.T) {
 func TestHost_HandleAgentTokenCount_ReturnsCount(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	h.SetAgentBridge(&testAgentBridge{onTokenCount: func() int64 { return 42 }})
 
@@ -1242,7 +1242,7 @@ func TestHost_HandleAgentTokenCount_ReturnsCount(t *testing.T) {
 func TestHost_HandleTeamCreate_CallbackInvoked(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	type createArgs struct{ id, name string }
 	got := make(chan createArgs, 1)
@@ -1278,7 +1278,7 @@ func TestHost_HandleTeamCreate_CallbackInvoked(t *testing.T) {
 func TestHost_HandleTeamClose_CallbackInvoked(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	closedID := make(chan string, 1)
 	h.SetTeamBridge(&testTeamBridge{onClose: func(_ context.Context, id string) error {
@@ -1313,7 +1313,7 @@ func TestHost_HandleTeamClose_CallbackInvoked(t *testing.T) {
 func TestHost_HandleTeamAddMember_CallbackInvoked(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	type addArgs struct{ teamID, agentID string }
 	got := make(chan addArgs, 1)
@@ -1349,7 +1349,7 @@ func TestHost_HandleTeamAddMember_CallbackInvoked(t *testing.T) {
 func TestHost_HandleTeamRemoveMember_CallbackInvoked(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	type removeArgs struct{ teamID, agentID string }
 	got := make(chan removeArgs, 1)
@@ -1385,7 +1385,7 @@ func TestHost_HandleTeamRemoveMember_CallbackInvoked(t *testing.T) {
 func TestHost_HandleTeamGetInfo_CallbackInvoked(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	h.SetTeamBridge(&testTeamBridge{onGetMembers: func(teamID string) ([]string, error) {
 		if teamID == "team-1" {
@@ -1424,7 +1424,7 @@ func TestHost_HandleTeamGetInfo_CallbackInvoked(t *testing.T) {
 func TestHost_HandleTeamGetInfo_UnknownTeam_ReturnsError(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	h.SetTeamBridge(&testTeamBridge{onGetMembers: func(teamID string) ([]string, error) {
 		return nil, fmt.Errorf("team not found: %s", teamID)
@@ -1448,7 +1448,7 @@ func TestHost_HandleTeamGetInfo_UnknownTeam_ReturnsError(t *testing.T) {
 func TestHost_HandleTeamGetInfo_MissingTeamID_ReturnsError(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	h.SetTeamBridge(&testTeamBridge{onGetMembers: func(teamID string) ([]string, error) {
 		return nil, nil
@@ -1472,7 +1472,7 @@ func TestHost_HandleTeamGetInfo_MissingTeamID_ReturnsError(t *testing.T) {
 func TestHost_HandleTeamList_CallbackInvoked(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	h.SetTeamBridge(&testTeamBridge{onList: func() ([]string, error) {
 		return []string{"team-alpha", "team-beta"}, nil
@@ -1504,7 +1504,7 @@ func TestHost_HandleTeamList_CallbackInvoked(t *testing.T) {
 func TestHost_HandleTeamList_EmptyList(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	h.SetTeamBridge(&testTeamBridge{onList: func() ([]string, error) {
 		return []string{}, nil
@@ -1535,7 +1535,7 @@ func TestHost_HandleTeamList_EmptyList(t *testing.T) {
 func TestHost_HandleTeamGetInfo_NilCallback_ReturnsError(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 	// OnTeamGetInfo not set
 
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
@@ -1556,7 +1556,7 @@ func TestHost_HandleTeamGetInfo_NilCallback_ReturnsError(t *testing.T) {
 func TestHost_HandleTeamList_NilCallback_ReturnsError(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 	// OnTeamList not set
 
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
@@ -1576,7 +1576,7 @@ func TestHost_HandleTeamList_NilCallback_ReturnsError(t *testing.T) {
 func TestHost_HandleTeamGetInfo_ReturnsMembers(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	h.SetTeamBridge(&testTeamBridge{onGetMembers: func(teamID string) ([]string, error) {
 		return []string{"a1", "a2"}, nil
@@ -1619,7 +1619,7 @@ func TestHost_HandleTeamGetInfo_ReturnsMembers(t *testing.T) {
 func TestHost_HandleTeamList_ReturnsTeams(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	h.SetTeamBridge(&testTeamBridge{onList: func() ([]string, error) {
 		return []string{"t1", "t2"}, nil
@@ -1662,7 +1662,7 @@ func TestHost_HandleTeamCreate_ReturnsTeamID(t *testing.T) {
 	// not an empty response.
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	h.SetTeamBridge(&testTeamBridge{onCreate: func(id, name string) error { return nil }})
 
@@ -1696,7 +1696,7 @@ func TestHost_HandleAgentRun_CallbackInvoked(t *testing.T) {
 	// Bug 3 fix: agent_run host_call must invoke OnAgentRun with the correct agent ID.
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	var calledWith string
 	h.SetAgentBridge(&testAgentBridge{onRun: func(id string) error {
@@ -1725,7 +1725,7 @@ func TestHost_HandleAgentRun_CallbackInvoked(t *testing.T) {
 func TestHost_HandleAgentRun_NilCallback_ReturnsError(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	// OnAgentRun not set — should return a clear error, not panic.
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
@@ -1747,7 +1747,7 @@ func TestHost_CapabilityProvider_Exec_AcceptsContext(t *testing.T) {
 	called := false
 	h := NewHost(nil)
 	ctx := context.Background()
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
 	if err := h.Load(ctx, path); err != nil {
@@ -1777,7 +1777,7 @@ func TestHost_HandleExec_PassesContext(t *testing.T) {
 	ctxCalled := false
 	h := NewHost(nil)
 	ctx := context.Background()
-	defer h.Close(ctx)
+	defer func() { _ = h.Close(ctx) }()
 
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
 	if err := h.Load(ctx, path); err != nil {
