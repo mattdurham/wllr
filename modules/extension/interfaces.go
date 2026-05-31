@@ -21,13 +21,13 @@ type SpawnRequest struct {
 	// default model name.
 	ModelName     string
 	InitialPrompt string
-	// ThinkingBudget enables extended thinking with the given token budget.
-	// Zero means disabled. Only supported on Anthropic models.
-	ThinkingBudget int
 	// CallerID is the agent ID that issued the create_agent call (i.e. the parent agent).
 	// Empty string for agents spawned directly by the host or in tests.
 	// Passed through to SpawnOpts.CreatorID so the Agent records its parent.
 	CallerID string
+	// ThinkingBudget enables extended thinking with the given token budget.
+	// Zero means disabled. Only supported on Anthropic models.
+	ThinkingBudget int
 }
 
 // AgentBridge is the interface extensions call to manage agents.
