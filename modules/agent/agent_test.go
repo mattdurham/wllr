@@ -553,7 +553,7 @@ func TestFinishTurn_ShutdownRequest_SendsAgentShutdownAndClosesSelf(t *testing.T
 	if err != nil {
 		t.Fatalf("Spawn orchestrator: %v", err)
 	}
-	_, err = pool.Spawn("main/worker", lm, agent.SpawnOpts{CreatorID: "main/orchestrator"})
+	_, err = pool.Spawn("main/worker", lm, agent.SpawnOpts{})
 	if err != nil {
 		t.Fatalf("Spawn worker: %v", err)
 	}
@@ -636,7 +636,7 @@ func TestFinishTurn_NormalMessagesProcessedBeforeShutdown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Spawn orchestrator: %v", err)
 	}
-	_, err = pool.Spawn("main/worker", lm, agent.SpawnOpts{CreatorID: "main/orchestrator"})
+	_, err = pool.Spawn("main/worker", lm, agent.SpawnOpts{})
 	if err != nil {
 		t.Fatalf("Spawn worker: %v", err)
 	}
@@ -710,7 +710,7 @@ func TestFinishTurn_NoShutdownRequest_Normal(t *testing.T) {
 	pool := agent.NewPool()
 	lm := newBlockingLM("response")
 
-	_, err := pool.Spawn("main/worker", lm, agent.SpawnOpts{CreatorID: "main/orchestrator"})
+	_, err := pool.Spawn("main/worker", lm, agent.SpawnOpts{})
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}

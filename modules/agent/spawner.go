@@ -67,7 +67,6 @@ func (s *Spawner) Spawn(ctx context.Context, req extension.SpawnRequest) error {
 		SystemPrompt: fullSystemPrompt,
 		Name:         req.Name,
 		TurnTimeout:  -1,
-		CreatorID:    req.CallerID,
 	}
 
 	if req.ThinkingBudget > 0 {
@@ -77,6 +76,10 @@ func (s *Spawner) Spawn(ctx context.Context, req extension.SpawnRequest) error {
 	a, err := s.pool.Spawn(req.ID, lm, opts)
 	if err != nil {
 		return fmt.Errorf("spawn agent %q: %w", req.ID, err)
+	}
+	// Set creatorID directly (not via SpawnOpts to avoid increasing SpawnOpts GC scan span).
+	if req.CallerID != "" {
+		a.creatorID = req.CallerID
 	}
 
 	// Sub-agent tokens are NOT routed to the main chat.

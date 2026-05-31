@@ -560,13 +560,15 @@ func TestPool_SpawnSetsCreatorID(t *testing.T) {
 	pool := agent.NewPool()
 	lm := newMockLM()
 
-	// Spawn with a CreatorID set.
-	a, err := pool.Spawn("main/worker", lm, agent.SpawnOpts{CreatorID: "main"})
+	// Spawn without a creator (CreatorID is set via Spawner.Spawn, tested in spawner_test.go).
+	// Direct pool.Spawn does not accept a CreatorID to keep SpawnOpts lean.
+	a, err := pool.Spawn("main/worker", lm, agent.SpawnOpts{})
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
-	if got := a.CreatorID(); got != "main" {
-		t.Errorf("CreatorID = %q, want %q", got, "main")
+	// pool.Spawn does not set creatorID — it is set by spawner.go after spawning.
+	if got := a.CreatorID(); got != "" {
+		t.Errorf("CreatorID = %q, want empty (set by spawner, not pool.Spawn)", got)
 	}
 }
 
