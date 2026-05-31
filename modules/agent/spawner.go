@@ -64,10 +64,10 @@ func (s *Spawner) Spawn(ctx context.Context, req extension.SpawnRequest) error {
 	}
 
 	opts := SpawnOpts{
-		SystemPrompt:   fullSystemPrompt,
-		Name:           req.Name,
-		NotifyParentID: parentID,
-		TurnTimeout:    -1,
+		SystemPrompt: fullSystemPrompt,
+		Name:         req.Name,
+		TurnTimeout:  -1,
+		CreatorID:    req.CallerID,
 	}
 
 	if req.ThinkingBudget > 0 {

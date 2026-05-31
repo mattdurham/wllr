@@ -48,6 +48,8 @@ idle ──(Submit called)──▶ running ──(turn complete)──▶ idle
 
 **Invariant:** `DrainInbox` is atomic — no message is lost between `AppendInbox` and `DrainInbox` regardless of concurrent calls. This is guaranteed by the `inboxMu` mutex.
 
+**Invariant:** `AppendInbox` and `DrainInbox` do not filter by `MessageType`. Filtering is done at `sdkToFantasyMessages` conversion time. `sdk.MessageTypeSystem` messages survive the inbox cycle intact but are never recorded in history (see §9 streamTurn) and never reach the LLM context.
+
 ---
 
 ## 4. Token Counter Atomicity
@@ -285,6 +287,10 @@ On error or cancellation it is not called, consistent with the pattern for other
 5. Returns the collected text, real `fantasy.Usage` from `result.TotalUsage`, and any error.
 6. On error, returns a zero-valued `fantasy.Usage`.
 
+**Message filtering before LLM calls:** `sdkToFantasyMessages` is called on the history slice before constructing the `AgentStreamCall`. It skips any message whose `Type` is `sdk.MessageTypeSystem` or `sdk.MessageTypeSteering`. These messages are consumed by the Go runtime and must never reach the provider.
+
+**History recording on drain-turn path:** When `content == ""` (drain-turn: inbox messages are the prompt), system messages (`MessageTypeSystem`) are NOT appended to `a.history`. This prevents control messages from accumulating in history and being sent to the LLM on future turns. Steering messages (`MessageTypeSteering`) are recorded in history but still filtered by `sdkToFantasyMessages`.
+
 ---
 
 ## 10. AgentPool.ProviderName
@@ -320,6 +326,7 @@ type SpawnOpts struct {
 - `ProviderOptions`: passed directly to `fantasy.WithProviderOptions` on each turn. Used for provider-specific settings such as extended thinking.
 - `NotifyParentID`: if non-empty, the pool automatically sends a completion message to this agent ID when the spawned agent's final turn ends, giving the parent a guaranteed wakeup.
 - `TurnTimeout`: overrides the per-turn context deadline. Zero uses the default (30 minutes). Negative disables the timeout entirely.
+- `CreatorID`: the ID of the agent that issued the `create_agent` call that spawned this agent. Empty string for top-level agents. Set by `Spawner` from `extension.SpawnRequest.CallerID`; available via `Agent.CreatorID() string`.
 
 ## 12. Spawner
 
@@ -354,3 +361,75 @@ func (s *Spawner) Spawn(ctx context.Context, req extension.SpawnRequest) error
 | `ErrAgentNotFound` | `Close`, `SendMessage`, `Send`, `Cancel`, `Team.AddMember` | Agent ID not in pool |
 | `ErrTeamExists`    | `CreateTeam`                  | Team ID already registered               |
 | `ErrTeamNotFound`  | `CloseTeam`                   | Team ID not in pool                      |
+
+---
+
+## 14. Graceful Shutdown Protocol
+
+An agent is shut down gracefully by sending a `system` message with JSON content
+`{"event":"shutdown_request","from":"<callerID>"}` to its inbox, then triggering a turn
+via `pool.Send`. The agent's `finishTurn` detects the shutdown_request and handles it
+without abrupt cancellation.
+
+### Message flow
+
+```
+Orchestrator                         Worker (target)
+─────────────                        ───────────────
+shutdown_agent(workerID)
+  → agent_send_message(id, payload, type="system")
+  → agent_run(id)                    [turn starts or next turn triggered]
+                                     [turn completes normally]
+                                     finishTurn detects shutdown_request
+                                       → pool.SendMessage(creatorID, AGENT_SHUTDOWN)
+                                       → pool.Close(a.id)
+                                       → onDone(nil)
+Orchestrator inbox receives:
+  {event:"AGENT_SHUTDOWN", agent_id:"workerID"}
+```
+
+### finishTurn shutdown detection
+
+`finishTurn` runs after `isRunning` transitions to false. It:
+
+1. Drains the inbox for messages that arrived **during** the current turn.
+2. Scans for any system message whose JSON content has `event == "shutdown_request"`.
+   Non-matching system messages are passed through as `normalPending`.
+3. Also checks `a.pendingShutdownFrom` — a field set in a previous `finishTurn` cycle
+   when a shutdown_request was deferred (see drain-until-empty below).
+4. If **normal messages coexist** with a shutdown_request: re-queues the normal messages
+   to the inbox, sets `a.pendingShutdownFrom = shutdownFrom`, and calls `Submit("")` for
+   a drain turn. The shutdown is deferred until all normal work is done.
+5. If **only the shutdown_request** remains (no normal pending, no new inbox messages):
+   - Marshals `{"event":"AGENT_SHUTDOWN","agent_id":"<id>"}` as a system message.
+   - Calls `pool.SendMessage(shutdownFrom, agentShutdownMsg)` to notify the creator.
+   - Calls `pool.Close(a.id)` to remove self from pool (idempotent, safe from finishTurn goroutine).
+   - Calls `onDone(nil)` exactly once and returns.
+
+### Invariants
+
+**Invariant:** `pendingShutdownFrom` is only read and written inside `finishTurn`, which
+runs after each `isRunning.Store(false)`. Because at most one goroutine can hold
+`isRunning == true` at a time, no additional mutex is needed for `pendingShutdownFrom`.
+`Submit` must never access this field.
+
+**Invariant:** Drain turns triggered from `finishTurn` use the original context passed to
+`Submit`, not `context.Background()`. This allows harness shutdown to cancel in-flight
+drain turns rather than running them to their full 30-minute timeout.
+
+**Invariant:** The shutdown_request is never re-injected into the inbox. It is consumed
+by `finishTurn` and persisted in `a.pendingShutdownFrom` if deferral is needed. This
+ensures Submit's initial `DrainInbox` cannot consume the deferred shutdown before the
+next `finishTurn` can act on it.
+
+**Invariant:** `onDone` is called exactly once per logical session. The shutdown path
+calls `onDone(nil)` and returns; the normal path at the bottom of `finishTurn` is
+therefore not reached. No double-`onDone` is possible.
+
+**Invariant:** `pool.Close` is idempotent. Calling it from `finishTurn` after
+`isRunning.Store(false)` is safe — the agent is no longer running when Close is called,
+and Close acquires `p.mu.Lock` without any pool lock being held by the agent goroutine.
+
+**Invariant:** System messages are never recorded in `a.history` on the drain-turn path
+(§9). An AGENT_SHUTDOWN message sent by the worker to the creator's inbox is a system
+message; it is filtered from LLM context when the creator's next turn runs.

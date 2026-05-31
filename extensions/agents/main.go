@@ -442,6 +442,7 @@ func handleCreateAgent(p beforeToolCallPayload) {
 		ModelName      string `json:"model_name"`
 		InitialPrompt  string `json:"initial_prompt"`
 		ThinkingBudget int    `json:"thinking_budget"`
+		CallerID       string `json:"caller_id"`
 	}
 	result := agentCall("agent_spawn", spawnParams{
 		ID:             agentID,
@@ -450,6 +451,7 @@ func handleCreateAgent(p beforeToolCallPayload) {
 		ModelName:      input.Model,
 		InitialPrompt:  input.Prompt,
 		ThinkingBudget: input.ThinkingBudget,
+		CallerID:       scope, // the calling agent's ID (p.AgentID or "main")
 	})
 
 	var resp struct {
@@ -478,11 +480,27 @@ func handleShutdownAgent(p beforeToolCallPayload) {
 		return
 	}
 
-	type closeParams struct {
-		ID string `json:"id"`
+	// Build a system shutdown_request message and send it to the target agent's inbox.
+	// The agent's finishTurn will detect it, send AGENT_SHUTDOWN back to the creator,
+	// and self-close. This avoids forcibly terminating a running agent.
+	callerID := p.AgentID
+	if callerID == "" {
+		callerID = "main"
 	}
-	result := agentCall("agent_close", closeParams{ID: input.AgentID})
-
+	payload, _ := json.Marshal(map[string]string{
+		"event": "shutdown_request",
+		"from":  callerID,
+	})
+	type sendParams struct {
+		ID      string `json:"id"`
+		Message string `json:"message"`
+		Type    string `json:"type"`
+	}
+	result := agentCall("agent_send_message", sendParams{
+		ID:      input.AgentID,
+		Message: string(payload),
+		Type:    "system",
+	})
 	var resp struct {
 		Error string `json:"error,omitempty"`
 	}
@@ -493,8 +511,14 @@ func handleShutdownAgent(p beforeToolCallPayload) {
 		ToolResult(p.ToolCallID, "shutdown_agent: "+resp.Error, true)
 		return
 	}
-	removeAgent(input.AgentID)
-	ToolResult(p.ToolCallID, `{"status":"closed"}`, false)
+
+	// Trigger the agent's next turn so it processes the shutdown_request immediately
+	// if it is currently idle. finishTurn handles the message after the turn completes.
+	agentCall("agent_run", map[string]string{"id": input.AgentID})
+
+	// Do NOT call removeAgent or agent_close here — the agent will self-close when
+	// finishTurn processes the shutdown_request and sends AGENT_SHUTDOWN back.
+	ToolResult(p.ToolCallID, `{"status":"shutdown_requested"}`, false)
 }
 
 func handleListAgents(p beforeToolCallPayload) {

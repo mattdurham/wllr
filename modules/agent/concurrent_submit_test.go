@@ -13,13 +13,20 @@ import (
 
 // blockingLM blocks in Stream until its release channel is closed.
 // This lets tests control exactly when a turn finishes.
+// streamStarted is closed when Stream is first entered, allowing callers to
+// synchronize without time.Sleep races.
 type blockingLM struct {
-	release chan struct{}
-	tokens  []string
+	release       chan struct{}
+	streamStarted chan struct{}
+	tokens        []string
 }
 
 func newBlockingLM(tokens ...string) *blockingLM {
-	return &blockingLM{release: make(chan struct{}), tokens: tokens}
+	return &blockingLM{
+		release:       make(chan struct{}),
+		streamStarted: make(chan struct{}),
+		tokens:        tokens,
+	}
 }
 
 func (b *blockingLM) Model() string    { return "blocking-model" }
@@ -28,6 +35,13 @@ func (b *blockingLM) Provider() string { return "blocking" }
 func (b *blockingLM) Stream(ctx context.Context, _ fantasy.Call) (fantasy.StreamResponse, error) {
 	toks := b.tokens
 	rel := b.release
+	// Signal that Stream has been entered — tests wait on this instead of sleeping.
+	select {
+	case <-b.streamStarted:
+		// already closed (e.g. reused LM) — no-op
+	default:
+		close(b.streamStarted)
+	}
 	return func(yield func(fantasy.StreamPart) bool) {
 		// Block until released or context cancelled.
 		select {
@@ -58,6 +72,16 @@ func (b *blockingLM) StreamObject(_ context.Context, _ fantasy.ObjectCall) (fant
 
 // Release unblocks the LM so the stream can complete.
 func (b *blockingLM) Release() { close(b.release) }
+
+// WaitForStream blocks until Stream has been entered or the test deadline is reached.
+func (b *blockingLM) WaitForStream(t *testing.T) {
+	t.Helper()
+	select {
+	case <-b.streamStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for blockingLM.Stream to be entered")
+	}
+}
 
 // TestSubmit_ConcurrentCallQueuesContent verifies that a second Submit call while
 // a turn is running queues content to the inbox and the running goroutine processes

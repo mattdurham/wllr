@@ -14,7 +14,7 @@ type fakeAgentBridge struct{}
 
 func (f *fakeAgentBridge) Spawn(_ context.Context, _ extension.SpawnRequest) error { return nil }
 func (f *fakeAgentBridge) Close(_ string) error                                    { return nil }
-func (f *fakeAgentBridge) SendMessage(_, _ string) error                           { return nil }
+func (f *fakeAgentBridge) SendMessage(_ string, _ sdk.Message) error               { return nil }
 func (f *fakeAgentBridge) Run(_ string) error                                      { return nil }
 func (f *fakeAgentBridge) List() ([]extension.AgentInfo, error)                    { return nil, nil }
 func (f *fakeAgentBridge) TokenCount() int64                                       { return 0 }

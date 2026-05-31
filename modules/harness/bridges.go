@@ -75,7 +75,7 @@ func (e *earlyAgentBridge) Spawn(_ context.Context, _ extension.SpawnRequest) er
 	return fmt.Errorf("agent_spawn: session not yet started")
 }
 func (e *earlyAgentBridge) Close(_ string) error                 { return fmt.Errorf("not started") }
-func (e *earlyAgentBridge) SendMessage(_, _ string) error        { return fmt.Errorf("not started") }
+func (e *earlyAgentBridge) SendMessage(_ string, _ sdk.Message) error { return fmt.Errorf("not started") }
 func (e *earlyAgentBridge) Run(_ string) error                   { return fmt.Errorf("not started") }
 func (e *earlyAgentBridge) List() ([]extension.AgentInfo, error) { return nil, nil }
 func (e *earlyAgentBridge) TokenCount() int64                    { return 0 }
@@ -110,14 +110,14 @@ func (b *harnessAgentBridge) Close(id string) error {
 	return b.pool.Close(id)
 }
 
-func (b *harnessAgentBridge) SendMessage(id, message string) error {
+func (b *harnessAgentBridge) SendMessage(id string, msg sdk.Message) error {
 	if b.pool == nil {
 		return fmt.Errorf("no agent pool")
 	}
-	if strings.TrimSpace(message) == "" {
+	if strings.TrimSpace(msg.Content) == "" {
 		return fmt.Errorf("send_message: message must be non-empty")
 	}
-	return b.pool.SendMessage(id, sdk.Message{Role: sdk.RoleUser, Content: message})
+	return b.pool.SendMessage(id, msg)
 }
 
 func (b *harnessAgentBridge) Run(id string) error {

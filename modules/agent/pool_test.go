@@ -555,3 +555,31 @@ func TestPool_Send_UnknownID_ReturnsError(t *testing.T) {
 		t.Errorf("expected ErrAgentNotFound, got %v", err)
 	}
 }
+
+func TestPool_SpawnSetsCreatorID(t *testing.T) {
+	pool := agent.NewPool()
+	lm := newMockLM()
+
+	// Spawn with a CreatorID set.
+	a, err := pool.Spawn("main/worker", lm, agent.SpawnOpts{CreatorID: "main"})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	if got := a.CreatorID(); got != "main" {
+		t.Errorf("CreatorID = %q, want %q", got, "main")
+	}
+}
+
+func TestPool_Spawn_NoCreatorID_EmptyString(t *testing.T) {
+	pool := agent.NewPool()
+	lm := newMockLM()
+
+	// Spawn without a CreatorID (top-level agent).
+	a, err := pool.Spawn("main", lm, agent.SpawnOpts{})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	if got := a.CreatorID(); got != "" {
+		t.Errorf("CreatorID = %q, want empty string for top-level agent", got)
+	}
+}
