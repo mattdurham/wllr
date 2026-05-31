@@ -1,3 +1,5 @@
+//go:build wasip1
+
 package main
 
 // PickerItem is one entry in a ShowPicker call.
