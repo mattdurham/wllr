@@ -843,8 +843,8 @@ func (h *Host) handleAgentSpawn(req sdk.HostCallRequest) sdk.HostCallResponse {
 		SystemPrompt   string `json:"system_prompt"`
 		ModelName      string `json:"model_name"`
 		InitialPrompt  string `json:"initial_prompt"`
-		ThinkingBudget int    `json:"thinking_budget"`
 		CallerID       string `json:"caller_id"`
+		ThinkingBudget int    `json:"thinking_budget"`
 	}
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("agent_spawn: %v", err)}
