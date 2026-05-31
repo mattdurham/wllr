@@ -81,7 +81,8 @@ func (e *earlyAgentBridge) SendMessage(_ string, _ sdk.Message) error {
 
 func (e *earlyAgentBridge) Run(_ string) error                   { return fmt.Errorf("not started") }
 func (e *earlyAgentBridge) List() ([]extension.AgentInfo, error) { return nil, nil }
-func (e *earlyAgentBridge) TokenCount() int64                    { return 0 }
+func (e *earlyAgentBridge) TokenCount() int64                          { return 0 }
+func (e *earlyAgentBridge) MainAgentContextUsage() sdk.ContextUsage    { return sdk.ContextUsage{} }
 func (e *earlyAgentBridge) SetHistory(_ string, _ []sdk.Message) error {
 	return fmt.Errorf("not started")
 }
@@ -162,6 +163,13 @@ func (b *harnessAgentBridge) SetHistory(id string, messages []sdk.Message) error
 		return fmt.Errorf("no agent pool")
 	}
 	return b.pool.SetAgentHistory(id, messages)
+}
+
+func (b *harnessAgentBridge) MainAgentContextUsage() sdk.ContextUsage {
+	if b.pool == nil {
+		return sdk.ContextUsage{}
+	}
+	return b.pool.MainAgentContextUsage()
 }
 
 // harnessTeamBridge implements extension.TeamBridge by delegating to the agent pool.

@@ -46,6 +46,12 @@ type Agent struct {
 	// can build an incremental summary. Protected by lastSummaryMu.
 	lastSummary string
 
+	// lastUsage is the token usage from the most recently completed turn.
+	// Updated after each turn by setLastUsage. Read by LastUsage().
+	// Protected by lastUsageMu.
+	lastUsage   fantasy.Usage
+	lastUsageMu sync.RWMutex
+
 	// pendingShutdownFrom is set when a shutdown_request arrives alongside normal
 	// pending messages in finishTurn. The shutdown is deferred until all normal
 	// messages are drained (drain-until-empty pattern). Only accessed from
@@ -217,6 +223,21 @@ func (a *Agent) SetLastSummary(s string) {
 	a.lastSummaryMu.Lock()
 	a.lastSummary = s
 	a.lastSummaryMu.Unlock()
+}
+
+// LastUsage returns the token usage from the most recently completed turn.
+// Returns a zero-valued Usage before the first turn completes.
+func (a *Agent) LastUsage() fantasy.Usage {
+	a.lastUsageMu.RLock()
+	defer a.lastUsageMu.RUnlock()
+	return a.lastUsage
+}
+
+// setLastUsage stores the usage from the most recently completed turn.
+func (a *Agent) setLastUsage(u fantasy.Usage) {
+	a.lastUsageMu.Lock()
+	a.lastUsage = u
+	a.lastUsageMu.Unlock()
 }
 
 // ID returns the agent's unique identifier within its pool.
