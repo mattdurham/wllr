@@ -33,6 +33,12 @@ func (r *Registry) Dispatch(name string, args []string) tea.Cmd {
 	return cmd.Handler(args)
 }
 
+// Get returns the Command registered under name and whether it was found.
+func (r *Registry) Get(name string) (Command, bool) {
+	cmd, ok := r.commands[name]
+	return cmd, ok
+}
+
 // List returns all registered commands sorted by name.
 func (r *Registry) List() []Command {
 	out := make([]Command, 0, len(r.commands))
@@ -59,8 +65,9 @@ func (r *Registry) HelpText() string {
 // registerBuiltins installs the built-in commands into r.
 func registerBuiltins(r *Registry) {
 	r.Register(Command{
-		Name: "help",
-		Desc: "Show available commands",
+		Name:    "help",
+		Desc:    "Show available commands",
+		Instant: true,
 		Handler: func(_ []string) tea.Cmd {
 			return func() tea.Msg {
 				return NotifyMsg{Text: "Use the commands listed in the help text above."}
@@ -69,24 +76,27 @@ func registerBuiltins(r *Registry) {
 	})
 
 	r.Register(Command{
-		Name: "clear",
-		Desc: "Clear the conversation history",
+		Name:    "clear",
+		Desc:    "Clear the conversation history",
+		Instant: true,
 		Handler: func(_ []string) tea.Cmd {
 			return func() tea.Msg { return clearMsg{} }
 		},
 	})
 
 	r.Register(Command{
-		Name: "reload",
-		Desc: "Hot-reload all extensions",
+		Name:    "reload",
+		Desc:    "Hot-reload all extensions",
+		Instant: true,
 		Handler: func(_ []string) tea.Cmd {
 			return func() tea.Msg { return ReloadMsg{} }
 		},
 	})
 
 	r.Register(Command{
-		Name: "model",
-		Desc: "Switch the active model (e.g. /model claude-haiku-3-5)",
+		Name:    "model",
+		Desc:    "Switch the active model (e.g. /model claude-haiku-3-5)",
+		Instant: true,
 		Handler: func(args []string) tea.Cmd {
 			if len(args) == 0 {
 				return func() tea.Msg { return NotifyMsg{Text: "Usage: /model <name>"} }
@@ -96,8 +106,9 @@ func registerBuiltins(r *Registry) {
 	})
 
 	r.Register(Command{
-		Name: "status",
-		Desc: "Override the status line (/status my text) or clear it (/status)",
+		Name:    "status",
+		Desc:    "Override the status line (/status my text) or clear it (/status)",
+		Instant: true,
 		Handler: func(args []string) tea.Cmd {
 			text := strings.Join(args, " ")
 			return func() tea.Msg {
@@ -107,8 +118,9 @@ func registerBuiltins(r *Registry) {
 	})
 
 	r.Register(Command{
-		Name: "tools",
-		Desc: "Show tool calls from the current agent turn",
+		Name:    "tools",
+		Desc:    "Show tool calls from the current agent turn",
+		Instant: true,
 		Handler: func(_ []string) tea.Cmd {
 			return func() tea.Msg { return showToolsMsg{} }
 		},

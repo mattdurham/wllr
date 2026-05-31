@@ -105,37 +105,77 @@ func (lm *FakeLM) Generate(_ context.Context, call fantasy.Call) (*fantasy.Respo
 }
 
 // Stream implements fantasy.LanguageModel.
-// It emits the next preset response word-by-word as text deltas.
+// If a scripted turn is available (added via SetScript), it is popped and
+// emitted — text parts first, then tool call parts, then a finish part.
+// When the script is exhausted, the next preset text response is emitted
+// word-by-word as text deltas.
 func (lm *FakeLM) Stream(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
 	lm.mu.Lock()
 	rc := recordCall(call)
 	lm.calls = append(lm.calls, rc)
-	text := lm.nextResponse()
+
+	// If a scripted turn is queued, pop it.
+	var scripted *ScriptedTurn
+	if len(lm.script) > 0 {
+		turn := lm.script[0]
+		lm.script = lm.script[1:]
+		scripted = &turn
+	}
+
+	text := ""
+	if scripted == nil {
+		text = lm.nextResponse()
+	} else if scripted.Text != "" {
+		text = scripted.Text
+	}
 	lm.mu.Unlock()
+
+	// Capture tool calls snapshot (nil-safe).
+	var toolCalls []ScriptedToolCall
+	if scripted != nil {
+		toolCalls = scripted.ToolCalls
+	}
 
 	words := splitWords(text)
 
 	return func(yield func(fantasy.StreamPart) bool) {
-		// text_start
-		if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextStart, ID: "0"}) {
-			return
-		}
-		// emit each word as a delta
-		for _, word := range words {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-			if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, ID: "0", Delta: word}) {
+		// Emit text parts if there is text content.
+		if len(words) > 0 {
+			if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextStart, ID: "0"}) {
 				return
 			}
+			for _, word := range words {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+				if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, ID: "0", Delta: word}) {
+					return
+				}
+			}
+			if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextEnd, ID: "0"}) {
+				return
+			}
 		}
-		// text_end
-		if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextEnd, ID: "0"}) {
-			return
+
+		// Emit tool call parts (each as a single complete StreamPartTypeToolCall).
+		for _, tc := range toolCalls {
+			input := ""
+			if len(tc.Input) > 0 {
+				input = string(tc.Input)
+			}
+			if !yield(fantasy.StreamPart{
+				Type:          fantasy.StreamPartTypeToolCall,
+				ID:            tc.ID,
+				ToolCallName:  tc.Name,
+				ToolCallInput: input,
+			}) {
+				return
+			}
 		}
-		// finish
+
+		// Finish part.
 		yield(fantasy.StreamPart{
 			Type:         fantasy.StreamPartTypeFinish,
 			FinishReason: fantasy.FinishReasonStop,

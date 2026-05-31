@@ -8,6 +8,17 @@ import (
 	"sync"
 )
 
+// agentCall fires a host_call for agent-related methods and returns the raw
+// response, or "" on error. It reuses the SDK's _sdkCallResult to avoid
+// duplicating the WASM import.
+func agentCall(method string, params any) string {
+	raw := _sdkCallResult(method, params)
+	if raw == nil {
+		return ""
+	}
+	return string(raw)
+}
+
 // Task represents a task in a task list.
 
 // pending, in_progress, completed, blocked
@@ -29,7 +40,7 @@ func init() {
 	RegisterTool(
 		"tasklist_create",
 		"Create a new task list and return its unique ID",
-		json.RawMessage(`{"type":"object","properties":{"name":{"type":"string","description":"Name of the task list"},"description":{"type":"string","description":"Description of the task list"}},"required":["name"]}`),
+		json.RawMessage(`{"type":"object","properties":{"name":{"type":"string","description":"Name of the task list"},"description":{"type":"string","description":"Description of the task list"},"owner_agent_id":{"type":"string","description":"Agent ID to notify on task completion or blocking"}},"required":["name"]}`),
 	)
 	RegisterTool(
 		"tasks_create",
@@ -73,8 +84,9 @@ func init() {
 
 func handleTasklistCreate(p toolPayload) (string, bool) {
 	var input struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
+		Name         string `json:"name"`
+		Description  string `json:"description"`
+		OwnerAgentID string `json:"owner_agent_id"`
 	}
 	if err := json.Unmarshal(p.Input, &input); err != nil || input.Name == "" {
 		return "tasklist_create: name is required", true
@@ -86,10 +98,11 @@ func handleTasklistCreate(p toolPayload) (string, bool) {
 	counterMu.Unlock()
 
 	taskList := &TaskList{
-		ID:          listID,
-		Name:        input.Name,
-		Description: input.Description,
-		Tasks:       make(map[string]*Task),
+		ID:           listID,
+		Name:         input.Name,
+		Description:  input.Description,
+		Tasks:        make(map[string]*Task),
+		OwnerAgentID: input.OwnerAgentID,
 	}
 
 	taskListMu.Lock()
@@ -179,6 +192,8 @@ func handleTasksUpdate(p toolPayload) (string, bool) {
 		return "tasks_update: task not found", true
 	}
 
+	oldStatus := task.Status
+
 	if input.Title != "" {
 		task.Title = input.Title
 	}
@@ -197,7 +212,27 @@ func handleTasksUpdate(p toolPayload) (string, bool) {
 	if input.Dependencies != nil {
 		task.Dependencies = input.Dependencies
 	}
+
+	ownerAgentID := taskList.OwnerAgentID
+	taskTitle := task.Title
+	taskID := task.ID
+	newStatus := task.Status
 	taskList.mu.Unlock()
+
+	if shouldNotify(oldStatus, newStatus) && ownerAgentID != "" {
+		resp := agentCall("agent_send_message", map[string]string{
+			"id":      ownerAgentID,
+			"message": fmt.Sprintf("TASK_DONE: %s %s", taskID, taskTitle),
+		})
+		if resp != "" {
+			var errResp struct {
+				Error string `json:"error"`
+			}
+			if jsonErr := json.Unmarshal([]byte(resp), &errResp); jsonErr == nil && errResp.Error != "" {
+				fmt.Printf("tasks: agent_send_message warning: %s\n", errResp.Error)
+			}
+		}
+	}
 
 	out, _ := json.Marshal(map[string]bool{"success": true})
 	return string(out), false

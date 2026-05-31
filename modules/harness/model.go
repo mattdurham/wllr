@@ -92,6 +92,16 @@ type Model struct {
 	modalContent string
 	input        InputArea
 
+	// OnMessageEnd is called after a completed assistant turn with the role
+	// and full content string. It is invoked on the bubbletea update goroutine.
+	// Nil means no callback. Set by cmd/main.go for session persistence.
+	OnMessageEnd func(role, content string)
+
+	// OnUserMessage is called when the user submits a message, before it is
+	// sent to the agent. It is invoked on the bubbletea update goroutine.
+	// Nil means no callback. Set by cmd/main.go for session persistence.
+	OnUserMessage func(content string)
+
 	// Loaded extension paths for reload.
 	extPaths []string
 
@@ -617,6 +627,9 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 		}
 		m.chat.FinalizeMessage()
 		m.chat.UnqueueLastMessage() // must be after FinalizeMessage so queued msgs appear after the assistant response
+		if responseContent != "" && m.OnMessageEnd != nil {
+			m.OnMessageEnd(string(sdk.RoleAssistant), responseContent)
+		}
 		cmds = append(cmds, m.cmdDispatchAfterProviderResponse())
 		if responseContent != "" {
 			cmds = append(cmds, m.cmdDispatchMessageEnd(string(sdk.RoleAssistant), responseContent))
@@ -672,6 +685,11 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 	case CommandMsg:
 		if msg.Name == "help" {
 			return m, func() tea.Msg { return ShowModalMsg{Text: m.commands.HelpText()} }, true
+		}
+		// Instant commands bypass WASM dispatch: invoke the handler directly
+		// without setting the "queuing…" indicator. Built-in commands are always Instant.
+		if cmd, ok := m.commands.Get(msg.Name); ok && cmd.Instant {
+			return m, cmd.Handler(msg.Args), true
 		}
 		// Show a queuing indicator while the command is dispatched asynchronously
 		// (e.g. skill commands go through WASM before submitToAgent is called).
@@ -804,6 +822,9 @@ func (m Model) submitToAgent(content, display string) (tea.Model, tea.Cmd) {
 	m.streamStart = time.Now()
 	m.statusBar.statuses["stream"] = "working."
 	m.live.setStreaming(true, m.streamStart, false)
+	if content != "" && m.OnUserMessage != nil {
+		m.OnUserMessage(content)
+	}
 
 	pool := m.agentPool
 	mainAgentID := m.mainAgentID
@@ -1085,17 +1106,15 @@ func (m Model) View() tea.View {
 			sb.WriteString("\n")
 		}
 	}
-	if m.consoleVisible && !m.console.
-
-		// Pad to exactly m.height lines so no old content bleeds through when
-		// the viewport shrinks (e.g. dropdown appears/disappears).
-		IsEmpty() {
+	if m.consoleVisible && !m.console.IsEmpty() {
 		sb.WriteString(m.renderConsole())
 	}
 	sb.WriteString(inputBox)
 
 	out := sb.String()
 	if m.height > 0 {
+		// Pad to exactly m.height lines so no old content bleeds through when
+		// the viewport shrinks (e.g. dropdown appears/disappears).
 		lineCount := strings.Count(out, "\n")
 		if lineCount < m.height-1 {
 			out += strings.Repeat("\n", m.height-1-lineCount)
