@@ -359,6 +359,67 @@ Note: Percent is 0–100. CompactConfig.ThresholdPct is a fraction 0.0–1.0.
 
 ---
 
+## UI Scene Graph (P0 — types only)
+
+These types describe a declarative, node-based view of an area of the TUI. They
+are pure data definitions in this phase: no host_call method is wired to them
+yet (that lands in a later phase). They cross the host/WASM boundary as JSON.
+
+### UINodeType
+
+`UINodeType` is a `string` typedef selecting a rendering primitive. Stable across ABI versions.
+
+| Constant         | Wire value   | Renders as                                   |
+|------------------|--------------|----------------------------------------------|
+| `UINodeText`     | `"text"`     | Leaf text node (uses `Text`)                 |
+| `UINodeVStack`   | `"vstack"`   | Vertical join of children                    |
+| `UINodeHStack`   | `"hstack"`   | Horizontal join of children                  |
+| `UINodeViewport` | `"viewport"` | Scrollable region wrapping one child subtree |
+| `UINodeSpinner`  | `"spinner"`  | Animated activity indicator                  |
+| `UINodeDivider`  | `"divider"`  | Horizontal rule                              |
+
+**Invariant:** An unknown `UINodeType` must render as an empty box (forward-compatibility).
+
+### UINode
+
+```json
+{ "id": "msg-1", "type": "vstack", "text": "", "props": {…}, "children": [ … ] }
+```
+
+- `id` — required; unique within the owning area; the address for incremental patches.
+- `type` — required; one of `UINodeType`.
+- `text` — meaningful only for `UINodeText`; omitted when empty.
+- `props` — optional `*UIProps`; omitted when nil.
+- `children` — meaningful only for container types; omitted when empty.
+
+### UIProps
+
+Optional style/layout. Colour fields (`fg`, `bg`) reference **named theme tokens**, never raw colours, so the host owns theming. `width`/`height` accept `"fill"`, `"auto"`, or a decimal cell count. `padding`/`margin` are length 1 (all sides), 2 (`[v,h]`), or 4 (`[t,r,b,l]`). A nil `*UIProps` means "inherit / harness defaults".
+
+### UIPatchOp / UIPatchParams
+
+`UIPatchOpType` selects a mutation; the host applies a batch in order, all-or-nothing.
+
+| Constant         | Wire value      | Meaningful fields            | Effect                                            |
+|------------------|-----------------|------------------------------|---------------------------------------------------|
+| `UIOpSetRoot`    | `"set_root"`    | `node`                       | Replace the area's whole scene graph              |
+| `UIOpInsert`     | `"insert"`      | `parent`, `index`, `node`    | Insert `node` under `parent` at `index`           |
+| `UIOpUpdate`     | `"update"`      | `id`, `props`                | Replace the props of node `id`                    |
+| `UIOpRemove`     | `"remove"`      | `id`                         | Remove node `id` and its subtree                  |
+| `UIOpAppendText` | `"append_text"` | `id`, `text`                 | Append `text` to text node `id` (streaming op)    |
+
+- `UIPatchOp.Index` is `*int`: a nil index appends; an index of `0` is preserved on the wire (not dropped by `omitempty`).
+- `UIPatchOp.Parent == ""` for `UIOpInsert` targets the area root container.
+- `UIPatchParams` wraps `{ "area": "<id>", "ops": [ … ] }`. If any op references a missing node the host rejects the whole batch.
+
+### UIArea / UICreateAreaParams
+
+An area is a named screen region owned by exactly one extension. `UIAreaPlacement` (`"main"`, `"sidebar"`, `"status"`, `"overlay"`) is an advisory layout hint; the harness owns final layout. `Weight` is a relative size hint among areas sharing a placement (`0` = harness default). Area `ID` is unique across all areas; the host rejects a create for an existing ID.
+
+**Invariant:** These types are additive in P0 and introduce no new callable host_call method or permission; they have no runtime effect until a later phase wires them.
+
+---
+
 ## Error Codes
 
 Returned as `int32` from the `host_call` WASM import (not the JSON layer).
@@ -389,3 +450,4 @@ Returned as `int32` from the `host_call` WASM import (not the JSON layer).
 12. `ContextUsagePayload.Compacted` is `true` only when `compactHistory` ran and succeeded during the turn that produced the event.
 13. `EventContextUsage` (`"context_usage"`) is fired once per completed turn, after the turn's usage is stored, only on success (not on error or cancellation).
 14. `MethodGetContextUsage` (`"get_context_usage"`) requires no permission; it returns a zero-valued `ContextUsage` when the agent bridge is unavailable.
+15. UI scene-graph types (`UINode`, `UIProps`, `UIPatchOp`, `UIPatchParams`, `UIArea`, `UICreateAreaParams`) are pure JSON data definitions; `UIPatchOp.Index` is a `*int` so a valid index of `0` survives the wire while a nil index (append) is omitted.
