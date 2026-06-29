@@ -146,7 +146,50 @@ func init() {
 
 // ─── Event handlers ───────────────────────────────────────────────────────────
 
+// agentsPanelArea is the scene-graph area the agents extension owns. It is
+// driven entirely from WASM via ui_patch — a proof that a WASM extension can
+// drive the TUI through the declarative scene graph.
+const agentsPanelArea = "agents-panel"
+
+// renderAgentsPanel rebuilds the sub-agent activity panel from agentRecords and
+// pushes it to the host as a single set_root patch. When no sub-agents exist
+// the root is an empty text node so the host renders nothing for the area.
+func renderAgentsPanel() {
+	if len(agentRecords) == 0 {
+		UIPatch(agentsPanelArea, OpSetRoot(UIText("panel-empty", "")))
+		return
+	}
+	title := fmt.Sprintf("Sub-agents (%d)", len(agentRecords))
+	kids := []UINode{
+		{ID: "panel-title", Type: "text", Text: title, Props: &UIProps{Fg: "accent", Bold: true}},
+	}
+	for _, r := range agentRecords {
+		label := "• " + r.name
+		if r.lastUpdate != "" {
+			label += " — " + truncate(r.lastUpdate, 40)
+		}
+		kids = append(kids, UINode{
+			ID:    "panel-agent-" + r.id,
+			Type:  "text",
+			Text:  label,
+			Props: &UIProps{Fg: "muted"},
+		})
+	}
+	root := UINode{
+		ID:       "panel-root",
+		Type:     "vstack",
+		Props:    &UIProps{Border: "rounded", Fg: "accent", Padding: []int{0, 1}},
+		Children: kids,
+	}
+	UIPatch(agentsPanelArea, OpSetRoot(root))
+}
+
 func onSessionStart() {
+	// Register the WASM-owned activity panel area and paint its initial (empty)
+	// state. All subsequent updates flow from WASM via renderAgentsPanel.
+	UICreateArea(agentsPanelArea, "sidebar", 1)
+	renderAgentsPanel()
+
 	guidance := `
 ## Agent and Team Tools
 
@@ -404,6 +447,9 @@ func onBeforeToolCall(payload json.RawMessage) {
 	case "send_message":
 		handleSendMessage(p)
 	}
+
+	// Repaint the WASM-driven activity panel after any agent state change.
+	renderAgentsPanel()
 }
 
 // ─── Tool handlers ────────────────────────────────────────────────────────────
