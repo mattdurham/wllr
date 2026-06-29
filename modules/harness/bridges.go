@@ -62,6 +62,9 @@ func (e *earlyUIBridge) ToolResult(_, _ string, _ bool)       {}
 func (e *earlyUIBridge) AfterToolCall(_, _, _ string, _ bool) {}
 func (e *earlyUIBridge) ConsoleOutput(_ string)               {}
 func (e *earlyUIBridge) ConsoleClear()                        {}
+func (e *earlyUIBridge) CreateArea(_ sdk.UIArea) error        { return nil }
+func (e *earlyUIBridge) PatchUI(_ sdk.UIPatchParams) error    { return nil }
+func (e *earlyUIBridge) RemoveArea(_ string)                  {}
 
 // Verify earlyUIBridge satisfies the interface at compile time.
 var _ extension.UIBridge = (*earlyUIBridge)(nil)
@@ -74,14 +77,14 @@ type earlyAgentBridge struct{}
 func (e *earlyAgentBridge) Spawn(_ context.Context, _ extension.SpawnRequest) error {
 	return fmt.Errorf("agent_spawn: session not yet started")
 }
-func (e *earlyAgentBridge) Close(_ string) error                 { return fmt.Errorf("not started") }
+func (e *earlyAgentBridge) Close(_ string) error { return fmt.Errorf("not started") }
 func (e *earlyAgentBridge) SendMessage(_ string, _ sdk.Message) error {
 	return fmt.Errorf("not started")
 }
-func (e *earlyAgentBridge) Run(_ string) error                   { return fmt.Errorf("not started") }
-func (e *earlyAgentBridge) List() ([]extension.AgentInfo, error) { return nil, nil }
-func (e *earlyAgentBridge) TokenCount() int64                          { return 0 }
-func (e *earlyAgentBridge) MainAgentContextUsage() sdk.ContextUsage    { return sdk.ContextUsage{} }
+func (e *earlyAgentBridge) Run(_ string) error                      { return fmt.Errorf("not started") }
+func (e *earlyAgentBridge) List() ([]extension.AgentInfo, error)    { return nil, nil }
+func (e *earlyAgentBridge) TokenCount() int64                       { return 0 }
+func (e *earlyAgentBridge) MainAgentContextUsage() sdk.ContextUsage { return sdk.ContextUsage{} }
 func (e *earlyAgentBridge) SetHistory(_ string, _ []sdk.Message) error {
 	return fmt.Errorf("not started")
 }
@@ -237,6 +240,7 @@ type harnessUIBridge struct {
 	prog   *tea.Program
 	live   *liveState
 	cmds   *Registry
+	scene  *SceneRenderer
 	mainID string
 }
 
@@ -395,4 +399,43 @@ func (b *harnessUIBridge) ConsoleClear() {
 		return
 	}
 	b.prog.Send(ConsoleMsg{Clear: true})
+}
+
+// CreateArea registers a new scene-graph area. The SceneRenderer is
+// goroutine-safe, so the mutation happens synchronously here; a sceneDirtyMsg
+// triggers a re-render on the bubbletea loop.
+func (b *harnessUIBridge) CreateArea(area sdk.UIArea) error {
+	if b.scene == nil {
+		return fmt.Errorf("ui: scene renderer not available")
+	}
+	if err := b.scene.CreateArea(area); err != nil {
+		return err
+	}
+	if b.prog != nil {
+		b.prog.Send(sceneDirtyMsg{})
+	}
+	return nil
+}
+
+func (b *harnessUIBridge) PatchUI(params sdk.UIPatchParams) error {
+	if b.scene == nil {
+		return fmt.Errorf("ui: scene renderer not available")
+	}
+	if err := b.scene.ApplyPatch(params); err != nil {
+		return err
+	}
+	if b.prog != nil {
+		b.prog.Send(sceneDirtyMsg{})
+	}
+	return nil
+}
+
+func (b *harnessUIBridge) RemoveArea(id string) {
+	if b.scene == nil {
+		return
+	}
+	b.scene.RemoveArea(id)
+	if b.prog != nil {
+		b.prog.Send(sceneDirtyMsg{})
+	}
 }

@@ -303,3 +303,15 @@ a separate `m.history` copy.
 **Rationale:** Built-in commands execute synchronously in the bubbletea update loop and do not touch WASM. Setting `"queuing…"` before them caused a brief flicker of the status indicator for commands like `/clear` that complete in the same frame. The `Instant` flag makes the distinction between "executes immediately in Go" and "routes through WASM dispatch" explicit and testable.
 
 **Consequence:** Any command registered with `instant=true` suppresses the "queuing…" status indicator. For WASM-backed instant commands (e.g. `/agents` from the agents extension), the handler still routes through `dispatchOnCommandMsg` → `EventOnCommand` — the flag only affects the UI status, not the dispatch path.
+
+---
+
+## SceneRenderer — synchronous mutation, async redraw (UI P1)
+
+*Added: 2026-06-29*
+
+**Decision:** Add `SceneRenderer` (scene.go), a goroutine-safe holder of the extension-driven UI scene graph, owned by `Model.scene` and shared by pointer with `harnessUIBridge`. The bridge's `CreateArea`/`PatchUI`/`RemoveArea` mutate the renderer **synchronously** (so `host_call` can return validation errors immediately), then send a payload-free `sceneDirtyMsg{}` to the program purely to trigger a re-render.
+
+**Rationale:** A `host_call` must return a synchronous error (e.g. "area already exists", "node not found"). Routing the mutation as a `tea.Msg` and applying it inside `Update` would make errors asynchronous and unobservable to the caller. Because `SceneRenderer` carries its own `sync.RWMutex`, the bridge can safely mutate it off the bubbletea loop while `View` reads it. The dirty message then leverages bubbletea's "re-render after every message" behavior without duplicating the mutation in `Update`.
+
+**Consequence:** `Model` gains a `scene *SceneRenderer` field (constructed in `New`, passed to the bridge in `SetProgram`). `Update` handles `sceneDirtyMsg` as a redraw-only no-op. `View` calls `renderScenes()` in the normal (non-modal, non-picker) branch. The patch protocol is intentionally clone-validated for atomicity, trading an allocation per batch for the guarantee that a failed batch never corrupts the live tree. P1 keeps View integration minimal (stack below chat); placement-aware compositing and moving the chat into a scene area are deferred to later phases.

@@ -90,6 +90,9 @@ const (
 	PermNetworkRead Permission = "network_read"
 	// PermNetworkWrite grants the extension the right to write to the network.
 	PermNetworkWrite Permission = "network_write"
+	// PermUI grants the extension the right to drive the TUI scene graph:
+	// create/remove areas and apply scene-graph patches.
+	PermUI Permission = "ui"
 )
 
 // ExtensionManifest is loaded from the JSON file alongside a .wasm extension.
@@ -200,6 +203,16 @@ const (
 	// auto-generated line.
 	// No permission required.
 	MethodSetStatusLine = "set_status_line"
+
+	// MethodUICreateArea registers a new UI area (a named screen region the
+	// extension owns). Params: UICreateAreaParams. Requires PermUI.
+	MethodUICreateArea = "ui_create_area"
+	// MethodUIPatch applies a batch of scene-graph patch ops to an area.
+	// Params: UIPatchParams. Requires PermUI.
+	MethodUIPatch = "ui_patch"
+	// MethodUIRemoveArea removes a UI area and its scene graph.
+	// Params: {"area": "<id>"}. Requires PermUI.
+	MethodUIRemoveArea = "ui_remove_area"
 )
 
 // ShowPickerItem is one entry displayed in the interactive picker overlay.
