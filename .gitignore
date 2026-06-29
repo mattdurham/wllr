@@ -40,3 +40,7 @@ dist/
 # bob/pi working directory
 .bob/
 features.md
+
+# Local agent working state and extension build artifacts
+.claude/
+extensions/agents/agents
