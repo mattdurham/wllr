@@ -329,3 +329,15 @@ wire one up. The harness is responsible for ensuring the dispatcher is set befor
 **Rationale:** The drain-until-empty pattern (§17) means `Submit("")` is called for each batch of pending normal messages. At the top of `Submit`, `DrainInbox` is called, consuming everything in the inbox. If the shutdown_request were re-injected into the inbox alongside normal messages, `Submit`'s initial drain would consume it, and the drain turn's `finishTurn` would never see it. Storing the sender in a field on the `Agent` instead of re-queuing the message as an inbox entry keeps the shutdown request alive across drain turns without violating the inbox drain invariant. `pendingShutdownFrom` is only read and written in `finishTurn`, which runs after `isRunning.Store(false)` — at most one `finishTurn` call is active at any time, so no additional mutex is needed.
 
 **Consequence:** `Agent` struct gains `pendingShutdownFrom string`. `finishTurn` now has three exit paths: (a) normal drain-turn re-queue when normal messages are pending, (b) graceful shutdown when only a deferred shutdown_request remains, (c) the original error/cancel path. `onDone` is still called exactly once. `AgentBridge.SendMessage` signature changed from `(id, message string)` to `(id string, msg sdk.Message)` to allow the `type` field to be passed from WASM through the host bridge. `extensions/agents/main.go` `handleShutdownAgent` now sends a system message via `agent_send_message` (with `type: "system"`) and triggers `agent_run` instead of calling `agent_close` directly.
+
+---
+
+## 22. Token usage propagation and context-usage dispatch wired into the turn
+
+*Added: 2026-06-29*
+
+**Decision:** `streamTurn` now returns the `fantasy.Usage` from the `*fantasy.AgentResult` produced by `fa.Stream` (previously discarded with `_`). `executeTurn` stores it via `a.setLastUsage(usage)` on a successful, non-cancelled turn (zero-valued on error/cancel) and, for the main agent only, calls `pool.dispatchContextUsage(sdk.ContextUsageFromFantasy(usage, contextWindow), didCompact)`.
+
+**Rationale:** `setLastUsage` and `dispatchContextUsage` were defined and specified (see §19 and the sdk `EventContextUsage` contract) but never actually invoked — the streaming turn dropped the result's usage entirely, so `LastUsage()` always returned zero, `MainAgentContextUsage()` reported empty, and `EventContextUsage` never fired. This made the behavior diverge from the documented spec. The fix makes the runtime match the existing contract: usage is captured per turn, failed/cancelled turns report zero (never stale counts), and the dispatcher fires once per completed main-agent turn.
+
+**Consequence:** `streamTurn` signature changed from `(string, error)` to `(string, fantasy.Usage, error)`. A `didCompact` bool tracks whether proactive compaction ran this turn and is forwarded as the dispatcher's `compacted` argument. Context-usage dispatch is restricted to `MainAgentID` so sub-agent turns do not overwrite the main context-window indicator. No public API of the agent package changed; the previously-zero `LastUsage()`/`MainAgentContextUsage()`/`EventContextUsage` values now carry real data.
