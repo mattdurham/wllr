@@ -441,6 +441,7 @@ func (a *Agent) executeTurn(
 		contextWindow = contextWindowForModel(a.modelName)
 	}
 	history := priorHistory
+	didCompact := false
 	if shouldCompact(history, sysPrompt, content, contextWindow) {
 		if onToken != nil {
 			onToken("[Compacting context…]\n\n")
@@ -453,6 +454,7 @@ func (a *Agent) executeTurn(
 		}
 		compacted, summaryText, cerr := compactHistory(childCtx, lm, history, priorSummary, keepRecent)
 		if cerr == nil {
+			didCompact = true
 			history = compacted
 			a.historyMu.Lock()
 			a.history = compacted
@@ -465,7 +467,7 @@ func (a *Agent) executeTurn(
 		}
 	}
 
-	collectedText, err := streamTurn(childCtx, fa, history, content, pool, onToken, onToolCall)
+	collectedText, usage, err := streamTurn(childCtx, fa, history, content, pool, onToken, onToolCall)
 
 	// Reactive fallback: if we still hit a context error, trim and retry once.
 	if err != nil && isContextTooLong(err) {
@@ -478,7 +480,21 @@ func (a *Agent) executeTurn(
 			a.history = history
 			a.historyMu.Unlock()
 		}
-		collectedText, err = streamTurn(childCtx, fa, history, content, pool, onToken, onToolCall)
+		collectedText, usage, err = streamTurn(childCtx, fa, history, content, pool, onToken, onToolCall)
+	}
+
+	// Record token usage for the turn. On error or cancellation, store a
+	// zero-valued usage so a failed turn never reports stale counts.
+	if err == nil && childCtx.Err() == nil {
+		a.setLastUsage(usage)
+		// Forward context window usage for the main agent so the harness/status
+		// bar and WASM extensions (EventContextUsage) see the latest usage.
+		// Sub-agent turns do not drive the main context indicator.
+		if pool != nil && a.id == MainAgentID {
+			pool.dispatchContextUsage(sdk.ContextUsageFromFantasy(usage, contextWindow), didCompact)
+		}
+	} else {
+		a.setLastUsage(fantasy.Usage{})
 	}
 
 	// Always record what the user said and the assistant response.
@@ -631,9 +647,9 @@ func streamTurn(
 	pool *AgentPool,
 	onToken func(string),
 	onToolCall func(id, name, input string),
-) (string, error) {
+) (string, fantasy.Usage, error) {
 	var collected string
-	_, err := fa.Stream(ctx, fantasy.AgentStreamCall{
+	res, err := fa.Stream(ctx, fantasy.AgentStreamCall{
 		Messages: sdkToFantasyMessages(history),
 		Prompt:   content,
 		OnTextDelta: func(_, text string) error {
@@ -661,7 +677,11 @@ func streamTurn(
 			return nil
 		},
 	})
-	return collected, err
+	var usage fantasy.Usage
+	if res != nil {
+		usage = res.TotalUsage
+	}
+	return collected, usage, err
 }
 
 // isContextTooLong returns true when the API rejected the request because the
