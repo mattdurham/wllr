@@ -102,11 +102,12 @@ type tokenBatcher struct {
     buf      strings.Builder
     lastSend time.Time
     p        *tea.Program
+    dispatch func(string) // optional: forward each batch to WASM (EventToken)
 }
 const tokenBatchInterval = 30 * time.Millisecond
 ```
 
-`makeBatchedOnToken(p)` returns `(onToken func(string), flush func())`. Tokens are coalesced and sent as a single `TokenMsg` at most every 30ms. `flush()` drains any buffered tail tokens immediately and must be called from `onDone`.
+`makeBatchedOnToken(p, dispatch)` returns `(onToken func(string), flush func())`. Tokens are coalesced and sent as a single `TokenMsg` at most every 30ms. `flush()` drains any buffered tail tokens immediately and must be called from `onDone`. When `dispatch` is non-nil, each flushed batch is also passed to it; `wireMainAgentCallbacks` supplies a closure that marshals a `sdk.TokenPayload` and calls `Host.DispatchEvent(EventToken)` so streamed text reaches WASM extensions. The dispatch runs on the agent goroutine, not the bubbletea loop.
 
 **Invariant:** The batcher uses time-based coalescing with no goroutines or channels — it is safe to call `flush()` multiple times across turns without panics. Locking is purely `sync.Mutex` on the buffer.
 

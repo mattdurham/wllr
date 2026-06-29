@@ -668,6 +668,25 @@ Fired when a message has finished streaming.
 
 ---
 
+### `token`
+
+Fired with a batch of streamed assistant text as the agent produces it. Batches
+are coalesced (~30ms) so the per-token boundary-crossing rate stays bounded. Use
+this to drive a scene-graph area with live streaming text (see `ui_patch`).
+
+```json
+{"agent_id": "main", "text": "The capital of "}
+```
+
+| Field      | Type   | Description                                      |
+|------------|--------|--------------------------------------------------|
+| `agent_id` | string | ID of the agent that produced the text batch.    |
+| `text`     | string | A batch of streamed assistant text.              |
+
+The `OnToken(func(agentID, text string))` SDK helper subscribes to this event.
+
+---
+
 ### `shutdown`
 
 Fired when the harness is shutting down. Use this for cleanup.

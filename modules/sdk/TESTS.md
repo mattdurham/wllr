@@ -180,3 +180,7 @@
 ### TestUIAreaRoundTrip
 **Scenario:** A `UICreateAreaParams` with placement main and weight 3 round-trips.
 **Assertion:** Area ID, Placement, and Weight are preserved.
+
+### TestTokenPayloadRoundTrip
+**Scenario:** A `TokenPayload{AgentID, Text}` marshals and unmarshals without loss.
+**Assertion:** AgentID and Text (including a trailing space) are preserved.

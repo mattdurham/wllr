@@ -29,6 +29,11 @@ const (
 	// EventContextUsage is dispatched after each completed turn with the current
 	// context window usage as a ContextUsagePayload.
 	EventContextUsage EventType = "context_usage"
+	// EventToken is dispatched with a batch of streamed assistant text (a
+	// TokenPayload) as the agent produces it. Batched (~30ms) to keep the WASM
+	// boundary crossing rate bounded. Used to route streaming text through
+	// extensions that drive the UI scene graph.
+	EventToken EventType = "token"
 )
 
 // Event is dispatched to extensions via _on_event.
