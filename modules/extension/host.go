@@ -485,7 +485,67 @@ func (h *Host) buildDispatch() map[string]func(ctx context.Context, ext *Extensi
 		sdk.MethodGetContextUsage: func(_ context.Context, _ *Extension, _ sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleGetContextUsage()
 		},
+		sdk.MethodUICreateArea: func(_ context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleUICreateArea(ext, req)
+		},
+		sdk.MethodUIPatch: func(_ context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleUIPatch(ext, req)
+		},
+		sdk.MethodUIRemoveArea: func(_ context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleUIRemoveArea(ext, req)
+		},
 	}
+}
+
+func (h *Host) handleUICreateArea(ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+	if ext == nil || !ext.HasPermission(sdk.PermUI) {
+		return sdk.HostCallResponse{Error: "ui_create_area: permission denied: requires ui"}
+	}
+	if h.uiBridge() == nil {
+		return sdk.HostCallResponse{Error: "ui_create_area: not supported by host"}
+	}
+	var params sdk.UICreateAreaParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return sdk.HostCallResponse{Error: fmt.Sprintf("ui_create_area: %v", err)}
+	}
+	if err := h.uiBridge().CreateArea(params.Area); err != nil {
+		return sdk.HostCallResponse{Error: err.Error()}
+	}
+	return sdk.HostCallResponse{}
+}
+
+func (h *Host) handleUIPatch(ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+	if ext == nil || !ext.HasPermission(sdk.PermUI) {
+		return sdk.HostCallResponse{Error: "ui_patch: permission denied: requires ui"}
+	}
+	if h.uiBridge() == nil {
+		return sdk.HostCallResponse{Error: "ui_patch: not supported by host"}
+	}
+	var params sdk.UIPatchParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return sdk.HostCallResponse{Error: fmt.Sprintf("ui_patch: %v", err)}
+	}
+	if err := h.uiBridge().PatchUI(params); err != nil {
+		return sdk.HostCallResponse{Error: err.Error()}
+	}
+	return sdk.HostCallResponse{}
+}
+
+func (h *Host) handleUIRemoveArea(ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+	if ext == nil || !ext.HasPermission(sdk.PermUI) {
+		return sdk.HostCallResponse{Error: "ui_remove_area: permission denied: requires ui"}
+	}
+	if h.uiBridge() == nil {
+		return sdk.HostCallResponse{Error: "ui_remove_area: not supported by host"}
+	}
+	var params struct {
+		Area string `json:"area"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return sdk.HostCallResponse{Error: fmt.Sprintf("ui_remove_area: %v", err)}
+	}
+	h.uiBridge().RemoveArea(params.Area)
+	return sdk.HostCallResponse{}
 }
 
 func (h *Host) handleSubscribe(ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {

@@ -85,6 +85,10 @@ func (b *testAgentBridge) SetHistory(id string, messages []sdk.Message) error {
 	return nil
 }
 
+func (b *testAgentBridge) MainAgentContextUsage() sdk.ContextUsage {
+	return sdk.ContextUsage{}
+}
+
 // testTeamBridge implements TeamBridge using optional callback fields.
 type testTeamBridge struct {
 	onCreate       func(id, name string) error
@@ -155,6 +159,9 @@ type testUIBridge struct {
 	onAfterToolCall   func(toolCallID, toolName, result string, isError bool)
 	onConsoleOutput   func(line string)
 	onConsoleClear    func()
+	createdAreas      []string
+	patchedAreas      []string
+	removedAreas      []string
 }
 
 func (b *testUIBridge) Notify(text string) {
@@ -254,6 +261,20 @@ func (b *testUIBridge) ConsoleClear() {
 	if b.onConsoleClear != nil {
 		b.onConsoleClear()
 	}
+}
+
+func (b *testUIBridge) CreateArea(a sdk.UIArea) error {
+	b.createdAreas = append(b.createdAreas, a.ID)
+	return nil
+}
+
+func (b *testUIBridge) PatchUI(p sdk.UIPatchParams) error {
+	b.patchedAreas = append(b.patchedAreas, p.Area)
+	return nil
+}
+
+func (b *testUIBridge) RemoveArea(id string) {
+	b.removedAreas = append(b.removedAreas, id)
 }
 
 // testCapabilityProvider implements CapabilityProvider using optional callback fields.
@@ -1802,5 +1823,73 @@ func TestHost_HandleExec_PassesContext(t *testing.T) {
 	}
 	if !ctxCalled {
 		t.Fatal("ctx was nil when Exec was called")
+	}
+}
+
+func TestHost_UIMethods_Dispatch(t *testing.T) {
+	h := NewHost(nil)
+	ctx := context.Background()
+	defer func() { _ = h.Close(ctx) }()
+
+	path := writeWASM(t, "minimal.wasm", minimalWASM)
+	if err := h.Load(ctx, path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	ext := h.extensions[0]
+	ext.trusted = true // bypass permission check
+
+	ui := &testUIBridge{}
+	h.SetUIBridge(ui)
+
+	if resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+		Method: sdk.MethodUICreateArea,
+		Params: []byte(`{"area":{"id":"chat","placement":"main"}}`),
+	}); resp.Error != "" {
+		t.Fatalf("ui_create_area: %s", resp.Error)
+	}
+	if resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+		Method: sdk.MethodUIPatch,
+		Params: []byte(`{"area":"chat","ops":[{"op":"set_root","node":{"id":"r","type":"text","text":"hi"}}]}`),
+	}); resp.Error != "" {
+		t.Fatalf("ui_patch: %s", resp.Error)
+	}
+	if resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+		Method: sdk.MethodUIRemoveArea,
+		Params: []byte(`{"area":"chat"}`),
+	}); resp.Error != "" {
+		t.Fatalf("ui_remove_area: %s", resp.Error)
+	}
+
+	if len(ui.createdAreas) != 1 || ui.createdAreas[0] != "chat" {
+		t.Fatalf("CreateArea not called: %v", ui.createdAreas)
+	}
+	if len(ui.patchedAreas) != 1 || ui.patchedAreas[0] != "chat" {
+		t.Fatalf("PatchUI not called: %v", ui.patchedAreas)
+	}
+	if len(ui.removedAreas) != 1 || ui.removedAreas[0] != "chat" {
+		t.Fatalf("RemoveArea not called: %v", ui.removedAreas)
+	}
+}
+
+func TestHost_UIMethods_PermissionDenied(t *testing.T) {
+	h := NewHost(nil)
+	ctx := context.Background()
+	defer func() { _ = h.Close(ctx) }()
+
+	path := writeWASM(t, "minimal.wasm", minimalWASM)
+	if err := h.Load(ctx, path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	ext := h.extensions[0]
+	ext.trusted = false // enforce permission check; no ui permission granted
+
+	h.SetUIBridge(&testUIBridge{})
+
+	resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+		Method: sdk.MethodUIPatch,
+		Params: []byte(`{"area":"chat","ops":[]}`),
+	})
+	if resp.Error == "" {
+		t.Fatal("expected permission denied for ui_patch without ui permission")
 	}
 }

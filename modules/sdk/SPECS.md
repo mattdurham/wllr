@@ -188,6 +188,7 @@ No payload fields — the event carries no structured data beyond the event type
 | `PermFileWrite`     | `"file_write"`    | Write file contents                            |
 | `PermNetworkRead`   | `"network_read"`  | Read from the network                          |
 | `PermNetworkWrite`  | `"network_write"` | Write to the network                           |
+| `PermUI`            | `"ui"`            | Drive the TUI scene graph (areas + patches)    |
 
 **Invariants:**
 1. Trusted extensions (loaded via `Host.LoadBytes` with `trusted=true`) have all permissions granted implicitly; no manifest is required.
@@ -354,16 +355,20 @@ Note: Percent is 0–100. CompactConfig.ThresholdPct is a fraction 0.0–1.0.
 | `MethodMCPClose` | `"mcp_close"` | Terminate an MCP server subprocess                 |
 | `MethodMCPSend`  | `"mcp_send"`  | Write JSON-RPC data to an MCP server's stdin       |
 | `MethodMCPRead`  | `"mcp_read"`  | Read a JSON-RPC response from an MCP server's stdout |
+| `MethodUICreateArea` | `"ui_create_area"` | Register a UI scene-graph area (requires `ui`)  |
+| `MethodUIPatch`  | `"ui_patch"`  | Apply a batch of scene-graph patch ops (requires `ui`) |
+| `MethodUIRemoveArea` | `"ui_remove_area"` | Remove a UI area and its scene graph (requires `ui`) |
 
 **Invariant:** Method strings must not change between ABI versions without a version bump.
 
 ---
 
-## UI Scene Graph (P0 — types only)
+## UI Scene Graph
 
 These types describe a declarative, node-based view of an area of the TUI. They
-are pure data definitions in this phase: no host_call method is wired to them
-yet (that lands in a later phase). They cross the host/WASM boundary as JSON.
+cross the host/WASM boundary as JSON. The `ui_create_area` / `ui_patch` /
+`ui_remove_area` host_call methods (gated behind `PermUI`) operate on them; the
+harness `SceneRenderer` applies and renders them.
 
 ### UINodeType
 
@@ -416,7 +421,7 @@ Optional style/layout. Colour fields (`fg`, `bg`) reference **named theme tokens
 
 An area is a named screen region owned by exactly one extension. `UIAreaPlacement` (`"main"`, `"sidebar"`, `"status"`, `"overlay"`) is an advisory layout hint; the harness owns final layout. `Weight` is a relative size hint among areas sharing a placement (`0` = harness default). Area `ID` is unique across all areas; the host rejects a create for an existing ID.
 
-**Invariant:** These types are additive in P0 and introduce no new callable host_call method or permission; they have no runtime effect until a later phase wires them.
+**Invariant:** Area `ID` is unique across all areas; the host rejects a create for an existing ID. The `UIPatchOp.Index` `*int` distinction (nil = append, `0` = first position) is significant and must survive the wire.
 
 ---
 

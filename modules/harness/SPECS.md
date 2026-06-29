@@ -489,3 +489,25 @@ Returns the current set of registered tools from `extHost.RegisteredTools()` as 
 **Invariant:** `OnMessageEnd` is called only when `responseContent != ""` (tool-only turns are excluded).
 
 **Invariant:** `OnUserMessage` is called only when `content != ""`.
+
+---
+
+## 26. SceneRenderer — Declarative, Extension-Driven UI (UI P1)
+
+`harness.SceneRenderer` is a goroutine-safe, data-driven renderer of the `sdk` scene graph (`UINode`/`UIPatchOp`/`UIArea`). It lets any WASM extension paint the TUI without touching harness rendering code.
+
+| Method | Behavior |
+|--------|----------|
+| `CreateArea(sdk.UIArea) error` | Registers a named area; errors on empty or duplicate ID. |
+| `RemoveArea(id string)` | Deletes an area and its tree; no-op if missing. |
+| `ApplyPatch(sdk.UIPatchParams) error` | Applies an op batch atomically to an area; rejects the whole batch (live tree unchanged) if the area or any referenced node is missing. |
+| `Render(areaID string, width int) string` | Renders an area's tree to a string via lipgloss; `""` for unknown/empty areas. |
+| `AreasByPlacement(p) []string` | Area IDs with a placement, in creation order. |
+
+**Invariants:**
+- `ApplyPatch` validates against a working clone; a mid-batch failure leaves the live tree untouched (atomicity).
+- `UIOpAppendText` targets only `UINodeText` nodes; appending to a non-text node errors.
+- An unknown `UINodeType` renders as an empty box (forward-compatibility).
+- Colour props resolve through `themeColor` (named tokens → hex); unknown non-hex tokens yield no colour, so the host keeps theming control.
+- The `harnessUIBridge` shares the `Model.scene` pointer, mutates it synchronously off the bubbletea loop (the renderer is mutex-guarded), and sends `sceneDirtyMsg{}` to force a re-render. `sceneDirtyMsg` is a no-op in `Update` other than triggering `View`.
+- P1 `View` integration is minimal: `renderScenes` stacks all areas below the chat regardless of placement. Later phases composite by placement and move the chat transcript into a `main` scene area.

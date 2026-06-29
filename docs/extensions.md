@@ -456,6 +456,75 @@ No permission required (read-only).
 
 ---
 
+### `ui_create_area`
+
+Register a named UI **area** — a region of the screen the extension owns. An
+extension may own one area, inject into an existing area's scene graph, or spawn
+additional areas. Requires the `ui` permission.
+
+```json
+{"method": "ui_create_area", "params": {"area": {"id": "chat", "placement": "main", "weight": 1}}}
+```
+
+| Field            | Type   | Description                                             |
+|------------------|--------|---------------------------------------------------------|
+| `area.id`        | string | Unique area ID. Errors if it already exists.            |
+| `area.placement` | string | Layout hint: `main`, `sidebar`, `status`, or `overlay`. |
+| `area.weight`    | int    | Optional relative size hint among same-placement areas. |
+
+Requires permission: `ui`
+
+---
+
+### `ui_patch`
+
+Apply a batch of scene-graph mutations to an area. Ops apply in order and the
+batch is all-or-nothing: if any op references a missing area or node, the whole
+batch is rejected and the live tree is unchanged. Requires the `ui` permission.
+
+```json
+{"method": "ui_patch", "params": {"area": "chat", "ops": [
+  {"op": "set_root", "node": {"id": "root", "type": "vstack", "children": [
+    {"id": "line1", "type": "text", "text": "Hello"}
+  ]}},
+  {"op": "append_text", "id": "line1", "text": " world"}
+]}}
+```
+
+Node shape (`UINode`): `{"id", "type", "text"?, "props"?, "children"?}` where
+`type` is one of `text`, `vstack`, `hstack`, `viewport`, `spinner`, `divider`.
+`props` (`UIProps`) carries optional style/layout: `width`/`height` (`"fill"`,
+`"auto"`, or a cell count), `border` (`none`/`normal`/`rounded`/`thick`/`double`),
+`padding`/`margin` (1, 2, or 4 cell counts), `align`, `fg`/`bg` (theme tokens such
+as `accent`, `muted`, `error`), and `bold`/`italic`/`underline`/`faint`/`wrap`.
+
+Op types (`op` field):
+
+| `op`          | Fields                     | Effect                                            |
+|---------------|----------------------------|---------------------------------------------------|
+| `set_root`    | `node`                     | Replace the area's whole scene graph              |
+| `insert`      | `parent`, `index`, `node`  | Insert `node` under `parent` at `index` (nil = append; `parent` "" = root) |
+| `update`      | `id`, `props`              | Replace the props of node `id`                    |
+| `remove`      | `id`                       | Remove node `id` and its subtree                  |
+| `append_text` | `id`, `text`               | Append `text` to text node `id` (streaming op)    |
+
+Requires permission: `ui`
+
+---
+
+### `ui_remove_area`
+
+Remove a UI area and its scene graph. Removing a missing area is a no-op.
+Requires the `ui` permission.
+
+```json
+{"method": "ui_remove_area", "params": {"area": "chat"}}
+```
+
+Requires permission: `ui`
+
+---
+
 ## Lifecycle Events
 
 Events are dispatched to subscribed extensions via `_on_event`. The `sdk.Event`

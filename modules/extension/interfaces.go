@@ -124,6 +124,15 @@ type UIBridge interface {
 	AfterToolCall(toolCallID, toolName, result string, isError bool)
 	ConsoleOutput(line string)
 	ConsoleClear()
+	// CreateArea registers a new UI scene-graph area owned by an extension.
+	// Returns an error if the area ID already exists.
+	CreateArea(area sdk.UIArea) error
+	// PatchUI applies a batch of scene-graph patch ops to an area atomically.
+	// Returns an error if the area or any referenced node is missing.
+	PatchUI(params sdk.UIPatchParams) error
+	// RemoveArea removes a UI area and its scene graph. Removing a missing
+	// area is a no-op.
+	RemoveArea(id string)
 }
 
 // MCPBridge is the interface extensions call to manage MCP server subprocesses.

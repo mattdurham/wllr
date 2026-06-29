@@ -265,3 +265,15 @@ is also easier to test in isolation and more transparent to extensions calling i
 Extensions that previously relied on this bridge method must use the `wait_for_all` tool
 instead. This is a breaking change to the `AgentBridge` interface for any out-of-tree
 implementations.
+
+---
+
+## 23. UIBridge scene-graph methods and ui_* host calls (UI P1)
+
+*Added: 2026-06-29*
+
+**Decision:** `UIBridge` gains three methods — `CreateArea(sdk.UIArea) error`, `PatchUI(sdk.UIPatchParams) error`, `RemoveArea(string)` — and the host gains three dispatch methods `ui_create_area`, `ui_patch`, `ui_remove_area`, all gated behind the new `sdk.PermUI` permission.
+
+**Rationale:** This is phase P1 of letting any WASM extension drive the TUI via the declarative scene graph defined in `sdk` (see sdk NOTES §13). The host validates the permission and forwards the typed params to the `UIBridge`, mirroring the existing pattern for `exec`/`modal`/`show_picker`. Keeping the three operations on the existing `UIBridge` (rather than a sixth bridge interface) avoids interface proliferation since they are conceptually UI operations alongside `Notify`/`ShowModal`/`ShowPicker`.
+
+**Consequence:** All `UIBridge` implementations (including test stubs in `host_test.go`, `interfaces_test.go`, `mcp/extension_test.go` and the `earlyUIBridge`) must implement the three new methods. `CreateArea`/`PatchUI` return errors that surface to the extension as `HostCallResponse.Error`; `RemoveArea` cannot fail. The harness implementation mutates a shared, goroutine-safe `SceneRenderer` synchronously and sends a redraw signal — see harness NOTES.
