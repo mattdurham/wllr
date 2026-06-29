@@ -315,3 +315,15 @@ a separate `m.history` copy.
 **Rationale:** A `host_call` must return a synchronous error (e.g. "area already exists", "node not found"). Routing the mutation as a `tea.Msg` and applying it inside `Update` would make errors asynchronous and unobservable to the caller. Because `SceneRenderer` carries its own `sync.RWMutex`, the bridge can safely mutate it off the bubbletea loop while `View` reads it. The dirty message then leverages bubbletea's "re-render after every message" behavior without duplicating the mutation in `Update`.
 
 **Consequence:** `Model` gains a `scene *SceneRenderer` field (constructed in `New`, passed to the bridge in `SetProgram`). `Update` handles `sceneDirtyMsg` as a redraw-only no-op. `View` calls `renderScenes()` in the normal (non-modal, non-picker) branch. The patch protocol is intentionally clone-validated for atomicity, trading an allocation per batch for the guarantee that a failed batch never corrupts the live tree. P1 keeps View integration minimal (stack below chat); placement-aware compositing and moving the chat into a scene area are deferred to later phases.
+
+---
+
+## Token batcher EventToken dispatch (UI P2)
+
+*Added: 2026-06-29*
+
+**Decision:** `tokenBatcher` gains an optional `dispatch func(string)` hook. `makeBatchedOnToken` takes a `dispatch` argument; `wireMainAgentCallbacks` builds a closure that marshals `sdk.TokenPayload{AgentID: mainID, Text}` and calls `extHost.DispatchEvent(EventToken)` for each flushed batch. The existing `TokenMsg`→`ChatView` path is unchanged; the two coexist.
+
+**Rationale:** Routing streamed assistant text through WASM (so an extension can render it via the scene graph) requires the text to reach the extension host. Reusing the batcher's existing 30ms coalescing keeps the WASM crossing rate bounded (~33/sec) instead of one dispatch per token. Keeping the direct chat path avoids regressing the main transcript while the WASM-driven rendering path is proven incrementally.
+
+**Consequence:** `makeBatchedOnToken`'s signature changed to `(p, dispatch)`. EventToken dispatch only occurs when an extension host is present. The dispatch executes on the agent's streaming goroutine; `DispatchEvent` is safe there (it does not touch the bubbletea loop).

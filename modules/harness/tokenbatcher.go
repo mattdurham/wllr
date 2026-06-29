@@ -13,6 +13,10 @@ import (
 type tokenBatcher struct {
 	lastSend time.Time
 	p        *tea.Program
+	// dispatch, when non-nil, is called with each flushed batch of text so the
+	// batch can be forwarded to WASM extensions (EventToken). Called on the
+	// agent goroutine, not the bubbletea loop.
+	dispatch func(string)
 	buf      strings.Builder
 	mu       sync.Mutex
 }

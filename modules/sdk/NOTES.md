@@ -166,3 +166,15 @@ Append-only design decision log. Never delete entries; add an `*Addendum (date):
 **Consequence:** These types are inert until a later phase adds the `ui_create_area`/`ui_patch` host_call methods, a `ui` permission, and a generic `SceneRenderer` in the harness. Adding them now establishes a stable wire contract that the harness, the agents extension, and `wllrsdk.go` helpers can target independently. No existing behavior changes; the type set is purely additive and does not bump `ABIVersion`.
 
 *Addendum (2026-06-29):* P1 wired these types into the runtime. `sdk` gained `MethodUICreateArea`/`MethodUIPatch`/`MethodUIRemoveArea` and `PermUI`; the extension host added the three handlers (permission-gated) plus `UIBridge.CreateArea`/`PatchUI`/`RemoveArea`; the harness added `SceneRenderer`. `ABIVersion` is unchanged (additive methods/permission). See extension NOTES §23 and harness NOTES (SceneRenderer).
+
+---
+
+## 14. EventToken — streaming text to extensions (UI P2)
+
+*Added: 2026-06-29*
+
+**Decision:** Add `EventToken` (`"token"`) and `TokenPayload{AgentID, Text}`. The harness dispatches it with each ~30ms batch of streamed assistant text, reusing the existing token batcher so the WASM crossing rate stays bounded.
+
+**Rationale:** The goal of routing assistant text through a WASM extension (so the extension can paint it into a scene-graph area) requires the streamed text to reach WASM. A per-token event would cross the boundary thousands of times per turn; batching at the existing 30ms cadence caps it at ~33 dispatches/sec. The payload carries `AgentID` so an extension can distinguish main-agent text from sub-agent text.
+
+**Consequence:** Event type count rises to 15. The harness token batcher gains an optional dispatch hook that forwards each flushed batch to `Host.DispatchEvent(EventToken)` on the agent goroutine, in addition to the existing `TokenMsg` chat path (the two coexist; a later phase may remove the direct chat path once the WASM path renders the transcript). `wllrsdk.go` gains `OnToken(func(agentID, text string))`.
