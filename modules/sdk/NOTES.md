@@ -147,3 +147,20 @@ Append-only design decision log. Never delete entries; add an `*Addendum (date):
 **Rationale:** Agent coordination requires messages that are not intended for the LLM but are instead consumed by the Go runtime (e.g. shutdown_request, AGENT_SHUTDOWN). Previously all messages were treated identically — user or assistant content sent to the provider. With multi-agent orchestration, there is a need for: (a) system-level control messages never sent to the LLM, and (b) steering messages visible in history but filtered from the provider context slice. The `type` field enables the `sdkToFantasyMessages` conversion to filter these without modifying the message store.
 
 **Consequence:** The `omitempty` tag preserves backward compatibility: existing serialized messages with no `type` field unmarshal to `Type == ""`, which is treated identically to `MessageTypeNormal` in all code paths. Extensions that do not set `Type` are unaffected. New code must not add `MessageTypeSystem` messages to the LLM context or history.
+
+---
+
+## 13. UI Scene-Graph Types — Node-Based Declarative TUI (P0)
+
+*Added: 2026-06-29*
+
+**Decision:** Add a node-based, JSON-serializable scene-graph vocabulary to the sdk: `UINode` (+`UINodeType`), `UIProps`, `UIPatchOp` (+`UIPatchOpType`) wrapped by `UIPatchParams`, and `UIArea` (+`UIAreaPlacement`) wrapped by `UICreateAreaParams`. This is phase P0 of letting any WASM extension drive the TUI declaratively: it defines the data contract only — no host_call method, permission, or host wiring is added yet.
+
+**Rationale:**
+- The harness currently renders via an imperative `harness.Renderer` (AppendToken, AddToolCall, …) and the agent token stream is wired straight to it. To prove that any WASM component can drive the UI, rendering must become data-driven: the harness becomes a generic renderer of a node tree, and extensions emit the tree plus incremental patches.
+- A scene graph addressed by stable node IDs supports partial updates and deletes, avoiding full re-serialization each token. `UIOpAppendText` is the deliberate cheap streaming op so token deltas append in place.
+- `UIPatchOp.Index` is `*int` rather than `int` because `omitempty` on a plain int would drop a legitimate insert position of `0`; a nil pointer cleanly encodes "append".
+- Colour props reference named theme tokens, not raw colours, so the host keeps ownership of theming when extensions describe UI.
+- The "area" is the unit of ownership: an extension owns one area, injects into an existing area's scene graph, or spawns a new area. Placement is advisory; the harness composites.
+
+**Consequence:** These types are inert until a later phase adds the `ui_create_area`/`ui_patch` host_call methods, a `ui` permission, and a generic `SceneRenderer` in the harness. Adding them now establishes a stable wire contract that the harness, the agents extension, and `wllrsdk.go` helpers can target independently. No existing behavior changes; the type set is purely additive and does not bump `ABIVersion`.
