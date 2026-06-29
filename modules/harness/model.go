@@ -249,6 +249,9 @@ func (b *tokenBatcher) onToken(token string) {
 		b.lastSend = now
 		b.mu.Unlock()
 		b.p.Send(TokenMsg{Token: s})
+		if b.dispatch != nil {
+			b.dispatch(s)
+		}
 		return
 	}
 	b.mu.Unlock()
@@ -261,6 +264,9 @@ func (b *tokenBatcher) flush() {
 	b.mu.Unlock()
 	if s != "" {
 		b.p.Send(TokenMsg{Token: s})
+		if b.dispatch != nil {
+			b.dispatch(s)
+		}
 	}
 }
 
@@ -268,8 +274,10 @@ func (b *tokenBatcher) flush() {
 // Tokens are coalesced into batches sent at most every 30ms, capping
 // render cycles to ~33/sec regardless of LLM speed (prevents O(n²) work).
 // flush() must be called from onDone to deliver any buffered tail tokens.
-func makeBatchedOnToken(p *tea.Program) (onToken func(string), flush func()) {
-	b := &tokenBatcher{p: p}
+// dispatch, when non-nil, receives each flushed batch for forwarding to WASM
+// (EventToken).
+func makeBatchedOnToken(p *tea.Program, dispatch func(string)) (onToken func(string), flush func()) {
+	b := &tokenBatcher{p: p, dispatch: dispatch}
 	return b.onToken, b.flush
 }
 
@@ -282,7 +290,19 @@ func (m *Model) wireMainAgentCallbacks(p *tea.Program) {
 	if a == nil {
 		return
 	}
-	onToken, stopBatch := makeBatchedOnToken(p)
+	extHostForToken := m.extHost
+	mainID := m.mainAgentID
+	var dispatchToken func(string)
+	if extHostForToken != nil {
+		dispatchToken = func(text string) {
+			if text == "" {
+				return
+			}
+			payload, _ := json.Marshal(sdk.TokenPayload{AgentID: mainID, Text: text})
+			_, _ = extHostForToken.DispatchEvent(context.Background(), sdk.Event{Type: sdk.EventToken, Payload: payload})
+		}
+	}
+	onToken, stopBatch := makeBatchedOnToken(p, dispatchToken)
 	a.SetOnToken(onToken)
 	a.SetOnDone(func(err error) {
 		stopBatch()

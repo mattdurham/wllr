@@ -95,3 +95,18 @@ func TestUIAreaRoundTrip(t *testing.T) {
 		t.Fatalf("round-trip mismatch: %+v", got)
 	}
 }
+
+func TestTokenPayloadRoundTrip(t *testing.T) {
+	p := TokenPayload{AgentID: "main", Text: "hello "}
+	data, err := json.Marshal(p)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got TokenPayload
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.AgentID != "main" || got.Text != "hello " {
+		t.Fatalf("round-trip mismatch: %+v", got)
+	}
+}

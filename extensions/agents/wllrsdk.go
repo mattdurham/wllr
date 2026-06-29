@@ -404,3 +404,100 @@ func _sdkCallResult(method string, params any) json.RawMessage {
 	}
 	return resp.Result
 }
+
+// ─── UI scene graph ───────────────────────────────────────────────────────────
+// Declarative, node-based TUI. An extension owns a named "area" and drives it
+// with scene-graph patches. Requires the "ui" permission in the manifest.
+
+// UIProps carries optional style/layout for a UINode. Colour fields name theme
+// tokens (e.g. "accent", "muted", "error"), never raw colours.
+type UIProps struct {
+	Width     string `json:"width,omitempty"`
+	Height    string `json:"height,omitempty"`
+	Border    string `json:"border,omitempty"`
+	Padding   []int  `json:"padding,omitempty"`
+	Margin    []int  `json:"margin,omitempty"`
+	Align     string `json:"align,omitempty"`
+	Fg        string `json:"fg,omitempty"`
+	Bg        string `json:"bg,omitempty"`
+	Bold      bool   `json:"bold,omitempty"`
+	Italic    bool   `json:"italic,omitempty"`
+	Underline bool   `json:"underline,omitempty"`
+	Faint     bool   `json:"faint,omitempty"`
+	Wrap      bool   `json:"wrap,omitempty"`
+}
+
+// UINode is one node in a UI scene graph. Type is one of: text, vstack, hstack,
+// viewport, spinner, divider.
+type UINode struct {
+	ID       string   `json:"id"`
+	Type     string   `json:"type"`
+	Text     string   `json:"text,omitempty"`
+	Props    *UIProps `json:"props,omitempty"`
+	Children []UINode `json:"children,omitempty"`
+}
+
+// UIPatchOp is a single scene-graph mutation. Op is one of: set_root, insert,
+// update, remove, append_text.
+type UIPatchOp struct {
+	Op     string   `json:"op"`
+	Parent string   `json:"parent,omitempty"`
+	Index  *int     `json:"index,omitempty"`
+	ID     string   `json:"id,omitempty"`
+	Node   *UINode  `json:"node,omitempty"`
+	Props  *UIProps `json:"props,omitempty"`
+	Text   string   `json:"text,omitempty"`
+}
+
+// UICreateArea registers a UI area owned by this extension. placement is one of
+// "main", "sidebar", "status", "overlay". weight is a relative size hint (0 = default).
+func UICreateArea(id, placement string, weight int) {
+	_sdkCall("ui_create_area", map[string]any{
+		"area": map[string]any{"id": id, "placement": placement, "weight": weight},
+	})
+}
+
+// UIPatch applies a batch of scene-graph ops to an area, in order, atomically.
+func UIPatch(area string, ops ...UIPatchOp) {
+	_sdkCall("ui_patch", map[string]any{"area": area, "ops": ops})
+}
+
+// UIRemoveArea removes a UI area and its scene graph.
+func UIRemoveArea(area string) {
+	_sdkCall("ui_remove_area", map[string]string{"area": area})
+}
+
+// Node builders.
+func UIText(id, text string) UINode { return UINode{ID: id, Type: "text", Text: text} }
+func UIVStack(id string, kids ...UINode) UINode {
+	return UINode{ID: id, Type: "vstack", Children: kids}
+}
+func UIHStack(id string, kids ...UINode) UINode {
+	return UINode{ID: id, Type: "hstack", Children: kids}
+}
+func UIDivider(id string) UINode { return UINode{ID: id, Type: "divider"} }
+
+// Op builders.
+func OpSetRoot(node UINode) UIPatchOp { return UIPatchOp{Op: "set_root", Node: &node} }
+func OpInsert(parent string, node UINode) UIPatchOp {
+	return UIPatchOp{Op: "insert", Parent: parent, Node: &node}
+}
+func OpUpdate(id string, props UIProps) UIPatchOp {
+	return UIPatchOp{Op: "update", ID: id, Props: &props}
+}
+func OpRemove(id string) UIPatchOp           { return UIPatchOp{Op: "remove", ID: id} }
+func OpAppendText(id, text string) UIPatchOp { return UIPatchOp{Op: "append_text", ID: id, Text: text} }
+
+// OnToken registers a handler called with batches of streamed assistant text as
+// the agent produces it. agentID identifies the producing agent.
+func OnToken(fn func(agentID, text string)) {
+	_sdkOn("token", func(payload json.RawMessage) {
+		var p struct {
+			AgentID string `json:"agent_id"`
+			Text    string `json:"text"`
+		}
+		if err := json.Unmarshal(payload, &p); err == nil {
+			fn(p.AgentID, p.Text)
+		}
+	})
+}
