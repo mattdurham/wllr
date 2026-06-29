@@ -164,3 +164,5 @@ Append-only design decision log. Never delete entries; add an `*Addendum (date):
 - The "area" is the unit of ownership: an extension owns one area, injects into an existing area's scene graph, or spawns a new area. Placement is advisory; the harness composites.
 
 **Consequence:** These types are inert until a later phase adds the `ui_create_area`/`ui_patch` host_call methods, a `ui` permission, and a generic `SceneRenderer` in the harness. Adding them now establishes a stable wire contract that the harness, the agents extension, and `wllrsdk.go` helpers can target independently. No existing behavior changes; the type set is purely additive and does not bump `ABIVersion`.
+
+*Addendum (2026-06-29):* P1 wired these types into the runtime. `sdk` gained `MethodUICreateArea`/`MethodUIPatch`/`MethodUIRemoveArea` and `PermUI`; the extension host added the three handlers (permission-gated) plus `UIBridge.CreateArea`/`PatchUI`/`RemoveArea`; the harness added `SceneRenderer`. `ABIVersion` is unchanged (additive methods/permission). See extension NOTES §23 and harness NOTES (SceneRenderer).

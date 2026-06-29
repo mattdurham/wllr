@@ -297,8 +297,8 @@ func (b *poolAgentBridge) Spawn(_ context.Context, req extension.SpawnRequest) e
 	return err
 }
 func (b *poolAgentBridge) Close(id string) error { return b.pool.Close(id) }
-func (b *poolAgentBridge) SendMessage(id, message string) error {
-	return b.pool.SendMessage(id, sdk.Message{Role: sdk.RoleUser, Content: message})
+func (b *poolAgentBridge) SendMessage(id string, msg sdk.Message) error {
+	return b.pool.SendMessage(id, msg)
 }
 
 func (b *poolAgentBridge) Run(id string) error {
@@ -320,9 +320,7 @@ func (b *poolAgentBridge) List() ([]extension.AgentInfo, error) {
 }
 func (b *poolAgentBridge) TokenCount() int64                          { return b.pool.TokenCount() }
 func (b *poolAgentBridge) SetHistory(_ string, _ []sdk.Message) error { return nil }
-func (b *poolAgentBridge) WaitForAll(_ string, _ []string, _ int) (extension.WaitResult, error) {
-	return extension.WaitResult{Status: "ok"}, nil
-}
+func (b *poolAgentBridge) MainAgentContextUsage() sdk.ContextUsage    { return sdk.ContextUsage{} }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 

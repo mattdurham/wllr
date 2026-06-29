@@ -185,3 +185,17 @@ Documents existing tests and specifies missing tests worth adding.
 **Assertions:**
 - Returns exactly the outer JSON object bytes.
 - Does not include trailing bytes beyond the closing `}`.
+
+---
+
+## UI Scene-Graph Host Methods (host_test.go)
+
+### TestHost_UIMethods_Dispatch
+**Scenario:** A trusted extension calls `ui_create_area`, `ui_patch`, then `ui_remove_area`.
+**Setup:** Load minimal.wasm, mark `ext.trusted = true`, install a `testUIBridge` capturing area IDs.
+**Assertion:** No error responses; the bridge's `CreateArea`, `PatchUI`, and `RemoveArea` were each invoked once with area "chat".
+
+### TestHost_UIMethods_PermissionDenied
+**Scenario:** A non-trusted extension without the `ui` permission calls `ui_patch`.
+**Setup:** Load minimal.wasm, `ext.trusted = false`, install a `testUIBridge`.
+**Assertion:** The response carries a permission-denied error.

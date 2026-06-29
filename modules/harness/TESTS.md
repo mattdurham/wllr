@@ -119,6 +119,20 @@ The following scenarios are not currently covered and should be added:
 | `TestModel_Update_StreamDoneMsg_HidesConsole` | StreamDone hides console | `consoleVisible=true`; `StreamDoneMsg` | `consoleVisible == false` |
 | `TestModel_chatHeight_AccountsForConsole` | chatHeight subtracts console height | `consoleVisible` on/off | height changes by `consolePaneLines` |
 
+## SceneRenderer (scene_test.go)
+
+| Test | Scenario | Assertion |
+|------|----------|-----------|
+| `TestSceneCreateAndDuplicateArea` | Create an area, create it again, remove it | Duplicate errors; `HasArea` reflects create/remove |
+| `TestSceneSetRootAndRender` | `set_root` a vstack with a text child, render | Output contains the text |
+| `TestSceneAppendTextStreaming` | Seed a text node, append two deltas | Render shows the concatenated text |
+| `TestSceneInsertAndRemove` | Insert two children (one at index 0), then remove one | Index-0 child renders first; removed node absent |
+| `TestSceneBatchAtomicOnError` | Batch with a valid op then an op on a missing node | Batch errors; live tree unchanged (no partial apply) |
+| `TestScenePatchUnknownArea` | Patch an area that does not exist | Returns an error |
+| `TestSceneAppendTextRejectsNonText` | `append_text` on a vstack node | Returns an error |
+| `TestSceneAreasByPlacement` | Create areas across placements | Sidebar areas returned in creation order |
+| `TestSceneUnknownNodeTypeRendersEmpty` | `set_root` with an unknown node type | Render does not panic |
+
 ### Missing / Recommended Tests
 
 | Priority | Test | Description | Success Criteria |

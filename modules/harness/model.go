@@ -114,6 +114,11 @@ type Model struct {
 
 	chat ChatView
 
+	// scene holds extension-driven UI areas (the declarative, node-based
+	// renderer). Shared by pointer with the harnessUIBridge so the bridge can
+	// mutate it off-loop and the View can read it.
+	scene *SceneRenderer
+
 	picker PickerView
 
 	width, height int
@@ -151,6 +156,7 @@ func New(pool *agent.AgentPool, mainAgentID string, h *extension.Host) Model {
 		extHost:     h,
 		console:     NewConsoleView(),
 		live:        &liveState{provider: provName},
+		scene:       NewSceneRenderer(),
 	}
 
 	registerBuiltins(m.commands)
@@ -214,6 +220,7 @@ func (m *Model) SetProgram(p *tea.Program) {
 			live:   m.live,
 			mainID: mainID,
 			cmds:   m.commands,
+			scene:  m.scene,
 		})
 
 		// Wire context-usage dispatcher so agent turns forward EventContextUsage
@@ -789,6 +796,11 @@ func (m Model) updateExtension(msg tea.Msg) (Model, tea.Cmd, bool) {
 	case StatusUpdateMsg:
 		m.statusBar, _ = m.statusBar.Update(msg)
 		return m, nil, true
+
+	case sceneDirtyMsg:
+		// The scene was mutated off-loop by the UI bridge; this message just
+		// forces a re-render. No state change here.
+		return m, nil, true
 	}
 	return m, nil, false
 }
@@ -1101,6 +1113,10 @@ func (m Model) View() tea.View {
 		}
 	} else {
 		sb.WriteString(strings.TrimRight(m.chat.View(), "\n") + "\n")
+		if scenes := m.renderScenes(); scenes != "" {
+			sb.WriteString(scenes)
+			sb.WriteString("\n")
+		}
 		if dropdown := m.renderDropdown(); dropdown != "" {
 			sb.WriteString(dropdown)
 			sb.WriteString("\n")
@@ -1125,6 +1141,32 @@ func (m Model) View() tea.View {
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
 	return v
+}
+
+// renderScenes renders every extension-driven scene area inline, stacked in
+// creation order. P1 integration is intentionally minimal: areas render below
+// the chat regardless of placement. Later phases composite by placement and
+// move the chat transcript itself into a "main" scene area.
+func (m Model) renderScenes() string {
+	if m.scene == nil {
+		return ""
+	}
+	width := m.width
+	if width <= 0 {
+		width = 80
+	}
+	var parts []string
+	for _, placement := range []sdk.UIAreaPlacement{sdk.UIAreaMain, sdk.UIAreaSidebar, sdk.UIAreaStatus, sdk.UIAreaOverlay} {
+		for _, id := range m.scene.AreasByPlacement(placement) {
+			if r := strings.TrimRight(m.scene.Render(id, width), "\n"); r != "" {
+				parts = append(parts, r)
+			}
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "\n")
 }
 
 // renderModal renders a centered modal popup sized at 80% width × height lines.

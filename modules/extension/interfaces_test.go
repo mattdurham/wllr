@@ -19,6 +19,7 @@ func (f *fakeAgentBridge) Run(_ string) error                                   
 func (f *fakeAgentBridge) List() ([]extension.AgentInfo, error)                    { return nil, nil }
 func (f *fakeAgentBridge) TokenCount() int64                                       { return 0 }
 func (f *fakeAgentBridge) SetHistory(_ string, _ []sdk.Message) error              { return nil }
+func (f *fakeAgentBridge) MainAgentContextUsage() sdk.ContextUsage                 { return sdk.ContextUsage{} }
 
 // compile-time check
 var _ extension.AgentBridge = (*fakeAgentBridge)(nil)
@@ -91,6 +92,9 @@ func (f *fakeUIBridge) ToolResult(_, _ string, _ bool)                        {}
 func (f *fakeUIBridge) AfterToolCall(_, _, _ string, _ bool)                  {}
 func (f *fakeUIBridge) ConsoleOutput(_ string)                                {}
 func (f *fakeUIBridge) ConsoleClear()                                         {}
+func (f *fakeUIBridge) CreateArea(_ sdk.UIArea) error                         { return nil }
+func (f *fakeUIBridge) PatchUI(_ sdk.UIPatchParams) error                     { return nil }
+func (f *fakeUIBridge) RemoveArea(_ string)                                   {}
 
 var _ extension.UIBridge = (*fakeUIBridge)(nil)
 

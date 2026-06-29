@@ -178,6 +178,9 @@ The full set of dispatched methods is:
 | `MethodGetStatusInfo`         | `handleGetStatusInfo`                            |
 | `MethodSetStatusLine`         | `handleSetStatusLine`                            |
 | `MethodGetContextUsage`       | `handleGetContextUsage`                          |
+| `MethodUICreateArea`          | `handleUICreateArea` (requires `ui`)             |
+| `MethodUIPatch`               | `handleUIPatch` (requires `ui`)                  |
+| `MethodUIRemoveArea`          | `handleUIRemoveArea` (requires `ui`)             |
 
 ---
 
@@ -189,7 +192,7 @@ The full set of dispatched methods is:
 |---------------|---------------------|-------------------------|----------------------------------------------------------------|
 | `agents`      | `AgentBridge`       | `SetAgentBridge`        | Spawn, close, message, run, list agents and manage history     |
 | `teams`       | `TeamBridge`        | `SetTeamBridge`         | Create, close, add/remove members, list teams                  |
-| `ui`          | `UIBridge`          | `SetUIBridge`           | Notify, modal, picker, status, send message, system prompt     |
+| `ui`          | `UIBridge`          | `SetUIBridge`           | Notify, modal, picker, status, system prompt, scene-graph areas |
 | `capabilities`| `CapabilityProvider`| `SetCapabilities`       | Exec, GetEnv, ReadFile, WriteFile, HTTPPost, ConfigRead        |
 | `mcp`         | `MCPBridge`         | `SetMCPBridge`          | Spawn, close, send, read MCP server subprocesses               |
 
@@ -198,6 +201,8 @@ The full set of dispatched methods is:
 **Invariant:** Dispatch handlers snapshot the bridge field under `h.mu.RLock()` via internal getter methods (`h.agentBridge()`, `h.uiBridge()`, etc.) so that the field transition from early stub to full implementation is race-free.
 
 **Invariant:** `PermExec` is required for `agent_spawn` (via `AgentBridge.Spawn`), `exec`, `read_file`, `write_file`, `http_post`, and `mcp_spawn`. If the extension is nil or lacks the required permission, the call returns a permission-denied error response.
+
+**Invariant:** `PermUI` is required for `ui_create_area`, `ui_patch`, and `ui_remove_area`. The `UIBridge` gains three methods for the declarative scene graph: `CreateArea(sdk.UIArea) error`, `PatchUI(sdk.UIPatchParams) error`, and `RemoveArea(string)`. `CreateArea` and `PatchUI` return an error (duplicate area, missing area/node) that the host forwards to the extension as an error response; `RemoveArea` is a no-op for a missing area.
 
 **Invariant:** `get_context_usage` (`MethodGetContextUsage`) requires no permission. It is a
 read-only observability call. When the `AgentBridge` is nil or not yet installed, the handler
