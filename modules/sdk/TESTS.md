@@ -155,3 +155,28 @@
 ### BenchmarkHostCallRequestRoundTrip
 **Scenario:** Marshal then unmarshal a `HostCallRequest` with a small params object.
 **Target:** See BENCHMARKS.md.
+
+---
+
+## UI Scene-Graph Tests (ui_test.go)
+
+### TestUINodeRoundTrip
+**Scenario:** A `UINode` with props and a text child marshals and unmarshals without loss.
+**Assertion:** ID, Type, child count, and child text are preserved.
+
+### TestUINodeTextNodeOmitsChildren
+**Scenario:** A `UINodeText` node with no children and nil props is marshalled.
+**Assertion:** The JSON contains neither `"children"` nor `"props"` (omitempty verified).
+
+### TestUIPatchOpIndexZeroPreserved
+**Scenario:** A `UIOpInsert` op with `Index = &0` and one with a nil `Index` are marshalled.
+**Assertion:** The first contains `"index":0`; the second omits `"index"` entirely.
+**Rationale:** `Index` is `*int` so a valid position of 0 survives while a nil (append) is dropped.
+
+### TestUIPatchParamsRoundTrip
+**Scenario:** A `UIPatchParams` with an append_text and a remove op round-trips.
+**Assertion:** Area, op count, and the append_text op's ID/Text are preserved.
+
+### TestUIAreaRoundTrip
+**Scenario:** A `UICreateAreaParams` with placement main and weight 3 round-trips.
+**Assertion:** Area ID, Placement, and Weight are preserved.
