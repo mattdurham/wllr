@@ -14,13 +14,13 @@
 | `TestModel_Update_StreamDoneMsg_ContextCanceled_NoError` | `context.Canceled` is not shown as error | `m.streaming = true`, partial token | `streaming == false`; no system notification message in chat |
 | `TestModel_Update_ReloadMsg_TriggersExtensionReload` | ReloadMsg returns a Cmd that resolves to NotifyMsg | `newTestModel()` (nil host) | `cmd != nil`; executing cmd yields `NotifyMsg` |
 | `TestModel_Update_ClearMsg_ClearsHistory` | clearMsg empties history and chat | history + chat pre-populated | `len(m.history) == 0`; `len(m.chat.messages) == 0` |
-| `TestModel_Update_SetModelMsg` | setModelMsg updates activeModel and statusBar | `newTestModel()` | `m.activeModel` and `m.statusBar.modelName` equal new model name |
+| `TestModel_Update_SetModelMsg` | setModelMsg updates activeModel and live.model | `newTestModel()` | `m.activeModel` and `m.live.model` equal new model name |
 | `TestModel_Update_CommandMsg_Clear` | /clear command dispatched via registry | history pre-populated | `len(m.history) == 0` after processing |
 | `TestModel_Update_CommandMsg_UnknownCommand` | Unknown command yields NotifyMsg | `newTestModel()` | `cmd != nil`; msg is `NotifyMsg` with non-empty text |
 | `TestModel_Update_SubmitMsg_StartsStream` | SubmitMsg starts streaming | `newTestModel()` with mock provider | `m.streaming == true`; `cmd != nil` |
 | `TestModel_Update_SubmitMsg_IgnoredWhileStreaming` | SubmitMsg dropped while streaming | `m.streaming = true` | No panic; model consistent |
 | `TestModel_Update_NotifyMsg` | NotifyMsg adds to chat | `newTestModel()` | `len(m.chat.messages) > 0` |
-| `TestModel_Update_StatusUpdateMsg` | StatusUpdateMsg updates statusBar | `newTestModel()` | `m.statusBar.statuses["foo"] == "bar"` |
+| `TestModel_Update_StatusUpdateMsg` | StatusUpdateMsg updates live.statuses | `newTestModel()` | `m.live.getStatus("foo") == "bar"` |
 | `TestModel_Update_WindowSizeMsg` | WindowSizeMsg updates dimensions | `newTestModel()` | `m.width == 120`, `m.height == 40` |
 | `TestModel_NilLangModel_StreamError` | nil langModel returns StreamDoneMsg with error | `New(nil, "none", nil)` | `streaming == true` before cmd runs; `StreamDoneMsg.Err != nil` |
 
@@ -94,7 +94,6 @@ The following scenarios are not currently covered and should be added:
 | Low | `TestStatusBar_Update_SetsStatus` | `StatusUpdateMsg` sets the keyed value |
 | Low | `TestStatusBar_View_SortedKeys` | Multiple status keys appear in sorted order in view output |
 
-
 ### console_test.go
 
 | Test | Scenario | Setup | Assertions |
@@ -114,6 +113,18 @@ The following scenarios are not currently covered and should be added:
 | `TestModel_Update_ConsoleMsg_Clear_ResetsConsole` | `ConsoleMsg{Clear}` empties console | Append then Clear msg | console empty |
 | `TestModel_Update_StreamDoneMsg_HidesConsole` | StreamDone hides console | `consoleVisible=true`; `StreamDoneMsg` | `consoleVisible == false` |
 | `TestModel_chatHeight_AccountsForConsole` | chatHeight subtracts console height | `consoleVisible` on/off | height changes by `consolePaneLines` |
+
+### SceneRenderer constraint tests (scene_test.go)
+
+| Test | Scenario | Assertion |
+|------|----------|-----------|
+| `TestSceneUpdateAreaConstraints` | Create area with constraints; UpdateArea raises max; error on unknown ID | Height clamped before and after update; unknown ID errors |
+| `TestSceneUpdateAreaWeight` | Create area; update weight; second update without weight leaves weight unchanged | No error |
+| `TestConstrainWidthAbsolute` | MinWidth=20, MaxWidth=80; pass 100, 10, 50 | Returns 80, 20, 50 respectively |
+| `TestConstrainWidthPercent` | MinWidth=25%, MaxWidth=75% of 100-wide terminal | Returns 75 for both clamped cases |
+| `TestConstrainHeightPercent` | MaxHeight=10% of 50-line terminal; pass 20 | Returns 5 |
+| `TestConstrainUnknownAreaPassthrough` | Unknown area ID | ConstrainWidth/ConstrainHeight return inputs unchanged |
+| `TestResolveConstraintEdgeCases` | Empty, non-numeric, 0%, 100% inputs | Empty=unconstrained; bad=unconstrained; 0%=0; 100%=terminal size |
 
 ## SceneRenderer (scene_test.go)
 

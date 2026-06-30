@@ -191,7 +191,7 @@ func renderAgentsPanel() {
 func onSessionStart() {
 	// Register the WASM-owned activity panel area and paint its initial (empty)
 	// state. All subsequent updates flow from WASM via renderAgentsPanel.
-	UICreateArea(agentsPanelArea, "sidebar", 1)
+	UICreateArea(agentsPanelArea, "sidebar", 1, "", "", "", "")
 	renderAgentsPanel()
 
 	// Optionally take over the main chat transcript (WLLR_WASM_CHAT=1).
