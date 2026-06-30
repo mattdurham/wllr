@@ -222,6 +222,10 @@ const (
 	// MethodUIRemoveArea removes a UI area and its scene graph.
 	// Params: {"area": "<id>"}. Requires PermUI.
 	MethodUIRemoveArea = "ui_remove_area"
+	// MethodUIUpdateArea updates the sizing constraints and/or weight of an
+	// existing area. Params: UIUpdateAreaParams. Requires PermUI.
+	// Returns an error if the area ID does not exist.
+	MethodUIUpdateArea = "ui_update_area"
 )
 
 // ShowPickerItem is one entry displayed in the interactive picker overlay.

@@ -15,4 +15,9 @@ const (
 	UIAreaStatus UIAreaPlacement = "status"
 	// UIAreaOverlay floats above other areas (e.g. modals, pickers).
 	UIAreaOverlay UIAreaPlacement = "overlay"
+	// UIAreaInput is the logical slot for the interactive text-entry box. The
+	// harness always owns this slot; it cannot be replaced by a scene area.
+	// Defined here so extensions can reference the constant for documentation
+	// and layout queries.
+	UIAreaInput UIAreaPlacement = "input"
 )
