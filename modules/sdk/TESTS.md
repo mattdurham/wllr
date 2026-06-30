@@ -184,3 +184,7 @@
 ### TestTokenPayloadRoundTrip
 **Scenario:** A `TokenPayload{AgentID, Text}` marshals and unmarshals without loss.
 **Assertion:** AgentID and Text (including a trailing space) are preserved.
+
+### TestNotifyPayloadRoundTrip (covered via test/wasmchat end-to-end)
+**Scenario:** `EventNotify`/`NotifyPayload{Text}` is dispatched to the bundled agents.wasm and rendered into the transcript scene.
+**Assertion:** The transcript contains the notification text (see test/wasmchat TestAgentsWASMDrivesChatTranscript).

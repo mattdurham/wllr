@@ -339,3 +339,15 @@ a separate `m.history` copy.
 **Rationale:** The vision ("all text goes through the agents wasm; the Go side is just a bridge") requires the transcript to be produced in WASM. But scrolling and key input are inherently bubbletea/harness concerns and must not cross into WASM. Splitting *content production* (WASM) from *viewport/scroll* (harness) achieves the goal without reimplementing scrolling, sizing, or input in the scene graph. Making it opt-in keeps the primary UI unchanged by default — a risky surface to flip — while letting the full pipeline be exercised and tested (see test/wasmchat). The legacy `ChatView` rendering and the direct token/user wiring are intentionally left intact (ignored in external mode) so the feature is fully reversible and notifications/tool state remain available for a future, fuller migration.
 
 **Consequence:** `Model` gains `wasmChat bool` (from env in `New`) and the `wasmChatAreaID` constant. `ChatView` gains `externalMode`/`externalContent` and `SetExternalContent`. No default behavior changes. Sub-agent text is excluded from the transcript by the extension (it filters on agent ID). A future phase could route notifications through an event and make this the default once validated.
+
+---
+
+## Notifications routed through EventNotify (UI P4)
+
+*Added: 2026-06-29*
+
+**Decision:** Introduce `Model.pushNotification(text)` as the single notification choke point. It calls `ChatView.AddNotification` (legacy rendering) and dispatches `sdk.EventNotify` in a goroutine. All in-Model notification sites (`NotifyMsg` handler, model-change, reload, history-restore, extension errors) now call it.
+
+**Rationale:** In WASM-chat mode the transcript is owned by an extension, so notifications rendered only by `ChatView` would be invisible. A notify event lets the transcript owner render them. The dispatch goroutine avoids blocking the bubbletea loop (mirrors the off-loop token dispatch); the SceneRenderer it ultimately mutates is goroutine-safe. Dispatching regardless of mode keeps the choke point simple and is harmless (subscription-gated).
+
+**Consequence:** Notifications now appear in the WASM-driven transcript (agents extension `OnNotify` → scene patch). Extensions must not call `notify` inside an `OnNotify` handler (infinite dispatch loop). The legacy `session.Renderer.AddNotification` seam (currently unwired in the binary) is unchanged.

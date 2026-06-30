@@ -527,3 +527,4 @@ When `WLLR_WASM_CHAT=1`, `Model.wasmChat` is true and the main chat transcript c
 - `wasmChat` defaults to **off**; with it off, behavior is identical to before P4 (internal `ChatView` rendering, no `chat` area created by the extension).
 - The viewport (scroll, size, `GotoBottom`) is always harness-owned regardless of mode. Input/scroll never route to WASM.
 - The direct `TokenMsg`/`AddUserMessage`/`FinalizeMessage` paths still run in WASM mode but are ignored for rendering because `ChatView` is in external mode; they harmlessly maintain internal `messages`.
+- All notifications funnel through `Model.pushNotification(text)`, which calls `ChatView.AddNotification` and dispatches `sdk.EventNotify` (in a goroutine) so a transcript-owning extension can render notifications. The dispatch fires regardless of `wasmChat` (subscription-gated; ignored by extensions that do not subscribe).

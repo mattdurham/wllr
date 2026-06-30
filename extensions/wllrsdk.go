@@ -576,3 +576,16 @@ func OnToken(fn func(agentID, text string)) {
 		}
 	})
 }
+
+// OnNotify registers a handler called when a system notification line is shown
+// in the chat. text may begin with "⚠" for warnings/errors.
+func OnNotify(fn func(text string)) {
+	_sdkOn("notify", func(payload json.RawMessage) {
+		var p struct {
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(payload, &p); err == nil {
+			fn(p.Text)
+		}
+	})
+}

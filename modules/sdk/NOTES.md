@@ -178,3 +178,15 @@ Append-only design decision log. Never delete entries; add an `*Addendum (date):
 **Rationale:** The goal of routing assistant text through a WASM extension (so the extension can paint it into a scene-graph area) requires the streamed text to reach WASM. A per-token event would cross the boundary thousands of times per turn; batching at the existing 30ms cadence caps it at ~33 dispatches/sec. The payload carries `AgentID` so an extension can distinguish main-agent text from sub-agent text.
 
 **Consequence:** Event type count rises to 15. The harness token batcher gains an optional dispatch hook that forwards each flushed batch to `Host.DispatchEvent(EventToken)` on the agent goroutine, in addition to the existing `TokenMsg` chat path (the two coexist; a later phase may remove the direct chat path once the WASM path renders the transcript). `wllrsdk.go` gains `OnToken(func(agentID, text string))`.
+
+---
+
+## 15. EventNotify — notifications to extensions (UI P4)
+
+*Added: 2026-06-29*
+
+**Decision:** Add `EventNotify` (`"notify"`) and `NotifyPayload{Text}`. The harness dispatches it for every notification line shown in the chat, via a single Model choke point (`pushNotification`), in a goroutine so the bubbletea loop never blocks.
+
+**Rationale:** When a WASM extension owns the transcript (WLLR_WASM_CHAT), notifications would otherwise be lost because they were rendered only by the internal `ChatView`. Routing them as an event lets the transcript-owning extension render them as system lines. The event is dispatched regardless of origin (extension `notify`, `/model`, reload, extension errors) because all of these funnel through the Model's notification path. It is also generally useful to any extension (e.g. logging) and is subscription-gated, so existing extensions are unaffected.
+
+**Consequence:** Event type count rises to 16. Extensions must not call `notify` from within an `OnNotify` handler (it would recurse). `wllrsdk.go` gains `OnNotify(func(text string))`. The harness `pushNotification` replaces direct `m.chat.AddNotification` calls and the `NotifyMsg` handler.

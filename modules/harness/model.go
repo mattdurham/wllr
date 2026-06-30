@@ -441,7 +441,7 @@ func (m Model) updateWindow(msg tea.Msg) (Model, tea.Cmd, bool) {
 			}
 		}
 		m.picker.Close()
-		m.chat.AddNotification("History restored — conversation loaded from selected point.")
+		m.pushNotification("History restored — conversation loaded from selected point.")
 		return m, nil, true
 	}
 	return m, nil, false
@@ -645,7 +645,7 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 				slog.Info("stream cancelled by user")
 			} else {
 				slog.Error("stream error", "err", msg.Err)
-				m.chat.AddNotification(fmt.Sprintf("⚠ %v", msg.Err))
+				m.pushNotification(fmt.Sprintf("⚠ %v", msg.Err))
 				m.statusBar.statuses["stream"] = "error"
 				m.live.setStreaming(false, time.Time{}, true)
 			}
@@ -744,7 +744,7 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 		m.activeModel = msg.Model
 		m.statusBar.modelName = msg.Model
 		m.live.setModel(msg.Model)
-		m.chat.AddNotification(fmt.Sprintf("Model set to: %s", msg.Model))
+		m.pushNotification(fmt.Sprintf("Model set to: %s", msg.Model))
 		return m, nil, true
 
 	case abortStreamMsg:
@@ -776,7 +776,7 @@ func (m Model) updateExtension(msg tea.Msg) (Model, tea.Cmd, bool) {
 	case sessionStartDoneMsg:
 		for _, r := range msg.Results {
 			if r.Error != "" {
-				m.chat.AddNotification(fmt.Sprintf("Extension error: %s", r.Error))
+				m.pushNotification(fmt.Sprintf("Extension error: %s", r.Error))
 			}
 		}
 		m.updateSuggestions()
@@ -810,7 +810,7 @@ func (m Model) updateExtension(msg tea.Msg) (Model, tea.Cmd, bool) {
 	case ExtensionEventResultMsg:
 		for _, r := range msg.Results {
 			if r.Error != "" {
-				m.chat.AddNotification(fmt.Sprintf("Extension error: %s", r.Error))
+				m.pushNotification(fmt.Sprintf("Extension error: %s", r.Error))
 			}
 		}
 		// Clear queuing… if streaming hasn't started yet (command didn't reach the LLM).
@@ -823,7 +823,7 @@ func (m Model) updateExtension(msg tea.Msg) (Model, tea.Cmd, bool) {
 		return m, m.cmdReloadExtensions(), true
 
 	case NotifyMsg:
-		m.chat.AddNotification(msg.Text)
+		m.pushNotification(msg.Text)
 		return m, nil, true
 
 	case StatusUpdateMsg:
@@ -838,6 +838,22 @@ func (m Model) updateExtension(msg tea.Msg) (Model, tea.Cmd, bool) {
 		return m, nil, true
 	}
 	return m, nil, false
+}
+
+// pushNotification shows a system notification line in the chat and dispatches
+// EventNotify so extensions that own the transcript (WASM-driven chat) can
+// render it. The dispatch runs in a goroutine so it never blocks the bubbletea
+// loop; the SceneRenderer it ultimately mutates is goroutine-safe.
+func (m *Model) pushNotification(text string) {
+	m.chat.AddNotification(text)
+	if m.extHost == nil {
+		return
+	}
+	extHost := m.extHost
+	payload, _ := json.Marshal(sdk.NotifyPayload{Text: text})
+	go func() {
+		_, _ = extHost.DispatchEvent(context.Background(), sdk.Event{Type: sdk.EventNotify, Payload: payload})
+	}()
 }
 
 // refreshWASMChat feeds the WASM-owned transcript scene area into the chat

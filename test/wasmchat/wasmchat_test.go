@@ -93,12 +93,24 @@ func TestAgentsWASMDrivesChatTranscript(t *testing.T) {
 	dispatch(t, h, sdk.EventToken, sdk.TokenPayload{AgentID: "main", Text: "The answer "})
 	dispatch(t, h, sdk.EventToken, sdk.TokenPayload{AgentID: "main", Text: "is 4."})
 
+	// A system notification should also be rendered into the transcript.
+	dispatch(t, h, sdk.EventNotify, sdk.NotifyPayload{Text: "Extensions reloaded."})
+
+	// Sub-agent text must NOT appear in the main transcript.
+	dispatch(t, h, sdk.EventToken, sdk.TokenPayload{AgentID: "main/worker", Text: "SECRET SUBAGENT"})
+
 	out := scene.Render("chat", 60)
 	if !strings.Contains(out, "what is 2+2?") {
 		t.Fatalf("transcript missing user prompt:\n%s", out)
 	}
 	if !strings.Contains(out, "The answer is 4.") {
 		t.Fatalf("transcript missing streamed assistant text:\n%s", out)
+	}
+	if !strings.Contains(out, "Extensions reloaded.") {
+		t.Fatalf("transcript missing notification line:\n%s", out)
+	}
+	if strings.Contains(out, "SECRET SUBAGENT") {
+		t.Fatalf("sub-agent text must not appear in the main transcript:\n%s", out)
 	}
 }
 
