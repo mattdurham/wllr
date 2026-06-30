@@ -327,3 +327,15 @@ a separate `m.history` copy.
 **Rationale:** Routing streamed assistant text through WASM (so an extension can render it via the scene graph) requires the text to reach the extension host. Reusing the batcher's existing 30ms coalescing keeps the WASM crossing rate bounded (~33/sec) instead of one dispatch per token. Keeping the direct chat path avoids regressing the main transcript while the WASM-driven rendering path is proven incrementally.
 
 **Consequence:** `makeBatchedOnToken`'s signature changed to `(p, dispatch)`. EventToken dispatch only occurs when an extension host is present. The dispatch executes on the agent's streaming goroutine; `DispatchEvent` is safe there (it does not touch the bubbletea loop).
+
+---
+
+## WASM-driven chat transcript — content/viewport split (UI P4)
+
+*Added: 2026-06-29*
+
+**Decision:** Add an opt-in (`WLLR_WASM_CHAT=1`) mode where the main chat transcript *content* is produced by a WASM extension via the `chat` scene area, while the harness keeps the scrollable viewport. `ChatView` gains an external-content mode (`SetExternalContent`/`externalMode`); `Model.refreshWASMChat` feeds `scene.Render("chat", width)` into the viewport on scene changes and resizes; `renderScenes` skips the `chat` area in this mode.
+
+**Rationale:** The vision ("all text goes through the agents wasm; the Go side is just a bridge") requires the transcript to be produced in WASM. But scrolling and key input are inherently bubbletea/harness concerns and must not cross into WASM. Splitting *content production* (WASM) from *viewport/scroll* (harness) achieves the goal without reimplementing scrolling, sizing, or input in the scene graph. Making it opt-in keeps the primary UI unchanged by default — a risky surface to flip — while letting the full pipeline be exercised and tested (see test/wasmchat). The legacy `ChatView` rendering and the direct token/user wiring are intentionally left intact (ignored in external mode) so the feature is fully reversible and notifications/tool state remain available for a future, fuller migration.
+
+**Consequence:** `Model` gains `wasmChat bool` (from env in `New`) and the `wasmChatAreaID` constant. `ChatView` gains `externalMode`/`externalContent` and `SetExternalContent`. No default behavior changes. Sub-agent text is excluded from the transcript by the extension (it filters on agent ID). A future phase could route notifications through an event and make this the default once validated.

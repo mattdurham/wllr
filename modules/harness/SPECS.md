@@ -512,3 +512,18 @@ Returns the current set of registered tools from `extHost.RegisteredTools()` as 
 - Colour props resolve through `themeColor` (named tokens → hex); unknown non-hex tokens yield no colour, so the host keeps theming control.
 - The `harnessUIBridge` shares the `Model.scene` pointer, mutates it synchronously off the bubbletea loop (the renderer is mutex-guarded), and sends `sceneDirtyMsg{}` to force a re-render. `sceneDirtyMsg` is a no-op in `Update` other than triggering `View`.
 - P1 `View` integration is minimal: `renderScenes` stacks all areas below the chat regardless of placement. Later phases composite by placement and move the chat transcript into a `main` scene area.
+
+---
+
+## 27. WASM-Driven Chat Transcript (UI P4)
+
+When `WLLR_WASM_CHAT=1`, `Model.wasmChat` is true and the main chat transcript content is produced by a WASM extension (the bundled `agents` extension) that owns the `wasmChatAreaID` (`"chat"`) scene area. The harness still owns the scrollable viewport; only the *content* is external.
+
+- `ChatView` gains an external-content mode: `SetExternalContent(string)` sets `externalMode = true` and replaces the viewport content (scrolling to bottom). In external mode `refreshContent` bypasses the internal message-rendering path entirely and uses `externalContent`.
+- `Model.refreshWASMChat()` is called on `sceneDirtyMsg` and on `WindowSizeMsg`; when `wasmChat` is set and the `chat` area exists it feeds `scene.Render("chat", width)` into the chat viewport.
+- `renderScenes` skips the `chat` area when `wasmChat` is set (it is rendered inside the viewport, not stacked below it).
+
+**Invariants:**
+- `wasmChat` defaults to **off**; with it off, behavior is identical to before P4 (internal `ChatView` rendering, no `chat` area created by the extension).
+- The viewport (scroll, size, `GotoBottom`) is always harness-owned regardless of mode. Input/scroll never route to WASM.
+- The direct `TokenMsg`/`AddUserMessage`/`FinalizeMessage` paths still run in WASM mode but are ignored for rendering because `ChatView` is in external mode; they harmlessly maintain internal `messages`.

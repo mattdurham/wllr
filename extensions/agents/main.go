@@ -142,6 +142,10 @@ func init() {
 
 	// Use the raw before_tool_call event so we get the AgentID field too.
 	OnBeforeToolCall(onBeforeToolCall)
+
+	// Register the WASM-driven chat transcript handlers (UI P4). They stay
+	// inert unless the host enables WLLR_WASM_CHAT (checked in onSessionStart).
+	initChat()
 }
 
 // ─── Event handlers ───────────────────────────────────────────────────────────
@@ -189,6 +193,9 @@ func onSessionStart() {
 	// state. All subsequent updates flow from WASM via renderAgentsPanel.
 	UICreateArea(agentsPanelArea, "sidebar", 1)
 	renderAgentsPanel()
+
+	// Optionally take over the main chat transcript (WLLR_WASM_CHAT=1).
+	onChatSessionStart()
 
 	guidance := `
 ## Agent and Team Tools
