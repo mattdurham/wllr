@@ -103,6 +103,39 @@ if respPtr != 0:
     host calls _free(respPtr)
 ```
 
+### DispatchEventChain Contract (transform-capable interception)
+
+`Host.DispatchEventChain(ctx, evt)` is the **transform** counterpart to the
+observe-only `DispatchEvent`. It threads `evt`'s payload through subscribed
+extensions in **priority order** (ascending `Priority`, then name ascending —
+identical ordering to `DispatchEvent`) and returns
+`(final sdk.Event, blocked bool, reason string, err error)`.
+
+For each subscribed extension it calls `_on_event` and applies the returned
+`sdk.EventResponse` via `applyInterceptorResponse`:
+
+- **observe** (`nil`/zero response): payload unchanged, chain continues.
+- **transform** (`EventResponse.Payload` non-empty): that payload replaces the
+  event payload for all subsequent interceptors and the final result.
+- **block** (`Block` or `Cancel` true): the chain stops immediately; `blocked`
+  is true and `reason` is `EventResponse.Error` (falling back to
+  `"blocked by extension <name>"` when empty). Later interceptors do not run.
+
+**Invariants:**
+
+- **Backward compatible.** An extension that returns no `Payload` and no
+  `Block`/`Cancel` leaves the event unchanged — existing observe/veto handlers
+  behave identically under the chain.
+- **First block wins.** The chain short-circuits at the first blocking response.
+- **The host does not validate transformed payload shape.** Each seam unmarshals
+  the final payload into its expected type and tolerates a malformed transform
+  (keeps the prior value, logs a warning). See `runBeforeToolCall`.
+- **Re-marshal per hop.** The event is re-marshalled before each extension so
+  each interceptor sees the prior interceptor's transform. A `json.Marshal`
+  failure is the only error `DispatchEventChain` returns.
+- **Bounded crossings.** Chains run once per interaction (per tool call), never
+  per render frame.
+
 ---
 
 ## 5. EventBus
@@ -327,26 +360,35 @@ Each `Extension` carries:
 
 `Host.ExecuteTool(ctx, agentID, toolCallID, toolName, input)` provides synchronous tool execution.
 
+**Both paths run the `before_tool_call` interceptor chain** via
+`runBeforeToolCall` (a wrapper over `DispatchEventChain`): interceptors may
+**rewrite the tool input** or **block** the call with a reason. A blocked call
+returns `toolResult{Result: blockReason(reason), IsError: true}` without executing
+the tool. A malformed transformed payload is tolerated (original input kept,
+warning logged).
+
 **Native tool fast path (checked first):**
 
 1. Acquires `nativeToolsMu.RLock()` and looks up `toolName` in `nativeTools`.
-2. If found, calls the native function directly (no WASM dispatch, no `pendingTools` channel).
-3. Dispatches `EventAfterToolCall` so WASM extensions that observe results stay informed.
-4. Calls `h.ui.AfterToolCall(toolCallID, toolName, result, isError)` via UIBridge (if set), then returns.
+2. Runs `runBeforeToolCall`; if blocked, returns the block result.
+3. If found, calls the native function with the **final (possibly rewritten) input** (no `pendingTools` channel).
+4. Dispatches `EventAfterToolCall` so WASM extensions that observe results stay informed.
+5. Calls `h.ui.AfterToolCall(toolCallID, toolName, result, isError)` via UIBridge (if set), then returns.
 
 **WASM dispatch path (when no native handler is registered):**
 
-1. Creates a `chan toolResult{1}` buffered channel keyed by `toolCallID` in `h.pendingTools`.
-2. Dispatches `EventBeforeToolCall` with `BeforeToolCallPayload{AgentID, ToolCallID, ToolName, Input}`.
+1. Registers a `chan toolResult{1}` buffered channel keyed by `toolCallID` in `h.pendingTools` **first** (the implementing extension is itself a `before_tool_call` subscriber and calls `tool_result` synchronously during the chain).
+2. Runs `runBeforeToolCall` (the interceptor chain). The implementing extension, running later in priority order, sees the threaded final input and calls `tool_result`. If a lower-priority interceptor blocks, the chain stops before the implementer runs, the pending entry is removed, and the block result is returned.
 3. Blocks on `select { case result := <-ch: ...; case <-ctx.Done(): ... }`.
 4. On result: dispatches `EventAfterToolCall` with `AfterToolCallPayload{AgentID, ToolCallID, ToolName, Result, IsError}`, then calls `h.ui.AfterToolCall(toolCallID, toolName, result, isError)` via UIBridge (if set).
 
 **Invariants:**
 
 - Native tools are checked before WASM; a tool registered via `RegisterNativeTool` is never dispatched through WASM.
-- `EventBeforeToolCall` is **not** dispatched for native tools (no interception needed for trusted built-ins).
+- `EventBeforeToolCall` **is** dispatched (as a transform chain) for both native and WASM tools — interceptors can rewrite input or block either. (Previously native tools skipped it; the interceptor contract applies uniformly.)
 - `EventAfterToolCall` **is** dispatched for both native and WASM tools so extensions that observe results work uniformly.
-- The WASM channel is registered in `pendingTools` **before** dispatching the event.
+- The WASM channel is registered in `pendingTools` **before** running the chain, so a `tool_result` called synchronously by the implementing extension during the chain is never dropped.
+- A blocked tool call returns an error `toolResult` and the implementing tool never executes; for the WASM path the pending channel entry is removed.
 - `AgentID` is included in both `BeforeToolCallPayload` and `AfterToolCallPayload` so extensions can correlate tool calls with the originating agent.
 - On context cancellation (WASM path), the pending entry is cleaned up before returning.
 - `handleToolResult` always calls `h.ui.ToolResult(toolCallID, result, isError)` via UIBridge in addition to signalling any pending channel.

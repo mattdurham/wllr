@@ -784,17 +784,42 @@ Fired when the harness is shutting down. Use this for cleanup.
 `EventResponse` object.
 
 ```json
-{"cancel": false, "block": false, "error": ""}
+{"cancel": false, "block": false, "error": "", "payload": null}
 ```
 
-| Field    | Type    | Semantics                                                          |
-|----------|---------|--------------------------------------------------------------------|
-| `cancel` | boolean | Cancel the current operation (e.g. abort a stream in progress).   |
-| `block`  | boolean | Block the event from being processed further (reserved).          |
-| `error`  | string  | Non-empty string signals an error; displayed as a notification.   |
+| Field     | Type    | Semantics                                                          |
+|-----------|---------|--------------------------------------------------------------------|
+| `cancel`  | boolean | Cancel the current operation (e.g. abort a stream in progress).   |
+| `block`   | boolean | Block the interaction; on a transform chain, stops it with `error` as the reason. |
+| `error`   | string  | Non-empty string signals an error / block reason; displayed as a notification. |
+| `payload` | object  | **Transformed event payload.** Same JSON shape as the incoming `Event.payload`. Empty = no transformation. |
 
 All fields are optional and default to their zero values. Return `0` (null
 pointer) from `_on_event` when no response is needed — this is the common case.
+
+### Interceptors (transform chains)
+
+Some interactions are dispatched as an **interceptor chain**: the host threads
+the event payload through subscribed extensions in priority order (lower
+`priority` first). Each extension may:
+
+- **observe** — return `0` / empty response; the payload is unchanged.
+- **transform** — return `{"payload": <modified payload>}`; the modified payload
+  is threaded to the next interceptor and applied to the operation.
+- **block** — return `{"block": true, "error": "<reason>"}`; the chain stops and
+  the operation is refused with the reason.
+
+The first block wins. A transformed payload that does not match the expected
+shape at the seam is ignored (the prior payload is kept).
+
+**`before_tool_call` is a transform chain.** An interceptor may rewrite a tool
+call's `input` (e.g. a security layer sanitising a bash command) or block the
+call. This applies to both WASM-implemented and native (built-in) tools. A
+blocked call returns an error tool result and the tool never executes.
+
+The SDK helper `OnInterceptToolCall(fn)` wraps this: `fn(agentID, toolName,
+input)` returns `(newInput, block, reason)` — a non-nil `newInput` rewrites the
+call, `block=true` refuses it with `reason`.
 
 ---
 

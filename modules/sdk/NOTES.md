@@ -204,3 +204,15 @@ Append-only design decision log. Never delete entries; add an `*Addendum (date):
 **Rationale:** The statusline scene design requires areas that can grow and shrink dynamically (e.g. collapse to 0 lines when idle, expand to show sub-agent status). Without constraints, extensions would have to truncate/pad themselves in the scene tree, duplicating logic across every extension. Placing constraint resolution in the harness means a single implementation handles all areas consistently. Percentage values allow layouts to adapt to any terminal size without hardcoding widths. `UIUpdateAreaParams` enables runtime resize without tearing down and recreating the area (which would lose the scene tree). `UIAreaInput` is added so extensions can reference the logical slot in documentation and layout queries even though the harness always owns it.
 
 **Consequence:** `UIArea` wire format gains four new `omitempty` fields — backward-compatible (missing fields = unconstrained). `sceneArea` struct in `modules/harness` gains matching fields. `SceneRenderer` gains `UpdateArea`, `ConstrainWidth`, `ConstrainHeight` methods. `ui_update_area` is routed through `UIBridge` in the extension host, same permission gate as other UI methods (`PermUI`).
+
+---
+
+## 17. EventResponse.Payload — transform-capable interception
+
+*Added: 2026-06-30*
+
+**Decision:** Add an optional `Payload json.RawMessage` field to `EventResponse`. An interceptor's `_on_event` may now return a **transformed event payload** (same JSON shape as the incoming `Event.Payload`) in addition to the existing observe (nil) and veto (`Cancel`/`Block`) outcomes.
+
+**Rationale:** This is the single capability gap behind the interceptor-contract design (docs/plans/2026-06-30-interceptor-contract-design.md). Before this, `EventResponse` was observe + veto only: an extension could watch an interaction and cancel/block it, but could not *change* it. Three concrete features all need exactly that — a bash-security layer rewriting a command, PII/key redaction editing the messages sent to the LLM, and cheap/frontier model routing overriding the request model. Rather than add a new response type or a parallel event mechanism, extending `EventResponse` with one `omitempty` field generalizes the existing event/dispatch infra into a transform pipeline (`Host.DispatchEventChain`). It is the smallest change that unlocks the whole class: "observe an interaction, then optionally transform / reroute / block it."
+
+**Consequence:** `EventResponse` gains `Payload`; empty means "no transformation" (backward compatible — existing observe/veto handlers are unaffected, and a zero `EventResponse` still marshals to `{}`). The host threads `Payload` through interceptors in priority order and applies the final payload at the seam. The first seam wired is `before_tool_call` (input rewrite / block); `before_provider_request` (PII + routing) follows in a later phase. `wllrsdk.go` gains an interceptor registry (`_sdkOnIntercept`) and `OnInterceptToolCall`. ABIVersion is unchanged (additive field).
