@@ -96,6 +96,86 @@ func TestUIAreaRoundTrip(t *testing.T) {
 	}
 }
 
+func TestUIAreaConstraintsRoundTrip(t *testing.T) {
+	a := UICreateAreaParams{Area: UIArea{
+		ID:        "statusline",
+		Placement: UIAreaStatus,
+		Weight:    1,
+		MinHeight: "1",
+		MaxHeight: "5",
+		MinWidth:  "20%",
+		MaxWidth:  "100%",
+	}}
+	data, err := json.Marshal(a)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got UICreateAreaParams
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	g := got.Area
+	if g.ID != "statusline" || g.Placement != UIAreaStatus || g.Weight != 1 {
+		t.Fatalf("base fields lost: %+v", g)
+	}
+	if g.MinHeight != "1" || g.MaxHeight != "5" {
+		t.Fatalf("height constraints lost: min=%q max=%q", g.MinHeight, g.MaxHeight)
+	}
+	if g.MinWidth != "20%" || g.MaxWidth != "100%" {
+		t.Fatalf("width constraints lost: min=%q max=%q", g.MinWidth, g.MaxWidth)
+	}
+}
+
+func TestUIUpdateAreaParamsRoundTrip(t *testing.T) {
+	w := 3
+	p := UIUpdateAreaParams{
+		ID:        "statusline",
+		MinHeight: "2",
+		MaxHeight: "10",
+		MinWidth:  "50%",
+		MaxWidth:  "100%",
+		Weight:    &w,
+	}
+	data, err := json.Marshal(p)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got UIUpdateAreaParams
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.ID != "statusline" || got.MinHeight != "2" || got.MaxHeight != "10" {
+		t.Fatalf("fields lost: %+v", got)
+	}
+	if got.MinWidth != "50%" || got.MaxWidth != "100%" {
+		t.Fatalf("width constraints lost: %+v", got)
+	}
+	if got.Weight == nil || *got.Weight != 3 {
+		t.Fatalf("weight lost: %+v", got.Weight)
+	}
+}
+
+func TestUIUpdateAreaParamsOmitsUnsetFields(t *testing.T) {
+	// Only ID and MaxHeight set — other constraint fields must be absent in JSON.
+	p := UIUpdateAreaParams{ID: "statusline", MaxHeight: "3"}
+	data, _ := json.Marshal(p)
+	s := string(data)
+	for _, absent := range []string{"min_height", "min_width", "max_width", "weight"} {
+		if strings.Contains(s, absent) {
+			t.Fatalf("unexpected field %q in %s", absent, s)
+		}
+	}
+	if !strings.Contains(s, "max_height") {
+		t.Fatalf("max_height must be present: %s", s)
+	}
+}
+
+func TestUIAreaInputPlacement(t *testing.T) {
+	if UIAreaInput != UIAreaPlacement("input") {
+		t.Fatalf("UIAreaInput must equal \"input\", got %q", UIAreaInput)
+	}
+}
+
 func TestTokenPayloadRoundTrip(t *testing.T) {
 	p := TokenPayload{AgentID: "main", Text: "hello "}
 	data, err := json.Marshal(p)

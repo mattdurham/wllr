@@ -119,6 +119,7 @@ Append-only design decision log. Never delete entries; add an `*Addendum (date):
 **Decision:** Three new `Method*` constants were added for modal display and system prompt management.
 
 **Rationale:**
+
 - `MethodModal`: Extensions that display large blobs of text (like AGENTS.md, skill descriptions, command output) need a focused overlay, not a chat notification. A dedicated modal avoids cluttering the conversation.
 - `MethodSetSystemPrompt` / `MethodAppendSystemPrompt`: The system prompt is shared state that affects all agents. Exposing it as a host_call method allows extensions to set it at any time (not just at load time), and allows the `context` extension to reinitialize it on config reload.
 
@@ -157,6 +158,7 @@ Append-only design decision log. Never delete entries; add an `*Addendum (date):
 **Decision:** Add a node-based, JSON-serializable scene-graph vocabulary to the sdk: `UINode` (+`UINodeType`), `UIProps`, `UIPatchOp` (+`UIPatchOpType`) wrapped by `UIPatchParams`, and `UIArea` (+`UIAreaPlacement`) wrapped by `UICreateAreaParams`. This is phase P0 of letting any WASM extension drive the TUI declaratively: it defines the data contract only — no host_call method, permission, or host wiring is added yet.
 
 **Rationale:**
+
 - The harness currently renders via an imperative `harness.Renderer` (AppendToken, AddToolCall, …) and the agent token stream is wired straight to it. To prove that any WASM component can drive the UI, rendering must become data-driven: the harness becomes a generic renderer of a node tree, and extensions emit the tree plus incremental patches.
 - A scene graph addressed by stable node IDs supports partial updates and deletes, avoiding full re-serialization each token. `UIOpAppendText` is the deliberate cheap streaming op so token deltas append in place.
 - `UIPatchOp.Index` is `*int` rather than `int` because `omitempty` on a plain int would drop a legitimate insert position of `0`; a nil pointer cleanly encodes "append".
@@ -190,3 +192,15 @@ Append-only design decision log. Never delete entries; add an `*Addendum (date):
 **Rationale:** When a WASM extension owns the transcript (WLLR_WASM_CHAT), notifications would otherwise be lost because they were rendered only by the internal `ChatView`. Routing them as an event lets the transcript-owning extension render them as system lines. The event is dispatched regardless of origin (extension `notify`, `/model`, reload, extension errors) because all of these funnel through the Model's notification path. It is also generally useful to any extension (e.g. logging) and is subscription-gated, so existing extensions are unaffected.
 
 **Consequence:** Event type count rises to 16. Extensions must not call `notify` from within an `OnNotify` handler (it would recurse). `wllrsdk.go` gains `OnNotify(func(text string))`. The harness `pushNotification` replaces direct `m.chat.AddNotification` calls and the `NotifyMsg` handler.
+
+---
+
+## 16. UIArea Sizing Constraints and UIUpdateAreaParams — Dynamic Area Layout
+
+*Added: 2026-06-30*
+
+**Decision:** `UIArea` gains four optional constraint fields (`MinHeight`, `MaxHeight`, `MinWidth`, `MaxWidth`), each accepting either an absolute cell/line count (`"3"`) or a percentage of the terminal dimension (`"20%"`). A new `UIUpdateAreaParams` struct and `MethodUIUpdateArea` (`"ui_update_area"`) host_call allow extensions to change constraints after area creation. `UIAreaInput` placement constant is added to document the harness-owned input box slot.
+
+**Rationale:** The statusline scene design requires areas that can grow and shrink dynamically (e.g. collapse to 0 lines when idle, expand to show sub-agent status). Without constraints, extensions would have to truncate/pad themselves in the scene tree, duplicating logic across every extension. Placing constraint resolution in the harness means a single implementation handles all areas consistently. Percentage values allow layouts to adapt to any terminal size without hardcoding widths. `UIUpdateAreaParams` enables runtime resize without tearing down and recreating the area (which would lose the scene tree). `UIAreaInput` is added so extensions can reference the logical slot in documentation and layout queries even though the harness always owns it.
+
+**Consequence:** `UIArea` wire format gains four new `omitempty` fields — backward-compatible (missing fields = unconstrained). `sceneArea` struct in `modules/harness` gains matching fields. `SceneRenderer` gains `UpdateArea`, `ConstrainWidth`, `ConstrainHeight` methods. `ui_update_area` is routed through `UIBridge` in the extension host, same permission gate as other UI methods (`PermUI`).

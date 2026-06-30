@@ -37,6 +37,7 @@ These types cross the host/WASM boundary via JSON; their wire format is stable a
 | `EventNotify`                 | `"notify"`                  | Dispatched when a system notification line is shown in chat (NotifyPayload) |
 
 **Invariants:**
+
 - The set of `EventType` string values must not change between ABI versions without a version bump.
 - An unknown `EventType` must be silently ignored by extensions (forward-compatibility).
 - There are exactly 16 defined event types.
@@ -195,6 +196,7 @@ No payload fields — the event carries no structured data beyond the event type
 | `PermUI`            | `"ui"`            | Drive the TUI scene graph (areas + patches)    |
 
 **Invariants:**
+
 1. Trusted extensions (loaded via `Host.LoadBytes` with `trusted=true`) have all permissions granted implicitly; no manifest is required.
 2. Untrusted extensions (loaded via `Host.Load`) declare permissions in a companion `<basename>.json` manifest as `{"permissions":["file_read",...]}`.
 3. Undeclared permissions are denied; the `request_permission` host_call returns an error response.
@@ -253,6 +255,7 @@ Note: Percent is 0–100. CompactConfig.ThresholdPct is a fraction 0.0–1.0.
 | `MessageTypeSystem`   | `"system"`    | Go-level control message (e.g. shutdown_request); never sent to LLM, not written to history |
 
 **Invariants:**
+
 - An empty `Type` field (zero value) is treated as normal everywhere; it is omitted from JSON via `omitempty` for backward compatibility.
 - `MessageTypeSystem` messages carry non-empty JSON payloads in `Content`; they are never empty strings.
 - `MessageType` string values must not change across ABI versions.
@@ -362,6 +365,7 @@ Note: Percent is 0–100. CompactConfig.ThresholdPct is a fraction 0.0–1.0.
 | `MethodUICreateArea` | `"ui_create_area"` | Register a UI scene-graph area (requires `ui`)  |
 | `MethodUIPatch`  | `"ui_patch"`  | Apply a batch of scene-graph patch ops (requires `ui`) |
 | `MethodUIRemoveArea` | `"ui_remove_area"` | Remove a UI area and its scene graph (requires `ui`) |
+| `MethodUIUpdateArea` | `"ui_update_area"` | Update constraints/weight of an existing area (requires `ui`) |
 
 **Invariant:** Method strings must not change between ABI versions without a version bump.
 
@@ -423,7 +427,28 @@ Optional style/layout. Colour fields (`fg`, `bg`) reference **named theme tokens
 
 ### UIArea / UICreateAreaParams
 
-An area is a named screen region owned by exactly one extension. `UIAreaPlacement` (`"main"`, `"sidebar"`, `"status"`, `"overlay"`) is an advisory layout hint; the harness owns final layout. `Weight` is a relative size hint among areas sharing a placement (`0` = harness default). Area `ID` is unique across all areas; the host rejects a create for an existing ID.
+An area is a named screen region owned by exactly one extension. `UIAreaPlacement` (`"main"`, `"sidebar"`, `"status"`, `"overlay"`, `"input"`) is an advisory layout hint; the harness owns final layout. `Weight` is a relative size hint among areas sharing a placement (`0` = harness default). Area `ID` is unique across all areas; the host rejects a create for an existing ID.
+
+`UIArea` carries optional sizing constraints:
+
+| Field        | Wire key      | Values                                    | Meaning |
+|--------------|---------------|-------------------------------------------|---------|
+| `MinHeight`  | `min_height`  | `"3"` or `"20%"`                          | Minimum rendered lines; pad with blank lines if below |
+| `MaxHeight`  | `max_height`  | `"10"` or `"80%"`                         | Maximum rendered lines; truncate if above |
+| `MinWidth`   | `min_width`   | `"80"` or `"50%"`                         | Minimum render width passed to `Render` |
+| `MaxWidth`   | `max_width`   | `"120"` or `"100%"`                       | Maximum render width passed to `Render` |
+
+All constraint fields are optional (`omitempty`); empty string means unconstrained. Percentage values are resolved against the current terminal dimension at render time.
+
+### UIUpdateAreaParams
+
+Params blob for `ui_update_area`. All constraint fields optional — omitted fields leave current values unchanged. `Weight` is `*int`; nil means leave unchanged.
+
+```json
+{ "id": "statusline", "max_height": "3", "weight": 2 }
+```
+
+Returns an error if the area ID does not exist.
 
 **Invariant:** Area `ID` is unique across all areas; the host rejects a create for an existing ID. The `UIPatchOp.Index` `*int` distinction (nil = append, `0` = first position) is significant and must survive the wire.
 
