@@ -175,6 +175,12 @@ original input, not blocked.
 **Scenario:** Baseline — with no interceptors a native tool receives the
 original input unchanged and returns its result.
 
+#### TestRunAfterToolCall_NoInterceptorsKeepsResult
+
+**Scenario:** With no subscribed interceptors, `runAfterToolCall` is a
+passthrough — returns the original result and error flag unchanged. Output-side
+counterpart of `TestRunBeforeToolCall_NoInterceptorsKeepsInput`.
+
 ---
 
 ## Missing Tests Worth Adding

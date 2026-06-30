@@ -1452,18 +1452,12 @@ func (h *Host) ExecuteTool(
 		}
 
 		result, isError := nativeFn(ctx, finalInput)
-		tr := toolResult{Result: result, IsError: isError}
 
-		// Fire after_tool_call so extensions can observe results.
-		afterPayload, _ := json.Marshal(sdk.AfterToolCallPayload{
-			AgentID:    agentID,
-			ToolCallID: toolCallID,
-			ToolName:   toolName,
-			Result:     result,
-			IsError:    isError,
-		})
-		afterEvt := sdk.Event{Type: sdk.EventAfterToolCall, Payload: afterPayload}
-		_, _ = h.DispatchEvent(ctx, afterEvt)
+		// Fire after_tool_call as a transform chain so interceptors can rewrite or
+		// redact the tool's output before the model sees it (the symmetric partner
+		// of the before_tool_call input rewrite).
+		result, isError = h.runAfterToolCall(ctx, agentID, toolCallID, toolName, result, isError)
+		tr := toolResult{Result: result, IsError: isError}
 
 		if h.uiBridge() != nil {
 			h.uiBridge().AfterToolCall(toolCallID, toolName, result, isError)
@@ -1495,16 +1489,9 @@ func (h *Host) ExecuteTool(
 	// Block until the extension returns the result or the context is cancelled.
 	select {
 	case result := <-ch:
-		// Dispatch after_tool_call event to all subscribed extensions.
-		afterPayload, _ := json.Marshal(sdk.AfterToolCallPayload{
-			AgentID:    agentID,
-			ToolCallID: toolCallID,
-			ToolName:   toolName,
-			Result:     result.Result,
-			IsError:    result.IsError,
-		})
-		afterEvt := sdk.Event{Type: sdk.EventAfterToolCall, Payload: afterPayload}
-		_, _ = h.DispatchEvent(ctx, afterEvt)
+		// Run the after_tool_call transform chain so interceptors can rewrite or
+		// redact the tool's output before it reaches the model.
+		result.Result, result.IsError = h.runAfterToolCall(ctx, agentID, toolCallID, toolName, result.Result, result.IsError)
 
 		// Notify the UI bridge so the TUI can update the tool call display.
 		if ui := h.uiBridge(); ui != nil {
@@ -1557,6 +1544,44 @@ func (h *Host) runBeforeToolCall(
 		return input, false, ""
 	}
 	return finalPayload.Input, false, ""
+}
+
+// runAfterToolCall runs the after_tool_call interceptor chain on a tool's result
+// and returns the final (possibly rewritten/redacted) result and error flag.
+// Interceptors may transform the result via EventResponse.Payload (an
+// AfterToolCallPayload). A blocking response replaces the result with the block
+// reason and forces IsError=true. A malformed transform is tolerated (original
+// result kept, warning logged). This is the output-side counterpart of
+// runBeforeToolCall.
+func (h *Host) runAfterToolCall(
+	ctx context.Context,
+	agentID, toolCallID, toolName, result string,
+	isError bool,
+) (finalResult string, finalIsError bool) {
+	payload, _ := json.Marshal(sdk.AfterToolCallPayload{
+		AgentID:    agentID,
+		ToolCallID: toolCallID,
+		ToolName:   toolName,
+		Result:     result,
+		IsError:    isError,
+	})
+	evt := sdk.Event{Type: sdk.EventAfterToolCall, Payload: payload}
+	finalEvt, blocked, reason, err := h.DispatchEventChain(ctx, evt)
+	if err != nil {
+		h.logger.Warn("extension: after_tool_call chain marshal error", "tool", toolName, "err", err)
+		return result, isError
+	}
+	if blocked {
+		// A block on the output side redacts the result wholesale with the reason.
+		return blockReason(reason), true
+	}
+	var finalPayload sdk.AfterToolCallPayload
+	if uerr := json.Unmarshal(finalEvt.Payload, &finalPayload); uerr != nil {
+		h.logger.Warn("extension: after_tool_call transform produced invalid payload; keeping original result",
+			"tool", toolName, "err", uerr)
+		return result, isError
+	}
+	return finalPayload.Result, finalPayload.IsError
 }
 
 // blockReason formats the user-facing tool result text for a blocked tool call.

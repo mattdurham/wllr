@@ -305,6 +305,51 @@ func OnAfterToolCall(fn func(callID, toolName, result string, isError bool)) {
 	})
 }
 
+// OnInterceptToolResult registers a transform/veto interceptor on tool call
+// RESULTS, just before the result reaches the model. The handler receives the
+// agent ID, tool name, result text, and error flag, and returns:
+//
+//   - ("", false, false, "")          — observe only; the result is unchanged.
+//   - (newResult, newIsError, false, "") — rewrite/redact the result (e.g. strip
+//     secrets from command output); the model sees newResult.
+//   - ("", false, true, "reason")     — block: the result is replaced with reason
+//     and forced to an error result.
+//
+// It is the output-side counterpart of OnInterceptToolCall. Interceptors run in
+// extension priority order; each sees the result as transformed by earlier ones.
+func OnInterceptToolResult(fn func(agentID, toolName, result string, isError bool) (newResult string, newIsError bool, block bool, reason string)) {
+	_sdkOnIntercept("after_tool_call", func(payload json.RawMessage) *_sdkEventResponse {
+		var p struct {
+			AgentID    string `json:"agent_id"`
+			ToolCallID string `json:"tool_call_id"`
+			ToolName   string `json:"tool_name"`
+			Result     string `json:"result"`
+			IsError    bool   `json:"is_error"`
+		}
+		if err := json.Unmarshal(payload, &p); err != nil {
+			return nil
+		}
+		newResult, newIsError, block, reason := fn(p.AgentID, p.ToolName, p.Result, p.IsError)
+		if block {
+			return &_sdkEventResponse{Block: true, Error: reason}
+		}
+		if newResult == "" && newIsError == p.IsError {
+			return nil // observe-only
+		}
+		out, err := json.Marshal(map[string]any{
+			"agent_id":     p.AgentID,
+			"tool_call_id": p.ToolCallID,
+			"tool_name":    p.ToolName,
+			"result":       newResult,
+			"is_error":     newIsError,
+		})
+		if err != nil {
+			return nil
+		}
+		return &_sdkEventResponse{Payload: out}
+	})
+}
+
 // ─── Host API ─────────────────────────────────────────────────────────────────
 
 // ToolResult sends the result of a tool call back to the host.

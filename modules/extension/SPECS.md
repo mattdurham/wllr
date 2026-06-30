@@ -367,28 +367,38 @@ returns `toolResult{Result: blockReason(reason), IsError: true}` without executi
 the tool. A malformed transformed payload is tolerated (original input kept,
 warning logged).
 
+**Both paths also run the `after_tool_call` interceptor chain** via
+`runAfterToolCall`: interceptors may **rewrite/redact the tool's result** (e.g.
+strip secrets from command output) or **block** it. The output side is the
+symmetric partner of the input side. A block on the output replaces the result
+wholesale with `blockReason(reason)` and forces `IsError=true`. A malformed
+transform keeps the original result. `EventAfterToolCall` is therefore a
+transform chain, not observe-only — but an extension that returns no `Payload`
+still observes the result exactly as before.
+
 **Native tool fast path (checked first):**
 
 1. Acquires `nativeToolsMu.RLock()` and looks up `toolName` in `nativeTools`.
 2. Runs `runBeforeToolCall`; if blocked, returns the block result.
 3. If found, calls the native function with the **final (possibly rewritten) input** (no `pendingTools` channel).
-4. Dispatches `EventAfterToolCall` so WASM extensions that observe results stay informed.
-5. Calls `h.ui.AfterToolCall(toolCallID, toolName, result, isError)` via UIBridge (if set), then returns.
+4. Runs `runAfterToolCall` on the result so interceptors can rewrite/redact/block the output.
+5. Calls `h.ui.AfterToolCall(toolCallID, toolName, result, isError)` via UIBridge (if set) with the **final result**, then returns.
 
 **WASM dispatch path (when no native handler is registered):**
 
 1. Registers a `chan toolResult{1}` buffered channel keyed by `toolCallID` in `h.pendingTools` **first** (the implementing extension is itself a `before_tool_call` subscriber and calls `tool_result` synchronously during the chain).
 2. Runs `runBeforeToolCall` (the interceptor chain). The implementing extension, running later in priority order, sees the threaded final input and calls `tool_result`. If a lower-priority interceptor blocks, the chain stops before the implementer runs, the pending entry is removed, and the block result is returned.
 3. Blocks on `select { case result := <-ch: ...; case <-ctx.Done(): ... }`.
-4. On result: dispatches `EventAfterToolCall` with `AfterToolCallPayload{AgentID, ToolCallID, ToolName, Result, IsError}`, then calls `h.ui.AfterToolCall(toolCallID, toolName, result, isError)` via UIBridge (if set).
+4. On result: runs `runAfterToolCall` (the output transform chain), then calls `h.ui.AfterToolCall(toolCallID, toolName, result, isError)` via UIBridge (if set) with the final result.
 
 **Invariants:**
 
 - Native tools are checked before WASM; a tool registered via `RegisterNativeTool` is never dispatched through WASM.
 - `EventBeforeToolCall` **is** dispatched (as a transform chain) for both native and WASM tools — interceptors can rewrite input or block either. (Previously native tools skipped it; the interceptor contract applies uniformly.)
-- `EventAfterToolCall` **is** dispatched for both native and WASM tools so extensions that observe results work uniformly.
+- `EventAfterToolCall` **is** dispatched (as a transform chain) for both native and WASM tools — interceptors can rewrite/redact/block the result, and observers (no `Payload`) work uniformly.
 - The WASM channel is registered in `pendingTools` **before** running the chain, so a `tool_result` called synchronously by the implementing extension during the chain is never dropped.
 - A blocked tool call returns an error `toolResult` and the implementing tool never executes; for the WASM path the pending channel entry is removed.
+- The UIBridge `AfterToolCall` is always called with the **post-interception** result, so the TUI shows what the model actually received.
 - `AgentID` is included in both `BeforeToolCallPayload` and `AfterToolCallPayload` so extensions can correlate tool calls with the originating agent.
 - On context cancellation (WASM path), the pending entry is cleaned up before returning.
 - `handleToolResult` always calls `h.ui.ToolResult(toolCallID, result, isError)` via UIBridge in addition to signalling any pending channel.
