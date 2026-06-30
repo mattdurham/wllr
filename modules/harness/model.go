@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -129,7 +130,16 @@ type Model struct {
 	modalScroll    int
 	streaming      bool
 	consoleVisible bool
+	// wasmChat, when true, sources the chat transcript content from the
+	// wasmChatAreaID scene area (driven by a WASM extension) instead of the
+	// internal ChatView message rendering. Enabled via WLLR_WASM_CHAT=1.
+	wasmChat bool
 }
+
+// wasmChatAreaID is the scene area ID a WASM extension uses to own the main
+// chat transcript when WLLR_WASM_CHAT is enabled. The harness feeds this area's
+// rendered content into the (still harness-owned) scrollable chat viewport.
+const wasmChatAreaID = "chat"
 
 // inputAreaHeight = top border (1) + textarea rows (3) + bottom border (1)
 const (
@@ -157,6 +167,7 @@ func New(pool *agent.AgentPool, mainAgentID string, h *extension.Host) Model {
 		console:     NewConsoleView(),
 		live:        &liveState{provider: provName},
 		scene:       NewSceneRenderer(),
+		wasmChat:    os.Getenv("WLLR_WASM_CHAT") == "1",
 	}
 
 	registerBuiltins(m.commands)
@@ -407,6 +418,8 @@ func (m Model) updateWindow(msg tea.Msg) (Model, tea.Cmd, bool) {
 		m.picker.SetSize(msg.Width, m.chatHeight())
 		m.input.SetWidth(msg.Width - 4)
 		m.statusBar.SetWidth(msg.Width)
+		// Re-render the WASM transcript at the new width.
+		m.refreshWASMChat()
 		return m, nil, true
 	case ShowModalMsg:
 		m.modalContent = msg.Text
@@ -818,11 +831,31 @@ func (m Model) updateExtension(msg tea.Msg) (Model, tea.Cmd, bool) {
 		return m, nil, true
 
 	case sceneDirtyMsg:
-		// The scene was mutated off-loop by the UI bridge; this message just
-		// forces a re-render. No state change here.
+		// The scene was mutated off-loop by the UI bridge. When the WASM-driven
+		// chat is active, refresh the transcript viewport from the scene area;
+		// otherwise this just forces a re-render.
+		m.refreshWASMChat()
 		return m, nil, true
 	}
 	return m, nil, false
+}
+
+// refreshWASMChat feeds the WASM-owned transcript scene area into the chat
+// viewport when WLLR_WASM_CHAT is enabled and the area exists. No-op otherwise.
+func (m *Model) refreshWASMChat() {
+	if !m.wasmChat || m.scene == nil || !m.scene.HasArea(wasmChatAreaID) {
+		return
+	}
+	width := m.chatWidth()
+	m.chat.SetExternalContent(m.scene.Render(wasmChatAreaID, width))
+}
+
+// chatWidth returns the content width available to the chat viewport.
+func (m *Model) chatWidth() int {
+	if m.width > 0 {
+		return m.width
+	}
+	return 80
 }
 
 // skillDisplayName extracts a compact display string from a skill XML block.
@@ -1178,6 +1211,11 @@ func (m Model) renderScenes() string {
 	var parts []string
 	for _, placement := range []sdk.UIAreaPlacement{sdk.UIAreaMain, sdk.UIAreaSidebar, sdk.UIAreaStatus, sdk.UIAreaOverlay} {
 		for _, id := range m.scene.AreasByPlacement(placement) {
+			// In WASM-chat mode the transcript area is rendered inside the chat
+			// viewport, not stacked here — skip it to avoid duplication.
+			if m.wasmChat && id == wasmChatAreaID {
+				continue
+			}
 			if r := strings.TrimRight(m.scene.Render(id, width), "\n"); r != "" {
 				parts = append(parts, r)
 			}
