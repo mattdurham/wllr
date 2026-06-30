@@ -172,6 +172,16 @@ Tests cover:
 - Complete workflows
 - Dependencies between tasks
 
+Unit tests in `claim_test.go` cover the atomic claim logic (`claimNext`):
+
+- Lowest-pending selection and `task-N` ordering (`TestClaimNext_PicksLowestPending`)
+- Skipping non-pending tasks (`TestClaimNext_SkipsNonPending`)
+- Dependency gating — blocked until deps complete (`TestClaimNext_RespectsDependencies`)
+- No-task-available and empty-list cases
+- **Concurrent no-double-assignment**: 3 workers drain 50 tasks under the real
+  locking discipline, asserting every task is claimed exactly once
+  (`TestClaimNext_ConcurrentNoDoubleAssignment`)
+
 All tests use the extension host to load and execute the WASM module, ensuring real-world behavior.
 
 ## Architecture
