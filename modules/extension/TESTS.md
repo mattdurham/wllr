@@ -181,6 +181,16 @@ original input unchanged and returns its result.
 passthrough — returns the original result and error flag unchanged. Output-side
 counterpart of `TestRunBeforeToolCall_NoInterceptorsKeepsInput`.
 
+### loghandler_test.go (cmd)
+
+| Test | Scenario | Assertions |
+|------|----------|-----------|
+| `TestLevelName` | slog.Level → lowercase name | debug/info/warn/error mapping; sub-Info → debug |
+| `TestDispatchLogHandler_RecordConversion` | Handle + WithGroup/WithAttrs | qualified, stringified attrs; level gate; no error |
+| `TestDispatchLogHandler_ReentrancyGuard` | record emitted while `inDispatch` | dropped (ring stays empty) — breaks the log→dispatch→log loop |
+| `TestDispatchLogHandler_RingBuffersBeforeSubscriber` | logs before any sink | buffered in the ring (5 in, 5 held) |
+| `TestDispatchLogHandler_RingCapsAtSize` | overflow | ring capped at `logRingSize` (oldest dropped) |
+
 ---
 
 ## Missing Tests Worth Adding

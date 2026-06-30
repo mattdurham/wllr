@@ -36,6 +36,9 @@ var agentsWASM []byte
 //go:embed builtins/history.wasm
 var historyWASM []byte
 
+//go:embed builtins/logging.wasm
+var loggingWASM []byte
+
 func main() {
 	execPrompt := flag.String("exec", "", "run a single prompt non-interactively and print the response to stdout")
 	flag.Parse()
@@ -54,9 +57,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	cleanupLog := setupLogging(*execPrompt == "")
-	defer cleanupLog()
-
 	// Create agent pool and spawn the main agent.
 	pool := agent.NewPool()
 	pool.SetProvider(fantasyProv)
@@ -73,6 +73,15 @@ func main() {
 
 	// Build extension host — extension logs flow through slog with "extension" attribute.
 	h := extension.NewHost(nil)
+
+	// Configure logging now that the host exists. stderr (exec/headless only) stays
+	// in core; the rolling log FILE is written by the bundled `logging` WASM
+	// extension, fed by the dispatchLogHandler via EventLog. See cmd/loghandler.go.
+	cleanupLog := setupLogging(h, *execPrompt == "")
+	defer cleanupLog()
+	// Route the host's own diagnostic logs through the configured default handler
+	// too (the dispatch handler's reentrancy guard makes this safe).
+	h.SetLogger(slog.Default())
 
 	// Wire OS capabilities via the CapabilityProvider interface.
 	h.SetCapabilities(newOSCapabilityProvider(pool))
@@ -168,24 +177,23 @@ func main() {
 	}
 }
 
-// setupLogging configures the default slog handler. In TUI mode logs go to
-// ~/.wllr/wllr.log (stderr bleeds into alt-screen). In exec mode logs go to
-// stderr. Returns a cleanup function that must be deferred by the caller.
-func setupLogging(tuiMode bool) func() {
-	var logHandler slog.Handler = newTeeHandler(os.Stderr, !tuiMode)
-	cleanup := func() {}
-	if tuiMode {
-		if lf, err := openLogFile(); err == nil {
-			logHandler = newTeeHandler(lf, true)
-			cleanup = func() {
-				if closeErr := lf.Close(); closeErr != nil {
-					slog.Warn("wllr: close log file", "error", closeErr)
-				}
-			}
-		}
+// setupLogging configures the default slog handler. The rolling log FILE is
+// written by the bundled `logging` WASM extension (fed via EventLog), not core.
+// In exec/headless mode logs also go to stderr; in TUI mode stderr is omitted
+// (it would corrupt the alt-screen). Returns a cleanup function (stops the log
+// dispatch goroutine) that must be deferred by the caller.
+func setupLogging(h *extension.Host, tuiMode bool) func() {
+	// stderr handler: only in exec/headless mode (it would corrupt the TUI alt-screen).
+	var stderrH slog.Handler
+	if !tuiMode {
+		stderrH = slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo})
 	}
-	slog.SetDefault(slog.New(logHandler))
-	return cleanup
+	// File/sink handler: the WASM log dispatcher, forwarding records to the
+	// bundled `logging` extension (which writes ~/.wllr/logs/<ts>.log).
+	dispatchH, stopDispatch := newDispatchLogHandler(h, slog.LevelDebug)
+
+	slog.SetDefault(slog.New(newTee(stderrH, dispatchH)))
+	return stopDispatch
 }
 
 // registerAgentStatusTool registers the get_agent_status native tool on h.
@@ -247,6 +255,7 @@ func loadBuiltinExtensions(ctx context.Context, h *extension.Host) {
 	}{
 		{"agents", agentsWASM},
 		{"history", historyWASM},
+		{"logging", loggingWASM},
 	}
 	for _, b := range builtins {
 		if loadErr := h.LoadBytes(ctx, b.name+".wasm", b.data, true); loadErr != nil {

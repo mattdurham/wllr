@@ -89,6 +89,16 @@ type Host struct {
 	pendingMu sync.Mutex
 }
 
+// SetLogger replaces the logger used for host-internal diagnostics (dispatch
+// errors, etc.). Useful when logging is configured after NewHost (e.g. the log
+// handler needs the host to dispatch EventLog). Not safe to call concurrently
+// with dispatch; call once during startup.
+func (h *Host) SetLogger(logger *slog.Logger) {
+	if logger != nil {
+		h.logger = logger
+	}
+}
+
 // NewHost creates a Host and installs the "env" host module into a fresh wazero runtime.
 // Pass nil to use slog.Default().
 func NewHost(logger *slog.Logger) *Host {
@@ -412,6 +422,9 @@ func (h *Host) buildDispatch() map[string]func(ctx context.Context, ext *Extensi
 		},
 		sdk.MethodWriteFile: func(_ context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleWriteFile(ext, req)
+		},
+		sdk.MethodAppendFile: func(_ context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleAppendFile(ext, req)
 		},
 		sdk.MethodHTTPPost: func(_ context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleHTTPPost(ext, req)
@@ -793,6 +806,30 @@ func (h *Host) handleWriteFile(ext *Extension, req sdk.HostCallRequest) sdk.Host
 		return sdk.HostCallResponse{Error: err.Error()}
 	}
 	result, _ := json.Marshal(map[string]string{"written": params.Path})
+	return sdk.HostCallResponse{Result: result}
+}
+
+func (h *Host) handleAppendFile(ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+	if ext == nil || !ext.HasPermission(sdk.PermFileWrite) {
+		return sdk.HostCallResponse{Error: "append_file: permission denied: requires file_write"}
+	}
+	if h.capabilityProvider() == nil {
+		return sdk.HostCallResponse{Error: "append_file: not supported by host"}
+	}
+	var params struct {
+		Path    string `json:"path"`
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return sdk.HostCallResponse{Error: fmt.Sprintf("append_file: %v", err)}
+	}
+	if params.Path == "" {
+		return sdk.HostCallResponse{Error: "append_file: path is required"}
+	}
+	if err := h.capabilityProvider().AppendFile(params.Path, params.Content); err != nil {
+		return sdk.HostCallResponse{Error: err.Error()}
+	}
+	result, _ := json.Marshal(map[string]string{"appended": params.Path})
 	return sdk.HostCallResponse{Result: result}
 }
 
@@ -1641,6 +1678,25 @@ func (h *Host) RegisteredTools() []RegisteredToolInfo {
 
 // DispatchEvent dispatches evt to all subscribed extensions and returns their responses.
 // A WASM trap (error from _on_event) is logged and does not stop dispatch to other extensions.
+// HasSubscribers reports whether any loaded extension is subscribed to evt.
+// Used to avoid building/dispatching event payloads when nothing will consume
+// them (e.g. the log dispatcher batches only once a log sink exists).
+func (h *Host) HasSubscribers(evt sdk.EventType) bool {
+	h.mu.RLock()
+	exts := make([]*Extension, len(h.extensions))
+	copy(exts, h.extensions)
+	h.mu.RUnlock()
+	for _, ext := range exts {
+		ext.subMu.RLock()
+		subscribed := ext.subscriptions[evt]
+		ext.subMu.RUnlock()
+		if subscribed {
+			return true
+		}
+	}
+	return false
+}
+
 func (h *Host) DispatchEvent(ctx context.Context, evt sdk.Event) ([]sdk.EventResponse, error) {
 	// Publish to the event bus (fire-and-forget, no-op if no subscribers).
 	h.Bus.Publish(ctx, evt)

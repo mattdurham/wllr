@@ -50,6 +50,21 @@ func (p *osCapabilityProvider) WriteFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0o600)
 }
 
+func (p *osCapabilityProvider) AppendFile(path, content string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, werr := f.WriteString(content); werr != nil {
+		_ = f.Close()
+		return werr
+	}
+	return f.Close()
+}
+
 func (p *osCapabilityProvider) HTTPPost(url string, headers map[string]string, body []byte) (int, []byte, error) {
 	return httpPost(url, headers, body)
 }

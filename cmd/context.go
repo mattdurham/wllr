@@ -16,19 +16,6 @@ func wllrExtensionsDir() string {
 	return filepath.Join(home, ".wllr", "extensions")
 }
 
-// openLogFile opens (or creates) ~/.wllr/wllr.log for appending.
-func openLogFile() (*os.File, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, err
-	}
-	dir := filepath.Join(home, ".wllr")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, err
-	}
-	return os.OpenFile(filepath.Join(dir, "wllr.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-}
-
 // loadExtensionsFromSubdirs scans dir for subdirectories, loading the first
 // *.wasm file found in each subdirectory (alongside an optional <name>.json manifest).
 func loadExtensionsFromSubdirs(ctx context.Context, h *extension.Host, dir string) []string {

@@ -60,6 +60,7 @@ func (f *fakeCapabilityProvider) Exec(_ context.Context, _, _ string, _ func(str
 func (f *fakeCapabilityProvider) GetEnv(_ string) (string, error)   { return "", nil }
 func (f *fakeCapabilityProvider) ReadFile(_ string) (string, error) { return "", nil }
 func (f *fakeCapabilityProvider) WriteFile(_, _ string) error       { return nil }
+func (f *fakeCapabilityProvider) AppendFile(_, _ string) error      { return nil }
 func (f *fakeCapabilityProvider) HTTPPost(_ string, _ map[string]string, _ []byte) (int, []byte, error) {
 	return 200, nil, nil
 }
