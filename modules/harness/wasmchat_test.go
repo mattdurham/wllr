@@ -25,55 +25,48 @@ func newSceneWithChat(t *testing.T, text string) *SceneRenderer {
 
 func TestRefreshWASMChat_FeedsSceneIntoViewport(t *testing.T) {
 	m := New(nil, "main", nil)
-	m.wasmChat = true
 	m.width = 60
 	m.scene = newSceneWithChat(t, "hello from wasm")
 
 	m.refreshWASMChat()
 
-	if !m.chat.ExternalMode() {
-		t.Fatal("chat should be in external mode after refresh")
-	}
 	if !strings.Contains(m.chat.externalContent, "hello from wasm") {
-		t.Fatalf("external content missing scene text: %q", m.chat.externalContent)
-	}
-}
-
-func TestRefreshWASMChat_DisabledIsNoOp(t *testing.T) {
-	m := New(nil, "main", nil)
-	m.wasmChat = false
-	m.width = 60
-	m.scene = newSceneWithChat(t, "should not appear")
-
-	m.refreshWASMChat()
-
-	if m.chat.ExternalMode() {
-		t.Fatal("chat must not enter external mode when wasmChat is disabled")
+		t.Fatalf("viewport content missing scene text: %q", m.chat.externalContent)
 	}
 }
 
 func TestRefreshWASMChat_NoAreaIsNoOp(t *testing.T) {
 	m := New(nil, "main", nil)
-	m.wasmChat = true
 	m.width = 60
 	// scene exists but has no "chat" area.
 
 	m.refreshWASMChat()
 
-	if m.chat.ExternalMode() {
-		t.Fatal("chat must not enter external mode when the chat area is absent")
+	if m.chat.externalContent != "" {
+		t.Fatalf("expected empty content when chat area is absent, got %q", m.chat.externalContent)
 	}
 }
 
-func TestRenderScenes_SkipsChatAreaInWASMMode(t *testing.T) {
+func TestResetChatArea_EmptiesTranscript(t *testing.T) {
 	m := New(nil, "main", nil)
-	m.wasmChat = true
+	m.width = 60
+	m.scene = newSceneWithChat(t, "to be cleared")
+
+	m.resetChatArea()
+
+	if got := m.scene.Render(wasmChatAreaID, 60); got != "" {
+		t.Fatalf("resetChatArea should empty the transcript, got %q", got)
+	}
+}
+
+func TestRenderScenes_SkipsChatArea(t *testing.T) {
+	m := New(nil, "main", nil)
 	m.width = 60
 	m.scene = newSceneWithChat(t, "transcript text")
 
 	// The transcript area is rendered inside the chat viewport, so renderScenes
 	// must not also stack it below the chat.
 	if got := m.renderScenes(); strings.Contains(got, "transcript text") {
-		t.Fatalf("renderScenes must skip the chat area in WASM mode: %q", got)
+		t.Fatalf("renderScenes must skip the chat area: %q", got)
 	}
 }

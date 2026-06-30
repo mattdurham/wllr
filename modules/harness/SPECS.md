@@ -131,83 +131,31 @@ Note: `m.history` was removed (see NOTES.md §20). The canonical conversation hi
 
 ---
 
-## 7. ChatView
+## 7. ChatView — Externally-Driven Viewport
 
-`ChatView` renders the conversation history in a scrollable viewport.
+`ChatView` is a thin wrapper around a `bubbles/viewport` whose transcript content
+is produced externally (by a WASM extension driving the `chat` scene area) and
+fed in via `SetExternalContent`. `ChatView` no longer renders messages itself;
+there is no built-in message renderer.
 
 ### Fields
 
-| Field            | Purpose                                                                         |
-|-----------------|---------------------------------------------------------------------------------|
-| `current`       | Accumulates in-progress assistant text during streaming                         |
-| `lastDoneToolID`| Last completed tool call ID; reset by `FinalizeMessage`. Present but unused for routing (see §8) |
-| `histContent`   | Cached rendered HTML of all finalized messages; rebuilt only when `histDirty`   |
-| `histDirty`     | Set when `messages` changes; cleared after `refreshContent` rebuilds the cache  |
-| `messages`      | Append-only slice of finalized `chatMessage` entries                            |
-| `vp`            | The bubbles/viewport model                                                      |
+| Field             | Purpose                                                  |
+|-------------------|----------------------------------------------------------|
+| `externalContent` | Last content set via `SetExternalContent` (re-applied on resize) |
+| `toolLog`         | Per-turn tool-call log (independent of the transcript; shown by `/tools`) |
+| `vp`              | The bubbles/viewport model                               |
 
 ### Key Methods
 
-- `AppendToken(token)`: appends to `c.current`, calls `refreshContent()`, scrolls to bottom.
-- `FinalizeMessage()`: if `c.current == ""` is a no-op; otherwise seals current into messages and resets.
-- `AddUserMessage(content)`: appends user message, invalidates cache.
-- `AddToolCall(id, toolName, input)`: seals any in-progress text first, then appends a pending tool entry.
-- `UpdateToolCall(id, isError, output)`: marks the named tool call done; sets `lastDoneToolID = id`.
-- `Clear()`: resets messages, current, lastDoneToolID, and histContent.
+- `SetExternalContent(content)`: replaces the viewport content and scrolls to bottom.
+- `SetSize(width, height)`: resizes the viewport and re-applies `externalContent`.
+- `ScrollUp(n)` / `ScrollDown(n)`: scroll the viewport.
+- `AddToolCall(id, name, input)` / `UpdateToolCall(id, isError, output)` / `ClearToolLog()`: maintain the per-turn tool log.
+- `ToolLogModal()`: renders the tool log for the `/tools` modal.
+- `View()`: returns the viewport view.
 
-### histContent Cache
-
-`refreshContent()` maintains a two-level cache:
-1. `histContent` — the rendered string of all finalized messages. Rebuilt only when `histDirty` is true.
-2. The live viewport content — `histContent + renderMessage(current)` when streaming, otherwise just `histContent`.
-
-**Invariant:** `histContent` never includes `c.current`. On every token, only `c.current` changes, so only a string append is needed (not a full O(n) rebuild of all messages).
-
-### renderToolGroup is a no-op
-
-`renderToolGroup` is defined but intentionally empty — tool calls are completely hidden from the chat UI. Only the LLM's text responses (rendered as assistant boxes) are visible. Tool calls are stored in `messages` for internal state tracking but produce no output.
-
-**Invariant:** Tool call visibility: none. Tool activity is reflected only indirectly when the LLM generates text that follows a tool call.
-
----
-
-## 8. Token Routing — All Tokens Go to c.current
-
-`AppendToken` always appends to `c.current` regardless of `lastDoneToolID`. The `lastDoneToolID` field is set by `UpdateToolCall` and reset by `FinalizeMessage` but is not used to route tokens to tool boxes.
-
-**Invariant:** All streaming text from the LLM appears in the in-progress assistant message box (`c.current`), never inside a tool call box. This is correct because the LLM response following a tool result is still the assistant's reply, not a property of the tool call.
-
----
-
-## 9. Color Rules for Chat Messages
-
-| Message type          | Current turn                    | Historical turn              |
-|-----------------------|---------------------------------|------------------------------|
-| User message border   | Green (`#00AA00`)               | Grey (`#444444`)             |
-| User message text     | Soft green (`#CCFFCC`)          | Grey (`#555555`)             |
-| Assistant message border | Blue (`#89CFF0`)             | Grey (`#444444`)             |
-| Assistant message text | White (`#FFFFFF`)              | Grey (`#555555`)             |
-| System/notification   | Italic grey (`#555555`)         | (same)                       |
-| Tool call boxes       | Not rendered                    | Not rendered                 |
-
-"Current turn" means the message belongs to the most recent user turn (at or after `recentStart`, the last user message index).
-
----
-
-## 10. renderUserMessage / renderAssistantMessage
-
-Both functions draw a rounded Unicode box:
-
-```
-╭──────────────────────────────╮
-│ content line                 │
-╰──────────────────────────────╯
-```
-
-- Minimum width: 14 characters.
-- Content is word-wrapped via `lipgloss.Wrap` to `width - 4` (accounting for borders and padding).
-- Lines longer than `contentWidth` are hard-truncated at the rune boundary.
-- Two blank lines (`\n\n`) follow each box to separate messages.
+**Invariant:** The viewport (scroll, size, `GotoBottom`) is harness-owned; transcript content is always external. The tool log is independent of the transcript and never appears in it (tool calls remain hidden from the transcript, as before).
 
 ---
 
@@ -470,7 +418,7 @@ Returns the current set of registered tools from `extHost.RegisteredTools()` as 
 - `IsEmpty()` returns true when no lines have been appended since the last `Clear`.
 - `View(width, height)` renders the last `min(height, count)` lines, each truncated to `width` runes.
 
-**Invariant:** `histContent` in `ChatView` is never affected by `ConsoleView`; they are independent display components.
+**Invariant:** the `ChatView` transcript and `ConsoleView` are independent display components.
 
 **Invariant:** `consoleVisible` is set to `true` on `ConsoleMsg{Line: ...}` and to `false` on `StreamDoneMsg`.
 
@@ -517,15 +465,16 @@ Returns the current set of registered tools from `extHost.RegisteredTools()` as 
 
 ## 27. WASM-Driven Chat Transcript (UI P4)
 
-By default the main chat transcript content is produced by a WASM extension (the bundled `agents` extension) that owns the `wasmChatAreaID` (`"chat"`) scene area; `Model.wasmChat` is true unless `WLLR_WASM_CHAT=0` opts out. The harness still owns the scrollable viewport; only the *content* is external.
+The main chat transcript content is produced by a WASM extension (the bundled `agents` extension) that owns the `wasmChatAreaID` (`"chat"`) scene area. The harness owns the scrollable viewport; the *content* is always external. There is no built-in message renderer.
 
-- `ChatView` gains an external-content mode: `SetExternalContent(string)` sets `externalMode = true` and replaces the viewport content (scrolling to bottom). In external mode `refreshContent` bypasses the internal message-rendering path entirely and uses `externalContent`.
-- `Model.refreshWASMChat()` is called on `sceneDirtyMsg` and on `WindowSizeMsg`; when `wasmChat` is set and the `chat` area exists it feeds `scene.Render("chat", width)` into the chat viewport.
-- `renderScenes` skips the `chat` area when `wasmChat` is set (it is rendered inside the viewport, not stacked below it).
+- `Model.refreshWASMChat()` is called on `sceneDirtyMsg` and on `WindowSizeMsg`; once the `chat` area exists it feeds `scene.Render("chat", width)` into the chat viewport via `ChatView.SetExternalContent`.
+- `Model.resetChatArea()` (used by `/clear` and history-restore) patches the `chat` area root back to an empty `vstack` (`"chat-root"`, matching the structure the extension expects) and clears the viewport.
+- `Model.streamContent` accumulates streamed assistant text from `TokenMsg` so the completed response can be captured for `OnMessageEnd`/logging; it is reset on `StreamDoneMsg` and `/clear`.
+- `Model.pushNotification(text)` dispatches `sdk.EventNotify` (in a goroutine) so the transcript-owning extension renders notifications; it no longer writes to `ChatView`.
+- `renderScenes` always skips the `chat` area (it is rendered inside the viewport, not stacked below it).
 
 **Invariants:**
-- `wasmChat` defaults to **on**; set `WLLR_WASM_CHAT=0` to opt out (internal `ChatView` rendering, no `chat` area created by the extension).
-- **Automatic fallback:** even with `wasmChat` on, if no extension creates the `chat` area (e.g. the `agents` extension is not loaded), `refreshWASMChat` no-ops and `ChatView` renders internally. WASM-driven rendering only activates once the area exists.
-- The viewport (scroll, size, `GotoBottom`) is always harness-owned regardless of mode. Input/scroll never route to WASM.
-- The direct `TokenMsg`/`AddUserMessage`/`FinalizeMessage` paths still run in WASM mode but are ignored for rendering because `ChatView` is in external mode; they harmlessly maintain internal `messages`.
-- All notifications funnel through `Model.pushNotification(text)`, which calls `ChatView.AddNotification` and dispatches `sdk.EventNotify` (in a goroutine) so a transcript-owning extension can render notifications. The dispatch fires regardless of `wasmChat` (subscription-gated; ignored by extensions that do not subscribe).
+- The viewport (scroll, size, `GotoBottom`) is harness-owned; input/scroll never route to WASM.
+- If no extension creates the `chat` area (e.g. the `agents` extension is not loaded), `refreshWASMChat` no-ops and the viewport is empty — there is no fallback renderer.
+- `/clear` and history-restore reset the transcript area to empty; restored history remains in agent context but is not re-rendered into the transcript.
+- The per-turn tool log is cleared at turn start (`submitToAgent`) and surfaced via `/tools`; it is independent of the transcript.

@@ -46,23 +46,23 @@ func TestModel_View_ReturnsNonEmpty(t *testing.T) {
 	}
 }
 
-func TestModel_Update_TokenMsg_AppendsToChat(t *testing.T) {
+func TestModel_Update_TokenMsg_AccumulatesResponse(t *testing.T) {
 	m := newTestModel()
 
 	m, _ = callUpdate(m, TokenMsg{Token: "hello"})
-	if m.chat.current != "hello" {
-		t.Errorf("chat current: got %q, want %q", m.chat.current, "hello")
+	if m.streamContent != "hello" {
+		t.Errorf("streamContent: got %q, want %q", m.streamContent, "hello")
 	}
 
 	m, _ = callUpdate(m, TokenMsg{Token: " world"})
-	if m.chat.current != "hello world" {
-		t.Errorf("chat current: got %q, want %q", m.chat.current, "hello world")
+	if m.streamContent != "hello world" {
+		t.Errorf("streamContent: got %q, want %q", m.streamContent, "hello world")
 	}
 }
 
 func TestModel_Update_StreamDoneMsg_ClearsStreamStatus(t *testing.T) {
 	m := newTestModel()
-	m.chat.AppendToken("test response")
+	m.streamContent = "test response"
 	// Simulate a stream status set externally.
 	m.statusBar.statuses["stream"] = "working."
 
@@ -71,30 +71,30 @@ func TestModel_Update_StreamDoneMsg_ClearsStreamStatus(t *testing.T) {
 	if _, ok := m.statusBar.statuses["stream"]; ok {
 		t.Error("stream status should be cleared after StreamDoneMsg")
 	}
+	if m.streamContent != "" {
+		t.Errorf("streamContent should be reset, got %q", m.streamContent)
+	}
 }
 
 func TestModel_Update_StreamDoneMsg_Error_ShowsError(t *testing.T) {
 	m := newTestModel()
 
 	m, _ = callUpdate(m, StreamDoneMsg{Err: errors.New("API error")})
-	// Should have added an error notification.
-	if len(m.chat.messages) == 0 {
-		t.Error("expected error notification in chat")
+	// The error line is rendered by the WASM transcript via EventNotify; the
+	// harness-side effect is the status bar entry.
+	if m.statusBar.statuses["stream"] != "error" {
+		t.Errorf("expected stream status 'error', got %q", m.statusBar.statuses["stream"])
 	}
 }
 
 func TestModel_Update_StreamDoneMsg_ContextCanceled_NoError(t *testing.T) {
 	m := newTestModel()
-	m.chat.AppendToken("partial")
+	m.streamContent = "partial"
 
-	// context.Canceled should not show as an error notification.
+	// context.Canceled should not set the error status.
 	m, _ = callUpdate(m, StreamDoneMsg{Err: context.Canceled})
-	// FinalizeMessage adds the partial assistant message (1 message expected).
-	// No additional error notification should be added for context.Canceled.
-	for _, msg := range m.chat.messages {
-		if msg.role == "system" {
-			t.Errorf("unexpected error notification for context.Canceled: %q", msg.content)
-		}
+	if m.statusBar.statuses["stream"] == "error" {
+		t.Error("context.Canceled should not set error status")
 	}
 }
 
@@ -114,11 +114,11 @@ func TestModel_Update_ReloadMsg_TriggersExtensionReload(t *testing.T) {
 
 func TestModel_Update_ClearMsg_ClearsHistory(t *testing.T) {
 	m := newTestModel()
-	m.chat.AddUserMessage("hello")
+	m.streamContent = "hello"
 
 	m, _ = callUpdate(m, clearMsg{})
-	if len(m.chat.messages) != 0 {
-		t.Errorf("expected empty chat after clear, got %d messages", len(m.chat.messages))
+	if m.streamContent != "" {
+		t.Errorf("expected streamContent reset after clear, got %q", m.streamContent)
 	}
 }
 
@@ -135,15 +135,15 @@ func TestModel_Update_SetModelMsg(t *testing.T) {
 
 func TestModel_Update_CommandMsg_Clear(t *testing.T) {
 	m := newTestModel()
-	m.chat.AddUserMessage("test")
+	m.streamContent = "test"
 
 	// Dispatch /clear command.
 	cmd := m.commands.Dispatch("clear", nil)
 	msg := cmd()
 	m, _ = callUpdate(m, msg)
 
-	if len(m.chat.messages) != 0 {
-		t.Errorf("expected empty chat after /clear, got %d", len(m.chat.messages))
+	if m.streamContent != "" {
+		t.Errorf("expected streamContent reset after /clear, got %q", m.streamContent)
 	}
 }
 
@@ -198,48 +198,36 @@ func TestModel_Update_CommandMsg_UnknownCommand(t *testing.T) {
 	}
 }
 
-func TestModel_Update_SubmitMsg_AddsToHistoryAndChat(t *testing.T) {
+func TestModel_Update_SubmitMsg_MarksStreaming(t *testing.T) {
 	pool := newTestPool()
 	m := New(pool, "main", nil)
 
 	m, cmd := callUpdate(m, SubmitMsg{Content: "hello"})
-	// SubmitMsg no longer starts a synchronous stream; it sends to the pool.
-	// The model should return nil cmd (pool runs asynchronously).
+	// SubmitMsg sends to the pool asynchronously; the harness marks streaming.
+	// The user prompt is echoed into the transcript by the WASM extension.
 	_ = cmd
-
-	// User message should be in chat immediately after SubmitMsg.
-	if len(m.chat.messages) != 1 {
-		t.Fatalf("expected 1 chat message after SubmitMsg, got %d", len(m.chat.messages))
-	}
-	if m.chat.messages[0].content != "hello" {
-		t.Errorf("chat.messages[0].content: got %q, want %q", m.chat.messages[0].content, "hello")
+	if !m.streaming {
+		t.Fatal("expected streaming=true after SubmitMsg")
 	}
 }
 
 func TestModel_Update_SubmitMsg_MultipleSubmitsAllowed(t *testing.T) {
-	// First submit goes into chat.messages; second (while streaming) goes into chat.queued.
 	pool := newTestPool()
 	m := New(pool, "main", nil)
 
+	// Multiple submits (the second while streaming) must not panic.
 	m, _ = callUpdate(m, SubmitMsg{Content: "first"})
 	m, _ = callUpdate(m, SubmitMsg{Content: "second"})
-
-	// First message in history, second queued below streaming output.
-	if len(m.chat.messages) != 1 {
-		t.Errorf("expected 1 chat message (first), got %d", len(m.chat.messages))
-	}
-	if len(m.chat.queued) != 1 {
-		t.Errorf("expected 1 queued message (second), got %d", len(m.chat.queued))
+	if !m.streaming {
+		t.Error("expected streaming=true after submits")
 	}
 }
 
 func TestModel_Update_NotifyMsg(t *testing.T) {
 	m := newTestModel()
+	// NotifyMsg is handled without panic; the visible line is rendered by the
+	// WASM transcript via EventNotify (covered in test/wasmchat).
 	m, _ = callUpdate(m, NotifyMsg{Text: "test notification"})
-	// Should have added to chat.
-	if len(m.chat.messages) == 0 {
-		t.Error("expected notification in chat")
-	}
 }
 
 func TestModel_Update_StatusUpdateMsg(t *testing.T) {
@@ -265,9 +253,9 @@ func TestModel_NilPool_SubmitMsg_Safe(t *testing.T) {
 
 	m, cmd := callUpdate(m, SubmitMsg{Content: "hello"})
 	_ = cmd
-	// User message should still be in chat.
-	if len(m.chat.messages) != 1 {
-		t.Errorf("expected 1 chat entry, got %d", len(m.chat.messages))
+	// Should not panic; streaming state is set.
+	if !m.streaming {
+		t.Error("expected streaming=true after submit")
 	}
 }
 

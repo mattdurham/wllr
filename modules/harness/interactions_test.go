@@ -126,82 +126,6 @@ func TestModel_ToolCallDoneMsg_ErrorFlag(t *testing.T) {
 
 // ─── Token routing to toolResponse ───────────────────────────────────────────
 
-func TestChatView_AppendToken_AlwaysGoesToCurrent(t *testing.T) {
-	// All text — before and after tool calls — accumulates in c.current so the
-	// entire turn renders as one box. A \n\n separator is inserted after a tool.
-	c := NewChatView(80, 20)
-	c.AddUserMessage("run it")
-	c.AppendToken("pre-tool text")
-	c.AddToolCall("t1", "exec", `{"command":"ls"}`)
-	c.UpdateToolCall("t1", false, "")
-
-	c.AppendToken("hello")
-	c.AppendToken(" world")
-
-	// Pre-tool text stays in c.current; post-tool text appended with \n\n separator.
-	want := "pre-tool text\n\nhello world"
-	if c.current != want {
-		t.Errorf("c.current = %q, want %q", c.current, want)
-	}
-}
-
-func TestChatView_FinalizeMessage_ResetslastDoneToolID(t *testing.T) {
-	c := NewChatView(80, 20)
-	c.AddToolCall("t1", "exec", `{"command":"ls"}`)
-	c.UpdateToolCall("t1", false, "")
-	c.AppendToken("result")
-
-	c.FinalizeMessage()
-
-	if c.lastDoneToolID != "" {
-		t.Errorf("FinalizeMessage should clear lastDoneToolID, got %q", c.lastDoneToolID)
-	}
-}
-
-// ─── AddToolCall seals c.current ─────────────────────────────────────────────
-
-func TestChatView_AddToolCall_PreservesCurrentText(t *testing.T) {
-	c := NewChatView(80, 20)
-	c.AddUserMessage("question")
-	c.AppendToken("Thinking... ")
-	c.AppendToken("let me check")
-
-	// c.current has partial text — AddToolCall should NOT seal it; it stays
-	// in c.current so the whole turn renders as one box.
-	c.AddToolCall("t1", "exec", `{"command":"ls"}`)
-
-	if c.current != "Thinking... let me check" {
-		t.Errorf("c.current should still hold pre-tool text, got %q", c.current)
-	}
-	found := false
-	for _, m := range c.messages {
-		if m.role == sdk.RoleAssistant && strings.Contains(m.content, "Thinking") {
-			found = true
-			break
-		}
-	}
-	if found {
-		t.Error("pre-tool text should stay in c.current, not be sealed into messages yet")
-	}
-}
-
-// ─── NotifyMsg ───────────────────────────────────────────────────────────────
-
-func TestModel_NotifyMsg_AddsToChat(t *testing.T) {
-	m := newTestModel()
-	m.width = 80
-	m.height = 40
-	m.chat.SetSize(80, 30)
-
-	next, _ := m.Update(NotifyMsg{Text: "Extension loaded"})
-	m = next.(Model)
-
-	content := m.chat.vp.View()
-	if !strings.Contains(content, "Extension loaded") {
-		t.Error("NotifyMsg should add notification text to chat")
-	}
-}
-
 // ─── StatusUpdateMsg ─────────────────────────────────────────────────────────
 
 func TestModel_StatusUpdateMsg_UpdatesStatusBar(t *testing.T) {
@@ -222,13 +146,25 @@ func TestModel_ClearMsg_ClearsChat(t *testing.T) {
 	m.width = 80
 	m.height = 40
 	m.chat.SetSize(80, 30)
-	m.chat.AddUserMessage("should be cleared")
+	// Seed a WASM transcript area with content and some streaming state.
+	_ = m.scene.CreateArea(sdk.UIArea{ID: wasmChatAreaID, Placement: sdk.UIAreaMain})
+	_ = m.scene.ApplyPatch(sdk.UIPatchParams{Area: wasmChatAreaID, Ops: []sdk.UIPatchOp{
+		{Op: sdk.UIOpSetRoot, Node: &sdk.UINode{ID: "chat-root", Type: sdk.UINodeText, Text: "should be cleared"}},
+	}})
+	m.streamContent = "partial"
+	m.chat.AddToolCall("1", "exec", `{"command":"ls"}`)
 
 	next, _ := m.Update(clearMsg{})
 	m = next.(Model)
 
-	if m.chat.MessageCount() != 0 {
-		t.Errorf("clearMsg should clear chat, got %d messages", m.chat.MessageCount())
+	if got := m.scene.Render(wasmChatAreaID, 80); got != "" {
+		t.Errorf("clearMsg should empty the transcript area, got %q", got)
+	}
+	if m.streamContent != "" {
+		t.Errorf("clearMsg should reset streamContent, got %q", m.streamContent)
+	}
+	if len(m.chat.toolLog) != 0 {
+		t.Errorf("clearMsg should clear the tool log, got %d entries", len(m.chat.toolLog))
 	}
 }
 
@@ -277,36 +213,11 @@ func TestModel_StreamDoneMsg_WithError_ShowsInChat(t *testing.T) {
 	if m.streaming {
 		t.Error("streaming should be false after StreamDoneMsg")
 	}
-	content := m.chat.vp.View()
-	if !strings.Contains(content, "rate limit") {
-		t.Error("error message should appear in chat")
-	}
+	// The error line is rendered into the transcript by the WASM extension via
+	// EventNotify (covered in test/wasmchat); the harness-side effect is the
+	// status bar entry.
 	if m.statusBar.statuses["stream"] != "error" {
 		t.Error("status bar should show 'error'")
-	}
-}
-
-// ─── SubmitMsg with Display field ────────────────────────────────────────────
-
-func TestModel_SubmitMsg_DisplayField_ShownInsteadOfContent(t *testing.T) {
-	m := newTestModel()
-	m.width = 80
-	m.height = 40
-	m.chat.SetSize(80, 30)
-
-	// The Content is a large XML blob; Display is the compact version
-	next, _ := m.Update(SubmitMsg{
-		Content: `<skill name="bob:work" location="/path">very long XML...</skill>`,
-		Display: "[skill: bob:work]",
-	})
-	m = next.(Model)
-
-	content := m.chat.vp.View()
-	if strings.Contains(content, "<skill") {
-		t.Error("raw XML should NOT appear in chat when Display is set")
-	}
-	if !strings.Contains(content, "[skill: bob:work]") {
-		t.Error("Display text should appear in chat")
 	}
 }
 
