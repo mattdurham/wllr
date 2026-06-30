@@ -363,3 +363,15 @@ a separate `m.history` copy.
 **Rationale:** With user prompts, streamed assistant text, and notifications (EventNotify) all routed through WASM, the WASM transcript reached parity with the built-in renderer (tool boxes are hidden in both). Making it the default realizes the original goal — the transcript is produced by a WASM component and the Go side is a bridge — while the retained `ChatView` path provides a zero-config safety net: if no extension owns the `chat` area, `refreshWASMChat` no-ops and the internal renderer is used. This means the binary still renders a chat even with all extensions removed.
 
 **Consequence:** Default runs now render the transcript from the agents extension's scene area. `WLLR_WASM_CHAT=0` restores the built-in renderer. Both sides read the same env var with the same default. The retained legacy path adds negligible overhead in WASM mode (`refreshContent` early-returns in external mode, so no histContent is built).
+
+---
+
+## Legacy ChatView renderer removed — WASM transcript is the only path
+
+*Added: 2026-06-29*
+
+**Decision:** Remove the built-in `ChatView` message renderer entirely. `ChatView` becomes a thin viewport wrapper fed via `SetExternalContent`; the transcript is always produced by the WASM extension (`chat` scene area). Removed: `messages`/`queued`/`current`/`histContent`/`histDirty`/`afterTool` state, the `render*` functions, `AppendToken`/`FinalizeMessage`/`AddUserMessage`/`AddQueuedUserMessage`/`UnqueueLastMessage`/`AddNotification`/`Clear`/`MessageCount`, the `chatMessage` type, the `wasmChat` flag and `WLLR_WASM_CHAT` opt-out, and the `externalMode` toggle. Added: `Model.streamContent` (accumulates response text for `OnMessageEnd`/logging) and `Model.resetChatArea` (for `/clear` and history-restore).
+
+**Rationale:** With user prompts, streamed text, and notifications all routed through WASM (EventToken/EventNotify) and the WASM transcript at parity, the dual rendering path was redundant maintenance surface. Removing it commits fully to "the transcript is produced by a WASM component; the harness is a bridge that owns only the viewport." The previous commit retained the legacy path as a safety net; this removes it (restorable from history).
+
+**Consequence:** If the `agents` extension is not loaded, the chat viewport is empty (no fallback). `/clear` and history-restore reset the transcript area to empty rather than re-rendering messages (restored history remains in agent context). The skill `display` echo (compact label instead of raw XML) is no longer applied to the transcript, since `before_agent_start` carries the raw prompt. The per-turn tool log is retained on `ChatView` for `/tools`, cleared at turn start. Rendering tests that asserted on `ChatView` internals were removed; transcript behavior is covered end-to-end by `test/wasmchat`.

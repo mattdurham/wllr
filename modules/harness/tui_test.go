@@ -5,6 +5,7 @@ package harness
 // as model_test.go) — no real terminal or program required.
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -80,10 +81,8 @@ func TestModel_PgUp_ScrollsChat(t *testing.T) {
 	m := newTestModel()
 	m, _ = callUpdate(m, tea.WindowSizeMsg{Width: 120, Height: 40})
 
-	// Add many messages so there is content to scroll.
-	for i := 0; i < 30; i++ {
-		m.chat.AddUserMessage("line of content to fill the viewport")
-	}
+	// Fill the viewport with enough content to scroll.
+	m.chat.SetExternalContent(strings.Repeat("line of content to fill the viewport\n", 60))
 
 	// Scroll to the bottom first.
 	m.chat.ScrollDown(1000)
@@ -102,10 +101,8 @@ func TestModel_PgDown_ScrollsChat(t *testing.T) {
 	m := newTestModel()
 	m, _ = callUpdate(m, tea.WindowSizeMsg{Width: 120, Height: 40})
 
-	// Add messages to create overflow.
-	for i := 0; i < 30; i++ {
-		m.chat.AddUserMessage("line of content to fill the viewport")
-	}
+	// Fill the viewport with enough content to create overflow.
+	m.chat.SetExternalContent(strings.Repeat("line of content to fill the viewport\n", 60))
 
 	// Start at the top.
 	m.chat.ScrollUp(1000)
@@ -202,12 +199,10 @@ func TestModel_SubmitMsg_UserBoxVisibleInChat(t *testing.T) {
 
 	m, _ = callUpdate(m, SubmitMsg{Content: "hello there"})
 
-	// Chat should have exactly one message (the user message).
-	if len(m.chat.messages) != 1 {
-		t.Fatalf("expected 1 chat message, got %d", len(m.chat.messages))
-	}
-	if m.chat.messages[0].content != "hello there" {
-		t.Errorf("chat message content: got %q, want %q", m.chat.messages[0].content, "hello there")
+	// The user box is rendered into the transcript by the WASM extension
+	// (covered in test/wasmchat); the harness-side effect is streaming state.
+	if !m.streaming {
+		t.Fatal("expected streaming=true after SubmitMsg")
 	}
 }
 

@@ -28,19 +28,13 @@ func TestIntegration_FullSubmitFlow(t *testing.T) {
 	var receivedTokens []string
 	a.SetOnToken(func(tok string) { receivedTokens = append(receivedTokens, tok) })
 
-	// Submit user message.
+	// Submit user message. The transcript itself is produced by the WASM
+	// extension (see test/wasmchat); here we verify the harness-side state.
 	m, cmd := callUpdate(m, SubmitMsg{Content: "what is 2+2?"})
 	_ = cmd
 
-	// User message should be in chat immediately after SubmitMsg.
-	if len(m.chat.messages) != 1 {
-		t.Fatalf("expected 1 message in chat after SubmitMsg, got %d", len(m.chat.messages))
-	}
-	if m.chat.messages[0].role != sdk.RoleUser {
-		t.Errorf("expected RoleUser, got %v", m.chat.messages[0].role)
-	}
-	if m.chat.messages[0].content != "what is 2+2?" {
-		t.Errorf("chat.messages[0].content: got %q, want %q", m.chat.messages[0].content, "what is 2+2?")
+	if !m.streaming {
+		t.Fatal("expected streaming=true after SubmitMsg")
 	}
 
 	// The agent goroutine is started by pool.Send inside the returned tea.Cmd,
@@ -48,48 +42,34 @@ func TestIntegration_FullSubmitFlow(t *testing.T) {
 	_ = receivedTokens
 }
 
-// TestIntegration_UserMessageInHistory verifies the user message is recorded correctly.
+// TestIntegration_UserMessageInHistory verifies a submit marks the turn active.
 func TestIntegration_UserMessageInHistory(t *testing.T) {
 	pool := newTestPool()
 	m := New(pool, "main", nil)
 
 	m, _ = callUpdate(m, SubmitMsg{Content: "hello world"})
 
-	// User message should be in chat immediately after SubmitMsg.
-	if len(m.chat.messages) != 1 {
-		t.Fatalf("expected 1 message in chat, got %d", len(m.chat.messages))
-	}
-	if m.chat.messages[0].role != sdk.RoleUser {
-		t.Errorf("expected RoleUser, got %v", m.chat.messages[0].role)
-	}
-	if m.chat.messages[0].content != "hello world" {
-		t.Errorf("chat.messages[0].content: got %q, want %q", m.chat.messages[0].content, "hello world")
-	}
-
-	// Chat should have 1 message (the user message).
-	if len(m.chat.messages) != 1 {
-		t.Errorf("expected 1 chat message, got %d", len(m.chat.messages))
+	if !m.streaming {
+		t.Fatal("expected streaming=true after SubmitMsg")
 	}
 }
 
-// TestIntegration_TokenMsg_UpdatesChat verifies that TokenMsg sent via the program
-// correctly appends to the chat view. Simulates what SetOnToken callback does.
-func TestIntegration_TokenMsg_UpdatesChat(t *testing.T) {
+// TestIntegration_TokenMsg_AccumulatesResponse verifies that TokenMsg accumulates
+// the assistant response text used for session persistence, and StreamDoneMsg
+// resets it. The visible transcript is produced by the WASM extension.
+func TestIntegration_TokenMsg_AccumulatesResponse(t *testing.T) {
 	m := newTestModel()
 
 	m, _ = callUpdate(m, TokenMsg{Token: "hello"})
 	m, _ = callUpdate(m, TokenMsg{Token: " world"})
-	if m.chat.current != "hello world" {
-		t.Errorf("chat.current: got %q, want %q", m.chat.current, "hello world")
+	if m.streamContent != "hello world" {
+		t.Errorf("streamContent: got %q, want %q", m.streamContent, "hello world")
 	}
 
-	// StreamDoneMsg finalizes.
+	// StreamDoneMsg resets the accumulator.
 	m, _ = callUpdate(m, StreamDoneMsg{Err: nil})
-	if m.chat.current != "" {
-		t.Errorf("chat.current should be empty after StreamDoneMsg, got %q", m.chat.current)
-	}
-	if len(m.chat.messages) == 0 {
-		t.Error("expected assistant message after StreamDoneMsg")
+	if m.streamContent != "" {
+		t.Errorf("streamContent should be empty after StreamDoneMsg, got %q", m.streamContent)
 	}
 }
 
@@ -112,8 +92,8 @@ func TestIntegration_NilExtensionHost_Safe(t *testing.T) {
 
 	// A normal SubmitMsg should work without panicking.
 	m, _ = callUpdate(m, SubmitMsg{Content: "test"})
-	if len(m.chat.messages) != 1 {
-		t.Errorf("expected 1 chat entry, got %d", len(m.chat.messages))
+	if !m.streaming {
+		t.Error("expected streaming=true after submit")
 	}
 }
 
@@ -131,8 +111,8 @@ func TestIntegration_ExtensionHost_NoExtensions_Safe(t *testing.T) {
 
 	// Submit — no extensions loaded, no panics expected.
 	m, _ = callUpdate(m, SubmitMsg{Content: "test with host"})
-	if len(m.chat.messages) != 1 {
-		t.Errorf("expected 1 chat entry, got %d", len(m.chat.messages))
+	if !m.streaming {
+		t.Error("expected streaming=true after submit")
 	}
 }
 

@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -130,15 +129,15 @@ type Model struct {
 	modalScroll    int
 	streaming      bool
 	consoleVisible bool
-	// wasmChat, when true, sources the chat transcript content from the
-	// wasmChatAreaID scene area (driven by a WASM extension) instead of the
-	// internal ChatView message rendering. Enabled via WLLR_WASM_CHAT=1.
-	wasmChat bool
+	// streamContent accumulates the in-flight assistant response text so it can
+	// be captured for session persistence (OnMessageEnd) and logging when the
+	// turn completes. The transcript itself is rendered by the WASM extension.
+	streamContent string
 }
 
-// wasmChatAreaID is the scene area ID a WASM extension uses to own the main
-// chat transcript when WLLR_WASM_CHAT is enabled. The harness feeds this area's
-// rendered content into the (still harness-owned) scrollable chat viewport.
+// wasmChatAreaID is the scene area ID the WASM extension uses to own the main
+// chat transcript. The harness feeds this area's rendered content into the
+// (still harness-owned) scrollable chat viewport.
 const wasmChatAreaID = "chat"
 
 // inputAreaHeight = top border (1) + textarea rows (3) + bottom border (1)
@@ -167,10 +166,6 @@ func New(pool *agent.AgentPool, mainAgentID string, h *extension.Host) Model {
 		console:     NewConsoleView(),
 		live:        &liveState{provider: provName},
 		scene:       NewSceneRenderer(),
-		// WASM-driven transcript is the default; set WLLR_WASM_CHAT=0 to opt out.
-		// If no extension creates the chat area, refreshWASMChat no-ops and the
-		// internal ChatView rendering is used automatically.
-		wasmChat: os.Getenv("WLLR_WASM_CHAT") != "0",
 	}
 
 	registerBuiltins(m.commands)
@@ -433,16 +428,11 @@ func (m Model) updateWindow(msg tea.Msg) (Model, tea.Cmd, bool) {
 		m.picker.SetSize(m.width, m.chatHeight())
 		return m, nil, true
 	case ResetHistoryMsg:
-		m.chat.Clear()
-		for _, sm := range msg.Messages {
-			switch sm.Role {
-			case sdk.RoleUser:
-				m.chat.AddUserMessage(sm.Content)
-			case sdk.RoleAssistant:
-				m.chat.AppendToken(sm.Content)
-				m.chat.FinalizeMessage()
-			}
-		}
+		// Agent history is replaced by the UIBridge; the visual transcript is
+		// owned by the WASM extension, so we reset it to empty here. Subsequent
+		// turns repopulate it. (The restored messages remain in agent context.)
+		m.resetChatArea()
+		m.streamContent = ""
 		m.picker.Close()
 		m.pushNotification("History restored — conversation loaded from selected point.")
 		return m, nil, true
@@ -611,7 +601,9 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 		return m, tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return streamTickMsg{} }), true
 
 	case TokenMsg:
-		m.chat.AppendToken(msg.Token)
+		// Accumulate for session persistence/logging; the visible transcript is
+		// rendered by the WASM extension via EventToken.
+		m.streamContent += msg.Token
 		return m, nil, true
 
 	case streamTickMsg:
@@ -656,8 +648,9 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 			slog.Info("stream done", "tokens", m.agentPool.TokenCount())
 			delete(m.statusBar.statuses, "stream")
 		}
-		// Capture response before FinalizeMessage clears c.current.
-		responseContent := m.chat.current
+		// Capture and reset the accumulated response text.
+		responseContent := m.streamContent
+		m.streamContent = ""
 		if msg.Err == nil {
 			preview := responseContent
 			if r := []rune(preview); len(r) > 150 {
@@ -668,8 +661,6 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 			}
 			slog.Info("stream response", "text", preview)
 		}
-		m.chat.FinalizeMessage()
-		m.chat.UnqueueLastMessage() // must be after FinalizeMessage so queued msgs appear after the assistant response
 		if responseContent != "" && m.OnMessageEnd != nil {
 			m.OnMessageEnd(string(sdk.RoleAssistant), responseContent)
 		}
@@ -740,7 +731,9 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 		return m, m.commands.Dispatch(msg.Name, msg.Args), true
 
 	case clearMsg:
-		m.chat.Clear()
+		m.resetChatArea()
+		m.streamContent = ""
+		m.chat.ClearToolLog()
 		return m, nil, true
 
 	case setModelMsg:
@@ -848,7 +841,6 @@ func (m Model) updateExtension(msg tea.Msg) (Model, tea.Cmd, bool) {
 // render it. The dispatch runs in a goroutine so it never blocks the bubbletea
 // loop; the SceneRenderer it ultimately mutates is goroutine-safe.
 func (m *Model) pushNotification(text string) {
-	m.chat.AddNotification(text)
 	if m.extHost == nil {
 		return
 	}
@@ -860,13 +852,27 @@ func (m *Model) pushNotification(text string) {
 }
 
 // refreshWASMChat feeds the WASM-owned transcript scene area into the chat
-// viewport when WLLR_WASM_CHAT is enabled and the area exists. No-op otherwise.
+// viewport. No-op until an extension creates the area (e.g. the agents
+// extension on session start); until then the viewport is empty.
 func (m *Model) refreshWASMChat() {
-	if !m.wasmChat || m.scene == nil || !m.scene.HasArea(wasmChatAreaID) {
+	if m.scene == nil || !m.scene.HasArea(wasmChatAreaID) {
 		return
 	}
-	width := m.chatWidth()
-	m.chat.SetExternalContent(m.scene.Render(wasmChatAreaID, width))
+	m.chat.SetExternalContent(m.scene.Render(wasmChatAreaID, m.chatWidth()))
+}
+
+// resetChatArea clears the WASM transcript scene area back to an empty root,
+// matching the structure the extension expects ("chat-root" vstack). Used by
+// /clear and history-restore, which are harness-initiated. No-op if the area
+// does not exist.
+func (m *Model) resetChatArea() {
+	if m.scene == nil || !m.scene.HasArea(wasmChatAreaID) {
+		return
+	}
+	_ = m.scene.ApplyPatch(sdk.UIPatchParams{Area: wasmChatAreaID, Ops: []sdk.UIPatchOp{
+		{Op: sdk.UIOpSetRoot, Node: &sdk.UINode{ID: "chat-root", Type: sdk.UINodeVStack}},
+	}})
+	m.chat.SetExternalContent("")
 }
 
 // chatWidth returns the content width available to the chat viewport.
@@ -897,10 +903,12 @@ func (m Model) submitToAgent(content, display string) (tea.Model, tea.Cmd) {
 	if chatText == "" {
 		chatText = content
 	}
-	if m.streaming {
-		m.chat.AddQueuedUserMessage(chatText)
-	} else {
-		m.chat.AddUserMessage(chatText)
+	// The user prompt is echoed into the transcript by the WASM extension via
+	// the before_agent_start event (dispatched below). Here we only manage
+	// streaming state and the per-turn tool log.
+	_ = chatText
+	if !m.streaming {
+		m.chat.ClearToolLog()
 		m.streaming = true
 	}
 	m.streamStart = time.Now()
@@ -1230,9 +1238,9 @@ func (m Model) renderScenes() string {
 	var parts []string
 	for _, placement := range []sdk.UIAreaPlacement{sdk.UIAreaMain, sdk.UIAreaSidebar, sdk.UIAreaStatus, sdk.UIAreaOverlay} {
 		for _, id := range m.scene.AreasByPlacement(placement) {
-			// In WASM-chat mode the transcript area is rendered inside the chat
-			// viewport, not stacked here — skip it to avoid duplication.
-			if m.wasmChat && id == wasmChatAreaID {
+			// The transcript area is rendered inside the chat viewport, not
+			// stacked here — skip it to avoid duplication.
+			if id == wasmChatAreaID {
 				continue
 			}
 			if r := strings.TrimRight(m.scene.Render(id, width), "\n"); r != "" {

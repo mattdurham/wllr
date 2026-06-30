@@ -114,29 +114,3 @@ func TestAgentsWASMDrivesChatTranscript(t *testing.T) {
 		t.Fatalf("sub-agent text must not appear in the main transcript:\n%s", out)
 	}
 }
-
-func TestAgentsWASMChatOptOut(t *testing.T) {
-	wasmPath := filepath.Join("..", "..", "cmd", "builtins", "agents.wasm")
-	data, err := os.ReadFile(wasmPath)
-	if err != nil {
-		t.Skipf("agents.wasm not built: %v", err)
-	}
-
-	h := extension.NewHost(nil)
-	ctx := context.Background()
-	defer func() { _ = h.Close(ctx) }()
-
-	scene := harness.NewSceneRenderer()
-	h.SetUIBridge(&sceneUIBridge{scene: scene})
-	// Explicit opt-out.
-	h.SetCapabilities(&envCapabilities{env: map[string]string{"WLLR_WASM_CHAT": "0"}})
-
-	if err := h.LoadBytes(ctx, "agents.wasm", data, true); err != nil {
-		t.Fatalf("load agents.wasm: %v", err)
-	}
-	dispatch(t, h, sdk.EventSessionStart, sdk.SessionStartPayload{Reason: "new_session"})
-
-	if scene.HasArea("chat") {
-		t.Fatal("chat area must not be created when WLLR_WASM_CHAT=0")
-	}
-}
