@@ -28,7 +28,7 @@ Append-only design decision log. Never delete entries; add an `*Addendum (date):
 
 ---
 
-## 3. Why _initialize is called before _init
+## 3. Why _initialize is called before_init
 
 *Added: 2026-05-06*
 
@@ -179,6 +179,7 @@ Append-only design decision log. Never delete entries; add an `*Addendum (date):
 **Decision:** Three new callback fields were added to `Host`: `OnModal`, `OnSetSystemPrompt`, and `OnAppendSystemPrompt`.
 
 **Rationale:**
+
 - `OnModal`: Extensions (notably the `context` extension displaying AGENTS.md) need to surface text to the user in a focused overlay, not just a chat notification. A dedicated modal host_call avoids cluttering the chat stream with large blocks of text.
 - `OnSetSystemPrompt` / `OnAppendSystemPrompt`: The `context` extension sets AGENTS.md as the system prompt; the `skills` extension appends skill descriptions. These must propagate to the agent pool via `AgentPool.SetBaseSystemPrompt` / `AppendBaseSystemPrompt`. Rather than wiring the pool directly into the host (creating a circular dependency), the host exposes callbacks that the harness wires in `SetProgram`.
 
@@ -277,3 +278,15 @@ implementations.
 **Rationale:** This is phase P1 of letting any WASM extension drive the TUI via the declarative scene graph defined in `sdk` (see sdk NOTES §13). The host validates the permission and forwards the typed params to the `UIBridge`, mirroring the existing pattern for `exec`/`modal`/`show_picker`. Keeping the three operations on the existing `UIBridge` (rather than a sixth bridge interface) avoids interface proliferation since they are conceptually UI operations alongside `Notify`/`ShowModal`/`ShowPicker`.
 
 **Consequence:** All `UIBridge` implementations (including test stubs in `host_test.go`, `interfaces_test.go`, `mcp/extension_test.go` and the `earlyUIBridge`) must implement the three new methods. `CreateArea`/`PatchUI` return errors that surface to the extension as `HostCallResponse.Error`; `RemoveArea` cannot fail. The harness implementation mutates a shared, goroutine-safe `SceneRenderer` synchronously and sends a redraw signal — see harness NOTES.
+
+---
+
+## 24. UIBridge.UpdateArea and ui_update_area host call (step 3 of statusline scene)
+
+*Added: 2026-06-30*
+
+**Decision:** `UIBridge` gains a fourth scene-graph method `UpdateArea(sdk.UIUpdateAreaParams) error`, and the host gains a corresponding `ui_update_area` dispatch entry gated behind `sdk.PermUI`.
+
+**Rationale:** Following the statusline scene design (docs/plans/2026-06-30-statusline-scene-design.md), extensions need to update area constraints post-creation (e.g. collapse to 0 lines when idle, expand to show detail). Adding it to the existing `UIBridge` is consistent with the pattern established in NOTES §23. The handler follows the same guard structure as `handleUICreateArea` / `handleUIPatch`: permission check, nil bridge check, JSON unmarshal, delegate to `UIBridge.UpdateArea`. The harness implementation delegates to `SceneRenderer.UpdateArea` and sends `sceneDirtyMsg{}`.
+
+**Consequence:** All `UIBridge` implementations must add `UpdateArea`. Affected stubs: `earlyUIBridge`, `testUIBridge` in `host_test.go` and `mcp/extension_test.go`, `fakeUIBridge` in `interfaces_test.go`, and `sceneUIBridge` in `test/wasmchat`. All updated in this commit.

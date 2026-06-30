@@ -62,9 +62,10 @@ func (e *earlyUIBridge) ToolResult(_, _ string, _ bool)       {}
 func (e *earlyUIBridge) AfterToolCall(_, _, _ string, _ bool) {}
 func (e *earlyUIBridge) ConsoleOutput(_ string)               {}
 func (e *earlyUIBridge) ConsoleClear()                        {}
-func (e *earlyUIBridge) CreateArea(_ sdk.UIArea) error        { return nil }
-func (e *earlyUIBridge) PatchUI(_ sdk.UIPatchParams) error    { return nil }
-func (e *earlyUIBridge) RemoveArea(_ string)                  {}
+func (e *earlyUIBridge) CreateArea(_ sdk.UIArea) error                    { return nil }
+func (e *earlyUIBridge) PatchUI(_ sdk.UIPatchParams) error                { return nil }
+func (e *earlyUIBridge) RemoveArea(_ string)                              {}
+func (e *earlyUIBridge) UpdateArea(_ sdk.UIUpdateAreaParams) error        { return nil }
 
 // Verify earlyUIBridge satisfies the interface at compile time.
 var _ extension.UIBridge = (*earlyUIBridge)(nil)
@@ -438,4 +439,17 @@ func (b *harnessUIBridge) RemoveArea(id string) {
 	if b.prog != nil {
 		b.prog.Send(sceneDirtyMsg{})
 	}
+}
+
+func (b *harnessUIBridge) UpdateArea(params sdk.UIUpdateAreaParams) error {
+	if b.scene == nil {
+		return fmt.Errorf("ui: scene renderer not available")
+	}
+	if err := b.scene.UpdateArea(params); err != nil {
+		return err
+	}
+	if b.prog != nil {
+		b.prog.Send(sceneDirtyMsg{})
+	}
+	return nil
 }

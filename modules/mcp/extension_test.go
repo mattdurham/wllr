@@ -40,9 +40,10 @@ func (b *testUIBridge) ToolResult(id, result string, isError bool) {
 func (b *testUIBridge) AfterToolCall(_, _, _ string, _ bool) {}
 func (b *testUIBridge) ConsoleOutput(_ string)               {}
 func (b *testUIBridge) ConsoleClear()                        {}
-func (b *testUIBridge) CreateArea(_ sdk.UIArea) error        { return nil }
-func (b *testUIBridge) PatchUI(_ sdk.UIPatchParams) error    { return nil }
-func (b *testUIBridge) RemoveArea(_ string)                  {}
+func (b *testUIBridge) CreateArea(_ sdk.UIArea) error                    { return nil }
+func (b *testUIBridge) PatchUI(_ sdk.UIPatchParams) error                { return nil }
+func (b *testUIBridge) RemoveArea(_ string)                              {}
+func (b *testUIBridge) UpdateArea(_ sdk.UIUpdateAreaParams) error        { return nil }
 
 var _ extension.UIBridge = (*testUIBridge)(nil)
 
