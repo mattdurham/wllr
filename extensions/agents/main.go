@@ -406,24 +406,27 @@ func onAgentsCommand(_ []string) {
 		meta[agentRecords[i].id] = &agentRecords[i]
 	}
 
-	text := "Sub-agents\n" + strings.Repeat("─", 40) + "\n\n"
+	var sb strings.Builder
+	sb.WriteString("Sub-agents\n")
+	sb.WriteString(strings.Repeat("─", 40))
+	sb.WriteString("\n\n")
 	for _, a := range poolResp.Agents {
-		text += a.ID
+		sb.WriteString(a.ID)
 		if a.Name != "" && a.Name != a.ID {
-			text += "  (" + a.Name + ")"
+			sb.WriteString("  (" + a.Name + ")")
 		}
-		text += "\n"
+		sb.WriteString("\n")
 		if r, ok := meta[a.ID]; ok {
 			if r.task != "" {
-				text += "  Task: " + r.task + "\n"
+				sb.WriteString("  Task: " + r.task + "\n")
 			}
 			if r.lastUpdate != "" {
-				text += "  Last: " + r.lastUpdate + "\n"
+				sb.WriteString("  Last: " + r.lastUpdate + "\n")
 			}
 		}
-		text += "\n"
+		sb.WriteString("\n")
 	}
-	Modal(strings.TrimRight(text, "\n"))
+	Modal(strings.TrimRight(sb.String(), "\n"))
 }
 
 func onBeforeToolCall(payload json.RawMessage) {
