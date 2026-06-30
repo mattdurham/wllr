@@ -593,3 +593,65 @@ func OnNotify(fn func(text string)) {
 		}
 	})
 }
+
+// OnTick registers a handler called once per second by the harness.
+func OnTick(fn func()) {
+	_sdkOn("tick", func(_ json.RawMessage) { fn() })
+}
+
+// OnAfterProviderResponse registers a handler called after the LLM provider
+// returns a response. usage contains token counts for the completed turn.
+func OnAfterProviderResponse(fn func(inputTokens, outputTokens int)) {
+	_sdkOn("after_provider_response", func(payload json.RawMessage) {
+		var p struct {
+			Usage struct {
+				InputTokens  int `json:"input_tokens"`
+				OutputTokens int `json:"output_tokens"`
+			} `json:"usage"`
+		}
+		if err := json.Unmarshal(payload, &p); err == nil {
+			fn(p.Usage.InputTokens, p.Usage.OutputTokens)
+		}
+	})
+}
+
+// OnContextUsage registers a handler called after each completed turn with the
+// current context window usage. contextWindow is 0 when no window is configured.
+func OnContextUsage(fn func(inputTokens, outputTokens, contextWindow int64, percent float64, compacted bool)) {
+	_sdkOn("context_usage", func(payload json.RawMessage) {
+		var p struct {
+			Usage struct {
+				InputTokens   int64   `json:"input_tokens"`
+				OutputTokens  int64   `json:"output_tokens"`
+				ContextWindow int64   `json:"context_window"`
+				Percent       float64 `json:"percent"`
+			} `json:"usage"`
+			Compacted bool `json:"compacted"`
+		}
+		if err := json.Unmarshal(payload, &p); err == nil {
+			fn(p.Usage.InputTokens, p.Usage.OutputTokens, p.Usage.ContextWindow, p.Usage.Percent, p.Compacted)
+		}
+	})
+}
+
+// UIUpdateArea updates the sizing constraints or weight of an existing scene area.
+// Only non-empty fields are applied; empty strings leave the current constraint unchanged.
+func UIUpdateArea(id, minHeight, maxHeight, minWidth, maxWidth string, weight *int) {
+	params := map[string]any{"id": id}
+	if minHeight != "" {
+		params["min_height"] = minHeight
+	}
+	if maxHeight != "" {
+		params["max_height"] = maxHeight
+	}
+	if minWidth != "" {
+		params["min_width"] = minWidth
+	}
+	if maxWidth != "" {
+		params["max_width"] = maxWidth
+	}
+	if weight != nil {
+		params["weight"] = *weight
+	}
+	_sdkCall("ui_update_area", params)
+}
