@@ -24,10 +24,16 @@ type AgentPool struct {
 	// wakeNotifier, when set, is called with an agent ID whenever Deliver wakes
 	// that agent (wake=true). The harness uses it to drive the TUI streaming
 	// indicator for the main agent. Set via SetWakeNotifier.
-	wakeNotifier     func(id string)
-	providerName     string
-	defaultModelName string
-	baseSystemPrompt string
+	wakeNotifier func(id string)
+	// providerRequestInterceptor, when set, runs the before_provider_request
+	// transform chain just before each agent turn streams to the provider. It can
+	// redact the outgoing messages, reroute the model, or block the request.
+	// Installed by the harness (routes to extension DispatchEventChain) to avoid
+	// an agent→extension circular import. Set via SetProviderRequestInterceptor.
+	providerRequestInterceptor ProviderRequestInterceptor
+	providerName               string
+	defaultModelName           string
+	baseSystemPrompt           string
 	// compactConfig controls the percentage-based compaction trigger.
 	// Initialized from WLLR_COMPACT_THRESHOLD in NewPool; override via SetCompactConfig.
 	compactConfig      CompactConfig

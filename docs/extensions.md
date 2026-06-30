@@ -821,6 +821,17 @@ The SDK helper `OnInterceptToolCall(fn)` wraps this: `fn(agentID, toolName,
 input)` returns `(newInput, block, reason)` — a non-nil `newInput` rewrites the
 call, `block=true` refuses it with `reason`.
 
+**`before_provider_request` is a transform chain.** An interceptor may redact
+the messages about to be sent to the LLM (e.g. strip PII / API keys), reroute
+the model (e.g. a cheap local model vs a frontier model), or block the request.
+Redaction is **send-time only** — the agent's stored history keeps the original
+content. A block fails the turn.
+
+The SDK helper `OnInterceptProviderRequest(fn)` wraps this: `fn(messages,
+model)` returns `(newMessages, newModel, block, reason)` — a non-nil
+`newMessages` redacts/edits the outgoing messages, a non-empty `newModel`
+reroutes, `block=true` refuses the request with `reason`.
+
 ---
 
 ## Memory Management Protocol

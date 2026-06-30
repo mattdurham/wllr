@@ -471,7 +471,41 @@ func (a *Agent) executeTurn(
 		}
 	}
 
-	collectedText, usage, err := streamTurn(childCtx, fa, history, content, pool, onToken, onToolCall)
+	// buildStream applies the before_provider_request interceptor chain (when one
+	// is installed) to the outgoing messages + model, just before streaming.
+	// With no interceptor it returns (history, content) unchanged so the default
+	// turn path is byte-identical. With an interceptor it folds content into the
+	// outgoing message list, returns the (possibly redacted) list with an empty
+	// prompt, rebuilds fa/lm on a model reroute, or signals a block. Redaction is
+	// send-time only — history records the original content (§ NOTES).
+	buildStream := func(h []sdk.Message, c string) (msgs []sdk.Message, prompt string, blocked bool, reason string) {
+		if pool == nil || !pool.hasProviderRequestInterceptor() {
+			return h, c, false, ""
+		}
+		outgoing := h
+		if c != "" {
+			outgoing = append(append([]sdk.Message{}, h...), sdk.Message{Role: sdk.RoleUser, Content: c})
+		}
+		redacted, newModel, blk, rsn := pool.interceptProviderRequest(a.id, outgoing, a.modelName)
+		if blk {
+			return nil, "", true, rsn
+		}
+		if newModel != "" && newModel != a.modelName {
+			if newLM, lerr := pool.LanguageModelForModel(childCtx, newModel); lerr == nil {
+				lm = newLM
+				fa = fantasy.NewAgent(lm, agentOpts...)
+			}
+		}
+		return redacted, "", false, ""
+	}
+
+	streamMsgs, streamPrompt, blocked, blockReason := buildStream(history, content)
+	if blocked {
+		a.finishTurn(ctx, &ProviderRequestBlockedError{Reason: blockReason}, nil, onDone, inboxMsgs)
+		return
+	}
+
+	collectedText, usage, err := streamTurn(childCtx, fa, streamMsgs, streamPrompt, pool, onToken, onToolCall)
 
 	// Reactive fallback: if we still hit a context error, trim and retry once.
 	if err != nil && isContextTooLong(err) {
@@ -484,7 +518,12 @@ func (a *Agent) executeTurn(
 			a.history = history
 			a.historyMu.Unlock()
 		}
-		collectedText, usage, err = streamTurn(childCtx, fa, history, content, pool, onToken, onToolCall)
+		streamMsgs, streamPrompt, blocked, blockReason = buildStream(history, content)
+		if blocked {
+			a.finishTurn(ctx, &ProviderRequestBlockedError{Reason: blockReason}, nil, onDone, inboxMsgs)
+			return
+		}
+		collectedText, usage, err = streamTurn(childCtx, fa, streamMsgs, streamPrompt, pool, onToken, onToolCall)
 	}
 
 	// Record token usage for the turn. On error or cancellation, store a

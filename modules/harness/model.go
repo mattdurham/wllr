@@ -271,10 +271,49 @@ func (m *Model) SetProgram(p *tea.Program) {
 					p.Send(agentWakeupMsg{})
 				}
 			})
+			// Wire the before_provider_request transform chain so extensions can
+			// redact messages (PII), reroute the model, or block the request just
+			// before each turn streams to the provider. Routes through the extension
+			// host's DispatchEventChain to avoid an agent→extension circular import.
+			pool.SetProviderRequestInterceptor(func(agentID string, messages []sdk.Message, model string) ([]sdk.Message, string, bool, string) {
+				return interceptProviderRequest(extHostRef, agentID, messages, model)
+			})
 		}
 	}
 
 	m.wireMainAgentCallbacks(p)
+}
+
+// interceptProviderRequest runs the before_provider_request transform chain via
+// the extension host and returns the (possibly transformed) messages and model,
+// whether the request is blocked, and the block reason. A malformed transformed
+// payload is tolerated: the original messages/model are kept.
+func interceptProviderRequest(extHost *extension.Host, agentID string, messages []sdk.Message, model string) ([]sdk.Message, string, bool, string) {
+	if extHost == nil {
+		return messages, model, false, ""
+	}
+	payload, err := json.Marshal(sdk.BeforeProviderRequestPayload{Messages: messages, Model: model})
+	if err != nil {
+		return messages, model, false, ""
+	}
+	evt := sdk.Event{Type: sdk.EventBeforeProviderRequest, Payload: payload}
+	final, blocked, reason, derr := extHost.DispatchEventChain(context.Background(), evt)
+	if derr != nil {
+		return messages, model, false, ""
+	}
+	if blocked {
+		return messages, model, true, reason
+	}
+	var fp sdk.BeforeProviderRequestPayload
+	if uerr := json.Unmarshal(final.Payload, &fp); uerr != nil {
+		// Malformed transform — keep the original request.
+		return messages, model, false, ""
+	}
+	outModel := fp.Model
+	if outModel == "" {
+		outModel = model
+	}
+	return fp.Messages, outModel, false, ""
 }
 
 const tokenBatchInterval = 30 * time.Millisecond
@@ -960,15 +999,11 @@ func (m Model) submitToAgent(content, display string) (tea.Model, tea.Cmd) {
 			_, _ = extHost.DispatchEvent(context.Background(), evt)
 		}
 
-		// Dispatch before_provider_request.
-		if extHost != nil {
-			payload, _ := json.Marshal(sdk.BeforeProviderRequestPayload{
-				Messages: []sdk.Message{{Role: sdk.RoleUser, Content: content}},
-				Model:    activeModel,
-			})
-			evt := sdk.Event{Type: sdk.EventBeforeProviderRequest, Payload: payload}
-			_, _ = extHost.DispatchEvent(context.Background(), evt)
-		}
+		// before_provider_request is dispatched as a transform chain inside the
+		// agent turn (via pool.SetProviderRequestInterceptor wired in SetProgram),
+		// not here — that is where the messages + model actually exist and where a
+		// redaction/reroute/block can be applied to the real provider call.
+		_ = activeModel
 
 		if pool == nil {
 			return StreamDoneMsg{Err: fmt.Errorf("no agent pool configured")}

@@ -16,6 +16,15 @@
 | `TestInboxMessages_AppendedAfterPriorHistory` | Inbox appended after prior history | Agent with history + inbox | Last message is inbox message |
 | `TestInboxMessages_EmptyPromptValidAfterAppend` | Empty prompt valid when inbox non-empty | Prior assistant history + inbox msg | onDone receives nil error |
 
+### providerintercept_test.go
+
+| Test | Scenario | Setup | Assertions |
+|------|----------|-------|------------|
+| `TestProviderIntercept_BlockFailsTurn` | Interceptor blocks the request | interceptor returns block+reason | turn errors with `*ProviderRequestBlockedError`; reason preserved |
+| `TestProviderIntercept_NoInterceptorTurnSucceeds` | No interceptor = unchanged path | no interceptor set | turn completes normally |
+| `TestProviderIntercept_RedactPreservesHistoryOriginal` | Send-time redaction | interceptor rewrites all message content | turn completes; history keeps ORIGINAL content; redacted text never in history |
+| `TestProviderIntercept_RerouteRequestsNewModel` | Model reroute | interceptor returns a new model; recordingProvider | provider asked for the rerouted model ID |
+
 ### mailbox_test.go
 
 | Test | Scenario | Setup | Assertions |

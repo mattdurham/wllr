@@ -121,6 +121,41 @@ func (p *AgentPool) dispatchContextUsage(cu sdk.ContextUsage, compacted bool) {
 	}
 }
 
+// SetProviderRequestInterceptor installs the before_provider_request transform
+// chain hook. The harness wires this to the extension host so interceptors can
+// redact/reroute/block outgoing provider requests without an agent→extension
+// circular import. Thread-safe; may be called before or after agents are spawned.
+func (p *AgentPool) SetProviderRequestInterceptor(fn ProviderRequestInterceptor) {
+	p.dispatchMu.Lock()
+	p.providerRequestInterceptor = fn
+	p.dispatchMu.Unlock()
+}
+
+// interceptProviderRequest runs the registered provider-request interceptor, if
+// any. Returns the (possibly transformed) messages and model, whether the
+// request is blocked, and the reason. With no interceptor it returns the inputs
+// unchanged.
+func (p *AgentPool) interceptProviderRequest(agentID string, messages []sdk.Message, model string) ([]sdk.Message, string, bool, string) {
+	p.dispatchMu.RLock()
+	fn := p.providerRequestInterceptor
+	p.dispatchMu.RUnlock()
+	if fn == nil {
+		return messages, model, false, ""
+	}
+	return fn(agentID, messages, model)
+}
+
+// hasProviderRequestInterceptor reports whether a before_provider_request
+// interceptor is installed. The agent uses this to keep the default turn path
+// byte-identical when no interceptor exists (the transform path folds content
+// into the message list and is only taken when interception is active).
+func (p *AgentPool) hasProviderRequestInterceptor() bool {
+	p.dispatchMu.RLock()
+	ok := p.providerRequestInterceptor != nil
+	p.dispatchMu.RUnlock()
+	return ok
+}
+
 // SetWakeNotifier installs a callback invoked with an agent ID whenever Deliver
 // wakes that agent (wake=true and the agent was idle). The harness uses it to
 // drive the TUI streaming indicator for the main agent. Thread-safe.
