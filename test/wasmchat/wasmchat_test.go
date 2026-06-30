@@ -76,7 +76,8 @@ func TestAgentsWASMDrivesChatTranscript(t *testing.T) {
 
 	scene := harness.NewSceneRenderer()
 	h.SetUIBridge(&sceneUIBridge{scene: scene})
-	h.SetCapabilities(&envCapabilities{env: map[string]string{"WLLR_WASM_CHAT": "1"}})
+	// No env set: WASM transcript is the default.
+	h.SetCapabilities(&envCapabilities{env: map[string]string{}})
 
 	if err := h.LoadBytes(ctx, "agents.wasm", data, true); err != nil {
 		t.Fatalf("load agents.wasm: %v", err)
@@ -114,7 +115,7 @@ func TestAgentsWASMDrivesChatTranscript(t *testing.T) {
 	}
 }
 
-func TestAgentsWASMChatDisabledByDefault(t *testing.T) {
+func TestAgentsWASMChatOptOut(t *testing.T) {
 	wasmPath := filepath.Join("..", "..", "cmd", "builtins", "agents.wasm")
 	data, err := os.ReadFile(wasmPath)
 	if err != nil {
@@ -127,8 +128,8 @@ func TestAgentsWASMChatDisabledByDefault(t *testing.T) {
 
 	scene := harness.NewSceneRenderer()
 	h.SetUIBridge(&sceneUIBridge{scene: scene})
-	// No WLLR_WASM_CHAT in the env.
-	h.SetCapabilities(&envCapabilities{env: map[string]string{}})
+	// Explicit opt-out.
+	h.SetCapabilities(&envCapabilities{env: map[string]string{"WLLR_WASM_CHAT": "0"}})
 
 	if err := h.LoadBytes(ctx, "agents.wasm", data, true); err != nil {
 		t.Fatalf("load agents.wasm: %v", err)
@@ -136,6 +137,6 @@ func TestAgentsWASMChatDisabledByDefault(t *testing.T) {
 	dispatch(t, h, sdk.EventSessionStart, sdk.SessionStartPayload{Reason: "new_session"})
 
 	if scene.HasArea("chat") {
-		t.Fatal("chat area must not be created when WLLR_WASM_CHAT is unset")
+		t.Fatal("chat area must not be created when WLLR_WASM_CHAT=0")
 	}
 }

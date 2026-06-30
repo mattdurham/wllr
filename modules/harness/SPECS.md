@@ -517,14 +517,15 @@ Returns the current set of registered tools from `extHost.RegisteredTools()` as 
 
 ## 27. WASM-Driven Chat Transcript (UI P4)
 
-When `WLLR_WASM_CHAT=1`, `Model.wasmChat` is true and the main chat transcript content is produced by a WASM extension (the bundled `agents` extension) that owns the `wasmChatAreaID` (`"chat"`) scene area. The harness still owns the scrollable viewport; only the *content* is external.
+By default the main chat transcript content is produced by a WASM extension (the bundled `agents` extension) that owns the `wasmChatAreaID` (`"chat"`) scene area; `Model.wasmChat` is true unless `WLLR_WASM_CHAT=0` opts out. The harness still owns the scrollable viewport; only the *content* is external.
 
 - `ChatView` gains an external-content mode: `SetExternalContent(string)` sets `externalMode = true` and replaces the viewport content (scrolling to bottom). In external mode `refreshContent` bypasses the internal message-rendering path entirely and uses `externalContent`.
 - `Model.refreshWASMChat()` is called on `sceneDirtyMsg` and on `WindowSizeMsg`; when `wasmChat` is set and the `chat` area exists it feeds `scene.Render("chat", width)` into the chat viewport.
 - `renderScenes` skips the `chat` area when `wasmChat` is set (it is rendered inside the viewport, not stacked below it).
 
 **Invariants:**
-- `wasmChat` defaults to **off**; with it off, behavior is identical to before P4 (internal `ChatView` rendering, no `chat` area created by the extension).
+- `wasmChat` defaults to **on**; set `WLLR_WASM_CHAT=0` to opt out (internal `ChatView` rendering, no `chat` area created by the extension).
+- **Automatic fallback:** even with `wasmChat` on, if no extension creates the `chat` area (e.g. the `agents` extension is not loaded), `refreshWASMChat` no-ops and `ChatView` renders internally. WASM-driven rendering only activates once the area exists.
 - The viewport (scroll, size, `GotoBottom`) is always harness-owned regardless of mode. Input/scroll never route to WASM.
 - The direct `TokenMsg`/`AddUserMessage`/`FinalizeMessage` paths still run in WASM mode but are ignored for rendering because `ChatView` is in external mode; they harmlessly maintain internal `messages`.
 - All notifications funnel through `Model.pushNotification(text)`, which calls `ChatView.AddNotification` and dispatches `sdk.EventNotify` (in a goroutine) so a transcript-owning extension can render notifications. The dispatch fires regardless of `wasmChat` (subscription-gated; ignored by extensions that do not subscribe).
