@@ -240,42 +240,6 @@ func SetStatus(key, value string) {
 	_sdkCall("set_status", map[string]string{"key": key, "value": value})
 }
 
-// SetStatusLine replaces the entire status bar with a custom string.
-// Pass an empty string to revert to the default auto-generated line.
-func SetStatusLine(text string) {
-	_sdkCall("set_status_line", map[string]string{"text": text})
-}
-
-// StatusInfo holds a snapshot of the current TUI status for status line rendering.
-type StatusInfo struct {
-	Provider     string            `json:"provider"`
-	Model        string            `json:"model"`
-	Tokens       int               `json:"tokens"`
-	Working      bool              `json:"working"`
-	ElapsedMs    int64             `json:"elapsed_ms"`
-	ActiveAgents int               `json:"active_agents"`
-	Width        int               `json:"width"`
-	HasError     bool              `json:"has_error"`
-	Statuses     map[string]string `json:"statuses"`
-}
-
-// GetStatusInfo returns a live snapshot of the current status bar state.
-func GetStatusInfo() StatusInfo {
-	raw := _sdkCallResult("get_status_info", nil)
-	var info StatusInfo
-	if raw != nil {
-		_ = json.Unmarshal(raw, &info)
-	}
-	return info
-}
-
-// OnTick registers a handler called once per second by the harness.
-func OnTick(fn func()) {
-	_sdkOn("tick", func(_ json.RawMessage) {
-		fn()
-	})
-}
-
 // SetSystemPrompt replaces the base system prompt for all agents.
 func SetSystemPrompt(prompt string) {
 	_sdkCall("set_system_prompt", map[string]string{"prompt": prompt})
@@ -324,6 +288,50 @@ func Exec(command, dir string) (output string, err error) {
 	return r.Output, nil
 }
 
+// ReadFile reads the contents of a file on the host filesystem.
+// Requires the file_read permission in the extension manifest.
+func ReadFile(path string) (string, error) {
+	raw := _sdkCallResult("read_file", map[string]string{"path": path})
+	if raw == nil {
+		return "", fmt.Errorf("read_file: no response")
+	}
+	var r struct {
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return "", err
+	}
+	return r.Content, nil
+}
+
+// WriteFile writes content to a file on the host filesystem.
+// Parent directories are created automatically.
+// Requires the file_write permission in the extension manifest.
+func WriteFile(path, content string) error {
+	if _sdkCallResult("write_file", map[string]string{"path": path, "content": content}) == nil {
+		return fmt.Errorf("write_file: failed")
+	}
+	return nil
+}
+
+// HTTPPost makes an HTTP POST request via the host.
+// headers may be nil. Returns (statusCode, responseBody, error).
+// Requires the network_write permission in the extension manifest.
+func HTTPPost(url string, headers map[string]string, body []byte) (int, string, error) {
+	raw := _sdkCallResult("http_post", map[string]any{"url": url, "headers": headers, "body": body})
+	if raw == nil {
+		return 0, "", fmt.Errorf("http_post: no response")
+	}
+	var r struct {
+		Status int    `json:"status"`
+		Body   string `json:"body"`
+	}
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return 0, "", err
+	}
+	return r.Status, r.Body, nil
+}
+
 // GetEnv returns the value of an environment variable.
 // Pass an empty name to get all variables as a JSON array.
 func GetEnv(name string) (string, error) {
@@ -338,6 +346,24 @@ func GetEnv(name string) (string, error) {
 		return "", err
 	}
 	return r.Value, nil
+}
+
+// GetOS returns the host operating system and architecture (e.g. "darwin", "arm64").
+// These are the same values as runtime.GOOS and runtime.GOARCH on the host.
+// No permission required.
+func GetOS() (goos, goarch string, err error) {
+	raw := _sdkCallResult("get_os", nil)
+	if raw == nil {
+		return "", "", fmt.Errorf("get_os: no response")
+	}
+	var r struct {
+		OS   string `json:"os"`
+		Arch string `json:"arch"`
+	}
+	if e := json.Unmarshal(raw, &r); e != nil {
+		return "", "", e
+	}
+	return r.OS, r.Arch, nil
 }
 
 // StoreSet stores a key-value pair in the extension's private store.
@@ -383,6 +409,31 @@ func Logf(level int, format string, args ...any) {
 
 // "user" or "assistant"
 
+// StatusInfo holds a snapshot of the current status bar state.
+// Returned by GetStatusInfo.
+
+// GetStatusInfo returns a snapshot of the current status bar state.
+// Extensions can use this to compose a fully custom status line.
+// No permission required.
+func GetStatusInfo() (StatusInfo, error) {
+	raw := _sdkCallResult("get_status_info", nil)
+	if raw == nil {
+		return StatusInfo{}, fmt.Errorf("get_status_info: no response")
+	}
+	var info StatusInfo
+	if err := json.Unmarshal(raw, &info); err != nil {
+		return StatusInfo{}, err
+	}
+	return info, nil
+}
+
+// SetStatusLine replaces the entire status bar text with a custom string.
+// Pass an empty string to revert to the default auto-generated line.
+// No permission required.
+func SetStatusLine(text string) {
+	_sdkCall("set_status_line", map[string]string{"text": text})
+}
+
 // ─── Internal host_call helpers ───────────────────────────────────────────────
 
 // _sdkCall fires a host_call and discards the response.
@@ -427,4 +478,180 @@ func _sdkCallResult(method string, params any) json.RawMessage {
 		return nil
 	}
 	return resp.Result
+}
+
+// ─── UI scene graph ───────────────────────────────────────────────────────────
+// Declarative, node-based TUI. An extension owns a named "area" and drives it
+// with scene-graph patches. Requires the "ui" permission in the manifest.
+
+// UIProps carries optional style/layout for a UINode. Colour fields name theme
+// tokens (e.g. "accent", "muted", "error"), never raw colours.
+type UIProps struct {
+	Width     string `json:"width,omitempty"`
+	Height    string `json:"height,omitempty"`
+	Border    string `json:"border,omitempty"`
+	Padding   []int  `json:"padding,omitempty"`
+	Margin    []int  `json:"margin,omitempty"`
+	Align     string `json:"align,omitempty"`
+	Fg        string `json:"fg,omitempty"`
+	Bg        string `json:"bg,omitempty"`
+	Bold      bool   `json:"bold,omitempty"`
+	Italic    bool   `json:"italic,omitempty"`
+	Underline bool   `json:"underline,omitempty"`
+	Faint     bool   `json:"faint,omitempty"`
+	Wrap      bool   `json:"wrap,omitempty"`
+}
+
+// UINode is one node in a UI scene graph. Type is one of: text, vstack, hstack,
+// viewport, spinner, divider.
+type UINode struct {
+	ID       string   `json:"id"`
+	Type     string   `json:"type"`
+	Text     string   `json:"text,omitempty"`
+	Props    *UIProps `json:"props,omitempty"`
+	Children []UINode `json:"children,omitempty"`
+}
+
+// UIPatchOp is a single scene-graph mutation. Op is one of: set_root, insert,
+// update, remove, append_text.
+type UIPatchOp struct {
+	Op     string   `json:"op"`
+	Parent string   `json:"parent,omitempty"`
+	Index  *int     `json:"index,omitempty"`
+	ID     string   `json:"id,omitempty"`
+	Node   *UINode  `json:"node,omitempty"`
+	Props  *UIProps `json:"props,omitempty"`
+	Text   string   `json:"text,omitempty"`
+}
+
+// UICreateArea registers a UI area owned by this extension. placement is one of
+// "main", "sidebar", "status", "overlay". weight is a relative size hint (0 = default).
+func UICreateArea(id, placement string, weight int) {
+	_sdkCall("ui_create_area", map[string]any{
+		"area": map[string]any{"id": id, "placement": placement, "weight": weight},
+	})
+}
+
+// UIPatch applies a batch of scene-graph ops to an area, in order, atomically.
+func UIPatch(area string, ops ...UIPatchOp) {
+	_sdkCall("ui_patch", map[string]any{"area": area, "ops": ops})
+}
+
+// UIRemoveArea removes a UI area and its scene graph.
+func UIRemoveArea(area string) {
+	_sdkCall("ui_remove_area", map[string]string{"area": area})
+}
+
+// Node builders.
+func UIText(id, text string) UINode { return UINode{ID: id, Type: "text", Text: text} }
+
+func UIVStack(id string, kids ...UINode) UINode {
+	return UINode{ID: id, Type: "vstack", Children: kids}
+}
+
+func UIHStack(id string, kids ...UINode) UINode {
+	return UINode{ID: id, Type: "hstack", Children: kids}
+}
+func UIDivider(id string) UINode { return UINode{ID: id, Type: "divider"} }
+
+// Op builders.
+func OpSetRoot(node UINode) UIPatchOp { return UIPatchOp{Op: "set_root", Node: &node} }
+
+func OpInsert(parent string, node UINode) UIPatchOp {
+	return UIPatchOp{Op: "insert", Parent: parent, Node: &node}
+}
+
+func OpUpdate(id string, props UIProps) UIPatchOp {
+	return UIPatchOp{Op: "update", ID: id, Props: &props}
+}
+func OpRemove(id string) UIPatchOp           { return UIPatchOp{Op: "remove", ID: id} }
+func OpAppendText(id, text string) UIPatchOp { return UIPatchOp{Op: "append_text", ID: id, Text: text} }
+
+// OnToken registers a handler called with batches of streamed assistant text as
+// the agent produces it. agentID identifies the producing agent.
+func OnToken(fn func(agentID, text string)) {
+	_sdkOn("token", func(payload json.RawMessage) {
+		var p struct {
+			AgentID string `json:"agent_id"`
+			Text    string `json:"text"`
+		}
+		if err := json.Unmarshal(payload, &p); err == nil {
+			fn(p.AgentID, p.Text)
+		}
+	})
+}
+
+// OnNotify registers a handler called when a system notification line is shown
+// in the chat. text may begin with "⚠" for warnings/errors.
+func OnNotify(fn func(text string)) {
+	_sdkOn("notify", func(payload json.RawMessage) {
+		var p struct {
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(payload, &p); err == nil {
+			fn(p.Text)
+		}
+	})
+}
+
+// OnTick registers a handler called once per second by the harness.
+func OnTick(fn func()) {
+	_sdkOn("tick", func(_ json.RawMessage) { fn() })
+}
+
+// OnAfterProviderResponse registers a handler called after the LLM provider
+// returns a response. usage contains token counts for the completed turn.
+func OnAfterProviderResponse(fn func(inputTokens, outputTokens int)) {
+	_sdkOn("after_provider_response", func(payload json.RawMessage) {
+		var p struct {
+			Usage struct {
+				InputTokens  int `json:"input_tokens"`
+				OutputTokens int `json:"output_tokens"`
+			} `json:"usage"`
+		}
+		if err := json.Unmarshal(payload, &p); err == nil {
+			fn(p.Usage.InputTokens, p.Usage.OutputTokens)
+		}
+	})
+}
+
+// OnContextUsage registers a handler called after each completed turn with the
+// current context window usage. contextWindow is 0 when no window is configured.
+func OnContextUsage(fn func(inputTokens int64, outputTokens int64, contextWindow int64, percent float64, compacted bool)) {
+	_sdkOn("context_usage", func(payload json.RawMessage) {
+		var p struct {
+			Usage struct {
+				InputTokens   int64   `json:"input_tokens"`
+				OutputTokens  int64   `json:"output_tokens"`
+				ContextWindow int64   `json:"context_window"`
+				Percent       float64 `json:"percent"`
+			} `json:"usage"`
+			Compacted bool `json:"compacted"`
+		}
+		if err := json.Unmarshal(payload, &p); err == nil {
+			fn(p.Usage.InputTokens, p.Usage.OutputTokens, p.Usage.ContextWindow, p.Usage.Percent, p.Compacted)
+		}
+	})
+}
+
+// UIUpdateArea updates the sizing constraints or weight of an existing scene area.
+// Only non-empty fields are applied; empty strings leave the current constraint unchanged.
+func UIUpdateArea(id, minHeight, maxHeight, minWidth, maxWidth string, weight *int) {
+	params := map[string]any{"id": id}
+	if minHeight != "" {
+		params["min_height"] = minHeight
+	}
+	if maxHeight != "" {
+		params["max_height"] = maxHeight
+	}
+	if minWidth != "" {
+		params["min_width"] = minWidth
+	}
+	if maxWidth != "" {
+		params["max_width"] = maxWidth
+	}
+	if weight != nil {
+		params["weight"] = *weight
+	}
+	_sdkCall("ui_update_area", params)
 }
