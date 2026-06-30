@@ -34,6 +34,10 @@ const (
 	// boundary crossing rate bounded. Used to route streaming text through
 	// extensions that drive the UI scene graph.
 	EventToken EventType = "token"
+	// EventNotify is dispatched whenever a system notification line is shown in
+	// the chat (a NotifyPayload). Lets extensions that own the transcript render
+	// notifications into their scene graph.
+	EventNotify EventType = "notify"
 )
 
 // Event is dispatched to extensions via _on_event.

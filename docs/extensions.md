@@ -696,6 +696,28 @@ The `OnToken(func(agentID, text string))` SDK helper subscribes to this event.
 
 ---
 
+### `notify`
+
+Fired whenever a system notification line is shown in the chat — from an
+extension's `notify` call, a model change, an extension reload, or an extension
+error. Lets an extension that owns the transcript render notifications into its
+scene graph.
+
+```json
+{"text": "Extensions reloaded."}
+```
+
+| Field  | Type   | Description                                                    |
+|--------|--------|----------------------------------------------------------------|
+| `text` | string | The notification line. May begin with `"⚠"` for warnings/errors. |
+
+The `OnNotify(func(text string))` SDK helper subscribes to this event.
+
+> **Do not call `notify` from inside an `OnNotify` handler** — it would
+> re-trigger this event and loop indefinitely.
+
+---
+
 ### `shutdown`
 
 Fired when the harness is shutting down. Use this for cleanup.

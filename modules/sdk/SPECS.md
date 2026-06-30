@@ -34,12 +34,14 @@ These types cross the host/WASM boundary via JSON; their wire format is stable a
 | `EventTick`                   | `"tick"`                    | Periodic heartbeat dispatched by the host at a configured interval |
 | `EventContextUsage`           | `"context_usage"`           | Dispatched after each completed turn with context window usage |
 | `EventToken`                  | `"token"`                   | Dispatched with a batch (~30ms) of streamed assistant text (TokenPayload) |
+| `EventNotify`                 | `"notify"`                  | Dispatched when a system notification line is shown in chat (NotifyPayload) |
 
 **Invariants:**
 - The set of `EventType` string values must not change between ABI versions without a version bump.
 - An unknown `EventType` must be silently ignored by extensions (forward-compatibility).
-- There are exactly 15 defined event types.
+- There are exactly 16 defined event types.
 - `EventToken` carries a `TokenPayload{AgentID, Text}`; batches are coalesced by the harness so the WASM crossing rate stays bounded (~33/sec) regardless of provider speed.
+- `EventNotify` carries a `NotifyPayload{Text}`; it is dispatched for every notification line shown in the chat, regardless of origin (extension `notify` call, model change, reload, extension error). Handlers must not call `notify` to avoid a dispatch loop.
 
 ---
 
