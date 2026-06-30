@@ -351,3 +351,15 @@ a separate `m.history` copy.
 **Rationale:** In WASM-chat mode the transcript is owned by an extension, so notifications rendered only by `ChatView` would be invisible. A notify event lets the transcript owner render them. The dispatch goroutine avoids blocking the bubbletea loop (mirrors the off-loop token dispatch); the SceneRenderer it ultimately mutates is goroutine-safe. Dispatching regardless of mode keeps the choke point simple and is harmless (subscription-gated).
 
 **Consequence:** Notifications now appear in the WASM-driven transcript (agents extension `OnNotify` → scene patch). Extensions must not call `notify` inside an `OnNotify` handler (infinite dispatch loop). The legacy `session.Renderer.AddNotification` seam (currently unwired in the binary) is unchanged.
+
+---
+
+## WASM-driven chat is now the default (opt-out)
+
+*Added: 2026-06-29*
+
+**Decision:** Flip `Model.wasmChat` to default **on** (`os.Getenv("WLLR_WASM_CHAT") != "0"`) and have the agents extension create/drive the `chat` area unless `WLLR_WASM_CHAT=0`. The legacy `ChatView` rendering path is retained as an automatic fallback.
+
+**Rationale:** With user prompts, streamed assistant text, and notifications (EventNotify) all routed through WASM, the WASM transcript reached parity with the built-in renderer (tool boxes are hidden in both). Making it the default realizes the original goal — the transcript is produced by a WASM component and the Go side is a bridge — while the retained `ChatView` path provides a zero-config safety net: if no extension owns the `chat` area, `refreshWASMChat` no-ops and the internal renderer is used. This means the binary still renders a chat even with all extensions removed.
+
+**Consequence:** Default runs now render the transcript from the agents extension's scene area. `WLLR_WASM_CHAT=0` restores the built-in renderer. Both sides read the same env var with the same default. The retained legacy path adds negligible overhead in WASM mode (`refreshContent` early-returns in external mode, so no histContent is built).

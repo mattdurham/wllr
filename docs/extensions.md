@@ -685,14 +685,14 @@ this to drive a scene-graph area with live streaming text (see `ui_patch`).
 
 The `OnToken(func(agentID, text string))` SDK helper subscribes to this event.
 
-> **Driving the main transcript from WASM.** When the host is started with
-> `WLLR_WASM_CHAT=1`, the bundled `agents` extension takes over the main chat
-> transcript: it owns the `chat` scene area (placement `main`) and builds the
-> transcript from `before_agent_start` (user prompts) and `token` (streamed
-> assistant text). The harness renders that area's content inside its own
-> scrollable viewport — scrolling and key input stay in the harness. With the
-> flag unset (the default), the built-in chat renderer is used and the `chat`
-> area is not created.
+> **Driving the main transcript from WASM (default).** By default the bundled
+> `agents` extension owns the main chat transcript: it creates the `chat` scene
+> area (placement `main`) and builds the transcript from `before_agent_start`
+> (user prompts), `token` (streamed assistant text), and `notify` (system
+> lines). The harness renders that area's content inside its own scrollable
+> viewport — scrolling and key input stay in the harness. Set `WLLR_WASM_CHAT=0`
+> to opt out and use the built-in chat renderer instead. If no extension creates
+> the `chat` area, the harness falls back to the built-in renderer automatically.
 
 ---
 
