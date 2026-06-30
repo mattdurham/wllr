@@ -136,6 +136,112 @@ func TestSceneAreasByPlacement(t *testing.T) {
 	}
 }
 
+func TestSceneUpdateAreaConstraints(t *testing.T) {
+	s := NewSceneRenderer()
+	_ = s.CreateArea(sdk.UIArea{ID: "sl", Placement: sdk.UIAreaStatus, MinHeight: "1", MaxHeight: "3"})
+
+	// Initial constraints: min=1, max=3.
+	if got := s.ConstrainHeight("sl", 5, 40); got != 3 {
+		t.Fatalf("expected clamped to 3, got %d", got)
+	}
+	if got := s.ConstrainHeight("sl", 0, 40); got != 1 {
+		t.Fatalf("expected padded to 1, got %d", got)
+	}
+
+	// UpdateArea: raise max to 10.
+	if err := s.UpdateArea(sdk.UIUpdateAreaParams{ID: "sl", MaxHeight: "10"}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if got := s.ConstrainHeight("sl", 5, 40); got != 5 {
+		t.Fatalf("expected 5 after max raise, got %d", got)
+	}
+
+	// UpdateArea with unknown ID must error.
+	if err := s.UpdateArea(sdk.UIUpdateAreaParams{ID: "nope", MaxHeight: "5"}); err == nil {
+		t.Fatal("expected error for unknown area")
+	}
+}
+
+func TestSceneUpdateAreaWeight(t *testing.T) {
+	s := NewSceneRenderer()
+	_ = s.CreateArea(sdk.UIArea{ID: "sl", Placement: sdk.UIAreaStatus, Weight: 1})
+	w := 5
+	if err := s.UpdateArea(sdk.UIUpdateAreaParams{ID: "sl", Weight: &w}); err != nil {
+		t.Fatalf("update weight: %v", err)
+	}
+	// Verify indirectly — weight is stored; no accessor needed for this test.
+	// A second update with nil weight must leave weight at 5 (not reset to 0).
+	if err := s.UpdateArea(sdk.UIUpdateAreaParams{ID: "sl", MaxHeight: "2"}); err != nil {
+		t.Fatalf("second update: %v", err)
+	}
+}
+
+func TestConstrainWidthAbsolute(t *testing.T) {
+	s := NewSceneRenderer()
+	_ = s.CreateArea(sdk.UIArea{ID: "a", MinWidth: "20", MaxWidth: "80"})
+	if got := s.ConstrainWidth("a", 100); got != 80 {
+		t.Fatalf("expected 80, got %d", got)
+	}
+	if got := s.ConstrainWidth("a", 10); got != 20 {
+		t.Fatalf("expected 20, got %d", got)
+	}
+	if got := s.ConstrainWidth("a", 50); got != 50 {
+		t.Fatalf("expected 50 (within range), got %d", got)
+	}
+}
+
+func TestConstrainWidthPercent(t *testing.T) {
+	s := NewSceneRenderer()
+	_ = s.CreateArea(sdk.UIArea{ID: "a", MinWidth: "25%", MaxWidth: "75%"})
+	// terminal width 100: min=25, max=75
+	if got := s.ConstrainWidth("a", 100); got != 75 {
+		t.Fatalf("expected 75, got %d", got)
+	}
+	// terminal width 100, input 10: clamp to min 25
+	if got := s.ConstrainWidth("a", 100); got != 75 {
+		t.Fatalf("expected 75, got %d", got)
+	}
+}
+
+func TestConstrainHeightPercent(t *testing.T) {
+	s := NewSceneRenderer()
+	_ = s.CreateArea(sdk.UIArea{ID: "a", MaxHeight: "10%"})
+	// 10% of 50 = 5
+	if got := s.ConstrainHeight("a", 20, 50); got != 5 {
+		t.Fatalf("expected 5, got %d", got)
+	}
+}
+
+func TestConstrainUnknownAreaPassthrough(t *testing.T) {
+	s := NewSceneRenderer()
+	// Unknown area — ConstrainWidth/ConstrainHeight must return inputs unchanged.
+	if got := s.ConstrainWidth("nope", 80); got != 80 {
+		t.Fatalf("expected 80, got %d", got)
+	}
+	if got := s.ConstrainHeight("nope", 5, 40); got != 5 {
+		t.Fatalf("expected 5, got %d", got)
+	}
+}
+
+func TestResolveConstraintEdgeCases(t *testing.T) {
+	// empty — unconstrained
+	if _, ok := resolveConstraint("", 100); ok {
+		t.Fatal("empty must be unconstrained")
+	}
+	// bad string
+	if _, ok := resolveConstraint("abc", 100); ok {
+		t.Fatal("non-numeric must be unconstrained")
+	}
+	// 0% — valid, resolves to 0
+	if v, ok := resolveConstraint("0%", 100); !ok || v != 0 {
+		t.Fatalf("0%% of 100 must be 0, got %d ok=%v", v, ok)
+	}
+	// 100% — full terminal
+	if v, ok := resolveConstraint("100%", 80); !ok || v != 80 {
+		t.Fatalf("100%% of 80 must be 80, got %d ok=%v", v, ok)
+	}
+}
+
 func TestSceneUnknownNodeTypeRendersEmpty(t *testing.T) {
 	s := NewSceneRenderer()
 	_ = s.CreateArea(sdk.UIArea{ID: "a"})

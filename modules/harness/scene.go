@@ -30,6 +30,11 @@ type sceneArea struct {
 	id        string
 	placement sdk.UIAreaPlacement
 	weight    int
+	// Sizing constraints — each accepts "" (unconstrained), "N" (absolute), or "N%" (percent).
+	minHeight string
+	maxHeight string
+	minWidth  string
+	maxWidth  string
 }
 
 // NewSceneRenderer returns an empty SceneRenderer.
@@ -47,7 +52,15 @@ func (s *SceneRenderer) CreateArea(a sdk.UIArea) error {
 	if _, ok := s.areas[a.ID]; ok {
 		return fmt.Errorf("ui_create_area: area already exists: %s", a.ID)
 	}
-	s.areas[a.ID] = &sceneArea{id: a.ID, placement: a.Placement, weight: a.Weight}
+	s.areas[a.ID] = &sceneArea{
+		id:        a.ID,
+		placement: a.Placement,
+		weight:    a.Weight,
+		minHeight: a.MinHeight,
+		maxHeight: a.MaxHeight,
+		minWidth:  a.MinWidth,
+		maxWidth:  a.MaxWidth,
+	}
 	s.order = append(s.order, a.ID)
 	return nil
 }
@@ -64,6 +77,118 @@ func (s *SceneRenderer) RemoveArea(id string) {
 		}
 	}
 	s.order = out
+}
+
+// UpdateArea applies a UIUpdateAreaParams to an existing area, replacing only
+// the fields that are non-empty / non-nil. Returns an error if the ID is unknown.
+func (s *SceneRenderer) UpdateArea(p sdk.UIUpdateAreaParams) error {
+	if p.ID == "" {
+		return fmt.Errorf("ui_update_area: area id is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	area, ok := s.areas[p.ID]
+	if !ok {
+		return fmt.Errorf("ui_update_area: area not found: %s", p.ID)
+	}
+	if p.MinHeight != "" {
+		area.minHeight = p.MinHeight
+	}
+	if p.MaxHeight != "" {
+		area.maxHeight = p.MaxHeight
+	}
+	if p.MinWidth != "" {
+		area.minWidth = p.MinWidth
+	}
+	if p.MaxWidth != "" {
+		area.maxWidth = p.MaxWidth
+	}
+	if p.Weight != nil {
+		area.weight = *p.Weight
+	}
+	return nil
+}
+
+// ConstrainWidth resolves the MinWidth/MaxWidth constraints for an area against
+// the terminal width and returns the clamped render width. Returns termWidth
+// unchanged for an unknown area or when no constraints are set.
+func (s *SceneRenderer) ConstrainWidth(id string, termWidth int) int {
+	s.mu.RLock()
+	area, ok := s.areas[id]
+	s.mu.RUnlock()
+	if !ok {
+		return termWidth
+	}
+	w := termWidth
+	if min, ok := resolveConstraint(area.minWidth, termWidth); ok && w < min {
+		w = min
+	}
+	if max, ok := resolveConstraint(area.maxWidth, termWidth); ok && w > max {
+		w = max
+	}
+	if w < 0 {
+		w = 0
+	}
+	return w
+}
+
+// ConstrainHeight clamps a rendered line count to the MinHeight/MaxHeight
+// constraints for an area, resolved against termHeight. Returns lines unchanged
+// for an unknown area or when no constraints are set.
+func (s *SceneRenderer) ConstrainHeight(id string, lines int, termHeight int) int {
+	s.mu.RLock()
+	area, ok := s.areas[id]
+	s.mu.RUnlock()
+	if !ok {
+		return lines
+	}
+	if min, ok := resolveConstraint(area.minHeight, termHeight); ok && lines < min {
+		lines = min
+	}
+	if max, ok := resolveConstraint(area.maxHeight, termHeight); ok && lines > max {
+		lines = max
+	}
+	if lines < 0 {
+		lines = 0
+	}
+	return lines
+}
+
+// resolveConstraint parses a constraint string ("N" absolute or "N%" percent
+// of total) and returns the resolved int value. Returns (0, false) for empty
+// or unparseable strings.
+func resolveConstraint(v string, total int) (int, bool) {
+	if v == "" {
+		return 0, false
+	}
+	if strings.HasSuffix(v, "%") {
+		n, ok := parseDecimal(v[:len(v)-1])
+		if !ok || n < 0 {
+			return 0, false
+		}
+		return total * n / 100, true
+	}
+	n, ok := parseDecimal(v)
+	if !ok {
+		return 0, false
+	}
+	return n, true
+}
+
+// parseDecimal parses a non-negative decimal integer string. Returns (0, false)
+// for empty strings, negative values, or non-digit characters.
+func parseDecimal(s string) (int, bool) {
+	if s == "" {
+		return 0, false
+	}
+	n := 0
+	for _, ch := range s {
+		if ch < '0' || ch > '9' {
+			return 0, false
+		}
+		n = n*10 + int(ch-'0')
+	}
+	return n, true
 }
 
 // HasArea reports whether an area exists.
