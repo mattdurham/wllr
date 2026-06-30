@@ -94,6 +94,9 @@ type CapabilityProvider interface {
 	GetEnv(name string) (string, error)
 	ReadFile(path string) (string, error)
 	WriteFile(path, content string) error
+	// AppendFile appends content to a file, creating it (and parent dirs) if
+	// absent. Used by log-sink extensions.
+	AppendFile(path, content string) error
 	HTTPPost(url string, headers map[string]string, body []byte) (int, []byte, error)
 	ConfigRead(group string) (json.RawMessage, error)
 }

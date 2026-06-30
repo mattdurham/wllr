@@ -294,6 +294,7 @@ type testCapabilityProvider struct {
 	onGetEnv     func(name string) (string, error)
 	onReadFile   func(path string) (string, error)
 	onWriteFile  func(path, content string) error
+	onAppendFile func(path, content string) error
 	onHTTPPost   func(url string, headers map[string]string, body []byte) (int, []byte, error)
 	onConfigRead func(group string) (json.RawMessage, error)
 }
@@ -322,6 +323,13 @@ func (p *testCapabilityProvider) ReadFile(path string) (string, error) {
 func (p *testCapabilityProvider) WriteFile(path, content string) error {
 	if p.onWriteFile != nil {
 		return p.onWriteFile(path, content)
+	}
+	return nil
+}
+
+func (p *testCapabilityProvider) AppendFile(path, content string) error {
+	if p.onAppendFile != nil {
+		return p.onAppendFile(path, content)
 	}
 	return nil
 }

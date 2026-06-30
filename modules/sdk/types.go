@@ -38,6 +38,13 @@ const (
 	// the chat (a NotifyPayload). Lets extensions that own the transcript render
 	// notifications into their scene graph.
 	EventNotify EventType = "notify"
+	// EventLog is dispatched with a batch of structured log records (a
+	// LogBatchPayload) emitted via the host's slog handler. Batched (~30ms) to
+	// keep the WASM boundary crossing rate bounded. Lets extensions act as log
+	// sinks (write to a file, ship to a backend) or observe diagnostics. The log
+	// dispatch path is reentrancy-guarded: logs emitted while dispatching EventLog
+	// are not re-dispatched.
+	EventLog EventType = "log"
 )
 
 // Event is dispatched to extensions via _on_event.
@@ -157,6 +164,10 @@ const (
 	// MethodWriteFile writes content to a file on the host filesystem.
 	// Requires PermFileWrite.
 	MethodWriteFile = "write_file"
+	// MethodAppendFile appends content to a file on the host filesystem, creating
+	// it (and parent directories) if absent. Used by log-sink extensions that
+	// accumulate output. Requires PermFileWrite. Params: {path, content}.
+	MethodAppendFile = "append_file"
 	// MethodHTTPPost makes an HTTP POST request from the host.
 	// Requires PermNetworkWrite.
 	MethodHTTPPost = "http_post"

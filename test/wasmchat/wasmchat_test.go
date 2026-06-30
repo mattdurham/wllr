@@ -51,6 +51,7 @@ func (c *envCapabilities) Exec(context.Context, string, string, func(string)) (s
 func (c *envCapabilities) GetEnv(name string) (string, error) { return c.env[name], nil }
 func (c *envCapabilities) ReadFile(string) (string, error)    { return "", nil }
 func (c *envCapabilities) WriteFile(string, string) error     { return nil }
+func (c *envCapabilities) AppendFile(string, string) error    { return nil }
 func (c *envCapabilities) HTTPPost(string, map[string]string, []byte) (int, []byte, error) {
 	return 0, nil, nil
 }

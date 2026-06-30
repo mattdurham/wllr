@@ -190,3 +190,37 @@ func TestTokenPayloadRoundTrip(t *testing.T) {
 		t.Fatalf("round-trip mismatch: %+v", got)
 	}
 }
+
+func TestLogBatchPayloadRoundTrip(t *testing.T) {
+	p := LogBatchPayload{Records: []LogRecord{
+		{
+			Time:    "2026-06-30T12:00:00Z",
+			Level:   "info",
+			Message: "stream done",
+			Attrs:   []LogAttr{{Key: "tokens", Value: "42"}, {Key: "agent", Value: "main"}},
+		},
+		{Time: "2026-06-30T12:00:01Z", Level: "error", Message: "boom"},
+	}}
+	data, err := json.Marshal(p)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got LogBatchPayload
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(got.Records) != 2 {
+		t.Fatalf("records: got %d, want 2", len(got.Records))
+	}
+	r0 := got.Records[0]
+	if r0.Level != "info" || r0.Message != "stream done" || len(r0.Attrs) != 2 {
+		t.Fatalf("record 0 mismatch: %+v", r0)
+	}
+	if r0.Attrs[0].Key != "tokens" || r0.Attrs[0].Value != "42" {
+		t.Fatalf("attr order/content lost: %+v", r0.Attrs)
+	}
+	// Empty Attrs omitted on the wire.
+	if strings.Contains(string(data), `"attrs":[]`) {
+		t.Fatalf("empty attrs must be omitted: %s", data)
+	}
+}

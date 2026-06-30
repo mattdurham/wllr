@@ -54,6 +54,7 @@ build: extensions $(DIST_DIR)
 extensions: $(DIST_DIR) $(BUILTINS)
 	cd extensions/agents    && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(BUILTINS)/agents.wasm .
 	cd extensions/history   && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(BUILTINS)/history.wasm .
+	cd extensions/logging   && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(BUILTINS)/logging.wasm .
 	mkdir -p $(EXT_DIR)/context $(EXT_DIR)/skills $(EXT_DIR)/tasks $(EXT_DIR)/lsp
 	cd extensions/context   && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(EXT_DIR)/context/context.wasm .
 	cp extensions/context/context.json $(EXT_DIR)/context/
@@ -298,5 +299,5 @@ generate-models:
 
 clean:
 	rm -rf $(DIST_DIR)
-	rm -f $(BUILTINS)/agents.wasm $(BUILTINS)/history.wasm
+	rm -f $(BUILTINS)/agents.wasm $(BUILTINS)/history.wasm $(BUILTINS)/logging.wasm
 	rm -rf $(EXT_DIR)/memory
