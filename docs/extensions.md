@@ -438,6 +438,31 @@ Requires permission: `file_write`
 
 ---
 
+### `append_file`
+
+Append content to a file on the host filesystem, creating it (and parent
+directories) if absent. Unlike `write_file`, existing content is preserved — use
+this for log-style accumulation.
+
+```json
+{"method": "append_file", "params": {"path": "/tmp/app.log", "content": "line\n"}}
+```
+
+| Field     | Type   | Description                         |
+|-----------|--------|-------------------------------------|
+| `path`    | string | Absolute or relative path to append.|
+| `content` | string | Content to append (UTF-8).          |
+
+Response result:
+
+```json
+{"appended": "/tmp/app.log"}
+```
+
+Requires permission: `file_write`
+
+---
+
 ### `get_env`
 
 Read an environment variable from the host process. Pass an empty name to get
@@ -761,6 +786,37 @@ The `OnNotify(func(text string))` SDK helper subscribes to this event.
 
 > **Do not call `notify` from inside an `OnNotify` handler** — it would
 > re-trigger this event and loop indefinitely.
+
+---
+
+### `log`
+
+Fired with a coalesced batch (~30ms) of structured log records emitted by the
+host's `slog` handler. Lets an extension act as a **log sink** — write a file,
+ship to a backend, filter, etc. The bundled `logging` extension uses this to
+write `~/.wllr/logs/<timestamp>.log`.
+
+```json
+{"records": [
+  {"time": "2026-06-30T12:00:00.123Z", "level": "info", "message": "stream done",
+   "attrs": [{"key": "tokens", "value": "42"}]},
+  {"time": "2026-06-30T12:00:01.4Z", "level": "error", "message": "boom"}
+]}
+```
+
+| Field            | Type   | Description                                            |
+|------------------|--------|--------------------------------------------------------|
+| `records[].time`    | string | RFC3339Nano UTC timestamp.                          |
+| `records[].level`   | string | `debug` / `info` / `warn` / `error`.                |
+| `records[].message` | string | The log message.                                    |
+| `records[].attrs`   | array  | Ordered `{key, value}` pairs (values pre-stringified). |
+
+The `OnLog(func(records []LogRecord))` SDK helper subscribes to this event. Pair
+it with `append_file` to write a log file.
+
+> **Do not call `Log`/`Logf` from inside an `OnLog` handler.** The host suppresses
+> logs emitted while dispatching `log` (reentrancy guard), so they would be
+> silently dropped — and relying on it is wasteful.
 
 ---
 

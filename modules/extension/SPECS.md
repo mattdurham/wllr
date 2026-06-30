@@ -190,6 +190,7 @@ The full set of dispatched methods is:
 | `MethodGetEnv`                | `handleGetEnv`                                   |
 | `MethodReadFile`              | `handleReadFile`                                 |
 | `MethodWriteFile`             | `handleWriteFile`                                |
+| `MethodAppendFile`            | `handleAppendFile` (requires `file_write`)       |
 | `MethodHTTPPost`              | `handleHTTPPost`                                 |
 | `MethodConfigRead`            | `handleConfigRead`                               |
 | `MethodAgentSpawn`            | `handleAgentSpawn`                               |
@@ -231,7 +232,7 @@ The full set of dispatched methods is:
 | `agents`      | `AgentBridge`       | `SetAgentBridge`        | Spawn, close, message, run, list agents and manage history     |
 | `teams`       | `TeamBridge`        | `SetTeamBridge`         | Create, close, add/remove members, list teams                  |
 | `ui`          | `UIBridge`          | `SetUIBridge`           | Notify, modal, picker, status, system prompt, scene-graph areas |
-| `capabilities`| `CapabilityProvider`| `SetCapabilities`       | Exec, GetEnv, ReadFile, WriteFile, HTTPPost, ConfigRead        |
+| `capabilities`| `CapabilityProvider`| `SetCapabilities`       | Exec, GetEnv, ReadFile, WriteFile, AppendFile, HTTPPost, ConfigRead |
 | `mcp`         | `MCPBridge`         | `SetMCPBridge`          | Spawn, close, send, read MCP server subprocesses               |
 
 **Invariant:** All `Set*` methods must be called before loading extensions (before `Load` or `LoadBytes`). The `earlyUIBridge` and `earlyAgentBridge` stubs installed in `harness.New()` satisfy this for command registration and agent calls that arrive during `_init`.
