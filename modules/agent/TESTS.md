@@ -16,6 +16,20 @@
 | `TestInboxMessages_AppendedAfterPriorHistory` | Inbox appended after prior history | Agent with history + inbox | Last message is inbox message |
 | `TestInboxMessages_EmptyPromptValidAfterAppend` | Empty prompt valid when inbox non-empty | Prior assistant history + inbox msg | onDone receives nil error |
 
+### mailbox_test.go
+
+| Test | Scenario | Setup | Assertions |
+|------|----------|-------|------------|
+| `TestMailbox_AppendDrainLen` | Basic queue ops | zero-value mailbox | FIFO drain; len tracks state; second drain returns nil |
+| `TestMailbox_DropsEmptyContent` | Empty-content guard | append blank/whitespace then real | only non-blank message queued |
+| `TestMailbox_ConcurrentAppendDrain` | Race safety | 8 writers ×100, 3 drainers, `-race` | every message drained exactly once; no race |
+
+### placeholder_test.go
+
+| Test | Scenario | Setup | Assertions |
+|------|----------|-------|------------|
+| `TestPlaceholderForEmptyResponse` | Empty-response placeholder selection | 4 cases (text/empty × cancelled) | non-empty passes through; empty→tool-only; empty+cancelled→cancelled |
+
 ### concurrent_submit_test.go
 
 | Test | Scenario | Setup | Assertions |
