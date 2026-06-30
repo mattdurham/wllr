@@ -215,7 +215,12 @@ No response result.
 
 ### `set_status`
 
-Set a keyed value displayed in the status bar.
+Set a keyed value readable via `get_status_info`. The bundled `statusline`
+extension reads these values and may surface them in the status scene area.
+
+> **Deprecated.** The statusline is now fully scene-driven. Prefer patching
+> the `"statusline"` area directly with `ui_patch` for full layout and styling
+> control. `set_status` is kept for backward compatibility.
 
 ```json
 {"method": "set_status", "params": {"key": "my_ext", "value": "active"}}
@@ -463,14 +468,56 @@ extension may own one area, inject into an existing area's scene graph, or spawn
 additional areas. Requires the `ui` permission.
 
 ```json
-{"method": "ui_create_area", "params": {"area": {"id": "chat", "placement": "main", "weight": 1}}}
+{"method": "ui_create_area", "params": {"area": {
+  "id": "my-panel",
+  "placement": "status",
+  "weight": 1,
+  "min_height": "1",
+  "max_height": "5",
+  "min_width": "",
+  "max_width": "100%"
+}}}
 ```
 
-| Field            | Type   | Description                                             |
-|------------------|--------|---------------------------------------------------------|
-| `area.id`        | string | Unique area ID. Errors if it already exists.            |
-| `area.placement` | string | Layout hint: `main`, `sidebar`, `status`, or `overlay`. |
-| `area.weight`    | int    | Optional relative size hint among same-placement areas. |
+| Field             | Type   | Description                                                                  |
+|-------------------|--------|------------------------------------------------------------------------------|
+| `area.id`         | string | Unique area ID. Errors if it already exists.                                 |
+| `area.placement`  | string | Layout hint: `main`, `sidebar`, `status`, `overlay`, or `input` (read-only). |
+| `area.weight`     | int    | Optional relative size hint among same-placement areas.                      |
+| `area.min_height` | string | Minimum height: `"N"` (lines) or `"N%"` (% of terminal). `""` = none.       |
+| `area.max_height` | string | Maximum height: `"N"` (lines) or `"N%"` (% of terminal). `""` = none.       |
+| `area.min_width`  | string | Minimum width: `"N"` (cols) or `"N%"` (% of terminal). `""` = none.         |
+| `area.max_width`  | string | Maximum width: `"N"` (cols) or `"N%"` (% of terminal). `""` = none.         |
+
+Constraint values accept `"N"` (absolute) or `"N%"` (percentage of the terminal
+dimension). Empty string (`""`) means unconstrained. The harness clamps the
+rendered output after calling `Render`.
+
+Requires permission: `ui`
+
+---
+
+### `ui_update_area`
+
+Update the sizing constraints and/or weight of an **existing** area. All fields
+are optional — omitted or empty fields leave current values unchanged. Returns
+an error if the area ID does not exist. Requires the `ui` permission.
+
+```json
+{"method": "ui_update_area", "params": {
+  "id": "my-panel",
+  "max_height": "3"
+}}
+```
+
+| Field        | Type   | Description                                                   |
+|--------------|--------|---------------------------------------------------------------|
+| `id`         | string | Area ID to update (required).                                 |
+| `min_height` | string | New minimum height. `""` = leave unchanged.                   |
+| `max_height` | string | New maximum height. `""` = leave unchanged.                   |
+| `min_width`  | string | New minimum width. `""` = leave unchanged.                    |
+| `max_width`  | string | New maximum width. `""` = leave unchanged.                    |
+| `weight`     | int?   | New weight. Omit (null) to leave unchanged.                   |
 
 Requires permission: `ui`
 
@@ -835,5 +882,6 @@ Key points from `extensions/example/main.go`:
 - `_free` is a no-op because TinyGo's GC handles reclamation.
 - `hostCallJSON` is a convenience wrapper that marshals params, writes them into
   WASM memory, calls `host_call`, and frees buffers on return.
-- The extension subscribes only to `session_start` and calls `set_status` to
-  update the status bar when the session begins.
+- The extension subscribes only to `session_start` and patches the
+  `"statusline"` scene area to update the display when the session begins.
+  See `extensions/statusline/main.go` for the reference implementation.
