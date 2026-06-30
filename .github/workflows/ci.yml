@@ -80,7 +80,7 @@ jobs:
         run: go install go.uber.org/nilaway/cmd/nilaway@latest
 
       - name: Run nilaway
-        run: nilaway -include-pkgs "github.com/modernice/wllr/..." ./...
+        run: nilaway -include-pkgs "github.com/mattdurham/wllr/..." ./...
 
   betteralign:
     name: Struct Alignment (betteralign)
