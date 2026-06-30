@@ -433,6 +433,18 @@ func (a *Agent) executeTurn(
 		agentOpts = append(agentOpts, fantasy.WithProviderOptions(opts.ProviderOptions))
 	}
 
+	// Control-only wake: empty prompt and every drained inbox message is a
+	// Go-level control message (system/steering). These are filtered from LLM
+	// context, so an LLM call would send an empty prompt and error out — and the
+	// erroring turn would skip finishTurn's shutdown/drain handling, stranding a
+	// shutdown_request delivered to an idle agent. Short-circuit straight to
+	// finishTurn so the control message (e.g. shutdown_request) is acted on
+	// without an LLM round-trip. See deliver_test.go shutdown-to-idle coverage.
+	if content == "" && len(inboxMsgs) > 0 && allControlMessages(inboxMsgs) {
+		a.finishTurn(ctx, nil, nil, onDone, inboxMsgs)
+		return
+	}
+
 	agentOpts = append(agentOpts, fantasy.WithMaxRetries(6))
 	fa := fantasy.NewAgent(lm, agentOpts...)
 
@@ -535,7 +547,7 @@ func (a *Agent) executeTurn(
 	a.history = append(a.history, sdk.Message{Role: sdk.RoleAssistant, Content: assistantText})
 	a.historyMu.Unlock()
 
-	a.finishTurn(ctx, err, childCtx.Err(), onDone)
+	a.finishTurn(ctx, err, childCtx.Err(), onDone, inboxMsgs)
 }
 
 // finishTurn releases isRunning and either fires onDone or starts the next drain turn.
@@ -553,7 +565,7 @@ func (a *Agent) executeTurn(
 // ctx is the original context passed to Submit — it is threaded into drain turns so
 // that harness shutdown can cancel in-flight drain turns rather than running them to
 // their 30-minute timeout.
-func (a *Agent) finishTurn(ctx context.Context, err error, ctxErr error, onDone func(error)) {
+func (a *Agent) finishTurn(ctx context.Context, err error, ctxErr error, onDone func(error), consumed []sdk.Message) {
 	a.isRunning.Store(false)
 
 	// Only drain on successful turns — errors and cancellations terminate the chain.
@@ -577,6 +589,29 @@ func (a *Agent) finishTurn(ctx context.Context, err error, ctxErr error, onDone 
 				}
 			}
 			normalPending = append(normalPending, m)
+		}
+
+		// Also scan the inbox messages that Submit consumed as THIS turn's content.
+		// A shutdown_request delivered to an idle agent is drained by Submit (not by
+		// the DrainInbox above) and filtered from history as a system message — so
+		// without this scan it would be silently lost and the agent would never
+		// self-close. Only the shutdown_request is recovered here; consumed normal
+		// messages were already processed as turn content and must not be re-queued.
+		if shutdownFrom == "" {
+			for _, m := range consumed {
+				if m.Type != sdk.MessageTypeSystem {
+					continue
+				}
+				var evt struct {
+					Event string `json:"event"`
+					From  string `json:"from"`
+				}
+				if json.Unmarshal([]byte(m.Content), &evt) == nil &&
+					evt.Event == "shutdown_request" {
+					shutdownFrom = evt.From
+					break
+				}
+			}
 		}
 
 		// Check for a deferred shutdown_request from a previous finishTurn cycle.
@@ -659,6 +694,19 @@ func (a *Agent) finishTurn(ctx context.Context, err error, ctxErr error, onDone 
 	if onDone != nil {
 		onDone(err)
 	}
+}
+
+// allControlMessages reports whether every message is a Go-level control
+// message (system or steering) that is filtered from LLM context. Such a batch
+// produces no LLM-visible content, so a turn carrying only these would send an
+// empty prompt.
+func allControlMessages(msgs []sdk.Message) bool {
+	for _, m := range msgs {
+		if m.Type != sdk.MessageTypeSystem && m.Type != sdk.MessageTypeSteering {
+			return false
+		}
+	}
+	return true
 }
 
 // streamTurn sends history+content to fa and collects the full text response.

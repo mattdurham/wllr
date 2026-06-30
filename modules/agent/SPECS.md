@@ -414,12 +414,16 @@ Orchestrator inbox receives:
 1. Drains the inbox for messages that arrived **during** the current turn.
 2. Scans for any system message whose JSON content has `event == "shutdown_request"`.
    Non-matching system messages are passed through as `normalPending`.
-3. Also checks `a.pendingShutdownFrom` — a field set in a previous `finishTurn` cycle
+3. Also scans the `consumed` slice (the inbox messages `Submit` drained as **this**
+   turn's content) for a `shutdown_request`. This recovers a shutdown delivered to an
+   **idle** agent, which `Submit` drains directly (not the post-turn `DrainInbox`).
+   Without this scan the system message would be filtered from history and lost.
+4. Also checks `a.pendingShutdownFrom` — a field set in a previous `finishTurn` cycle
    when a shutdown_request was deferred (see drain-until-empty below).
-4. If **normal messages coexist** with a shutdown_request: re-queues the normal messages
+5. If **normal messages coexist** with a shutdown_request: re-queues the normal messages
    to the inbox, sets `a.pendingShutdownFrom = shutdownFrom`, and calls `Submit("")` for
    a drain turn. The shutdown is deferred until all normal work is done.
-5. If **only the shutdown_request** remains (no normal pending, no new inbox messages):
+6. If **only the shutdown_request** remains (no normal pending, no new inbox messages):
    - Marshals `{"event":"AGENT_SHUTDOWN","agent_id":"<id>"}` as a system message.
    - Calls `pool.SendMessage(shutdownFrom, agentShutdownMsg)` to notify the creator.
    - Calls `pool.Close(a.id)` to remove self from pool (idempotent, safe from finishTurn goroutine).
@@ -435,6 +439,12 @@ runs after each `isRunning.Store(false)`. Because at most one goroutine can hold
 **Invariant:** Drain turns triggered from `finishTurn` use the original context passed to
 `Submit`, not `context.Background()`. This allows harness shutdown to cancel in-flight
 drain turns rather than running them to their full 30-minute timeout.
+
+**Invariant:** A `shutdown_request` delivered to an **idle** agent (via
+`Deliver(wake=true)`) is recovered from the `consumed` inbox slice in `finishTurn`, not
+lost. `executeTurn` short-circuits a control-only wake (empty content + all drained
+messages are system/steering) straight to `finishTurn` without an LLM call — otherwise
+the empty prompt would error and skip shutdown handling. See `allControlMessages`.
 
 **Invariant:** The shutdown_request is never re-injected into the inbox. It is consumed
 by `finishTurn` and persisted in `a.pendingShutdownFrom` if deferral is needed. This
