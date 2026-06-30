@@ -235,7 +235,9 @@ func Notify(text string) {
 	_sdkCall("notify", map[string]string{"text": text})
 }
 
-// SetStatus sets a keyed value in the status bar (e.g. "my-ext", "ready").
+// SetStatus sets a keyed value readable via get_status_info. The statusline
+// extension reads these values and can surface them in the scene area.
+// Deprecated: prefer patching the "statusline" scene area directly via UIPatch.
 func SetStatus(key, value string) {
 	_sdkCall("set_status", map[string]string{"key": key, "value": value})
 }
@@ -427,9 +429,10 @@ func GetStatusInfo() (StatusInfo, error) {
 	return info, nil
 }
 
-// SetStatusLine replaces the entire status bar text with a custom string.
-// Pass an empty string to revert to the default auto-generated line.
-// No permission required.
+// SetStatusLine replaces the entire status line text with a custom string.
+// Deprecated: the statusline is now fully scene-driven. Patch the
+// "statusline" area via UIPatch/OpSetRoot to achieve the same effect with
+// full layout and styling control.
 func SetStatusLine(text string) {
 	_sdkCall("set_status_line", map[string]string{"text": text})
 }
@@ -524,12 +527,27 @@ type UIPatchOp struct {
 	Text   string   `json:"text,omitempty"`
 }
 
-// UICreateArea registers a UI area owned by this extension. placement is one of
-// "main", "sidebar", "status", "overlay". weight is a relative size hint (0 = default).
-func UICreateArea(id, placement string, weight int) {
-	_sdkCall("ui_create_area", map[string]any{
-		"area": map[string]any{"id": id, "placement": placement, "weight": weight},
-	})
+// UICreateArea registers a UI area owned by this extension.
+// placement is one of: "main", "sidebar", "status", "overlay".
+// weight is a relative size hint (0 = default).
+// minHeight/maxHeight/minWidth/maxWidth are optional sizing constraints;
+// each accepts "" (unconstrained), "N" (absolute cells/lines), or "N%"
+// (percentage of terminal dimension).
+func UICreateArea(id, placement string, weight int, minHeight, maxHeight, minWidth, maxWidth string) {
+	area := map[string]any{"id": id, "placement": placement, "weight": weight}
+	if minHeight != "" {
+		area["min_height"] = minHeight
+	}
+	if maxHeight != "" {
+		area["max_height"] = maxHeight
+	}
+	if minWidth != "" {
+		area["min_width"] = minWidth
+	}
+	if maxWidth != "" {
+		area["max_width"] = maxWidth
+	}
+	_sdkCall("ui_create_area", map[string]any{"area": area})
 }
 
 // UIPatch applies a batch of scene-graph ops to an area, in order, atomically.

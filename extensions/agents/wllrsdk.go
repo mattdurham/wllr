@@ -449,12 +449,27 @@ type UIPatchOp struct {
 	Text   string   `json:"text,omitempty"`
 }
 
-// UICreateArea registers a UI area owned by this extension. placement is one of
-// "main", "sidebar", "status", "overlay". weight is a relative size hint (0 = default).
-func UICreateArea(id, placement string, weight int) {
-	_sdkCall("ui_create_area", map[string]any{
-		"area": map[string]any{"id": id, "placement": placement, "weight": weight},
-	})
+// UICreateArea registers a UI area owned by this extension.
+// placement is one of: "main", "sidebar", "status", "overlay".
+// weight is a relative size hint (0 = default).
+// minHeight/maxHeight/minWidth/maxWidth are optional sizing constraints;
+// each accepts "" (unconstrained), "N" (absolute cells/lines), or "N%"
+// (percentage of terminal dimension).
+func UICreateArea(id, placement string, weight int, minHeight, maxHeight, minWidth, maxWidth string) {
+	area := map[string]any{"id": id, "placement": placement, "weight": weight}
+	if minHeight != "" {
+		area["min_height"] = minHeight
+	}
+	if maxHeight != "" {
+		area["max_height"] = maxHeight
+	}
+	if minWidth != "" {
+		area["min_width"] = minWidth
+	}
+	if maxWidth != "" {
+		area["max_width"] = maxWidth
+	}
+	_sdkCall("ui_create_area", map[string]any{"area": area})
 }
 
 // UIPatch applies a batch of scene-graph ops to an area, in order, atomically.

@@ -33,7 +33,7 @@ func initChat() {
 // there is no built-in fallback renderer.
 func onChatSessionStart() {
 	chatEnabled = true
-	UICreateArea(chatArea, "main", 0)
+	UICreateArea(chatArea, "main", 0, "", "", "", "")
 	UIPatch(chatArea, OpSetRoot(UIVStack("chat-root")))
 }
 
