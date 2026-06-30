@@ -4,13 +4,14 @@ Go-based WASM extension providing task management tools for wllr.
 
 ## Overview
 
-The tasks extension adds task list and task management capabilities to wllr through 5 MCP tools:
+The tasks extension adds task list and task management capabilities to wllr through 6 MCP tools:
 
 - `tasklist_create` - Create a new task list
 - `tasks_create` - Create a task in a list
 - `tasks_update` - Update task fields
 - `tasks_list` - List all tasks in a list
 - `tasks_get` - Get specific task details
+- `tasks_claim` - Atomically claim the next available task (multi-worker safe)
 
 ## Installation
 
@@ -25,20 +26,32 @@ This compiles the extension to `~/.wllr/extensions/tasks/tasks.wasm` and copies 
 ## Features
 
 ### Task Lists
+
 - Sequential IDs (`list-1`, `list-2`, ...)
 - Name and description
 - Contains multiple tasks
 
 ### Tasks
+
 - Sequential IDs per list (`task-1`, `task-2`, ...)
 - Title and description
 - Status: `pending`, `in_progress`, `completed`, `blocked`
 - Priority: `low`, `medium`, `high`, `critical`
+- Assignee (set by `tasks_claim`)
 - Tags (array of strings)
 - Dependencies (array of task IDs)
 - Timestamps (created_at, updated_at)
 
+### Atomic Claiming
+
+`tasks_claim(list_id, agent_id)` finds the first pending, dependency-satisfied
+task (lowest `task-N`), flips it to `in_progress`, and records `agent_id` as the
+assignee — all under the list lock, so two workers racing to claim can never be
+assigned the same task. Returns `{"task": null}` when nothing is available.
+Prefer this over `tasks_list` + `tasks_update` for multi-worker coordination.
+
 ### Storage
+
 - In-memory (persists for extension process lifetime)
 - Thread-safe with mutexes
 - Separate counters per list for task IDs
@@ -55,6 +68,7 @@ This compiles the extension to `~/.wllr/extensions/tasks/tasks.wasm` and copies 
 ```
 
 Returns:
+
 ```json
 {
   "list_id": "list-1"
@@ -74,6 +88,7 @@ Returns:
 ```
 
 Returns:
+
 ```json
 {
   "task_id": "task-1"
@@ -91,6 +106,7 @@ Returns:
 ```
 
 Returns:
+
 ```json
 {
   "success": true
@@ -107,6 +123,7 @@ Returns:
 ```
 
 Returns:
+
 ```json
 {
   "tasks": [
@@ -146,6 +163,7 @@ go test -v ./test/integration/tasks/
 ```
 
 Tests cover:
+
 - Task list creation
 - Task creation with all fields
 - Task updates (status, priority, etc.)
@@ -186,6 +204,7 @@ The tasks extension follows the standard wllr extension pattern:
 ### Thread Safety
 
 All state access is protected by `sync.RWMutex`:
+
 - `taskListMu` protects the task lists map
 - Each `TaskList` has its own `mu` for task operations
 - `counterMu` protects ID counters
@@ -208,6 +227,7 @@ test/integration/tasks/
 ## Future Enhancements
 
 Potential additions:
+
 - Persistence to disk
 - Task search/filtering
 - Subtasks

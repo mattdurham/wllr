@@ -363,16 +363,17 @@ blocking on wait_for_all.
    If tasks remain, end your turn again and wait.
 
 **Worker turn:**
-1. Call tasks_list(list_id, status=pending) to find available tasks.
-2. If tasks found: call tasks_update(list_id, task_id, status=in_progress) to claim one.
-3. Do the work. Call tasks_update(list_id, task_id, status=completed) when done.
-4. Repeat from step 1.
-5. If tasks_list returns {"tasks": []} (empty): send send_message("main", "IDLE: no more tasks").
+1. Call tasks_claim(list_id, agent_id=your_id) to atomically claim the next available task.
+2. If it returns a task: do the work, then call tasks_update(list_id, task_id, status=completed).
+3. Repeat from step 1.
+4. If tasks_claim returns {"task": null} (nothing available): send send_message("main", "IDLE: no more tasks").
    Then end your turn.
 
-**Note:** Two workers may try to claim the same task. Always re-read the task after claiming
-to confirm you own it (tasks_get). If the status is already in_progress by another worker,
-skip to the next task.
+**Why tasks_claim and not tasks_list + tasks_update?**
+tasks_claim finds the next pending, dependency-satisfied task AND marks it in_progress in a
+single atomic step, recording you as the assignee. Two workers can never claim the same task.
+The old list-then-update pattern had a race window where both workers saw the same pending
+task and both "claimed" it. Use tasks_claim — no re-read-to-confirm dance is needed.
 
 **Why not wait_for_all?**
 wait_for_all blocks the orchestrator's WASM thread during the wait. For long-running tasks
