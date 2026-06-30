@@ -45,6 +45,11 @@ type AgentBridge interface {
 	Spawn(ctx context.Context, req SpawnRequest) error
 	Close(id string) error
 	SendMessage(id string, msg sdk.Message) error
+	// Deliver appends msg to the agent's inbox and, when wake is true, ensures
+	// the agent processes it (starts a drain turn if idle; relies on
+	// drain-until-empty if already running). This is the atomic
+	// deliver-and-process primitive that replaces a SendMessage+Run pair.
+	Deliver(id string, msg sdk.Message, wake bool) error
 	Run(id string) error
 	List() ([]AgentInfo, error)
 	TokenCount() int64

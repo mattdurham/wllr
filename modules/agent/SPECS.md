@@ -85,14 +85,23 @@ A `Team` is a lightweight membership set — it does not own goroutines or resou
 
 ---
 
-## 6. Pool.Send vs. Pool.SendMessage
+## 6. Pool.Send vs. Pool.SendMessage vs. Pool.Deliver
 
-`AgentPool` provides two message delivery methods:
+`AgentPool` provides three message delivery methods:
 
-- `SendMessage(id, msg sdk.Message)` appends `msg` to the agent's inbox. The agent's next `Submit` call will deliver it as prior context. Non-blocking.
+- `SendMessage(id, msg sdk.Message)` appends `msg` to the agent's inbox. The agent's next `Submit` call will deliver it as prior context. Non-blocking. Does **not** start a turn.
 - `Send(id, content string)` calls `agent.Submit(context.Background(), content)`, which starts a new turn immediately (non-blocking goroutine). The turn drains the inbox first.
+- `Deliver(id, msg sdk.Message, wake bool)` is the **atomic deliver-and-process primitive**. It appends `msg` to the inbox and, when `wake` is true, calls `Submit(ctx, "")` so the message is processed immediately (or picked up by drain-until-empty if a turn is already running). It replaces the prior two-call `SendMessage` + `Send`/`Run` pattern at every call site. Returns `ErrAgentNotFound` for unknown IDs and an error for empty content.
 
-**Invariant:** `Send` always returns immediately. The agent goroutine may be running concurrently with the caller.
+**Invariant:** `Send` and `Deliver` always return immediately. The agent goroutine may be running concurrently with the caller.
+
+**Invariant:** `Deliver(id, msg, wake=true)` guarantees the message is *processed*, not merely queued. A delivered message can never be silently stranded in the inbox by a missing follow-up trigger — this is the failure mode the two-call pattern allowed (e.g. the tasks extension queued a `TASK_DONE` notification but never triggered a turn).
+
+**Invariant:** `Deliver` Submits with empty content. The just-appended inbox message becomes the turn content via the drain path; no synthetic placeholder string (such as the former `"[process pending inbox messages]"`) is ever injected into history.
+
+### Wake Notifier
+
+`SetWakeNotifier(fn func(id string))` installs a callback invoked with the agent ID whenever `Deliver` wakes that agent (`wake=true`). The harness uses it to drive the TUI streaming indicator for the main agent (sends `agentWakeupMsg`). The callback runs on the delivering goroutine (which may be a sub-agent's `finishTurn` goroutine), not the bubbletea loop — implementations must be goroutine-safe. Guarded by `dispatchMu` alongside `contextUsageDispatcher`.
 
 ---
 
@@ -116,6 +125,7 @@ Each agent has a two-level system prompt:
 2. **Agent-specific prompt** (`opts.SystemPrompt`): set in `SpawnOpts` at spawn time and never changes.
 
 On each `Submit` call, the resolved system prompt sent to the LLM is:
+
 - `base + "\n\n" + specific` when both are non-empty
 - `base` when only base is non-empty
 - `specific` when only specific is non-empty (including when base is empty)
@@ -147,6 +157,7 @@ prompt + next message) exceeds `contextWindow - reserveTokens` (16,384 tokens re
 output). If so, `compactHistory` is called first.
 
 `compactHistory(ctx, lm, history, priorSummary string, keepRecentTokens int64)`:
+
 1. Applies a token-budget walk via `findCutPoint(rest, keepRecentTokens)` (default 20,000
    tokens) to determine how many recent messages to keep verbatim. `keepRecentTokens=0` uses
    the default.
@@ -204,12 +215,14 @@ back to the heuristic. The trigger uses the real API token counts from the most 
 turn (`a.lastUsage`) rather than an estimate.
 
 `shouldCompactByUsage(lastUsage fantasy.Usage, contextWindow int64, thresholdPct float64) bool`:
+
 - Returns `true` when `lastUsage.InputTokens / contextWindow >= thresholdPct`.
 - Returns `false` when `lastUsage.InputTokens == 0` (first turn — no prior usage data).
 - Returns `false` when `contextWindow == 0` (window not configured).
 - Returns `false` when `thresholdPct <= 0`.
 
 The check order in `Submit` is:
+
 1. If `pool.CompactConfig().Enabled` and `shouldCompactByUsage(a.LastUsage(), contextWindow, cfg.ThresholdPct)` → compact.
 2. Else if `shouldCompact(history, sysPrompt, content, contextWindow)` → compact (chars/4 heuristic).
 3. Else → no proactive compaction.
@@ -223,6 +236,7 @@ proceeds normally. (Inherited from §9.)
 ### AutoCompact Configuration
 
 `CompactConfig` holds the percentage-based trigger configuration:
+
 ```go
 type CompactConfig struct {
     Enabled      bool    // default true
@@ -231,6 +245,7 @@ type CompactConfig struct {
 ```
 
 `AgentPool` reads `WLLR_COMPACT_THRESHOLD` at construction:
+
 - Unset or empty → `ThresholdPct = 0.80`, `Enabled = true`.
 - Numeric string (e.g. `"90"` or `"0.90"`) → parsed as percentage if > 1 (divide by 100), else as fraction.
 - Unparseable → default 0.80.
@@ -243,6 +258,7 @@ after pool creation has no effect.
 ### lastUsage — Real API Token Tracking
 
 `Agent` stores the token usage from the most recently completed turn:
+
 ```go
 lastUsage   fantasy.Usage
 lastUsageMu sync.RWMutex
@@ -264,6 +280,7 @@ concurrent writes.
 ### EventContextUsage Dispatch
 
 After each successful turn, the pool's `contextUsageDispatcher` callback is invoked:
+
 ```go
 pool.dispatchContextUsage(cu sdk.ContextUsage, compacted bool)
 ```
@@ -280,6 +297,7 @@ On error or cancellation it is not called, consistent with the pattern for other
 ### streamTurn Helper
 
 `streamTurn` is the internal helper extracted from `Submit` to keep cyclomatic complexity below threshold. It:
+
 1. Calls `fa.Stream` with history, content, and callbacks.
 2. Counts each text delta as one token via `pool.addTokens(1)`.
 3. Forwards text deltas to `onToken` (if set).
@@ -338,6 +356,7 @@ func (s *Spawner) Spawn(ctx context.Context, req extension.SpawnRequest) error
 ```
 
 `Spawner` creates sub-agents in a pool with appropriate callbacks and conventions. It encapsulates:
+
 - Agent-identity system prompt suffix injection (`## Your Agent Identity` section with agent ID).
 - Parent ID derivation from the `/` convention in `req.ID` (e.g. `"main/coder"` → parent `"main"`).
 - Provider-option construction for extended thinking (`ThinkingBudget > 0`).
@@ -433,3 +452,56 @@ and Close acquires `p.mu.Lock` without any pool lock being held by the agent gor
 **Invariant:** System messages are never recorded in `a.history` on the drain-turn path
 (§9). An AGENT_SHUTDOWN message sent by the worker to the creator's inbox is a system
 message; it is filtered from LLM context when the creator's next turn runs.
+
+---
+
+## 15. Idle Notification (Wakeup Contract)
+
+When a sub-agent completes a turn and goes idle, it notifies its creator so the
+orchestrator can review results or shut the agent down. This makes the
+"spawn → work → the orchestrator is woken when the agent finishes" pattern work
+without the orchestrator polling.
+
+### When it fires
+
+Inside `finishTurn`, on the clean-idle transition: the turn completed with no error
+and no cancellation, **no normal pending messages remain**, and **no shutdown is
+pending**. This is the same branch that would otherwise fall through to the final
+`onDone(err)`. It is the symmetric counterpart to the AGENT_SHUTDOWN path.
+
+### What it sends
+
+`pool.Deliver(creatorID, msg, wake=true)` where `msg` is a **normal** (model-visible)
+user-role message:
+
+```
+[agent '<id>' is idle — review its results with get_agent_status or shut it down with shutdown_agent]
+```
+
+Unlike AGENT_SHUTDOWN (a `system` message filtered from LLM context), the idle
+notification is intentionally model-visible: the orchestrator's model must see that a
+sub-agent finished in order to act on it.
+
+### Invariants
+
+**Invariant:** The idle notification fires only when `a.creatorID != ""`. Top-level
+agents (e.g. `main`, whose `creatorID` is empty) never self-notify, so there is no
+notification loop. `main` waking itself is impossible by construction.
+
+**Invariant:** The notification fires once per running→idle transition, not continuously.
+An orchestrator that wakes, inspects, and does nothing leaves the sub-agent idle and
+quiet until it is given new work (which produces a new transition on completion).
+
+**Invariant:** The notification uses `Deliver` with `wake=true`, so the creator is both
+informed (message in its inbox/history) and woken (a turn is started or drain-until-empty
+picks it up). A delivery failure other than `ErrAgentNotFound` is logged and ignored;
+`ErrAgentNotFound` (creator already closed) is silently tolerated.
+
+**Invariant:** A sub-agent that explicitly `send_message`s its creator during the turn
+*and then* goes idle produces both the explicit message and the idle notification. These
+are coalesced by the creator's drain-until-empty into a single turn. This is intentional
+(simple, always-notify behaviour); no per-turn suppression is performed.
+
+**Invariant:** `creatorID` is set by `Spawner.Spawn` (from `SpawnRequest.CallerID`) or via
+`Agent.SetCreatorID`. It must be set before the agent's first turn completes for the
+notification to fire on that turn.
