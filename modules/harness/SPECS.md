@@ -64,6 +64,8 @@ Must be called after creating the bubbletea program and before calling `prog.Run
 
 `CapabilityProvider` and `MCPBridge` are NOT installed by SetProgram — `CapabilityProvider` is installed by `cmd/main.go` via `h.SetCapabilities`, and `MCPBridge` is not currently used.
 
+`SetProgram` also wires three pool callbacks (when `pool != nil`): `SetContextUsageDispatcher` (forwards `EventContextUsage`), `SetWakeNotifier` (sends `agentWakeupMsg` when a `Deliver` wakes the main agent), and `SetProviderRequestInterceptor` (routes the `before_provider_request` transform chain to `extHost.DispatchEventChain` via the package helper `interceptProviderRequest`). The interceptor lets extensions redact messages, reroute the model, or block the request just before each turn streams; a malformed transformed payload is tolerated (original messages/model kept). `submitToAgent` no longer dispatches `before_provider_request` — interception happens inside the agent turn where the real messages + model exist (see agent SPECS §9 Provider-Request Interception).
+
 **Invariant:** `harnessUIBridge.SetSystemPrompt` and `harnessUIBridge.AppendSystemPrompt` both route through the `AgentPool`, which propagates the prompt to all current and future agents. They do NOT set the prompt on the extension host or the harness model itself.
 
 ### Main agent callbacks wired in SetProgram

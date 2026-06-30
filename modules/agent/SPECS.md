@@ -298,6 +298,43 @@ between the `agent` and `extension` packages.
 **Invariant:** `dispatchContextUsage` is only called on successful turns (`err == nil`).
 On error or cancellation it is not called, consistent with the pattern for other events.
 
+### Provider-Request Interception
+
+A `ProviderRequestInterceptor` (set via `SetProviderRequestInterceptor`) runs the
+`before_provider_request` transform chain immediately before each agent turn
+streams to the provider. It receives the agent ID, the messages about to be
+sent, and the model, and returns `(outMessages, outModel, blocked, reason)`.
+The harness installs an implementation that routes to the extension host's
+`DispatchEventChain`, avoiding an agent→extension circular import.
+
+In `executeTurn`, a local `buildStream` helper applies it:
+
+- **No interceptor installed:** `buildStream` returns `(history, content)`
+  unchanged — the default turn path is byte-identical (the provider call still
+  uses `Messages: history, Prompt: content`). This keeps the common case
+  allocation- and behavior-identical.
+- **Interceptor installed:** `content` is folded into the outgoing message list
+  (`history + {user: content}`), the chain transforms it, and the turn streams
+  with `Messages: redacted, Prompt: ""`.
+- **Reroute:** when the interceptor returns a different non-empty model, a new
+  `LanguageModel` is built via `pool.LanguageModelForModel` and a fresh
+  `fantasy.Agent` replaces the turn's `fa`. A model-build failure falls back to
+  the original model (best-effort reroute, never fails the turn).
+- **Block:** the turn finishes immediately with a `*ProviderRequestBlockedError`
+  carrying the reason; no provider call is made. It flows through `finishTurn`
+  like any turn error (no drain, `onDone(err)`).
+
+**Invariant:** redaction is **send-time only**. History records the *original*
+user content (`a.history` append uses `content`, not the redacted messages), so
+a redacting interceptor never mutates stored history or future-turn context.
+
+**Invariant:** the interceptor is consulted once per `streamTurn` attempt,
+including the reactive-fallback retry (so a trimmed retry is re-interceptable).
+
+**Invariant:** a malformed transformed payload at the harness seam is tolerated
+(`interceptProviderRequest` keeps the original messages/model); a buggy
+interceptor can never crash a turn.
+
 ### streamTurn Helper
 
 `streamTurn` is the internal helper extracted from `Submit` to keep cyclomatic complexity below threshold. It:
