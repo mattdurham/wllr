@@ -39,9 +39,10 @@ type taskList struct {
 }
 
 type task struct {
-	id     string
-	title  string
-	status string
+	id       string
+	title    string
+	status   string
+	assignee string
 }
 
 func newTaskStore() *taskStore {
@@ -69,6 +70,38 @@ func (s *taskStore) createTask(listID, title string) (string, error) {
 	id := fmt.Sprintf("task-%d", s.taskSeq)
 	l.tasks[id] = &task{id: id, title: title, status: "pending"}
 	return id, nil
+}
+
+// claimTask atomically finds the first pending task (lowest seq) and flips it to
+// in_progress with the given assignee, all under the store lock so two workers
+// can never claim the same task. Returns (nil, nil) when none are available.
+func (s *taskStore) claimTask(listID, agentID string) (*task, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	l, ok := s.lists[listID]
+	if !ok {
+		return nil, fmt.Errorf("list %q not found", listID)
+	}
+	// Deterministic lowest-seq-first selection.
+	var best *task
+	bestSeq := int(^uint(0) >> 1)
+	for id, tk := range l.tasks {
+		if tk.status != "pending" {
+			continue
+		}
+		seq := 0
+		_, _ = fmt.Sscanf(id, "task-%d", &seq)
+		if seq < bestSeq {
+			bestSeq = seq
+			best = tk
+		}
+	}
+	if best == nil {
+		return nil, nil
+	}
+	best.status = "in_progress"
+	best.assignee = agentID
+	return best, nil
 }
 
 // updateTaskResult carries the side-effect notification info back to the handler.
@@ -137,6 +170,7 @@ func newCoordEnv(t *testing.T) *coordEnv {
 	host.SetAgentBridge(&poolAgentBridge{pool: pool, ctx: ctx})
 
 	registerTaskTools(t, host, store, pool)
+	registerClaimTool(t, host, store)
 	registerSendMessageTool(t, host, pool)
 
 	t.Cleanup(func() { host.Close(ctx) })
@@ -254,6 +288,33 @@ func registerTaskTools(_ *testing.T, host *extension.Host, store *taskStore, poo
 			out[i] = tj{ID: t.id, Title: t.title, Status: t.status}
 		}
 		b, _ := json.Marshal(map[string]interface{}{"tasks": out})
+		return string(b), false
+	})
+}
+
+func registerClaimTool(_ *testing.T, host *extension.Host, store *taskStore) {
+	host.RegisterNativeTool(sdk.Tool{
+		Name:        "tasks_claim",
+		Description: "Atomically claim the next available task",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"list_id":{"type":"string"},"agent_id":{"type":"string"}},"required":["list_id","agent_id"]}`),
+	}, func(_ context.Context, input json.RawMessage) (string, bool) {
+		var in struct {
+			ListID  string `json:"list_id"`
+			AgentID string `json:"agent_id"`
+		}
+		if err := json.Unmarshal(input, &in); err != nil {
+			return "bad input: " + err.Error(), true
+		}
+		claimed, err := store.claimTask(in.ListID, in.AgentID)
+		if err != nil {
+			return err.Error(), true
+		}
+		if claimed == nil {
+			return `{"task":null}`, false
+		}
+		b, _ := json.Marshal(map[string]any{"task": map[string]string{
+			"id": claimed.id, "title": claimed.title, "status": claimed.status, "assignee": claimed.assignee,
+		}})
 		return string(b), false
 	})
 }
@@ -744,5 +805,69 @@ func TestTaskNotification_FiresOnCompletion(t *testing.T) {
 	}
 	if notifyCount != 1 {
 		t.Errorf("expected exactly 1 TASK_DONE notification, got %d", notifyCount)
+	}
+}
+
+// TestTasksClaim_NoDoubleAssignment verifies the atomic claim primitive: when
+// two workers race to claim from the same list, each task is claimed by exactly
+// one worker and no task is assigned twice. This exercises store.claimTask
+// directly (the WASM tasks_claim handler is the same find-and-flip under lock).
+func TestTasksClaim_NoDoubleAssignment(t *testing.T) {
+	env := newCoordEnv(t)
+	listID := env.store.createList("race", "")
+	const nTasks = 20
+	for i := 0; i < nTasks; i++ {
+		if _, err := env.store.createTask(listID, fmt.Sprintf("t%d", i)); err != nil {
+			t.Fatalf("createTask: %v", err)
+		}
+	}
+
+	// Two workers claim concurrently until the list is drained.
+	var mu sync.Mutex
+	assignees := make(map[string]string) // taskID -> claiming worker
+	double := false
+
+	var wg sync.WaitGroup
+	for _, worker := range []string{"w1", "w2"} {
+		wg.Add(1)
+		go func(agentID string) {
+			defer wg.Done()
+			for {
+				claimed, err := env.store.claimTask(listID, agentID)
+				if err != nil {
+					t.Errorf("claimTask: %v", err)
+					return
+				}
+				if claimed == nil {
+					return // list drained
+				}
+				mu.Lock()
+				if _, seen := assignees[claimed.id]; seen {
+					double = true
+				}
+				assignees[claimed.id] = agentID
+				if claimed.assignee != agentID {
+					t.Errorf("claimed task %s assignee=%q, want %q", claimed.id, claimed.assignee, agentID)
+				}
+				mu.Unlock()
+			}
+		}(worker)
+	}
+	wg.Wait()
+
+	if double {
+		t.Error("a task was claimed by more than one worker")
+	}
+	if len(assignees) != nTasks {
+		t.Errorf("claimed %d distinct tasks, want %d", len(assignees), nTasks)
+	}
+
+	// Every task must now be in_progress with an assignee.
+	pending, err := env.store.listByStatus(listID, "pending")
+	if err != nil {
+		t.Fatalf("listByStatus: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Errorf("expected 0 pending after draining, got %d", len(pending))
 	}
 }

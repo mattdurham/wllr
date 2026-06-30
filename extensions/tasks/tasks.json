@@ -173,6 +173,24 @@
         },
         "required": ["list_id", "task_id"]
       }
+    },
+    {
+      "name": "tasks_claim",
+      "description": "Atomically claim the next available pending, dependency-satisfied task. Sets it to in_progress and records the assignee. Returns {\"task\":null} when none are available. Cannot double-assign a task.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "list_id": {
+            "type": "string",
+            "description": "Task list ID"
+          },
+          "agent_id": {
+            "type": "string",
+            "description": "Claiming agent's ID (recorded as assignee)"
+          }
+        },
+        "required": ["list_id", "agent_id"]
+      }
     }
   ]
 }

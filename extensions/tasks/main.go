@@ -62,6 +62,11 @@ func init() {
 		"Get details of a specific task",
 		json.RawMessage(`{"type":"object","properties":{"list_id":{"type":"string","description":"Task list ID"},"task_id":{"type":"string","description":"Task ID"}},"required":["list_id","task_id"]}`),
 	)
+	RegisterTool(
+		"tasks_claim",
+		"Atomically claim the next available (pending, dependency-satisfied) task in a list. Sets it to in_progress and records the assignee. Returns the claimed task, or {\"task\":null} when none are available. Prefer this over tasks_list+tasks_update when multiple workers share a list — it cannot double-assign a task.",
+		json.RawMessage(`{"type":"object","properties":{"list_id":{"type":"string","description":"Task list ID"},"agent_id":{"type":"string","description":"Claiming agent's ID (recorded as assignee)"}},"required":["list_id","agent_id"]}`),
+	)
 
 	OnToolCall(func(callID, toolName string, input json.RawMessage) (string, bool) {
 		p := toolPayload{ToolCallID: callID, Input: input}
@@ -76,6 +81,8 @@ func init() {
 			return handleTasksList(p)
 		case "tasks_get":
 			return handleTasksGet(p)
+		case "tasks_claim":
+			return handleTasksClaim(p)
 		default:
 			return "", false
 		}
@@ -270,6 +277,65 @@ func handleTasksList(p toolPayload) (string, bool) {
 
 	out, _ := json.Marshal(map[string][]*Task{"tasks": tasks})
 	return string(out), false
+}
+
+func handleTasksClaim(p toolPayload) (string, bool) {
+	var input struct {
+		ListID  string `json:"list_id"`
+		AgentID string `json:"agent_id"`
+	}
+	if err := json.Unmarshal(p.Input, &input); err != nil || input.ListID == "" || input.AgentID == "" {
+		return "tasks_claim: list_id and agent_id are required", true
+	}
+
+	taskListMu.RLock()
+	taskList, exists := taskLists[input.ListID]
+	taskListMu.RUnlock()
+	if !exists {
+		return "tasks_claim: task list not found", true
+	}
+
+	// Hold the list lock across the entire find-and-claim so two concurrent
+	// claims can never select the same task. WASM is single-threaded per module
+	// instance, but agent turns dispatch into the same instance serially; the
+	// lock makes the check-then-set atomic regardless.
+	taskList.mu.Lock()
+	defer taskList.mu.Unlock()
+
+	// Completed-task set for dependency checks.
+	completed := make(map[string]bool, len(taskList.Tasks))
+	for id, t := range taskList.Tasks {
+		if t.Status == "completed" {
+			completed[id] = true
+		}
+	}
+
+	// Deterministic order: claim the lowest-numbered eligible task. Map iteration
+	// is randomised, so sort the IDs first for predictable claiming.
+	ids := make([]string, 0, len(taskList.Tasks))
+	for id := range taskList.Tasks {
+		ids = append(ids, id)
+	}
+	sortTaskIDs(ids)
+
+	for _, id := range ids {
+		task := taskList.Tasks[id]
+		if task.Status != "pending" {
+			continue
+		}
+		if !dependenciesSatisfied(task, completed) {
+			continue
+		}
+		// Claim it.
+		task.Status = "in_progress"
+		task.Assignee = input.AgentID
+		out, _ := json.Marshal(map[string]*Task{"task": task})
+		return string(out), false
+	}
+
+	// No claimable task. Return an explicit null so callers can distinguish
+	// "nothing to do" from an error.
+	return `{"task":null}`, false
 }
 
 func handleTasksGet(p toolPayload) (string, bool) {
