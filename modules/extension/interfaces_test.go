@@ -95,6 +95,7 @@ func (f *fakeUIBridge) ConsoleClear()                                         {}
 func (f *fakeUIBridge) CreateArea(_ sdk.UIArea) error                         { return nil }
 func (f *fakeUIBridge) PatchUI(_ sdk.UIPatchParams) error                     { return nil }
 func (f *fakeUIBridge) RemoveArea(_ string)                                   {}
+func (f *fakeUIBridge) UpdateArea(_ sdk.UIUpdateAreaParams) error              { return nil }
 
 var _ extension.UIBridge = (*fakeUIBridge)(nil)
 
