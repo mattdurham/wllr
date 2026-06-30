@@ -544,9 +544,11 @@ func UIRemoveArea(area string) {
 
 // Node builders.
 func UIText(id, text string) UINode { return UINode{ID: id, Type: "text", Text: text} }
+
 func UIVStack(id string, kids ...UINode) UINode {
 	return UINode{ID: id, Type: "vstack", Children: kids}
 }
+
 func UIHStack(id string, kids ...UINode) UINode {
 	return UINode{ID: id, Type: "hstack", Children: kids}
 }
@@ -554,9 +556,11 @@ func UIDivider(id string) UINode { return UINode{ID: id, Type: "divider"} }
 
 // Op builders.
 func OpSetRoot(node UINode) UIPatchOp { return UIPatchOp{Op: "set_root", Node: &node} }
+
 func OpInsert(parent string, node UINode) UIPatchOp {
 	return UIPatchOp{Op: "insert", Parent: parent, Node: &node}
 }
+
 func OpUpdate(id string, props UIProps) UIPatchOp {
 	return UIPatchOp{Op: "update", ID: id, Props: &props}
 }

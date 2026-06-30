@@ -85,13 +85,6 @@ type Model struct {
 	// If nil, warnings are silently dropped.
 	logFn func(int, string)
 
-	mainAgentID string
-	activeModel string
-
-	// Modal overlay state (non-empty when modal is open).
-	modalContent string
-	input        InputArea
-
 	// OnMessageEnd is called after a completed assistant turn with the role
 	// and full content string. It is invoked on the bubbletea update goroutine.
 	// Nil means no callback. Set by cmd/main.go for session persistence.
@@ -101,6 +94,22 @@ type Model struct {
 	// sent to the agent. It is invoked on the bubbletea update goroutine.
 	// Nil means no callback. Set by cmd/main.go for session persistence.
 	OnUserMessage func(content string)
+
+	// scene holds extension-driven UI areas (the declarative, node-based
+	// renderer). Shared by pointer with the harnessUIBridge so the bridge can
+	// mutate it off-loop and the View can read it.
+	scene *SceneRenderer
+
+	mainAgentID string
+	activeModel string
+
+	// Modal overlay state (non-empty when modal is open).
+	modalContent string
+	// streamContent accumulates the in-flight assistant response text so it can
+	// be captured for session persistence (OnMessageEnd) and logging when the
+	// turn completes. The transcript itself is rendered by the WASM extension.
+	streamContent string
+	input         InputArea
 
 	// Loaded extension paths for reload.
 	extPaths []string
@@ -114,11 +123,6 @@ type Model struct {
 
 	chat ChatView
 
-	// scene holds extension-driven UI areas (the declarative, node-based
-	// renderer). Shared by pointer with the harnessUIBridge so the bridge can
-	// mutate it off-loop and the View can read it.
-	scene *SceneRenderer
-
 	picker PickerView
 
 	width, height int
@@ -129,16 +133,15 @@ type Model struct {
 	modalScroll    int
 	streaming      bool
 	consoleVisible bool
-	// streamContent accumulates the in-flight assistant response text so it can
-	// be captured for session persistence (OnMessageEnd) and logging when the
-	// turn completes. The transcript itself is rendered by the WASM extension.
-	streamContent string
 }
 
 // wasmChatAreaID is the scene area ID the WASM extension uses to own the main
 // chat transcript. The harness feeds this area's rendered content into the
 // (still harness-owned) scrollable chat viewport.
 const wasmChatAreaID = "chat"
+
+// streamStatusError is the status-bar "stream" value shown when a turn fails.
+const streamStatusError = "error"
 
 // inputAreaHeight = top border (1) + textarea rows (3) + bottom border (1)
 const (
@@ -641,7 +644,7 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 			} else {
 				slog.Error("stream error", "err", msg.Err)
 				m.pushNotification(fmt.Sprintf("⚠ %v", msg.Err))
-				m.statusBar.statuses["stream"] = "error"
+				m.statusBar.statuses["stream"] = streamStatusError
 				m.live.setStreaming(false, time.Time{}, true)
 			}
 		} else {

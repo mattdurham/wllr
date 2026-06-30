@@ -206,6 +206,7 @@ func (b *testUIBridge) SendMessage(msg sdk.Message) {
 		b.onSendMessage(msg)
 	}
 }
+
 func (b *testUIBridge) RegisterCommand(name, desc string, instant bool) error {
 	if b.onRegisterCommand != nil {
 		return b.onRegisterCommand(name, desc, instant)
