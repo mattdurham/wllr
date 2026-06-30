@@ -2,6 +2,7 @@ package sdk_test
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/mattdurham/wllr/modules/sdk"
@@ -100,6 +101,8 @@ func TestEventResponseRoundTrip(t *testing.T) {
 		{Cancel: true},
 		{Block: true},
 		{Error: "something went wrong"},
+		{Payload: json.RawMessage(`{"model":"local"}`)},
+		{Block: true, Error: "blocked by policy"},
 		{},
 	}
 	for _, c := range cases {
@@ -111,9 +114,23 @@ func TestEventResponseRoundTrip(t *testing.T) {
 		if err := json.Unmarshal(data, &got); err != nil {
 			t.Fatalf("unmarshal: %v", err)
 		}
-		if got != c {
-			t.Errorf("got %+v, want %+v", got, c)
+		if got.Cancel != c.Cancel || got.Block != c.Block || got.Error != c.Error {
+			t.Errorf("flags: got %+v, want %+v", got, c)
 		}
+		if string(got.Payload) != string(c.Payload) {
+			t.Errorf("payload: got %q, want %q", got.Payload, c.Payload)
+		}
+	}
+}
+
+func TestEventResponseOmitsPayloadWhenEmpty(t *testing.T) {
+	data, _ := json.Marshal(sdk.EventResponse{Block: true})
+	if strings.Contains(string(data), "payload") {
+		t.Fatalf("empty payload must be omitted: %s", data)
+	}
+	observe, _ := json.Marshal(sdk.EventResponse{})
+	if string(observe) != "{}" {
+		t.Fatalf("zero EventResponse must marshal to {}, got %s", observe)
 	}
 }
 

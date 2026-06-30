@@ -1442,22 +1442,16 @@ func (h *Host) ExecuteTool(
 	h.nativeToolsMu.RUnlock()
 
 	if isNative {
-		// Fire before_tool_call so extensions can intercept or cancel native tools.
-		beforePayload, _ := json.Marshal(sdk.BeforeToolCallPayload{
-			AgentID:    agentID,
-			ToolCallID: toolCallID,
-			ToolName:   toolName,
-			Input:      input,
-		})
-		beforeEvt := sdk.Event{Type: sdk.EventBeforeToolCall, Payload: beforePayload}
-		responses, _ := h.DispatchEvent(ctx, beforeEvt)
-		for _, r := range responses {
-			if r.Cancel {
-				return toolResult{Result: "tool call cancelled by extension", IsError: true}, nil
-			}
+		// Fire before_tool_call as a transform chain so interceptors can rewrite
+		// the input (e.g. a security layer) or block the call with a reason.
+		// Native tools have no WASM implementer, so no subscriber calls tool_result
+		// during the chain — the host executes nativeFn with the final input.
+		finalInput, blocked, reason := h.runBeforeToolCall(ctx, agentID, toolCallID, toolName, input)
+		if blocked {
+			return toolResult{Result: blockReason(reason), IsError: true}, nil
 		}
 
-		result, isError := nativeFn(ctx, input)
+		result, isError := nativeFn(ctx, finalInput)
 		tr := toolResult{Result: result, IsError: isError}
 
 		// Fire after_tool_call so extensions can observe results.
@@ -1477,22 +1471,26 @@ func (h *Host) ExecuteTool(
 		return tr, nil
 	}
 
+	// Register the pending result channel BEFORE running the chain: the
+	// implementing extension is itself a before_tool_call subscriber and calls
+	// tool_result synchronously within _on_event during the chain. Registering
+	// first ensures that result is delivered to ch and never dropped.
 	ch := make(chan toolResult, 1)
-
 	h.pendingMu.Lock()
 	h.pendingTools[toolCallID] = ch
 	h.pendingMu.Unlock()
 
-	// Dispatch before_tool_call event. An extension may call tool_result
-	// synchronously within _on_event, which will write to ch.
-	payload, _ := json.Marshal(sdk.BeforeToolCallPayload{
-		AgentID:    agentID,
-		ToolCallID: toolCallID,
-		ToolName:   toolName,
-		Input:      input,
-	})
-	evt := sdk.Event{Type: sdk.EventBeforeToolCall, Payload: payload}
-	_, _ = h.DispatchEvent(ctx, evt)
+	// Run the before_tool_call transform chain ONCE. Interceptors (lower
+	// priority) rewrite/block the input; the implementing extension (higher
+	// priority) sees the threaded final input and calls tool_result. A block
+	// short-circuits before the implementer runs, so tool_result is never called.
+	_, blocked, reason := h.runBeforeToolCall(ctx, agentID, toolCallID, toolName, input)
+	if blocked {
+		h.pendingMu.Lock()
+		delete(h.pendingTools, toolCallID)
+		h.pendingMu.Unlock()
+		return toolResult{Result: blockReason(reason), IsError: true}, nil
+	}
 
 	// Block until the extension returns the result or the context is cancelled.
 	select {
@@ -1520,6 +1518,53 @@ func (h *Host) ExecuteTool(
 		h.pendingMu.Unlock()
 		return toolResult{}, ctx.Err()
 	}
+}
+
+// runBeforeToolCall runs the before_tool_call interceptor chain for a tool call
+// and returns the final (possibly rewritten) tool input, whether the call was
+// blocked, and the block reason. Interceptors may rewrite Input or block the
+// call (see DispatchEventChain). A malformed transformed payload is tolerated:
+// the original input is kept and a warning is logged.
+func (h *Host) runBeforeToolCall(
+	ctx context.Context,
+	agentID, toolCallID, toolName string,
+	input json.RawMessage,
+) (finalInput json.RawMessage, blocked bool, reason string) {
+	payload, _ := json.Marshal(sdk.BeforeToolCallPayload{
+		AgentID:    agentID,
+		ToolCallID: toolCallID,
+		ToolName:   toolName,
+		Input:      input,
+	})
+	evt := sdk.Event{Type: sdk.EventBeforeToolCall, Payload: payload}
+	finalEvt, blocked, reason, err := h.DispatchEventChain(ctx, evt)
+	if err != nil {
+		h.logger.Warn("extension: before_tool_call chain marshal error", "tool", toolName, "err", err)
+		return input, false, ""
+	}
+	if blocked {
+		return input, true, reason
+	}
+	// Extract the (possibly transformed) Input from the final payload. A
+	// malformed transform keeps the original input.
+	var finalPayload sdk.BeforeToolCallPayload
+	if uerr := json.Unmarshal(finalEvt.Payload, &finalPayload); uerr != nil {
+		h.logger.Warn("extension: before_tool_call transform produced invalid payload; keeping original input",
+			"tool", toolName, "err", uerr)
+		return input, false, ""
+	}
+	if len(finalPayload.Input) == 0 {
+		return input, false, ""
+	}
+	return finalPayload.Input, false, ""
+}
+
+// blockReason formats the user-facing tool result text for a blocked tool call.
+func blockReason(reason string) string {
+	if reason == "" {
+		return "tool call blocked by extension"
+	}
+	return "tool call blocked: " + reason
 }
 
 // SendToolResult delivers a tool result for the given toolCallID.
@@ -1609,6 +1654,86 @@ func (h *Host) DispatchEvent(ctx context.Context, evt sdk.Event) ([]sdk.EventRes
 		responses = append(responses, resp)
 	}
 	return responses, nil
+}
+
+// DispatchEventChain threads evt's payload through subscribed extensions in
+// priority order (lower priority first, name asc tiebreak — same order as
+// DispatchEvent). Each extension's _on_event may:
+//   - observe: return nil/zero → payload unchanged, chain continues.
+//   - transform: return EventResponse.Payload → that payload replaces the
+//     event's payload for subsequent interceptors and the final result.
+//   - block: return Block or Cancel → the chain stops and blocked is true,
+//     with reason taken from EventResponse.Error.
+//
+// It returns the final (possibly transformed) event, whether the chain was
+// blocked, the block reason, and any fatal marshal error. A WASM trap on one
+// extension is logged and skipped (that extension is treated as observe-only).
+//
+// A transformed Payload that is empty is treated as "no change". The host does
+// not validate the payload shape here — the caller at each seam unmarshals the
+// final payload into the expected type and is responsible for tolerating a
+// malformed transform (keep prior payload, log).
+func (h *Host) DispatchEventChain(ctx context.Context, evt sdk.Event) (sdk.Event, bool, string, error) {
+	h.mu.RLock()
+	exts := make([]*Extension, len(h.extensions))
+	copy(exts, h.extensions)
+	h.mu.RUnlock()
+
+	sort.Slice(exts, func(i, j int) bool {
+		if exts[i].Priority != exts[j].Priority {
+			return exts[i].Priority < exts[j].Priority
+		}
+		return exts[i].name < exts[j].name
+	})
+
+	current := evt
+	for _, ext := range exts {
+		ext.subMu.RLock()
+		subscribed := ext.subscriptions[current.Type]
+		ext.subMu.RUnlock()
+		if !subscribed {
+			continue
+		}
+
+		evtJSON, err := json.Marshal(current)
+		if err != nil {
+			return current, false, "", fmt.Errorf("marshal event: %w", err)
+		}
+
+		resp, dispErr := h.dispatchToExtension(ctx, ext, evtJSON)
+		if dispErr != nil {
+			h.logger.Warn("extension: chain dispatch error", "extension", ext.name, "err", dispErr)
+			continue
+		}
+
+		next, blocked, reason := applyInterceptorResponse(current, resp, ext.name)
+		if blocked {
+			return current, true, reason, nil
+		}
+		current = next
+	}
+	return current, false, "", nil
+}
+
+// applyInterceptorResponse applies one interceptor's response to the running
+// event in a chain. It is the pure decision step of DispatchEventChain:
+//   - Block or Cancel → (current, true, reason): the chain stops. reason falls
+//     back to a default naming the extension when Error is empty.
+//   - non-empty Payload → (event with the new payload, false, ""): the transform
+//     is threaded to the next interceptor.
+//   - otherwise (observe) → (current, false, ""): unchanged.
+func applyInterceptorResponse(current sdk.Event, resp sdk.EventResponse, extName string) (sdk.Event, bool, string) {
+	if resp.Block || resp.Cancel {
+		reason := resp.Error
+		if reason == "" {
+			reason = "blocked by extension " + extName
+		}
+		return current, true, reason
+	}
+	if len(resp.Payload) > 0 {
+		return sdk.Event{Type: current.Type, Payload: resp.Payload}, false, ""
+	}
+	return current, false, ""
 }
 
 // dispatchToExtension calls _on_event on a single extension.
