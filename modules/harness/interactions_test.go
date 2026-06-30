@@ -134,8 +134,8 @@ func TestModel_StatusUpdateMsg_UpdatesStatusBar(t *testing.T) {
 	next, _ := m.Update(StatusUpdateMsg{Key: "test", Value: "active"})
 	m = next.(Model)
 
-	if m.statusBar.statuses["test"] != "active" {
-		t.Errorf("StatusUpdateMsg should update status bar, got %q", m.statusBar.statuses["test"])
+	if v := m.live.getStatus("test"); v != "active" {
+		t.Errorf("StatusUpdateMsg should update live status, got %q", v)
 	}
 }
 
@@ -179,8 +179,8 @@ func TestModel_SetModelMsg_UpdatesActiveModel(t *testing.T) {
 	if m.activeModel != "claude-haiku-4-5" {
 		t.Errorf("setModelMsg should update activeModel, got %q", m.activeModel)
 	}
-	if m.statusBar.modelName != "claude-haiku-4-5" {
-		t.Errorf("setModelMsg should update status bar model name")
+	if m.live.model != "claude-haiku-4-5" {
+		t.Errorf("setModelMsg should update live.model, got %q", m.live.model)
 	}
 }
 
@@ -216,8 +216,8 @@ func TestModel_StreamDoneMsg_WithError_ShowsInChat(t *testing.T) {
 	// The error line is rendered into the transcript by the WASM extension via
 	// EventNotify (covered in test/wasmchat); the harness-side effect is the
 	// status bar entry.
-	if m.statusBar.statuses["stream"] != streamStatusError {
-		t.Error("status bar should show 'error'")
+	if v := m.live.getStatus("stream"); v != streamStatusError {
+		t.Errorf("expected live stream status 'error', got %q", v)
 	}
 }
 

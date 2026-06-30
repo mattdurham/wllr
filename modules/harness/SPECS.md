@@ -1,8 +1,9 @@
 # harness — Interface Contracts and Behavioral Invariants
 
 Package `harness` implements the bubbletea v2 TUI for the bob coding assistant. It owns the
-chat view, input area, status bar, autocomplete dropdown, modal overlay, extension dispatch
-wiring, and the token batching layer between the agent pool and the TUI event loop.
+chat view, input area, autocomplete dropdown, modal overlay, extension dispatch wiring, and
+the token batching layer between the agent pool and the TUI event loop. Status display is
+fully scene-driven via the `statusline` WASM extension (see §28).
 
 ---
 
@@ -15,7 +16,6 @@ wiring, and the token batching layer between the agent pool and the TUI event lo
 - `extHost *extension.Host` — the extension host for dispatching events and managing WASM extensions.
 - `chat ChatView` — the scrollable conversation viewport.
 - `input InputArea` — the multi-line textarea with command detection.
-- `statusBar StatusBar` — provider/model/token/status display.
 - `commands *Registry` — the registered slash commands.
 - `modalContent string` — non-empty when the modal overlay is open.
 - `modalScroll int` — scroll offset for the modal.
@@ -294,31 +294,36 @@ Built-in commands registered at startup:
 
 ---
 
-## 18. StatusBar
+## 18. liveState — Shared Harness State
 
-- `providerName`, `modelName`, `totalTokens` set at construction or via messages.
-- `statuses map[string]string` keyed by arbitrary string; rendered in sorted order.
-- `Line()` returns unstyled text; used in `renderInputBox` top border.
-- `View()` returns lipgloss-styled text; not currently used in the main view (status is embedded in the input box border).
-- Token count is updated live from `m.agentPool.TokenCount()` on every render; the status bar's own `totalTokens` field is also updated from `StreamDoneMsg`.
+`liveState` is a goroutine-safe struct (mutex-guarded) shared between the bubbletea
+Update loop and WASM bridge goroutines. It holds:
 
-### Context Usage Percentage (`ctx%`)
+- `streaming bool` — true while an agent turn is in progress.
+- `streamStart time.Time` — when the current turn started.
+- `tokens int` — latest total token count.
+- `model string` — active model name.
+- `provider string` — active provider name.
+- `statuses map[string]string` — keyed status values that the `statusline` extension
+  and `get_status_info` read. Updated via `setStatus(key, value)`; empty value deletes.
+- `width int` — terminal width.
+- `hasError bool` — true when the last turn completed with an error.
 
-On each `StreamDoneMsg` (successful or not), the `StreamDoneMsg` handler calls
-`m.agentPool.MainAgentContextUsage()` and updates `statuses["ctx"]`:
+The `StatusBar` struct has been removed. All state that was in `StatusBar` is now in
+`liveState`; the statusline scene area (owned by the bundled WASM extension) reads
+it via `get_status_info`.
 
-- When `cu.ContextWindow > 0`: `statuses["ctx"] = fmt.Sprintf("%.0f%%", cu.Percent)`.
-  The result is shown in the status bar as `ctx:N%`.
-- When `cu.ContextWindow == 0`: `delete(statuses, "ctx")`. The key is absent — no `ctx:0%`
-  shown for unconfigured or first-turn sessions.
+### Context Usage (`ctx rem`)
 
-**Invariant:** The `ctx` key is only present in the status bar when a real context window has
-been configured via `WLLR_CONTEXT_WINDOW` or `pool.SetContextWindow()` and at least one turn
-has completed successfully.
+On each `StreamDoneMsg`, the handler calls `m.agentPool.MainAgentContextUsage()` and
+updates `liveState.statuses["ctx rem"]` via `setStatus`:
 
-**Invariant:** `ctx%` reflects the input token count of the most recently completed turn as a
-fraction of the configured context window. It is updated once per `StreamDoneMsg`, not
-continuously during streaming.
+- When `cu.ContextWindow > 0`: `"ctx rem"` = `fmt.Sprintf("%.0f%%", rem)` where `rem`
+  is `thresholdPct*100 - cu.Percent`.
+- When `cu.ContextWindow == 0`: `"ctx rem"` is deleted (empty string to `setStatus`).
+
+**Invariant:** The `ctx rem` key is only present when a context window is configured
+and at least one turn has completed. Updated once per `StreamDoneMsg`.
 
 ---
 
@@ -395,17 +400,21 @@ Returns the current set of registered tools from `extHost.RegisteredTools()` as 
 ## 22. View Layout
 
 ```
-┌────────────────────────────────────┐
-│  chat viewport (scrollable)        │  height = m.height - inputAreaHeight - dropdownHeight
-│  [optional: suggestion dropdown]   │  dropdownHeight = min(8, len(suggestions)) + 2 borders (0 when hidden)
-│  [or: modal overlay (centered)]    │  height = chatHeight * 8/10, vertically centered
-├────────────────────────────────────┤
-│  input box (5 lines)               │  top border + 3 textarea lines + bottom border
-└────────────────────────────────────┘
+┌──────────────────────────────────────┐
+│  chat viewport (scrollable)          │  area: "chat", height = m.height - statusLineHeight - inputAreaHeight - dropdownHeight
+│  [optional: suggestion dropdown]     │  dropdownHeight = min(8, len(suggestions)) + 2 borders (0 when hidden)
+│  [or: modal overlay (centered)]      │  height = chatHeight * 8/10, vertically centered
+├──────────────────────────────────────┤
+│  statusline (1–N lines)              │  area: "statusline", placement: status; height = statusLineHeight()
+├──────────────────────────────────────┤
+│  input box (5 lines, plain border)   │  top border + 3 textarea lines + bottom border
+└──────────────────────────────────────┘
 ```
 
 - `AltScreen = true` is set on every `tea.View` returned from `View()`.
 - The output is padded to exactly `m.height` lines to prevent old content bleeding through on resize.
+- `statusLineHeight()` sums the constrained heights of all `UIAreaStatus` areas; it is called on every `View()` and `chatHeight()` invocation.
+- `UIAreaStatus` areas are NOT included in `renderScenes()` — they are rendered by `renderStatusLine()` between the console pane and the input box.
 
 ## 23. ConsoleView
 
@@ -467,11 +476,49 @@ Returns the current set of registered tools from `extHost.RegisteredTools()` as 
 - The `harnessUIBridge` shares the `Model.scene` pointer, mutates it synchronously off the bubbletea loop (the renderer is mutex-guarded), and sends `sceneDirtyMsg{}` to force a re-render. `sceneDirtyMsg` is a no-op in `Update` other than triggering `View`.
 - `ConstrainWidth` and `ConstrainHeight` never return negative values.
 - `UpdateArea` with an empty string for a constraint field leaves that constraint unchanged (does not clear it). To clear a constraint, use `"0%"` or remove the area and re-create it.
-- P1 `View` integration is minimal: `renderScenes` stacks all areas below the chat regardless of placement. Later phases composite by placement and move the chat transcript into a `main` scene area.
+- `UIAreaStatus` areas are NOT rendered by `renderScenes()`; they are composited by `renderStatusLine()` between the console pane and the input box (see §28).
+- `renderScenes()` covers `UIAreaMain`, `UIAreaSidebar`, and `UIAreaOverlay` only.
 
 ---
 
 ## 27. WASM-Driven Chat Transcript (UI P4)
+
+---
+
+## 28. Scene-Driven Statusline (statusline area)
+
+The statusline is a standalone row rendered above the input box, driven entirely by the
+scene graph. The `statusline` scene area (`statuslineAreaID = "statusline"`, placement
+`UIAreaStatus`) is pre-created by the harness in `New()` so the slot is reserved before
+`session_start` fires. The bundled `statusline` WASM extension owns the content.
+
+### Layout methods
+
+| Method | Behavior |
+|--------|----------|
+| `statusLineHeight() int` | Sums constrained heights of all `UIAreaStatus` areas. Called by `chatHeight()` and `View()`. |
+| `renderStatusLine() string` | Renders all `UIAreaStatus` areas; each clamped to `MaxHeight`. Inserted between console pane and input box in `View()`. |
+
+### Input box border
+
+The input box top border is now a plain ruled line `╭──────╮` with no embedded
+status text. All status content lives in the statusline scene area above it.
+
+### `StatusUpdateMsg` routing
+
+`StatusUpdateMsg{Key, Value}` now calls `m.live.setStatus(key, value)` instead of
+updating `StatusBar.statuses`. This keeps `get_status_info` working (the statusline
+extension reads `liveState` via the bridge) while removing the `StatusBar` struct.
+
+**Invariants:**
+
+- The `statusline` area is always present from `New()` onwards (empty tree until the
+  extension sets a root on `session_start`).
+- `statusLineHeight()` returns 0 for empty areas, so layout is unaffected before the
+  extension initialises.
+- `UIAreaStatus` areas are excluded from `renderScenes()` to prevent double-rendering.
+- The `StatusBar` struct (`statusbar.go`) is retained for `get_status_info` response
+  assembly only; it is not used for rendering.
 
 The main chat transcript content is produced by a WASM extension (the bundled `agents` extension) that owns the `wasmChatAreaID` (`"chat"`) scene area. The harness owns the scrollable viewport; the *content* is always external. There is no built-in message renderer.
 

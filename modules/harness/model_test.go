@@ -64,12 +64,12 @@ func TestModel_Update_StreamDoneMsg_ClearsStreamStatus(t *testing.T) {
 	m := newTestModel()
 	m.streamContent = "test response"
 	// Simulate a stream status set externally.
-	m.statusBar.statuses["stream"] = "working."
+	m.live.setStatus("stream", "working.")
 
 	m, _ = callUpdate(m, StreamDoneMsg{Err: nil})
 	// Stream status should be cleared.
-	if _, ok := m.statusBar.statuses["stream"]; ok {
-		t.Error("stream status should be cleared after StreamDoneMsg")
+	if v := m.live.getStatus("stream"); v != "" {
+		t.Errorf("stream status should be cleared after StreamDoneMsg, got %q", v)
 	}
 	if m.streamContent != "" {
 		t.Errorf("streamContent should be reset, got %q", m.streamContent)
@@ -81,9 +81,9 @@ func TestModel_Update_StreamDoneMsg_Error_ShowsError(t *testing.T) {
 
 	m, _ = callUpdate(m, StreamDoneMsg{Err: errors.New("API error")})
 	// The error line is rendered by the WASM transcript via EventNotify; the
-	// harness-side effect is the status bar entry.
-	if m.statusBar.statuses["stream"] != streamStatusError {
-		t.Errorf("expected stream status 'error', got %q", m.statusBar.statuses["stream"])
+	// harness-side effect is the live status entry.
+	if v := m.live.getStatus("stream"); v != streamStatusError {
+		t.Errorf("expected stream status 'error', got %q", v)
 	}
 }
 
@@ -93,7 +93,7 @@ func TestModel_Update_StreamDoneMsg_ContextCanceled_NoError(t *testing.T) {
 
 	// context.Canceled should not set the error status.
 	m, _ = callUpdate(m, StreamDoneMsg{Err: context.Canceled})
-	if m.statusBar.statuses["stream"] == streamStatusError {
+	if v := m.live.getStatus("stream"); v == streamStatusError {
 		t.Error("context.Canceled should not set error status")
 	}
 }
@@ -128,8 +128,8 @@ func TestModel_Update_SetModelMsg(t *testing.T) {
 	if m.activeModel != "claude-haiku-3-5" {
 		t.Errorf("activeModel: got %q, want %q", m.activeModel, "claude-haiku-3-5")
 	}
-	if m.statusBar.modelName != "claude-haiku-3-5" {
-		t.Errorf("statusBar.modelName: got %q, want %q", m.statusBar.modelName, "claude-haiku-3-5")
+	if m.live.model != "claude-haiku-3-5" {
+		t.Errorf("live.model: got %q, want %q", m.live.model, "claude-haiku-3-5")
 	}
 }
 
@@ -154,8 +154,8 @@ func TestInstantCommandSkipsQueueingStatus(t *testing.T) {
 	m, _ = callUpdate(m, CommandMsg{Name: "clear", Args: nil})
 
 	// Instant commands must NOT set the "queuing…" status indicator.
-	if m.statusBar.statuses["stream"] == "queuing…" {
-		t.Error("Instant command should not set statusBar stream to 'queuing…'")
+	if v := m.live.getStatus("stream"); v == "queuing…" {
+		t.Error("Instant command should not set stream status to 'queuing…'")
 	}
 }
 
@@ -175,9 +175,8 @@ func TestNonInstantCommandSetsQueueingStatus(t *testing.T) {
 	m, _ = callUpdate(m, CommandMsg{Name: "wasm-cmd", Args: nil})
 
 	// Non-instant commands should set the "queuing…" status indicator.
-	if m.statusBar.statuses["stream"] != "queuing…" {
-		t.Errorf("non-instant command should set statusBar stream to 'queuing…', got %q",
-			m.statusBar.statuses["stream"])
+	if v := m.live.getStatus("stream"); v != "queuing…" {
+		t.Errorf("non-instant command should set stream status to 'queuing…', got %q", v)
 	}
 }
 
@@ -233,8 +232,8 @@ func TestModel_Update_NotifyMsg(t *testing.T) {
 func TestModel_Update_StatusUpdateMsg(t *testing.T) {
 	m := newTestModel()
 	m, _ = callUpdate(m, StatusUpdateMsg{Key: "foo", Value: "bar"})
-	if m.statusBar.statuses["foo"] != "bar" {
-		t.Errorf("statusBar.statuses[foo]: got %q, want %q", m.statusBar.statuses["foo"], "bar")
+	if v := m.live.getStatus("foo"); v != "bar" {
+		t.Errorf("live.statuses[foo]: got %q, want %q", v, "bar")
 	}
 }
 
@@ -567,13 +566,13 @@ func TestStatusBarCtxPercent(t *testing.T) {
 	// Simulate StreamDoneMsg — this should update ctx rem in status bar.
 	m, _ = callUpdate(m, StreamDoneMsg{Err: nil})
 
-	rem, ok := m.statusBar.statuses["ctx rem"]
-	if !ok {
-		t.Fatal("expected statuses[ctx rem] to be present after StreamDoneMsg with non-zero usage")
+	rem := m.live.getStatus("ctx rem")
+	if rem == "" {
+		t.Fatal("expected live.statuses[ctx rem] to be present after StreamDoneMsg with non-zero usage")
 	}
 	// threshold=80%, current=25% → rem=55%
 	if rem != "55%" {
-		t.Errorf("statuses[ctx rem] = %q, want %q", rem, "55%")
+		t.Errorf("live.statuses[ctx rem] = %q, want %q", rem, "55%")
 	}
 }
 
@@ -592,7 +591,7 @@ func TestStatusBarCtxPercentZero(t *testing.T) {
 	// StreamDoneMsg with zero context window — ctx rem key should not appear.
 	m, _ = callUpdate(m, StreamDoneMsg{Err: nil})
 
-	if _, ok := m.statusBar.statuses["ctx rem"]; ok {
-		t.Errorf("statuses[ctx rem] should be absent when ContextWindow is 0, got %q", m.statusBar.statuses["ctx rem"])
+	if v := m.live.getStatus("ctx rem"); v != "" {
+		t.Errorf("live.statuses[ctx rem] should be absent when ContextWindow is 0, got %q", v)
 	}
 }
