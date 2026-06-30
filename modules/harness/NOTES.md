@@ -399,3 +399,15 @@ a separate `m.history` copy.
 **Rationale:** This is step 4 of the statusline scene design (docs/plans/2026-06-30-statusline-scene-design.md). Removing `StatusBar` eliminates a parallel state path and commits the harness to the scene-graph-only model. The `liveState` struct already held a mirrored subset of this data for the `get_status_info` host call; consolidating there removes the duplication. The `StatusBar` file (`statusbar.go`) is retained for now because `StatusBar.StatusInfo()` and `StatusBar.defaultLine()` are referenced by `harnessUIBridge.GetStatusInfo()` — this will be cleaned up when the `statusline` extension is rewritten in step 5.
 
 **Consequence:** All test assertions on `m.statusBar.statuses[...]` and `m.statusBar.modelName` are migrated to `m.live.getStatus(...)` and `m.live.model`. The `streamTickMsg` handler no longer updates a status entry — the animated working indicator is now produced entirely by the `statusline` WASM extension responding to `EventToken`/`EventAfterProviderResponse`.
+
+---
+
+## statusbar.go deleted — dead after the statusline scene migration
+
+*Added: 2026-06-30*
+
+**Decision:** Delete `modules/harness/statusbar.go` entirely (the `StatusBar` struct, `NewStatusBar`, `Update`, `Line`/`defaultLine`/`View`, `StatusInfo`, `AddTokens`, `formatElapsed`, and `statusBarStyle`).
+
+**Rationale:** The prior entry ("StatusBar removed; statusline is now a scene area") removed all *uses* of `StatusBar` from `Model` but left the file in place, noting it was kept for `get_status_info`. That turned out to be unnecessary — `harnessUIBridge.GetStatusInfo` builds `sdk.StatusInfo` directly from `liveState`, never from `StatusBar.StatusInfo`. `staticcheck` flagged `formatElapsed` as unused (U1000), confirming the whole file had become dead code: nothing outside `statusbar.go` referenced any of its symbols. Keeping a parallel, unreferenced status type is exactly the kind of drift the spec-driven invariant exists to prevent.
+
+**Consequence:** `staticcheck ./...` is clean (was reporting `formatElapsed is unused`). `get_status_info` is served entirely from `liveState`; there is no longer any `StatusBar` type in the harness. SPECS.md §28 updated to state the struct is removed rather than "retained for get_status_info". No behavior change — the file was unreachable.

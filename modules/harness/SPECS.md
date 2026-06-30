@@ -506,9 +506,10 @@ status text. All status content lives in the statusline scene area above it.
 
 ### `StatusUpdateMsg` routing
 
-`StatusUpdateMsg{Key, Value}` now calls `m.live.setStatus(key, value)` instead of
-updating `StatusBar.statuses`. This keeps `get_status_info` working (the statusline
-extension reads `liveState` via the bridge) while removing the `StatusBar` struct.
+`StatusUpdateMsg{Key, Value}` calls `m.live.setStatus(key, value)`. `get_status_info`
+is served entirely from `liveState` via `harnessUIBridge.GetStatusInfo` (provider,
+model, tokens, statuses, working, elapsed, active-agent count). The `StatusBar` struct
+has been removed; no parallel status state exists.
 
 **Invariants:**
 
@@ -517,8 +518,8 @@ extension reads `liveState` via the bridge) while removing the `StatusBar` struc
 - `statusLineHeight()` returns 0 for empty areas, so layout is unaffected before the
   extension initialises.
 - `UIAreaStatus` areas are excluded from `renderScenes()` to prevent double-rendering.
-- The `StatusBar` struct (`statusbar.go`) is retained for `get_status_info` response
-  assembly only; it is not used for rendering.
+- There is no `StatusBar` struct; all status state lives in `liveState` and the
+  `statusline` scene area. `get_status_info` reads `liveState` directly.
 
 The main chat transcript content is produced by a WASM extension (the bundled `agents` extension) that owns the `wasmChatAreaID` (`"chat"`) scene area. The harness owns the scrollable viewport; the *content* is always external. There is no built-in message renderer.
 
