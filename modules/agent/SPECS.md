@@ -42,13 +42,17 @@ idle ──(Submit called)──▶ running ──(turn complete)──▶ idle
 
 ## 3. Message Queue (Inbox) Ordering
 
+The inbox is the unexported `mailbox` type (`mailbox.go`): it owns the message slice and the `sync.RWMutex` guarding it, and is embedded by value in `*Agent` as the `inbox` field. The `Agent.AppendInbox`/`DrainInbox`/`InboxLen` methods are thin forwarders to `mailbox.append`/`drain`/`len`. The mailbox is the **message store only** — it does not own turn-execution state (`isRunning`), which remains the Agent's concern.
+
 `AppendInbox` enqueues messages for delivery before the next turn. `DrainInbox` atomically retrieves and clears all queued messages. `Submit` calls `DrainInbox` at the start of each turn and **appends** inbox messages after the conversation history (inbox messages appear after prior history, making them the most-recent messages visible to the LLM). See NOTES.md §16.
 
 **Invariant:** Inbox messages are delivered in FIFO order and always appear as the most recent messages in the prompt. Messages appended before `Submit` is called are guaranteed to be visible within that turn. Messages appended after `Submit` has called `DrainInbox` will appear in the next turn.
 
-**Invariant:** `DrainInbox` is atomic — no message is lost between `AppendInbox` and `DrainInbox` regardless of concurrent calls. This is guaranteed by the `inboxMu` mutex.
+**Invariant:** `DrainInbox` is atomic — no message is lost between `AppendInbox` and `DrainInbox` regardless of concurrent calls. This is guaranteed by the mailbox's internal mutex.
 
-**Invariant:** `AppendInbox` and `DrainInbox` do not filter by `MessageType`. Filtering is done at `sdkToFantasyMessages` conversion time. `sdk.MessageTypeSystem` messages survive the inbox cycle intact but are never recorded in history (see §9 streamTurn) and never reach the LLM context.
+**Invariant:** `mailbox.append` drops messages whose content is blank (empty or whitespace-only) and logs a warning, because the Anthropic API rejects empty text content blocks. This is the single enforcement point for the non-empty-content rule.
+
+**Invariant:** the mailbox does not filter by `MessageType`. Filtering is done at `sdkToFantasyMessages` conversion time. `sdk.MessageTypeSystem` messages survive the inbox cycle intact but are never recorded in history (see §9 streamTurn) and never reach the LLM context.
 
 ---
 
@@ -308,6 +312,8 @@ On error or cancellation it is not called, consistent with the pattern for other
 **Message filtering before LLM calls:** `sdkToFantasyMessages` is called on the history slice before constructing the `AgentStreamCall`. It skips any message whose `Type` is `sdk.MessageTypeSystem` or `sdk.MessageTypeSteering`. These messages are consumed by the Go runtime and must never reach the provider.
 
 **History recording on drain-turn path:** When `content == ""` (drain-turn: inbox messages are the prompt), system messages (`MessageTypeSystem`) are NOT appended to `a.history`. This prevents control messages from accumulating in history and being sent to the LLM on future turns. Steering messages (`MessageTypeSteering`) are recorded in history but still filtered by `sdkToFantasyMessages`.
+
+**Empty-response placeholders:** Providers reject empty text content blocks and require strictly alternating user/assistant messages, so an assistant turn is never recorded as an empty string. `placeholderForEmptyResponse(collected, cancelled)` returns `collected` when non-empty, otherwise `placeholderCancelled` (`"[response cancelled]"`) when the turn's context was cancelled, or `placeholderToolOnly` (`"[tool calls only]"`) for a turn that did tool work but produced no text. These are the single source of truth for the placeholder strings (`agent.go`).
 
 ---
 
