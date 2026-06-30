@@ -28,10 +28,10 @@ func initChat() {
 	OnNotify(onChatNotify)
 }
 
-// onChatSessionStart enables the WASM transcript when WLLR_WASM_CHAT=1 and
-// creates the chat area with an empty vstack root.
+// onChatSessionStart enables the WASM transcript (the default) and creates the
+// chat area with an empty vstack root. Set WLLR_WASM_CHAT=0 to opt out.
 func onChatSessionStart() {
-	if v, _ := GetEnv("WLLR_WASM_CHAT"); v != "1" {
+	if v, _ := GetEnv("WLLR_WASM_CHAT"); v == "0" {
 		return
 	}
 	chatEnabled = true

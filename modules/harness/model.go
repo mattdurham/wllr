@@ -167,7 +167,10 @@ func New(pool *agent.AgentPool, mainAgentID string, h *extension.Host) Model {
 		console:     NewConsoleView(),
 		live:        &liveState{provider: provName},
 		scene:       NewSceneRenderer(),
-		wasmChat:    os.Getenv("WLLR_WASM_CHAT") == "1",
+		// WASM-driven transcript is the default; set WLLR_WASM_CHAT=0 to opt out.
+		// If no extension creates the chat area, refreshWASMChat no-ops and the
+		// internal ChatView rendering is used automatically.
+		wasmChat: os.Getenv("WLLR_WASM_CHAT") != "0",
 	}
 
 	registerBuiltins(m.commands)
