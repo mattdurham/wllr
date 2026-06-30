@@ -300,6 +300,9 @@ func (b *poolAgentBridge) Close(id string) error { return b.pool.Close(id) }
 func (b *poolAgentBridge) SendMessage(id string, msg sdk.Message) error {
 	return b.pool.SendMessage(id, msg)
 }
+func (b *poolAgentBridge) Deliver(id string, msg sdk.Message, wake bool) error {
+	return b.pool.Deliver(id, msg, wake)
+}
 
 func (b *poolAgentBridge) Run(id string) error {
 	a := b.pool.Get(id)

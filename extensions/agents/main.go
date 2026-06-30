@@ -544,12 +544,15 @@ func handleShutdownAgent(p beforeToolCallPayload) {
 		"event": "shutdown_request",
 		"from":  callerID,
 	})
-	type sendParams struct {
+	// agent_deliver atomically queues the shutdown_request and wakes the agent so
+	// it processes the request immediately if idle. finishTurn handles it after
+	// the turn completes (sends AGENT_SHUTDOWN to the creator and self-closes).
+	type deliverParams struct {
 		ID      string `json:"id"`
 		Message string `json:"message"`
 		Type    string `json:"type"`
 	}
-	result := agentCall("agent_send_message", sendParams{
+	result := agentCall("agent_deliver", deliverParams{
 		ID:      input.AgentID,
 		Message: string(payload),
 		Type:    "system",
@@ -564,10 +567,6 @@ func handleShutdownAgent(p beforeToolCallPayload) {
 		ToolResult(p.ToolCallID, "shutdown_agent: "+resp.Error, true)
 		return
 	}
-
-	// Trigger the agent's next turn so it processes the shutdown_request immediately
-	// if it is currently idle. finishTurn handles the message after the turn completes.
-	agentCall("agent_run", map[string]string{"id": input.AgentID})
 
 	// Do NOT call removeAgent or agent_close here — the agent will self-close when
 	// finishTurn processes the shutdown_request and sends AGENT_SHUTDOWN back.
@@ -751,11 +750,15 @@ func handleSendMessage(p beforeToolCallPayload) {
 		labeledMessage = label + ": " + input.Message
 	}
 
-	type msgParams struct {
+	// agent_deliver atomically queues the message AND wakes the recipient so it
+	// processes the message immediately if idle (or via drain-until-empty if
+	// already running). Replaces the prior agent_send_message + agent_run pair,
+	// which could leave a message queued but unprocessed if the run leg failed.
+	type deliverParams struct {
 		ID      string `json:"id"`
 		Message string `json:"message"`
 	}
-	result := agentCall("agent_send_message", msgParams{ID: input.AgentID, Message: labeledMessage})
+	result := agentCall("agent_deliver", deliverParams{ID: input.AgentID, Message: labeledMessage})
 
 	var resp struct {
 		Error string `json:"error,omitempty"`
@@ -765,18 +768,6 @@ func handleSendMessage(p beforeToolCallPayload) {
 	}
 	if resp.Error != "" {
 		ToolResult(p.ToolCallID, "send_message: "+resp.Error, true)
-		return
-	}
-	// Trigger an immediate turn so the agent processes the queued message now.
-	runResult := agentCall("agent_run", map[string]string{"id": input.AgentID})
-	var runResp struct {
-		Error string `json:"error,omitempty"`
-	}
-	if runResult != "" {
-		_ = json.Unmarshal([]byte(runResult), &runResp)
-	}
-	if runResp.Error != "" {
-		ToolResult(p.ToolCallID, fmt.Sprintf(`{"status":"error","error":"agent_run failed: %s"}`, runResp.Error), true)
 		return
 	}
 	upsertAgent(input.AgentID, "", "", "← "+truncate(input.Message, 60))

@@ -54,18 +54,18 @@ func (e *earlyUIBridge) RegisterCommand(name, desc string, instant bool) error {
 	})
 	return nil
 }
-func (e *earlyUIBridge) RegisterTool(_ sdk.Tool) error        { return nil }
-func (e *earlyUIBridge) SetSystemPrompt(_ string)             {}
-func (e *earlyUIBridge) AppendSystemPrompt(_ string)          {}
-func (e *earlyUIBridge) ResetHistory(_ []sdk.Message) error   { return nil }
-func (e *earlyUIBridge) ToolResult(_, _ string, _ bool)       {}
-func (e *earlyUIBridge) AfterToolCall(_, _, _ string, _ bool) {}
-func (e *earlyUIBridge) ConsoleOutput(_ string)               {}
-func (e *earlyUIBridge) ConsoleClear()                        {}
-func (e *earlyUIBridge) CreateArea(_ sdk.UIArea) error                    { return nil }
-func (e *earlyUIBridge) PatchUI(_ sdk.UIPatchParams) error                { return nil }
-func (e *earlyUIBridge) RemoveArea(_ string)                              {}
-func (e *earlyUIBridge) UpdateArea(_ sdk.UIUpdateAreaParams) error        { return nil }
+func (e *earlyUIBridge) RegisterTool(_ sdk.Tool) error             { return nil }
+func (e *earlyUIBridge) SetSystemPrompt(_ string)                  {}
+func (e *earlyUIBridge) AppendSystemPrompt(_ string)               {}
+func (e *earlyUIBridge) ResetHistory(_ []sdk.Message) error        { return nil }
+func (e *earlyUIBridge) ToolResult(_, _ string, _ bool)            {}
+func (e *earlyUIBridge) AfterToolCall(_, _, _ string, _ bool)      {}
+func (e *earlyUIBridge) ConsoleOutput(_ string)                    {}
+func (e *earlyUIBridge) ConsoleClear()                             {}
+func (e *earlyUIBridge) CreateArea(_ sdk.UIArea) error             { return nil }
+func (e *earlyUIBridge) PatchUI(_ sdk.UIPatchParams) error         { return nil }
+func (e *earlyUIBridge) RemoveArea(_ string)                       {}
+func (e *earlyUIBridge) UpdateArea(_ sdk.UIUpdateAreaParams) error { return nil }
 
 // Verify earlyUIBridge satisfies the interface at compile time.
 var _ extension.UIBridge = (*earlyUIBridge)(nil)
@@ -80,6 +80,9 @@ func (e *earlyAgentBridge) Spawn(_ context.Context, _ extension.SpawnRequest) er
 }
 func (e *earlyAgentBridge) Close(_ string) error { return fmt.Errorf("not started") }
 func (e *earlyAgentBridge) SendMessage(_ string, _ sdk.Message) error {
+	return fmt.Errorf("not started")
+}
+func (e *earlyAgentBridge) Deliver(_ string, _ sdk.Message, _ bool) error {
 	return fmt.Errorf("not started")
 }
 func (e *earlyAgentBridge) Run(_ string) error                      { return fmt.Errorf("not started") }
@@ -126,6 +129,16 @@ func (b *harnessAgentBridge) SendMessage(id string, msg sdk.Message) error {
 	return b.pool.SendMessage(id, msg)
 }
 
+func (b *harnessAgentBridge) Deliver(id string, msg sdk.Message, wake bool) error {
+	if b.pool == nil {
+		return fmt.Errorf("no agent pool")
+	}
+	if strings.TrimSpace(msg.Content) == "" {
+		return fmt.Errorf("deliver: message must be non-empty")
+	}
+	return b.pool.Deliver(id, msg, wake)
+}
+
 func (b *harnessAgentBridge) Run(id string) error {
 	if b.pool == nil {
 		return fmt.Errorf("no agent pool")
@@ -135,7 +148,9 @@ func (b *harnessAgentBridge) Run(id string) error {
 	if id == b.mainID && b.prog != nil {
 		b.prog.Send(agentWakeupMsg{})
 	}
-	return b.pool.Send(id, "[process pending inbox messages]")
+	// Empty content: the agent drains its inbox (queued by a prior SendMessage)
+	// as the turn content. No synthetic placeholder message leaks into history.
+	return b.pool.Send(id, "")
 }
 
 func (b *harnessAgentBridge) List() ([]extension.AgentInfo, error) {

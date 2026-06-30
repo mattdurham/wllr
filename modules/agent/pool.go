@@ -121,6 +121,56 @@ func (p *AgentPool) dispatchContextUsage(cu sdk.ContextUsage, compacted bool) {
 	}
 }
 
+// SetWakeNotifier installs a callback invoked with an agent ID whenever Deliver
+// wakes that agent (wake=true and the agent was idle). The harness uses it to
+// drive the TUI streaming indicator for the main agent. Thread-safe.
+func (p *AgentPool) SetWakeNotifier(fn func(id string)) {
+	p.dispatchMu.Lock()
+	p.wakeNotifier = fn
+	p.dispatchMu.Unlock()
+}
+
+// notifyWake calls the registered wakeNotifier, if any.
+func (p *AgentPool) notifyWake(id string) {
+	p.dispatchMu.RLock()
+	fn := p.wakeNotifier
+	p.dispatchMu.RUnlock()
+	if fn != nil {
+		fn(id)
+	}
+}
+
+// Deliver appends msg to the named agent's inbox and, when wake is true,
+// ensures the agent processes it: if the agent is idle it starts a drain turn
+// (empty-content Submit), and if it is already running the drain-until-empty
+// pattern picks the message up when the current turn finishes. This is the
+// single atomic "deliver and make sure it gets processed" primitive — it
+// replaces the SendMessage+Send/Run two-call pattern at the call sites.
+//
+// Returns ErrAgentNotFound if id is unknown, or an error if msg.Content is empty.
+// Non-blocking: any turn runs in a goroutine.
+func (p *AgentPool) Deliver(id string, msg sdk.Message, wake bool) error {
+	if strings.TrimSpace(msg.Content) == "" {
+		return fmt.Errorf("Deliver: content must be non-empty (would cause API rejection)")
+	}
+	p.mu.RLock()
+	a, exists := p.agents[id]
+	p.mu.RUnlock()
+	if !exists {
+		return ErrAgentNotFound
+	}
+	a.AppendInbox(msg)
+	if !wake {
+		return nil
+	}
+	p.notifyWake(id)
+	// Submit with empty content: the just-appended inbox message becomes the
+	// turn's content via the drain path. If the agent is already running, the
+	// CAS in Submit re-queues and the running turn's finishTurn drains it.
+	a.Submit(context.Background(), "")
+	return nil
+}
+
 // SetProvider stores the fantasy provider so OnAgentSpawn wiring in cmd/main.go
 // can call LanguageModelForModel to create sub-agent language models.
 func (p *AgentPool) SetProvider(prov fantasy.Provider) {

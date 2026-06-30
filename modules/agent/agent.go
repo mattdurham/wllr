@@ -253,6 +253,12 @@ func (a *Agent) IsRunning() bool { return a.isRunning.Load() }
 // Returns an empty string for top-level agents that were not spawned by another agent.
 func (a *Agent) CreatorID() string { return a.creatorID }
 
+// SetCreatorID sets the ID of the agent that spawned this agent. Normally set by
+// Spawner.Spawn immediately after pool.Spawn; exposed for tests and for callers
+// that wire the creator relationship outside the spawner. Must be called before
+// the agent's first turn completes so the idle-notification path can use it.
+func (a *Agent) SetCreatorID(id string) { a.creatorID = id }
+
 // Cancel cancels the current active turn, if any.
 // No-op if no turn is running.
 func (a *Agent) Cancel() {
@@ -600,7 +606,25 @@ func (a *Agent) finishTurn(ctx context.Context, err error, ctxErr error, onDone 
 			return
 		}
 
-		// No normal pending messages remain. Handle deferred shutdown if present.
+		// No normal pending messages remain. Notify the creator that this agent
+		// has gone idle so the orchestrator can review results or shut it down.
+		// Skip when a shutdown is pending (handled below) or when the agent has no
+		// creator (top-level agents such as main never self-notify). The message is
+		// a normal (model-visible) message, unlike the system-only AGENT_SHUTDOWN.
+		if shutdownFrom == "" && a.creatorID != "" && a.pool != nil {
+			idleMsg := fmt.Sprintf(
+				"[agent '%s' is idle — review its results with get_agent_status or shut it down with shutdown_agent]",
+				a.id,
+			)
+			if derr := a.pool.Deliver(a.creatorID, sdk.Message{
+				Role:    sdk.RoleUser,
+				Content: idleMsg,
+			}, true); derr != nil && !errors.Is(derr, ErrAgentNotFound) {
+				slog.Warn("finishTurn: failed to notify creator of idle", "agent", a.id, "creator", a.creatorID, "err", derr)
+			}
+		}
+
+		// Handle deferred shutdown if present.
 		if shutdownFrom != "" {
 			// invariant: pendingShutdownFrom is only written and read from finishTurn,
 			// which runs after isRunning transitions to false. Submit must never access

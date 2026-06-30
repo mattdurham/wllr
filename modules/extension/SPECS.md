@@ -162,6 +162,7 @@ The full set of dispatched methods is:
 | `MethodAgentSpawn`            | `handleAgentSpawn`                               |
 | `MethodAgentClose`            | `handleAgentClose`                               |
 | `MethodAgentSendMessage`      | `handleAgentSendMessage`                         |
+| `MethodAgentDeliver`          | `handleAgentDeliver`                             |
 | `MethodAgentRun`              | `handleAgentRun`                                 |
 | `MethodAgentList`             | `handleAgentList`                                |
 | `MethodAgentTokenCount`       | `handleAgentTokenCount`                          |

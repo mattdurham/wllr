@@ -15,6 +15,7 @@ type fakeAgentBridge struct{}
 func (f *fakeAgentBridge) Spawn(_ context.Context, _ extension.SpawnRequest) error { return nil }
 func (f *fakeAgentBridge) Close(_ string) error                                    { return nil }
 func (f *fakeAgentBridge) SendMessage(_ string, _ sdk.Message) error               { return nil }
+func (f *fakeAgentBridge) Deliver(_ string, _ sdk.Message, _ bool) error           { return nil }
 func (f *fakeAgentBridge) Run(_ string) error                                      { return nil }
 func (f *fakeAgentBridge) List() ([]extension.AgentInfo, error)                    { return nil, nil }
 func (f *fakeAgentBridge) TokenCount() int64                                       { return 0 }
@@ -95,7 +96,7 @@ func (f *fakeUIBridge) ConsoleClear()                                         {}
 func (f *fakeUIBridge) CreateArea(_ sdk.UIArea) error                         { return nil }
 func (f *fakeUIBridge) PatchUI(_ sdk.UIPatchParams) error                     { return nil }
 func (f *fakeUIBridge) RemoveArea(_ string)                                   {}
-func (f *fakeUIBridge) UpdateArea(_ sdk.UIUpdateAreaParams) error              { return nil }
+func (f *fakeUIBridge) UpdateArea(_ sdk.UIUpdateAreaParams) error             { return nil }
 
 var _ extension.UIBridge = (*fakeUIBridge)(nil)
 
