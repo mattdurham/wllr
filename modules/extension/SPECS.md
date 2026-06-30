@@ -79,10 +79,12 @@ Host.Close
 ## 4. DispatchEvent Contract
 
 `Host.DispatchEvent(ctx, evt)`:
+
 1. Publishes `evt` to the `EventBus` (`h.Bus.Publish`) — fire-and-forget.
 2. Iterates all loaded extensions in load order and calls `_on_event` on each that has subscribed to `evt.Type`.
 
 **Rules:**
+
 1. Only extensions whose `subscriptions[evt.Type] == true` receive the WASM call (guarded by `ext.subMu`).
 2. If `_alloc` returns 0 for the event buffer, `_on_event` is **NOT** called for that extension.
 3. If `_on_event` returns a WASM trap (error from wazero), it is logged at warn level and dispatch continues to the next extension. The error is **not** propagated to the caller.
@@ -90,6 +92,7 @@ Host.Close
 5. `DispatchEvent` itself only returns a non-nil error if `json.Marshal(evt)` fails; individual extension errors do not bubble up.
 
 **Memory flow during dispatch (per extension):**
+
 ```
 host calls _alloc(len(evtJSON))  →  evtPtr
 host writes evtJSON to evtPtr
@@ -181,6 +184,7 @@ The full set of dispatched methods is:
 | `MethodUICreateArea`          | `handleUICreateArea` (requires `ui`)             |
 | `MethodUIPatch`               | `handleUIPatch` (requires `ui`)                  |
 | `MethodUIRemoveArea`          | `handleUIRemoveArea` (requires `ui`)             |
+| `MethodUIUpdateArea`          | `handleUIUpdateArea` (requires `ui`)             |
 
 ---
 
@@ -202,7 +206,7 @@ The full set of dispatched methods is:
 
 **Invariant:** `PermExec` is required for `agent_spawn` (via `AgentBridge.Spawn`), `exec`, `read_file`, `write_file`, `http_post`, and `mcp_spawn`. If the extension is nil or lacks the required permission, the call returns a permission-denied error response.
 
-**Invariant:** `PermUI` is required for `ui_create_area`, `ui_patch`, and `ui_remove_area`. The `UIBridge` gains three methods for the declarative scene graph: `CreateArea(sdk.UIArea) error`, `PatchUI(sdk.UIPatchParams) error`, and `RemoveArea(string)`. `CreateArea` and `PatchUI` return an error (duplicate area, missing area/node) that the host forwards to the extension as an error response; `RemoveArea` is a no-op for a missing area.
+**Invariant:** `PermUI` is required for `ui_create_area`, `ui_patch`, `ui_remove_area`, and `ui_update_area`. The `UIBridge` exposes four scene-graph methods: `CreateArea(sdk.UIArea) error`, `PatchUI(sdk.UIPatchParams) error`, `RemoveArea(string)`, and `UpdateArea(sdk.UIUpdateAreaParams) error`. `CreateArea`, `PatchUI`, and `UpdateArea` return errors (duplicate area, missing area/node, unknown area) forwarded to the extension as an error response; `RemoveArea` is a no-op for a missing area.
 
 **Invariant:** `get_context_usage` (`MethodGetContextUsage`) requires no permission. It is a
 read-only observability call. When the `AgentBridge` is nil or not yet installed, the handler
@@ -218,17 +222,20 @@ context window has been configured — it must never panic or block.
 ## 8. Memory Protocol
 
 **Host → Extension (event delivery):**
+
 - Host calls `_alloc(n)` to request `n` bytes from the extension's allocator.
 - Host writes the event JSON to the returned pointer.
 - If `_alloc` returns 0, the write and `_on_event` call are skipped entirely.
 - After reading the response, the host calls `_free(evtPtr)` to release the input buffer.
 
 **Extension → Host (response):**
+
 - The extension allocates its response buffer via its own `_alloc` and stores the JSON there.
 - `_on_event` returns the pointer.
 - The host reads the JSON using `readNullTerminatedOrJSON` (see §9), then calls `_free(respPtr)`.
 
 **Host → Extension (host_call response):**
+
 - When `host_call` needs to return a response, it calls the extension's `_alloc` to get a buffer in WASM memory.
 - If `_alloc` returns 0, the response is silently omitted and `ErrOK` is still returned.
 - The host writes the JSON-encoded `sdk.HostCallResponse` to that buffer and stores the pointer/length into the caller-supplied `resp_ptr_ptr` / `resp_len_ptr` slots.
@@ -259,6 +266,7 @@ context window has been configured — it must never panic or block.
 ## 11. Host.mu Guards
 
 `Host.mu` is a `sync.RWMutex` that guards:
+
 - `h.extensions` slice (append in `Load`, nil + replacement in `Reload`, iteration in `DispatchEvent`, removal in `removeExtension`)
 - `h.registeredTools` map (read+write in `handleRegisterTool`, snapshot in `GetRegisteredTools` and `RegisteredTools`)
 - `h.toolOwners` map (written in `handleRegisterTool`, read in `RegisteredTools`)
@@ -297,10 +305,12 @@ Each `Extension` has its own `*Store`. Stores are not shared between extensions.
 ## 14. Permission Model
 
 Each `Extension` carries:
+
 - `trusted bool` — set to `true` for extensions loaded via `Host.LoadBytes(ctx, name, data, true)`.
 - `permissions map[sdk.Permission]bool` — for untrusted extensions, holds the declared permissions.
 
 `Extension.HasPermission(p Permission) bool`:
+
 - Returns `true` if `ext.trusted`.
 - Returns `ext.permissions[p]` otherwise.
 
@@ -331,6 +341,7 @@ Each `Extension` carries:
 4. On result: dispatches `EventAfterToolCall` with `AfterToolCallPayload{AgentID, ToolCallID, ToolName, Result, IsError}`, then calls `h.ui.AfterToolCall(toolCallID, toolName, result, isError)` via UIBridge (if set).
 
 **Invariants:**
+
 - Native tools are checked before WASM; a tool registered via `RegisterNativeTool` is never dispatched through WASM.
 - `EventBeforeToolCall` is **not** dispatched for native tools (no interception needed for trusted built-ins).
 - `EventAfterToolCall` **is** dispatched for both native and WASM tools so extensions that observe results work uniformly.
@@ -349,6 +360,7 @@ Each `Extension` carries:
 ## 16. WASM Filesystem and Environment Passthrough
 
 When instantiating a WASM module, the host configures:
+
 - `WithFSConfig(wazero.NewFSConfig().WithDirMount("/", "/"))` — mounts the full host filesystem at `/` read/write.
 - All host environment variables are passed through via `WithEnv` (iterated from `os.Environ()`).
 
@@ -386,6 +398,7 @@ When instantiating a WASM module, the host configures:
 **Invariant:** Any change to the host↔extension ABI — adding, removing, or modifying a `host_call` method, lifecycle event, event payload field, required WASM export, or permission type — must be reflected in `docs/extensions.md` in the same commit.
 
 Files that trigger this requirement when modified:
+
 - `extension/host.go` — `host_call` dispatch map and method implementations
 - `sdk/types.go` — event types, payload structs, permission constants
 - Any file that adds or removes constants under `sdk.Method*` or `sdk.Event*`

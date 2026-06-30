@@ -278,6 +278,8 @@ func (b *testUIBridge) RemoveArea(id string) {
 	b.removedAreas = append(b.removedAreas, id)
 }
 
+func (b *testUIBridge) UpdateArea(_ sdk.UIUpdateAreaParams) error { return nil }
+
 // testCapabilityProvider implements CapabilityProvider using optional callback fields.
 type testCapabilityProvider struct {
 	onExec       func(ctx context.Context, command, dir string, onLine func(string)) (string, error)
@@ -1870,6 +1872,14 @@ func TestHost_UIMethods_Dispatch(t *testing.T) {
 	if len(ui.removedAreas) != 1 || ui.removedAreas[0] != "chat" {
 		t.Fatalf("RemoveArea not called: %v", ui.removedAreas)
 	}
+
+	// ui_update_area must route to UIBridge.UpdateArea.
+	if resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+		Method: sdk.MethodUIUpdateArea,
+		Params: []byte(`{"id":"chat","max_height":"5"}`),
+	}); resp.Error != "" {
+		t.Fatalf("ui_update_area: %s", resp.Error)
+	}
 }
 
 func TestHost_UIMethods_PermissionDenied(t *testing.T) {
@@ -1886,11 +1896,22 @@ func TestHost_UIMethods_PermissionDenied(t *testing.T) {
 
 	h.SetUIBridge(&testUIBridge{})
 
-	resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
-		Method: sdk.MethodUIPatch,
-		Params: []byte(`{"area":"chat","ops":[]}`),
-	})
-	if resp.Error == "" {
-		t.Fatal("expected permission denied for ui_patch without ui permission")
+	for _, tc := range []struct {
+		name   string
+		method string
+		params string
+	}{
+		{"ui_patch", sdk.MethodUIPatch, `{"area":"chat","ops":[]}` },
+		{"ui_create_area", sdk.MethodUICreateArea, `{"area":{"id":"x","placement":"main"}}` },
+		{"ui_remove_area", sdk.MethodUIRemoveArea, `{"area":"x"}` },
+		{"ui_update_area", sdk.MethodUIUpdateArea, `{"id":"x","max_height":"5"}` },
+	} {
+		resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+			Method: tc.method,
+			Params: []byte(tc.params),
+		})
+		if resp.Error == "" {
+			t.Fatalf("%s: expected permission denied", tc.name)
+		}
 	}
 }

@@ -133,6 +133,10 @@ type UIBridge interface {
 	// RemoveArea removes a UI area and its scene graph. Removing a missing
 	// area is a no-op.
 	RemoveArea(id string)
+	// UpdateArea updates the sizing constraints and/or weight of an existing
+	// area. Omitted (empty/nil) fields leave current values unchanged.
+	// Returns an error if the area ID does not exist.
+	UpdateArea(params sdk.UIUpdateAreaParams) error
 }
 
 // MCPBridge is the interface extensions call to manage MCP server subprocesses.
