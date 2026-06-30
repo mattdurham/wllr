@@ -50,7 +50,9 @@ type Agent struct {
 	// finishTurn, which runs after isRunning transitions — no separate lock needed.
 	pendingShutdownFrom string
 
-	inbox []sdk.Message
+	// inbox is the agent's pending-message queue (see mailbox). It owns its own
+	// mutex; the agent does not lock it directly.
+	inbox mailbox
 
 	history []sdk.Message
 
@@ -80,9 +82,6 @@ type Agent struct {
 	systemPromptMu sync.RWMutex
 
 	lastSummaryMu sync.RWMutex
-
-	// inbox holds messages injected between turns via AppendInbox.
-	inboxMu sync.RWMutex
 
 	// cancelMu protects the cancel function for the current active turn.
 	cancelMu sync.Mutex
@@ -155,33 +154,20 @@ func (a *Agent) SetToolsFn(fn func() []fantasy.AgentTool) {
 // Thread-safe. Silently drops messages with empty content — empty content
 // causes Anthropic API rejection ("text content blocks must be non-empty").
 func (a *Agent) AppendInbox(msg sdk.Message) {
-	if strings.TrimSpace(msg.Content) == "" {
-		slog.Warn("agent: dropping inbox message with empty content", "agent", a.id, "role", msg.Role)
-		return
-	}
-	a.inboxMu.Lock()
-	a.inbox = append(a.inbox, msg)
-	a.inboxMu.Unlock()
+	a.inbox.append(a.id, msg)
 }
 
 // DrainInbox atomically returns all pending inbox messages and clears the inbox.
 // Thread-safe.
 func (a *Agent) DrainInbox() []sdk.Message {
-	a.inboxMu.Lock()
-	msgs := a.inbox
-	a.inbox = nil
-	a.inboxMu.Unlock()
-	return msgs
+	return a.inbox.drain()
 }
 
 // InboxLen returns the number of messages currently queued in the agent's inbox.
 // Thread-safe. Does not drain or modify the inbox. Useful for idle detection in
 // coordination tools without consuming pending messages.
 func (a *Agent) InboxLen() int {
-	a.inboxMu.RLock()
-	n := len(a.inbox)
-	a.inboxMu.RUnlock()
-	return n
+	return a.inbox.len()
 }
 
 // ModelName returns the model name used for context-window sizing.
@@ -519,16 +505,7 @@ func (a *Agent) executeTurn(
 	// Providers require strictly alternating user/assistant messages —
 	// leaving history ending with a lone user message causes "text content
 	// cannot be empty" on the next turn.
-	assistantText := collectedText
-	if assistantText == "" {
-		if childCtx.Err() != nil {
-			assistantText = "[response cancelled]"
-		} else {
-			// Tool-only turn: no text produced. Use a placeholder so the
-			// user message is never silently dropped from history.
-			assistantText = "[tool calls only]"
-		}
-	}
+	assistantText := placeholderForEmptyResponse(collectedText, childCtx.Err() != nil)
 	// Record this turn to history. When content is empty (drain-until-empty
 	// path), use the inbox messages instead so we never write an empty user
 	// message — Anthropic rejects empty text content blocks.
@@ -694,6 +671,33 @@ func (a *Agent) finishTurn(ctx context.Context, err error, ctxErr error, onDone 
 	if onDone != nil {
 		onDone(err)
 	}
+}
+
+// Placeholder assistant-message text used when a turn produces no streamed text.
+// Providers reject empty text content blocks and require strictly alternating
+// user/assistant messages, so the assistant turn is never recorded as an empty
+// string — one of these placeholders stands in instead.
+const (
+	// placeholderCancelled marks a turn whose context was cancelled before any
+	// text was produced.
+	placeholderCancelled = "[response cancelled]"
+	// placeholderToolOnly marks a turn that did real work via tool calls but
+	// emitted no assistant text.
+	placeholderToolOnly = "[tool calls only]"
+)
+
+// placeholderForEmptyResponse returns collected unchanged when it is non-empty,
+// otherwise the appropriate placeholder so the assistant turn is never recorded
+// as an empty string (see the placeholder* constants). cancelled selects the
+// cancellation placeholder over the tool-only one.
+func placeholderForEmptyResponse(collected string, cancelled bool) string {
+	if collected != "" {
+		return collected
+	}
+	if cancelled {
+		return placeholderCancelled
+	}
+	return placeholderToolOnly
 }
 
 // allControlMessages reports whether every message is a Go-level control
