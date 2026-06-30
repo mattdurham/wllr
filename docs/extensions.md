@@ -821,6 +821,16 @@ The SDK helper `OnInterceptToolCall(fn)` wraps this: `fn(agentID, toolName,
 input)` returns `(newInput, block, reason)` — a non-nil `newInput` rewrites the
 call, `block=true` refuses it with `reason`.
 
+**`after_tool_call` is a transform chain.** An interceptor may rewrite or redact
+a tool's `result` before the model sees it (e.g. strip secrets from command
+output) or block it. This is the output-side partner of `before_tool_call` and
+applies to both WASM and native tools. A block replaces the result with the
+reason and marks it an error.
+
+The SDK helper `OnInterceptToolResult(fn)` wraps this: `fn(agentID, toolName,
+result, isError)` returns `(newResult, newIsError, block, reason)` — a non-empty
+`newResult` rewrites the output, `block=true` redacts it with `reason`.
+
 **`before_provider_request` is a transform chain.** An interceptor may redact
 the messages about to be sent to the LLM (e.g. strip PII / API keys), reroute
 the model (e.g. a cheap local model vs a frontier model), or block the request.

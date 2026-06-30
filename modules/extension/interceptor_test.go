@@ -89,7 +89,7 @@ func TestRunBeforeToolCall_NoInterceptorsKeepsInput(t *testing.T) {
 }
 
 // TestExecuteTool_NativeToolReceivesInput is a baseline: with no interceptors a
-// native tool receives the original input unchanged.
+// native tool receives the original input unchanged and its result is unchanged.
 func TestExecuteTool_NativeToolReceivesInput(t *testing.T) {
 	h := NewHost(nil)
 	ctx := context.Background()
@@ -110,5 +110,18 @@ func TestExecuteTool_NativeToolReceivesInput(t *testing.T) {
 	}
 	if seen != `{"command":"ls"}` {
 		t.Errorf("native tool input: got %s", seen)
+	}
+}
+
+// TestRunAfterToolCall_NoInterceptorsKeepsResult verifies the output-side chain
+// is a passthrough with no interceptors.
+func TestRunAfterToolCall_NoInterceptorsKeepsResult(t *testing.T) {
+	h := NewHost(nil)
+	ctx := context.Background()
+	defer func() { _ = h.Close(ctx) }()
+
+	res, isErr := h.runAfterToolCall(ctx, "main", "tc-1", "exec", "raw output", false)
+	if res != "raw output" || isErr {
+		t.Errorf("passthrough failed: got (%q, %v)", res, isErr)
 	}
 }
