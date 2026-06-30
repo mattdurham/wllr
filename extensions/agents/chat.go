@@ -25,6 +25,7 @@ var (
 func initChat() {
 	OnBeforeAgentStart(onChatUserPrompt)
 	OnToken(onChatToken)
+	OnNotify(onChatNotify)
 }
 
 // onChatSessionStart enables the WASM transcript when WLLR_WASM_CHAT=1 and
@@ -78,4 +79,19 @@ func onChatToken(agentID, text string) {
 		return
 	}
 	UIPatch(chatArea, OpAppendText(chatAsstNode, text))
+}
+
+// onChatNotify renders a system notification as an italic line in the transcript.
+func onChatNotify(text string) {
+	if !chatEnabled {
+		return
+	}
+	chatSeq++
+	node := UINode{
+		ID:    fmt.Sprintf("n%d", chatSeq),
+		Type:  "text",
+		Text:  "» " + text,
+		Props: &UIProps{Fg: "muted", Italic: true, Width: "fill", Wrap: true},
+	}
+	UIPatch(chatArea, OpInsert("chat-root", node))
 }
