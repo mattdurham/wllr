@@ -32,6 +32,18 @@
 | `TestSpawner_Spawn_AgentIdentitySuffix` | System prompt gets identity suffix | Spawn with base prompt | Agent spawned (suffix verified via pool.Get) |
 | `TestSpawner_Spawn_UnknownModel` | Unknown model returns error | Non-existent model name | Error returned |
 
+### deliver_test.go
+
+| Test | Scenario | Setup | Assertions |
+|------|----------|-------|------------|
+| `TestDeliver_WakesIdleAgent` | `Deliver(wake=true)` queues AND processes | Spawn idle agent, Deliver | Delivered message appears in history (turn ran) |
+| `TestDeliver_NoWakeQueuesOnly` | `Deliver(wake=false)` queues without a turn | Spawn agent, Deliver wake=false | onDone never fires; `InboxLen()==1` |
+| `TestDeliver_EmptyContentRejected` | Empty content guard | Deliver whitespace content | Error returned |
+| `TestDeliver_UnknownAgent` | Unknown ID | Deliver to ghost ID | `ErrAgentNotFound` |
+| `TestDeliver_WakeNotifierFires` | Wake notifier callback | SetWakeNotifier, Deliver wake=true | Notifier called once with the agent ID |
+| `TestIdleNotification_WakesCreator` | Sub-agent idle notifies creator | Worker with creatorID=main, run a turn | Creator woken; creator history contains `is idle` + worker ID |
+| `TestIdleNotification_TopLevelAgentDoesNotSelfNotify` | main never self-notifies | Spawn main (no creator), run a turn | main inbox empty after turn (no loop) |
+
 ## Missing / Recommended Tests
 
 | Priority | Test | Scenario | Assertions |

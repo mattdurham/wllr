@@ -171,6 +171,10 @@ const (
 	MethodAgentSpawn       = "agent_spawn"
 	MethodAgentClose       = "agent_close"
 	MethodAgentSendMessage = "agent_send_message"
+	// MethodAgentDeliver appends a message to an agent's inbox and, when wake is
+	// true (default), ensures the agent processes it — the atomic counterpart to
+	// an agent_send_message + agent_run pair. Params: {id, message, type?, wake?}.
+	MethodAgentDeliver = "agent_deliver"
 	// MethodAgentRun triggers an immediate turn for an existing agent.
 	MethodAgentRun        = "agent_run"
 	MethodAgentList       = "agent_list"

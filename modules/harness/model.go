@@ -139,7 +139,6 @@ type Model struct {
 
 	console ConsoleView
 
-
 	chat ChatView
 
 	picker PickerView
@@ -264,6 +263,13 @@ func (m *Model) SetProgram(p *tea.Program) {
 				payload, _ := json.Marshal(sdk.ContextUsagePayload{Usage: cu, Compacted: compacted})
 				evt := sdk.Event{Type: sdk.EventContextUsage, Payload: payload}
 				_, _ = extHostRef.DispatchEvent(context.Background(), evt)
+			})
+			// Drive the TUI streaming indicator when a Deliver (e.g. a sub-agent's
+			// idle notification or result) wakes the main agent off the bubbletea loop.
+			pool.SetWakeNotifier(func(id string) {
+				if id == mainID {
+					p.Send(agentWakeupMsg{})
+				}
 			})
 		}
 	}

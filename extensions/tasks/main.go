@@ -220,7 +220,11 @@ func handleTasksUpdate(p toolPayload) (string, bool) {
 	taskList.mu.Unlock()
 
 	if shouldNotify(oldStatus, newStatus) && ownerAgentID != "" {
-		resp := agentCall("agent_send_message", map[string]string{
+		// agent_deliver queues the TASK_DONE notification AND wakes the owner so it
+		// reacts immediately. The prior agent_send_message-only path left the
+		// notification sitting in the owner's inbox until it happened to run for
+		// some other reason — a silent stall in the task-coordination pattern.
+		resp := agentCall("agent_deliver", map[string]string{
 			"id":      ownerAgentID,
 			"message": fmt.Sprintf("TASK_DONE: %s %s", taskID, taskTitle),
 		})
@@ -229,7 +233,7 @@ func handleTasksUpdate(p toolPayload) (string, bool) {
 				Error string `json:"error"`
 			}
 			if jsonErr := json.Unmarshal([]byte(resp), &errResp); jsonErr == nil && errResp.Error != "" {
-				fmt.Printf("tasks: agent_send_message warning: %s\n", errResp.Error)
+				fmt.Printf("tasks: agent_deliver warning: %s\n", errResp.Error)
 			}
 		}
 	}

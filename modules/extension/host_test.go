@@ -30,6 +30,7 @@ type testAgentBridge struct {
 	onSpawn       func(ctx context.Context, req SpawnRequest) error
 	onClose       func(id string) error
 	onSendMessage func(id string, msg sdk.Message) error
+	onDeliver     func(id string, msg sdk.Message, wake bool) error
 	onRun         func(id string) error
 	onList        func() ([]AgentInfo, error)
 	onTokenCount  func() int64
@@ -53,6 +54,13 @@ func (b *testAgentBridge) Close(id string) error {
 func (b *testAgentBridge) SendMessage(id string, msg sdk.Message) error {
 	if b.onSendMessage != nil {
 		return b.onSendMessage(id, msg)
+	}
+	return nil
+}
+
+func (b *testAgentBridge) Deliver(id string, msg sdk.Message, wake bool) error {
+	if b.onDeliver != nil {
+		return b.onDeliver(id, msg, wake)
 	}
 	return nil
 }
@@ -1901,10 +1909,10 @@ func TestHost_UIMethods_PermissionDenied(t *testing.T) {
 		method string
 		params string
 	}{
-		{"ui_patch", sdk.MethodUIPatch, `{"area":"chat","ops":[]}` },
-		{"ui_create_area", sdk.MethodUICreateArea, `{"area":{"id":"x","placement":"main"}}` },
-		{"ui_remove_area", sdk.MethodUIRemoveArea, `{"area":"x"}` },
-		{"ui_update_area", sdk.MethodUIUpdateArea, `{"id":"x","max_height":"5"}` },
+		{"ui_patch", sdk.MethodUIPatch, `{"area":"chat","ops":[]}`},
+		{"ui_create_area", sdk.MethodUICreateArea, `{"area":{"id":"x","placement":"main"}}`},
+		{"ui_remove_area", sdk.MethodUIRemoveArea, `{"area":"x"}`},
+		{"ui_update_area", sdk.MethodUIUpdateArea, `{"id":"x","max_height":"5"}`},
 	} {
 		resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
 			Method: tc.method,

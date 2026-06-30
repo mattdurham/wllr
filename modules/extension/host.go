@@ -428,6 +428,9 @@ func (h *Host) buildDispatch() map[string]func(ctx context.Context, ext *Extensi
 		sdk.MethodAgentSendMessage: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleAgentSendMessage(req)
 		},
+		sdk.MethodAgentDeliver: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleAgentDeliver(req)
+		},
 		sdk.MethodAgentRun: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleAgentRun(req)
 		},
@@ -984,6 +987,40 @@ func (h *Host) handleAgentSendMessage(req sdk.HostCallRequest) sdk.HostCallRespo
 		Type:    sdk.MessageType(params.Type),
 	}
 	if err := h.agentBridge().SendMessage(params.ID, msg); err != nil {
+		return sdk.HostCallResponse{Error: err.Error()}
+	}
+	return sdk.HostCallResponse{}
+}
+
+func (h *Host) handleAgentDeliver(req sdk.HostCallRequest) sdk.HostCallResponse {
+	if h.agentBridge() == nil {
+		return sdk.HostCallResponse{Error: "agent_deliver: not supported by host"}
+	}
+	var params struct {
+		ID      string `json:"id"`
+		Message string `json:"message"`
+		Type    string `json:"type,omitempty"` // optional: "system", "steering", or "" (normal)
+		Wake    *bool  `json:"wake,omitempty"` // optional: defaults to true
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return sdk.HostCallResponse{Error: fmt.Sprintf("agent_deliver: %v", err)}
+	}
+	switch params.Type {
+	case "", "normal", "steering", "system":
+		// valid message types
+	default:
+		return sdk.HostCallResponse{Error: "agent_deliver: unknown message type: " + params.Type}
+	}
+	wake := true
+	if params.Wake != nil {
+		wake = *params.Wake
+	}
+	msg := sdk.Message{
+		Role:    sdk.RoleUser,
+		Content: params.Message,
+		Type:    sdk.MessageType(params.Type),
+	}
+	if err := h.agentBridge().Deliver(params.ID, msg, wake); err != nil {
 		return sdk.HostCallResponse{Error: err.Error()}
 	}
 	return sdk.HostCallResponse{}
