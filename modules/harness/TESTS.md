@@ -26,18 +26,14 @@
 
 ---
 
-### chat_test.go
+### ChatView (chat_test.go removed)
 
-| Test | Scenario | Setup | Assertions |
-|---|---|---|---|
-| `TestChatView_AppendToken` | Tokens accumulate in `current` | `NewChatView(80, 20)` | `c.current == "hello world"` after two appends |
-| `TestChatView_FinalizeMessage_SetsRole` | FinalizeMessage seals message with RoleAssistant | Token appended | 1 message; role == `RoleAssistant`; content matches; `current == ""` |
-| `TestChatView_FinalizeMessage_Empty_NoOp` | FinalizeMessage on empty current is no-op | No tokens appended | `len(messages) == 0` |
-| `TestChatView_AddUserMessage` | AddUserMessage creates user-role message | `NewChatView(80, 20)` | 1 message; role == `RoleUser`; content matches |
-| `TestChatView_MessageOrder` | Messages appear in insertion order | user then assistant | `messages[0].role == RoleUser`; `messages[1].role == RoleAssistant` |
-| `TestChatView_Clear` | Clear resets messages and current | user + in-progress token | `len(messages) == 0`; `current == ""` |
-| `TestChatView_View_NonEmpty` | View does not panic | messages + in-progress token | No panic |
-| `TestChatView_RenderUserMessage_ContainsContent` | Viewport content includes user message text | `AddUserMessage("unique-test-content")` | `vp.View()` contains the unique string |
+The built-in `ChatView` message renderer was removed (the transcript is produced
+by a WASM extension via the scene graph). Its rendering tests
+(`chat_test.go`, `chat_render_test.go`) were deleted. Transcript behavior is now
+covered end-to-end by `test/wasmchat`; the harness-side viewport/scroll, tool
+log, and reset behavior are covered by `wasmchat_test.go`, `tui_test.go`, and
+`interactions_test.go`.
 
 ---
 

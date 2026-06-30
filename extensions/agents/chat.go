@@ -28,12 +28,10 @@ func initChat() {
 	OnNotify(onChatNotify)
 }
 
-// onChatSessionStart enables the WASM transcript (the default) and creates the
-// chat area with an empty vstack root. Set WLLR_WASM_CHAT=0 to opt out.
+// onChatSessionStart enables the WASM transcript and creates the chat area with
+// an empty vstack root. The harness renders this area as the main transcript;
+// there is no built-in fallback renderer.
 func onChatSessionStart() {
-	if v, _ := GetEnv("WLLR_WASM_CHAT"); v == "0" {
-		return
-	}
 	chatEnabled = true
 	UICreateArea(chatArea, "main", 0)
 	UIPatch(chatArea, OpSetRoot(UIVStack("chat-root")))
