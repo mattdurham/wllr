@@ -61,9 +61,16 @@ func _sdkFree(ptr int32) {
 
 //go:wasmexport _init
 func _sdkInit() int32 {
-	// Subscribe to every event that has a registered handler.
+	// Subscribe to every event that has a registered handler or interceptor.
+	subscribed := map[string]bool{}
 	for evt := range _sdkHandlers {
 		_sdkCall("subscribe", map[string]string{"event": evt})
+		subscribed[evt] = true
+	}
+	for evt := range _sdkInterceptors {
+		if !subscribed[evt] {
+			_sdkCall("subscribe", map[string]string{"event": evt})
+		}
 	}
 	// Run deferred init hooks (RegisterTool, RegisterCommand calls).
 	for _, fn := range _sdkInitHooks {
@@ -82,21 +89,61 @@ func _sdkOnEvent(ptr, length int32) int32 {
 	if err := json.Unmarshal(data, &evt); err != nil {
 		return 0
 	}
+	// Observe handlers run first (fire-and-forget).
 	for _, fn := range _sdkHandlers[evt.Type] {
 		fn(evt.Payload)
+	}
+	// Interceptors run next; the first non-nil result is returned to the host as
+	// the EventResponse (transform via Payload, or veto via Block).
+	for _, fn := range _sdkInterceptors[evt.Type] {
+		if resp := fn(evt.Payload); resp != nil {
+			return _sdkReturnResponse(resp)
+		}
 	}
 	return 0
 }
 
+// _sdkReturnResponse marshals an EventResponse, copies it into a pinned buffer,
+// and returns the pointer for the host to read and free. Returns 0 on error.
+func _sdkReturnResponse(resp *_sdkEventResponse) int32 {
+	b, err := json.Marshal(resp)
+	if err != nil {
+		return 0
+	}
+	ptr := _sdkAlloc(int32(len(b)))
+	if ptr == 0 {
+		return 0
+	}
+	copy(_sdkPinned[uintptr(ptr)], b)
+	return ptr
+}
+
 // ─── Internal registry ────────────────────────────────────────────────────────
 
+// _sdkEventResponse mirrors sdk.EventResponse on the wire. An interceptor
+// returns one of: nil (observe), {Payload} (transform), or {Block, Error} (veto).
+type _sdkEventResponse struct {
+	Error   string          `json:"error,omitempty"`
+	Payload json.RawMessage `json:"payload,omitempty"`
+	Block   bool            `json:"block,omitempty"`
+}
+
 var (
-	_sdkHandlers  = map[string][]func(json.RawMessage){}
-	_sdkInitHooks []func()
+	_sdkHandlers     = map[string][]func(json.RawMessage){}
+	_sdkInterceptors = map[string][]func(json.RawMessage) *_sdkEventResponse{}
+	_sdkInitHooks    []func()
 )
 
 func _sdkOn(event string, fn func(json.RawMessage)) {
 	_sdkHandlers[event] = append(_sdkHandlers[event], fn)
+}
+
+// _sdkOnIntercept registers a transform/veto interceptor for an event. The
+// handler returns nil to observe-only, or an *_sdkEventResponse to transform the
+// payload or block the interaction. The first non-nil result from any
+// interceptor on the event is returned to the host.
+func _sdkOnIntercept(event string, fn func(json.RawMessage) *_sdkEventResponse) {
+	_sdkInterceptors[event] = append(_sdkInterceptors[event], fn)
 }
 
 // ─── Tool and command registration ───────────────────────────────────────────
@@ -196,6 +243,51 @@ func OnMessageEnd(fn func(role, content string)) {
 // Prefer OnToolCall for most cases.
 func OnBeforeToolCall(fn func(payload json.RawMessage)) {
 	_sdkOn("before_tool_call", fn)
+}
+
+// OnInterceptToolCall registers a transform/veto interceptor on tool calls.
+// For each tool call the handler receives the agent ID, tool name, and current
+// input, and returns:
+//
+//   - (nil, false, "")          — observe only; the call proceeds unchanged.
+//   - (newInput, false, "")     — rewrite the tool input (e.g. a security layer
+//     sanitising a bash command); the call proceeds with newInput.
+//   - (nil, true, "reason")     — block the call; the tool returns an error
+//     result carrying reason, and the implementing tool never runs.
+//
+// Interceptors run in extension-priority order; each sees the input as
+// transformed by earlier interceptors. The first block wins.
+func OnInterceptToolCall(fn func(agentID, toolName string, input json.RawMessage) (newInput json.RawMessage, block bool, reason string)) {
+	_sdkOnIntercept("before_tool_call", func(payload json.RawMessage) *_sdkEventResponse {
+		var p struct {
+			AgentID    string          `json:"agent_id"`
+			ToolCallID string          `json:"tool_call_id"`
+			ToolName   string          `json:"tool_name"`
+			Input      json.RawMessage `json:"input"`
+		}
+		if err := json.Unmarshal(payload, &p); err != nil {
+			return nil
+		}
+		newInput, block, reason := fn(p.AgentID, p.ToolName, p.Input)
+		if block {
+			return &_sdkEventResponse{Block: true, Error: reason}
+		}
+		if len(newInput) == 0 {
+			return nil // observe-only
+		}
+		// Transform: return the full payload with the rewritten input so the host
+		// threads it to the implementing tool.
+		out, err := json.Marshal(map[string]any{
+			"agent_id":     p.AgentID,
+			"tool_call_id": p.ToolCallID,
+			"tool_name":    p.ToolName,
+			"input":        newInput,
+		})
+		if err != nil {
+			return nil
+		}
+		return &_sdkEventResponse{Payload: out}
+	})
 }
 
 // OnAfterToolCall registers a handler called after a tool call completes.
