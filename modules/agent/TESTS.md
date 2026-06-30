@@ -41,8 +41,12 @@
 | `TestDeliver_EmptyContentRejected` | Empty content guard | Deliver whitespace content | Error returned |
 | `TestDeliver_UnknownAgent` | Unknown ID | Deliver to ghost ID | `ErrAgentNotFound` |
 | `TestDeliver_WakeNotifierFires` | Wake notifier callback | SetWakeNotifier, Deliver wake=true | Notifier called once with the agent ID |
+| `TestDeliver_WhileRunning_DrainsAfterTurn` | Deliver lands mid-turn (gated LM) | Start gated turn, Deliver while running | Queued not started; drained after turn; both messages in history; single onDone |
+| `TestDeliver_ShutdownRequestToIdleAgent` | Regression: shutdown to idle agent | Deliver shutdown_request to idle worker | Worker self-closes; creator gets AGENT_SHUTDOWN, no idle notice; clean (no error) |
 | `TestIdleNotification_WakesCreator` | Sub-agent idle notifies creator | Worker with creatorID=main, run a turn | Creator woken; creator history contains `is idle` + worker ID |
 | `TestIdleNotification_TopLevelAgentDoesNotSelfNotify` | main never self-notifies | Spawn main (no creator), run a turn | main inbox empty after turn (no loop) |
+| `TestIdleNotification_SuppressedDuringShutdown` | Shutdown path suppresses idle notice | Deliver shutdown_request, run worker | Creator gets exactly 1 AGENT_SHUTDOWN, 0 idle notices |
+| `TestIdleNotification_MultipleWorkersCoalesce` | N workers idle-notify shared creator | 5 workers each run + go idle | Each worker's idle notice in creator history exactly once (no loss/dup) |
 
 ## Missing / Recommended Tests
 

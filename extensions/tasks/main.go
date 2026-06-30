@@ -298,44 +298,19 @@ func handleTasksClaim(p toolPayload) (string, bool) {
 	// Hold the list lock across the entire find-and-claim so two concurrent
 	// claims can never select the same task. WASM is single-threaded per module
 	// instance, but agent turns dispatch into the same instance serially; the
-	// lock makes the check-then-set atomic regardless.
+	// lock makes the check-then-set atomic regardless. The find-and-claim logic
+	// lives in claimNext (untagged, unit-tested in claim_test.go).
 	taskList.mu.Lock()
-	defer taskList.mu.Unlock()
+	claimed := claimNext(taskList, input.AgentID)
+	taskList.mu.Unlock()
 
-	// Completed-task set for dependency checks.
-	completed := make(map[string]bool, len(taskList.Tasks))
-	for id, t := range taskList.Tasks {
-		if t.Status == "completed" {
-			completed[id] = true
-		}
+	if claimed == nil {
+		// No claimable task. Return an explicit null so callers can distinguish
+		// "nothing to do" from an error.
+		return `{"task":null}`, false
 	}
-
-	// Deterministic order: claim the lowest-numbered eligible task. Map iteration
-	// is randomised, so sort the IDs first for predictable claiming.
-	ids := make([]string, 0, len(taskList.Tasks))
-	for id := range taskList.Tasks {
-		ids = append(ids, id)
-	}
-	sortTaskIDs(ids)
-
-	for _, id := range ids {
-		task := taskList.Tasks[id]
-		if task.Status != "pending" {
-			continue
-		}
-		if !dependenciesSatisfied(task, completed) {
-			continue
-		}
-		// Claim it.
-		task.Status = "in_progress"
-		task.Assignee = input.AgentID
-		out, _ := json.Marshal(map[string]*Task{"task": task})
-		return string(out), false
-	}
-
-	// No claimable task. Return an explicit null so callers can distinguish
-	// "nothing to do" from an error.
-	return `{"task":null}`, false
+	out, _ := json.Marshal(map[string]*Task{"task": claimed})
+	return string(out), false
 }
 
 func handleTasksGet(p toolPayload) (string, bool) {
