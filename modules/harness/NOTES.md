@@ -387,3 +387,15 @@ a separate `m.history` copy.
 **Rationale:** The statusline scene design requires areas that can declare their height and width bounds so the harness compositor can subtract the correct space from the chat viewport without each extension managing its own padding/truncation. Placing the logic in `SceneRenderer` rather than in `Model.View` keeps it testable independently of the bubbletea lifecycle and reusable for future placement zones (sidebar, overlay). `UpdateArea` follows the same partial-update pattern used for `UIPatchOp.Update` on nodes: empty string fields are ignored, allowing callers to change a single constraint without serializing the rest.
 
 **Consequence:** `Model` will call `ConstrainWidth` before `Render` and `ConstrainHeight` after counting newlines in the rendered output (step 4 of the statusline plan). The `harnessUIBridge` will forward `ui_update_area` host calls to `SceneRenderer.UpdateArea` (step 3).
+
+---
+
+## StatusBar removed; statusline is now a scene area (step 4 of statusline scene)
+
+*Added: 2026-06-30*
+
+**Decision:** Remove the `StatusBar` struct from `Model`. All status state moves to `liveState.statuses` (accessed via the new `setStatus`/`getStatus` helpers, which are mutex-guarded like the other `liveState` fields). `renderInputBox` now renders a plain `╭──────╮` top border with no embedded status text. `statusBarHeight = 0` constant removed; replaced by `statusLineHeight()` which dynamically measures the rendered height of all `UIAreaStatus` scene areas. The `statusline` area (`statuslineAreaID`) is pre-created in `New()`. `StatusUpdateMsg` routes to `liveState.setStatus` instead of `StatusBar.Update`.
+
+**Rationale:** This is step 4 of the statusline scene design (docs/plans/2026-06-30-statusline-scene-design.md). Removing `StatusBar` eliminates a parallel state path and commits the harness to the scene-graph-only model. The `liveState` struct already held a mirrored subset of this data for the `get_status_info` host call; consolidating there removes the duplication. The `StatusBar` file (`statusbar.go`) is retained for now because `StatusBar.StatusInfo()` and `StatusBar.defaultLine()` are referenced by `harnessUIBridge.GetStatusInfo()` — this will be cleaned up when the `statusline` extension is rewritten in step 5.
+
+**Consequence:** All test assertions on `m.statusBar.statuses[...]` and `m.statusBar.modelName` are migrated to `m.live.getStatus(...)` and `m.live.model`. The `streamTickMsg` handler no longer updates a status entry — the animated working indicator is now produced entirely by the `statusline` WASM extension responding to `EventToken`/`EventAfterProviderResponse`.
