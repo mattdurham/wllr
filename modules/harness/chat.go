@@ -204,6 +204,12 @@ func (c *ChatView) invalidateHistory() {
 // The rendered historical messages are cached; only the streaming current
 // message is appended on every token, avoiding a full O(n) rebuild each time.
 func (c *ChatView) refreshContent() {
+	if c.externalMode {
+		// Content is owned by an external producer (WASM scene area). The
+		// internal message path is bypassed; SetExternalContent drives updates.
+		c.vp.SetContent(c.externalContent)
+		return
+	}
 	if c.histDirty {
 		// Find the start of the most recent user turn and the last tool call.
 		recentStart := 0

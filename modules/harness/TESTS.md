@@ -139,3 +139,12 @@ The following scenarios are not currently covered and should be added:
 |---|---|---|---|
 | High | `TestConsoleView_Append_LargeCount` | Append 300 lines without panic; ring buffer wraps correctly | Ring stable at 200 entries |
 | Medium | `TestModel_View_ConsoleVisible_RendersFeed` | When `consoleVisible`, `View()` contains console header | View output contains "─ console" |
+
+## WASM-Driven Chat (wasmchat_test.go)
+
+| Test | Scenario | Assertion |
+|------|----------|-----------|
+| `TestRefreshWASMChat_FeedsSceneIntoViewport` | `wasmChat=true`, scene has a `chat` area | `ChatView` enters external mode; viewport content includes the scene text |
+| `TestRefreshWASMChat_DisabledIsNoOp` | `wasmChat=false` | `ChatView` does not enter external mode |
+| `TestRefreshWASMChat_NoAreaIsNoOp` | `wasmChat=true` but no `chat` area | `ChatView` does not enter external mode |
+| `TestRenderScenes_SkipsChatAreaInWASMMode` | `wasmChat=true`, `chat` area present | `renderScenes` output excludes the chat transcript (rendered in viewport instead) |
