@@ -449,16 +449,24 @@ Returns the current set of registered tools from `extHost.RegisteredTools()` as 
 |--------|----------|
 | `CreateArea(sdk.UIArea) error` | Registers a named area; errors on empty or duplicate ID. |
 | `RemoveArea(id string)` | Deletes an area and its tree; no-op if missing. |
+| `UpdateArea(sdk.UIUpdateAreaParams) error` | Updates constraints/weight of an existing area; errors if ID not found. Omitted fields leave current values unchanged. |
 | `ApplyPatch(sdk.UIPatchParams) error` | Applies an op batch atomically to an area; rejects the whole batch (live tree unchanged) if the area or any referenced node is missing. |
 | `Render(areaID string, width int) string` | Renders an area's tree to a string via lipgloss; `""` for unknown/empty areas. |
 | `AreasByPlacement(p) []string` | Area IDs with a placement, in creation order. |
+| `ConstrainWidth(id string, termWidth int) int` | Returns the render width clamped to the area's MinWidth/MaxWidth constraints resolved against `termWidth`. Passthrough for unknown areas or absent constraints. |
+| `ConstrainHeight(id string, lines int, termHeight int) int` | Returns `lines` clamped to the area's MinHeight/MaxHeight constraints resolved against `termHeight`. Passthrough for unknown areas or absent constraints. |
+
+**Constraint resolution:** values accept `"N"` (absolute cells/lines) or `"N%"` (percentage of the terminal dimension). Empty string is unconstrained. Percentages are integer division: `termDim * N / 100`.
 
 **Invariants:**
+
 - `ApplyPatch` validates against a working clone; a mid-batch failure leaves the live tree untouched (atomicity).
 - `UIOpAppendText` targets only `UINodeText` nodes; appending to a non-text node errors.
 - An unknown `UINodeType` renders as an empty box (forward-compatibility).
 - Colour props resolve through `themeColor` (named tokens → hex); unknown non-hex tokens yield no colour, so the host keeps theming control.
 - The `harnessUIBridge` shares the `Model.scene` pointer, mutates it synchronously off the bubbletea loop (the renderer is mutex-guarded), and sends `sceneDirtyMsg{}` to force a re-render. `sceneDirtyMsg` is a no-op in `Update` other than triggering `View`.
+- `ConstrainWidth` and `ConstrainHeight` never return negative values.
+- `UpdateArea` with an empty string for a constraint field leaves that constraint unchanged (does not clear it). To clear a constraint, use `"0%"` or remove the area and re-create it.
 - P1 `View` integration is minimal: `renderScenes` stacks all areas below the chat regardless of placement. Later phases composite by placement and move the chat transcript into a `main` scene area.
 
 ---
@@ -474,6 +482,7 @@ The main chat transcript content is produced by a WASM extension (the bundled `a
 - `renderScenes` always skips the `chat` area (it is rendered inside the viewport, not stacked below it).
 
 **Invariants:**
+
 - The viewport (scroll, size, `GotoBottom`) is harness-owned; input/scroll never route to WASM.
 - If no extension creates the `chat` area (e.g. the `agents` extension is not loaded), `refreshWASMChat` no-ops and the viewport is empty — there is no fallback renderer.
 - `/clear` and history-restore reset the transcript area to empty; restored history remains in agent context but is not re-rendered into the transcript.

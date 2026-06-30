@@ -375,3 +375,15 @@ a separate `m.history` copy.
 **Rationale:** With user prompts, streamed text, and notifications all routed through WASM (EventToken/EventNotify) and the WASM transcript at parity, the dual rendering path was redundant maintenance surface. Removing it commits fully to "the transcript is produced by a WASM component; the harness is a bridge that owns only the viewport." The previous commit retained the legacy path as a safety net; this removes it (restorable from history).
 
 **Consequence:** If the `agents` extension is not loaded, the chat viewport is empty (no fallback). `/clear` and history-restore reset the transcript area to empty rather than re-rendering messages (restored history remains in agent context). The skill `display` echo (compact label instead of raw XML) is no longer applied to the transcript, since `before_agent_start` carries the raw prompt. The per-turn tool log is retained on `ChatView` for `/tools`, cleared at turn start. Rendering tests that asserted on `ChatView` internals were removed; transcript behavior is covered end-to-end by `test/wasmchat`.
+
+---
+
+## SceneRenderer gains UpdateArea, ConstrainWidth, ConstrainHeight (step 2 of statusline scene)
+
+*Added: 2026-06-30*
+
+**Decision:** `sceneArea` struct gains four constraint fields (`minHeight`, `maxHeight`, `minWidth`, `maxWidth`), populated from the matching `UIArea` fields at `CreateArea` time and modifiable via the new `UpdateArea(UIUpdateAreaParams) error` method. `ConstrainWidth` and `ConstrainHeight` resolve constraint strings against the current terminal dimension and clamp the render width / line count respectively. A package-private `resolveConstraint` helper parses `"N"` (absolute) and `"N%"` (percent) strings.
+
+**Rationale:** The statusline scene design requires areas that can declare their height and width bounds so the harness compositor can subtract the correct space from the chat viewport without each extension managing its own padding/truncation. Placing the logic in `SceneRenderer` rather than in `Model.View` keeps it testable independently of the bubbletea lifecycle and reusable for future placement zones (sidebar, overlay). `UpdateArea` follows the same partial-update pattern used for `UIPatchOp.Update` on nodes: empty string fields are ignored, allowing callers to change a single constraint without serializing the rest.
+
+**Consequence:** `Model` will call `ConstrainWidth` before `Render` and `ConstrainHeight` after counting newlines in the rendered output (step 4 of the statusline plan). The `harnessUIBridge` will forward `ui_update_area` host calls to `SceneRenderer.UpdateArea` (step 3).
