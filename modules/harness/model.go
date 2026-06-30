@@ -68,6 +68,26 @@ func (s *liveState) setTokens(n int) {
 	s.mu.Unlock()
 }
 
+func (s *liveState) setStatus(key, value string) {
+	s.mu.Lock()
+	if s.statuses == nil {
+		s.statuses = make(map[string]string)
+	}
+	if value == "" {
+		delete(s.statuses, key)
+	} else {
+		s.statuses[key] = value
+	}
+	s.mu.Unlock()
+}
+
+func (s *liveState) getStatus(key string) string {
+	s.mu.RLock()
+	v := s.statuses[key]
+	s.mu.RUnlock()
+	return v
+}
+
 // Model is the root bubbletea v2 model for the bob TUI.
 type Model struct {
 	streamStart time.Time
@@ -119,7 +139,6 @@ type Model struct {
 
 	console ConsoleView
 
-	statusBar StatusBar
 
 	chat ChatView
 
@@ -140,14 +159,15 @@ type Model struct {
 // (still harness-owned) scrollable chat viewport.
 const wasmChatAreaID = "chat"
 
-// streamStatusError is the status-bar "stream" value shown when a turn fails.
+// statuslineAreaID is the scene area ID the statusline extension uses to drive
+// the standalone status row rendered above the input box.
+const statuslineAreaID = "statusline"
+
+// streamStatusError is the status key value shown when a turn fails.
 const streamStatusError = "error"
 
 // inputAreaHeight = top border (1) + textarea rows (3) + bottom border (1)
-const (
-	inputAreaHeight = 5
-	statusBarHeight = 0
-)
+const inputAreaHeight = 5
 
 // New creates a Model wired to the given agent pool, main agent ID, and extension host.
 // The pool must have its provider name set via SetProviderName before calling New
@@ -161,15 +181,17 @@ func New(pool *agent.AgentPool, mainAgentID string, h *extension.Host) Model {
 	m := Model{
 		chat:        NewChatView(80, 20),
 		input:       NewInputArea(80),
-		statusBar:   NewStatusBar(provName, ""),
 		commands:    NewRegistry(),
 		agentPool:   pool,
 		mainAgentID: mainAgentID,
 		extHost:     h,
 		console:     NewConsoleView(),
-		live:        &liveState{provider: provName},
+		live:        &liveState{provider: provName, statuses: make(map[string]string)},
 		scene:       NewSceneRenderer(),
 	}
+	// Pre-create the statusline area so the placement slot is reserved before
+	// session_start fires and the bundled statusline extension sets its root.
+	_ = m.scene.CreateArea(sdk.UIArea{ID: statuslineAreaID, Placement: sdk.UIAreaStatus})
 
 	registerBuiltins(m.commands)
 
@@ -418,7 +440,6 @@ func (m Model) updateWindow(msg tea.Msg) (Model, tea.Cmd, bool) {
 		m.chat.SetSize(msg.Width, m.chatHeight())
 		m.picker.SetSize(msg.Width, m.chatHeight())
 		m.input.SetWidth(msg.Width - 4)
-		m.statusBar.SetWidth(msg.Width)
 		// Re-render the WASM transcript at the new width.
 		m.refreshWASMChat()
 		return m, nil, true
@@ -469,7 +490,7 @@ func (m Model) updateKeyPress(msg tea.Msg) (Model, tea.Cmd, bool) {
 			if m.agentPool != nil {
 				m.agentPool.CancelAll()
 			}
-			m.statusBar.statuses["stream"] = "cancelling…"
+			m.live.setStatus("stream", "cancelling…")
 			return m, nil, true
 		}
 		return m, tea.Quit, true
@@ -598,7 +619,6 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 		if !m.streaming {
 			m.streaming = true
 			m.streamStart = time.Now()
-			m.statusBar.statuses["stream"] = "working."
 			m.live.setStreaming(true, m.streamStart, false)
 		}
 		return m, tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return streamTickMsg{} }), true
@@ -612,9 +632,6 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 	case streamTickMsg:
 		cmds := make([]tea.Cmd, 0, 1)
 		if m.streaming {
-			since := time.Since(m.streamStart)
-			dots := strings.Repeat(".", int(since/400/time.Millisecond)%3+1)
-			m.statusBar.statuses["stream"] = fmt.Sprintf("working%-3s %s", dots, formatElapsed(since))
 			cmds = append(cmds, tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return streamTickMsg{} }))
 		}
 		return m, tea.Batch(cmds...), true
@@ -626,30 +643,30 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 		m.consoleVisible = false
 		if m.agentPool != nil {
 			n := int(m.agentPool.TokenCount())
-			m.statusBar.totalTokens = n
 			m.live.setTokens(n)
 			// Update context-usage percentage from real API token counts.
 			cu := m.agentPool.MainAgentContextUsage()
 			if cu.ContextWindow > 0 {
 				cfg := m.agentPool.CompactConfig()
 				rem := cfg.ThresholdPct*100 - cu.Percent
-				m.statusBar.statuses["ctx rem"] = fmt.Sprintf("%.0f%%", rem)
+				m.live.setStatus("ctx rem", fmt.Sprintf("%.0f%%", rem))
 			} else {
-				delete(m.statusBar.statuses, "ctx rem")
+				m.live.setStatus("ctx rem", "")
 			}
 		}
 		if msg.Err != nil {
 			if errors.Is(msg.Err, context.Canceled) {
 				slog.Info("stream cancelled by user")
+				m.live.setStatus("stream", "")
 			} else {
 				slog.Error("stream error", "err", msg.Err)
 				m.pushNotification(fmt.Sprintf("⚠ %v", msg.Err))
-				m.statusBar.statuses["stream"] = streamStatusError
+				m.live.setStatus("stream", streamStatusError)
 				m.live.setStreaming(false, time.Time{}, true)
 			}
 		} else {
 			slog.Info("stream done", "tokens", m.agentPool.TokenCount())
-			delete(m.statusBar.statuses, "stream")
+			m.live.setStatus("stream", "")
 		}
 		// Capture and reset the accumulated response text.
 		responseContent := m.streamContent
@@ -730,7 +747,7 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 		}
 		// Show a queuing indicator while the command is dispatched asynchronously
 		// (e.g. skill commands go through WASM before submitToAgent is called).
-		m.statusBar.statuses["stream"] = "queuing…"
+		m.live.setStatus("stream", "queuing…")
 		return m, m.commands.Dispatch(msg.Name, msg.Args), true
 
 	case clearMsg:
@@ -741,7 +758,6 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 
 	case setModelMsg:
 		m.activeModel = msg.Model
-		m.statusBar.modelName = msg.Model
 		m.live.setModel(msg.Model)
 		m.pushNotification(fmt.Sprintf("Model set to: %s", msg.Model))
 		return m, nil, true
@@ -750,7 +766,7 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 		if m.agentPool != nil {
 			m.agentPool.CancelAll()
 		}
-		m.statusBar.statuses["stream"] = "cancelling…"
+		m.live.setStatus("stream", "cancelling…")
 		return m, nil, true
 
 	case dispatchOnCommandMsg:
@@ -813,8 +829,8 @@ func (m Model) updateExtension(msg tea.Msg) (Model, tea.Cmd, bool) {
 			}
 		}
 		// Clear queuing… if streaming hasn't started yet (command didn't reach the LLM).
-		if !m.streaming && m.statusBar.statuses["stream"] == "queuing…" {
-			delete(m.statusBar.statuses, "stream")
+		if !m.streaming && m.live.getStatus("stream") == "queuing…" {
+			m.live.setStatus("stream", "")
 		}
 		return m, nil, true
 
@@ -826,7 +842,10 @@ func (m Model) updateExtension(msg tea.Msg) (Model, tea.Cmd, bool) {
 		return m, nil, true
 
 	case StatusUpdateMsg:
-		m.statusBar, _ = m.statusBar.Update(msg)
+		m.live.setStatus(msg.Key, msg.Value)
+		if m.program != nil {
+			m.program.Send(sceneDirtyMsg{})
+		}
 		return m, nil, true
 
 	case sceneDirtyMsg:
@@ -915,7 +934,6 @@ func (m Model) submitToAgent(content, display string) (tea.Model, tea.Cmd) {
 		m.streaming = true
 	}
 	m.streamStart = time.Now()
-	m.statusBar.statuses["stream"] = "working."
 	m.live.setStreaming(true, m.streamStart, false)
 	if content != "" && m.OnUserMessage != nil {
 		m.OnUserMessage(content)
@@ -1028,12 +1046,56 @@ func (m Model) cmdReloadExtensions() tea.Cmd {
 // chatHeight returns the number of lines available for the chat viewport,
 // accounting for the input box and any visible suggestion dropdown.
 func (m Model) chatHeight() int {
-	h := m.height - inputAreaHeight - statusBarHeight - m.dropdownHeight() - m.consoleHeight()
-
+	h := m.height - inputAreaHeight - m.statusLineHeight() - m.dropdownHeight() - m.consoleHeight()
 	if h < 1 {
 		h = 1
 	}
 	return h
+}
+
+// statusLineHeight returns the total number of lines consumed by all UIAreaStatus
+// scene areas, constrained by each area's MinHeight/MaxHeight settings.
+func (m Model) statusLineHeight() int {
+	if m.scene == nil {
+		return 0
+	}
+	total := 0
+	for _, id := range m.scene.AreasByPlacement(sdk.UIAreaStatus) {
+		w := m.scene.ConstrainWidth(id, m.chatWidth())
+		rendered := m.scene.Render(id, w)
+		lines := 0
+		if rendered != "" {
+			lines = strings.Count(rendered, "\n") + 1
+		}
+		total += m.scene.ConstrainHeight(id, lines, m.height)
+	}
+	return total
+}
+
+// renderStatusLine renders all UIAreaStatus scene areas as a contiguous block.
+func (m Model) renderStatusLine() string {
+	if m.scene == nil {
+		return ""
+	}
+	var parts []string
+	for _, id := range m.scene.AreasByPlacement(sdk.UIAreaStatus) {
+		w := m.scene.ConstrainWidth(id, m.chatWidth())
+		rendered := strings.TrimRight(m.scene.Render(id, w), "\n")
+		if rendered == "" {
+			continue
+		}
+		// Clamp to MaxHeight.
+		rawLines := strings.Split(rendered, "\n")
+		clamped := m.scene.ConstrainHeight(id, len(rawLines), m.height)
+		if clamped < len(rawLines) {
+			rawLines = rawLines[:clamped]
+		}
+		parts = append(parts, strings.Join(rawLines, "\n"))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "\n")
 }
 
 // dropdownHeight returns the rendered height of the suggestion dropdown (0 when hidden).
@@ -1208,6 +1270,9 @@ func (m Model) View() tea.View {
 	if m.consoleVisible && !m.console.IsEmpty() {
 		sb.WriteString(m.renderConsole())
 	}
+	if sl := m.renderStatusLine(); sl != "" {
+		sb.WriteString(sl + "\n")
+	}
 	sb.WriteString(inputBox)
 
 	out := sb.String()
@@ -1239,7 +1304,7 @@ func (m Model) renderScenes() string {
 		width = 80
 	}
 	var parts []string
-	for _, placement := range []sdk.UIAreaPlacement{sdk.UIAreaMain, sdk.UIAreaSidebar, sdk.UIAreaStatus, sdk.UIAreaOverlay} {
+	for _, placement := range []sdk.UIAreaPlacement{sdk.UIAreaMain, sdk.UIAreaSidebar, sdk.UIAreaOverlay} {
 		for _, id := range m.scene.AreasByPlacement(placement) {
 			// The transcript area is rendered inside the chat viewport, not
 			// stacked here — skip it to avoid duplication.
@@ -1331,23 +1396,8 @@ func (m Model) renderInputBox() string {
 
 	b := lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
 
-	// Always read the live pool token count so sub-agent tokens are visible.
-	if m.agentPool != nil {
-		m.statusBar.totalTokens = int(m.agentPool.TokenCount())
-	}
-
-	// Build top border: ╭─ provider  model  status ──────────────╮
-	label := m.statusBar.Line()
-	var prefix string
-	if label != "" {
-		prefix = "─ " + label + " "
-	}
-	fillLen := innerWidth - len([]rune(prefix))
-	if fillLen < 0 {
-		fillLen = 0
-	}
-	fill := strings.Repeat("─", fillLen)
-	top := b.Render("╭" + prefix + fill + "╮")
+	fill := strings.Repeat("─", innerWidth)
+	top := b.Render("╭" + fill + "╮")
 
 	// Embed textarea lines between side borders.
 	// Use lipgloss.Width for padding — len([]rune) counts ANSI escape bytes.

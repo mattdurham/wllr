@@ -134,8 +134,8 @@ func TestModel_CtrlC_DuringStream_SetsCancellingStatus(t *testing.T) {
 
 	m, _ = callUpdate(m, keyMsg('c', tea.ModCtrl))
 
-	if m.statusBar.statuses["stream"] != "cancelling…" {
-		t.Errorf("expected 'cancelling…', got %q", m.statusBar.statuses["stream"])
+	if v := m.live.getStatus("stream"); v != "cancelling…" {
+		t.Errorf("expected 'cancelling…', got %q", v)
 	}
 }
 
@@ -156,12 +156,12 @@ func TestModel_CtrlC_NotStreaming_Quits(t *testing.T) {
 func TestModel_StreamDoneMsg_ClearsWorkingIndicator(t *testing.T) {
 	m := newTestModel()
 	m.streaming = true
-	m.statusBar.statuses["stream"] = "working..."
+	m.live.setStatus("stream", "working...")
 
 	m, _ = callUpdate(m, StreamDoneMsg{Err: nil})
 
-	if _, ok := m.statusBar.statuses["stream"]; ok {
-		t.Error("stream status should be cleared by StreamDoneMsg")
+	if v := m.live.getStatus("stream"); v != "" {
+		t.Errorf("stream status should be cleared by StreamDoneMsg, got %q", v)
 	}
 	if m.streaming {
 		t.Error("streaming should be false after StreamDoneMsg")
