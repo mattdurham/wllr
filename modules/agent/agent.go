@@ -33,8 +33,6 @@ type Agent struct {
 
 	toolsFn func() []fantasy.AgentTool
 
-	opts SpawnOpts
-
 	id           string
 	name         string
 	modelName    string // for context window lookup
@@ -46,12 +44,6 @@ type Agent struct {
 	// can build an incremental summary. Protected by lastSummaryMu.
 	lastSummary string
 
-	// lastUsage is the token usage from the most recently completed turn.
-	// Updated after each turn by setLastUsage. Read by LastUsage().
-	// Protected by lastUsageMu.
-	lastUsage   fantasy.Usage
-	lastUsageMu sync.RWMutex
-
 	// pendingShutdownFrom is set when a shutdown_request arrives alongside normal
 	// pending messages in finishTurn. The shutdown is deferred until all normal
 	// messages are drained (drain-until-empty pattern). Only accessed from
@@ -61,6 +53,14 @@ type Agent struct {
 	inbox []sdk.Message
 
 	history []sdk.Message
+
+	opts SpawnOpts
+
+	// lastUsage is the token usage from the most recently completed turn.
+	// Updated after each turn by setLastUsage. Read by LastUsage().
+	// Protected by lastUsageMu.
+	lastUsage   fantasy.Usage
+	lastUsageMu sync.RWMutex
 
 	// onToken is called per text delta. Set via SetOnToken before calling Submit.
 	onTokenMu sync.RWMutex

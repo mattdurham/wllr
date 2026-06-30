@@ -19,17 +19,17 @@ import (
 // All methods are safe for concurrent use; the bubbletea Update loop applies
 // patches while View reads. A single mutex guards the area map and trees.
 type SceneRenderer struct {
-	mu    sync.RWMutex
 	areas map[string]*sceneArea
 	order []string // area IDs in creation order, for deterministic compositing
+	mu    sync.RWMutex
 }
 
 // sceneArea is one named region owned by an extension.
 type sceneArea struct {
+	root      *sdk.UINode
 	id        string
 	placement sdk.UIAreaPlacement
 	weight    int
-	root      *sdk.UINode
 }
 
 // NewSceneRenderer returns an empty SceneRenderer.

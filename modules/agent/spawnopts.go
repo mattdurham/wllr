@@ -10,12 +10,12 @@ import (
 
 // SpawnOpts configures a new agent at spawn time.
 type SpawnOpts struct {
+	InheritBasePrompt *bool
+	ProviderOptions   fantasy.ProviderOptions
 	SystemPrompt      string
 	Name              string
-	InheritBasePrompt *bool
-	Tools             []fantasy.AgentTool
 	ModelName         string
+	Tools             []fantasy.AgentTool
 	TurnTimeout       time.Duration
 	ThinkingBudget    int
-	ProviderOptions   fantasy.ProviderOptions
 }

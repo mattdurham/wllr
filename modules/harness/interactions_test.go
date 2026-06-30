@@ -216,7 +216,7 @@ func TestModel_StreamDoneMsg_WithError_ShowsInChat(t *testing.T) {
 	// The error line is rendered into the transcript by the WASM extension via
 	// EventNotify (covered in test/wasmchat); the harness-side effect is the
 	// status bar entry.
-	if m.statusBar.statuses["stream"] != "error" {
+	if m.statusBar.statuses["stream"] != streamStatusError {
 		t.Error("status bar should show 'error'")
 	}
 }

@@ -82,7 +82,7 @@ func TestModel_Update_StreamDoneMsg_Error_ShowsError(t *testing.T) {
 	m, _ = callUpdate(m, StreamDoneMsg{Err: errors.New("API error")})
 	// The error line is rendered by the WASM transcript via EventNotify; the
 	// harness-side effect is the status bar entry.
-	if m.statusBar.statuses["stream"] != "error" {
+	if m.statusBar.statuses["stream"] != streamStatusError {
 		t.Errorf("expected stream status 'error', got %q", m.statusBar.statuses["stream"])
 	}
 }
@@ -93,7 +93,7 @@ func TestModel_Update_StreamDoneMsg_ContextCanceled_NoError(t *testing.T) {
 
 	// context.Canceled should not set the error status.
 	m, _ = callUpdate(m, StreamDoneMsg{Err: context.Canceled})
-	if m.statusBar.statuses["stream"] == "error" {
+	if m.statusBar.statuses["stream"] == streamStatusError {
 		t.Error("context.Canceled should not set error status")
 	}
 }
@@ -227,7 +227,7 @@ func TestModel_Update_NotifyMsg(t *testing.T) {
 	m := newTestModel()
 	// NotifyMsg is handled without panic; the visible line is rendered by the
 	// WASM transcript via EventNotify (covered in test/wasmchat).
-	m, _ = callUpdate(m, NotifyMsg{Text: "test notification"})
+	_, _ = callUpdate(m, NotifyMsg{Text: "test notification"})
 }
 
 func TestModel_Update_StatusUpdateMsg(t *testing.T) {
