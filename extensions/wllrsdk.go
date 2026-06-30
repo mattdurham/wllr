@@ -317,6 +317,63 @@ func ToolResult(callID, result string, isError bool) {
 	})
 }
 
+// OnInterceptProviderRequest registers a transform/veto interceptor on the
+// outgoing provider request, just before an agent turn streams to the LLM. The
+// handler receives the messages about to be sent and the model that would be
+// used, and returns:
+//
+//   - (nil, "", false, "")            — observe only; the request proceeds unchanged.
+//   - (newMessages, "", false, "")    — redact/edit the outgoing messages
+//     (e.g. strip PII/API keys). History keeps the original; redaction is
+//     send-time only.
+//   - (nil, "model-id", false, "")    — reroute to a different model
+//     (e.g. cheap local vs frontier).
+//   - (nil, "", true, "reason")       — block the request; the turn fails with reason.
+//
+// newMessages and newModel may both be set. Interceptors run in extension
+// priority order; each sees the request as transformed by earlier interceptors.
+func OnInterceptProviderRequest(fn func(messages []ProviderMessage, model string) (newMessages []ProviderMessage, newModel string, block bool, reason string)) {
+	_sdkOnIntercept("before_provider_request", func(payload json.RawMessage) *_sdkEventResponse {
+		var p struct {
+			Messages []ProviderMessage `json:"messages"`
+			Model    string            `json:"model"`
+		}
+		if err := json.Unmarshal(payload, &p); err != nil {
+			return nil
+		}
+		newMessages, newModel, block, reason := fn(p.Messages, p.Model)
+		if block {
+			return &_sdkEventResponse{Block: true, Error: reason}
+		}
+		if newMessages == nil && (newModel == "" || newModel == p.Model) {
+			return nil // observe-only
+		}
+		outMessages := p.Messages
+		if newMessages != nil {
+			outMessages = newMessages
+		}
+		outModel := p.Model
+		if newModel != "" {
+			outModel = newModel
+		}
+		out, err := json.Marshal(map[string]any{
+			"messages": outMessages,
+			"model":    outModel,
+		})
+		if err != nil {
+			return nil
+		}
+		return &_sdkEventResponse{Payload: out}
+	})
+}
+
+// ProviderMessage is one message in a before_provider_request payload. Role is
+// "user" or "assistant"; Content is the text.
+type ProviderMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
 // Modal displays text in a fullscreen modal overlay (read-only, scrollable).
 func Modal(text string) {
 	_sdkCall("modal", map[string]string{"text": text})
