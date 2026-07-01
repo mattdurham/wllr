@@ -1469,6 +1469,29 @@ func (m Model) renderScenes() string {
 	return strings.Join(parts, "\n")
 }
 
+// wrapModalLines hard-wraps each input line to at most width runes, preserving
+// blank lines. Long unbreakable tokens (e.g. a URL) are split at the width
+// boundary so they stay fully visible in the modal rather than being truncated.
+func wrapModalLines(lines []string, width int) []string {
+	if width < 1 {
+		return lines
+	}
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		runes := []rune(line)
+		if len(runes) == 0 {
+			out = append(out, "")
+			continue
+		}
+		for len(runes) > width {
+			out = append(out, string(runes[:width]))
+			runes = runes[width:]
+		}
+		out = append(out, string(runes))
+	}
+	return out
+}
+
 // renderModal renders a centered modal popup sized at 80% width × height lines.
 // The caller is responsible for adding the top/bottom margin blank lines.
 func (m Model) renderModal(height int) string {
@@ -1488,7 +1511,9 @@ func (m Model) renderModal(height int) string {
 	contentLines := height - 2 // room for top + bottom border
 
 	b := lipgloss.NewStyle().Foreground(lipgloss.Color("#AAAAAA"))
-	lines := strings.Split(strings.TrimRight(m.modalContent, "\n"), "\n")
+	// Wrap to the content width instead of truncating, so long lines (e.g. the
+	// OAuth authorize URL) remain fully visible across multiple rows.
+	lines := wrapModalLines(strings.Split(strings.TrimRight(m.modalContent, "\n"), "\n"), contentWidth)
 	maxScroll := len(lines) - contentLines
 	if maxScroll < 0 {
 		maxScroll = 0

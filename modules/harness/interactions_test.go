@@ -335,3 +335,46 @@ func TestModel_DispatchOnCommandMsg_WithNoHost_IsNoOp(t *testing.T) {
 	}
 	_ = m
 }
+
+// ─── Modal line wrapping ─────────────────────────────────────────────────────
+
+func TestWrapModalLines_WrapsLongLine(t *testing.T) {
+	long := strings.Repeat("x", 50)
+	out := wrapModalLines([]string{long}, 20)
+	if len(out) != 3 {
+		t.Fatalf("50 runes at width 20 → want 3 lines, got %d: %v", len(out), out)
+	}
+	for i, l := range out {
+		if r := []rune(l); len(r) > 20 {
+			t.Errorf("line %d exceeds width: %d runes", i, len(r))
+		}
+	}
+	if strings.Join(out, "") != long {
+		t.Error("wrapping must preserve content exactly")
+	}
+}
+
+func TestWrapModalLines_PreservesShortAndBlank(t *testing.T) {
+	out := wrapModalLines([]string{"short", "", "also short"}, 20)
+	want := []string{"short", "", "also short"}
+	if len(out) != len(want) {
+		t.Fatalf("got %v, want %v", out, want)
+	}
+	for i := range want {
+		if out[i] != want[i] {
+			t.Errorf("line %d = %q, want %q", i, out[i], want[i])
+		}
+	}
+}
+
+func TestWrapModalLines_WrapsOAuthURL(t *testing.T) {
+	// A realistic long authorize URL must remain fully present (not truncated).
+	url := "https://claude.ai/oauth/authorize?client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&code=true&code_challenge=abcdefghijklmnopqrstuvwxyz0123456789ABCDEF&code_challenge_method=S256&state=xyz"
+	out := wrapModalLines([]string{url}, 40)
+	if strings.Join(out, "") != url {
+		t.Error("wrapped URL must reconstruct to the original exactly")
+	}
+	if len(out) < 2 {
+		t.Errorf("long URL should wrap to multiple lines, got %d", len(out))
+	}
+}
