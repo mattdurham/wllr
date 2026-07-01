@@ -130,6 +130,37 @@ func main() {
 	}
 
 	m.SetExtensionPaths(extPaths)
+
+	// Wire the /model picker: list the active provider's models, and switch +
+	// persist on selection. The switch rebuilds the main agent's language model,
+	// updates the context window, and saves the choice for next launch.
+	currentProvider := cfg.Provider
+	m.ModelListFn = func() []harness.ModelChoice {
+		catalog := modelsForProvider(currentProvider)
+		out := make([]harness.ModelChoice, 0, len(catalog))
+		for _, mi := range catalog {
+			out = append(out, harness.ModelChoice{ID: mi.ID, Name: mi.Name})
+		}
+		return out
+	}
+	m.SelectModelFn = func(modelID string) error {
+		lm, lmErr := pool.LanguageModelForModel(ctx, modelID)
+		if lmErr != nil {
+			return lmErr
+		}
+		if main := pool.Get(agent.MainAgentID); main != nil {
+			main.SetModel(lm, modelID)
+		}
+		pool.SetDefaultModelName(modelID)
+		if cw := contextWindowFromCatalog(currentProvider, modelID); cw > 0 {
+			pool.SetContextWindow(cw)
+		}
+		if saveErr := saveModel(modelID); saveErr != nil {
+			slog.Warn("wllr: could not persist model selection", "model", modelID, "error", saveErr)
+		}
+		return nil
+	}
+
 	m.SetLogFn(func(level int, msg string) {
 		lvl := []slog.Level{slog.LevelDebug, slog.LevelInfo, slog.LevelWarn, slog.LevelError}
 		l := slog.LevelError

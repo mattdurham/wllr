@@ -81,6 +81,10 @@ type Agent struct {
 	// Set via SetSystemPrompt; safe to call before the first Submit.
 	systemPromptMu sync.RWMutex
 
+	// lmMu guards lm and modelName, which can be swapped at runtime via SetModel
+	// (e.g. the /model picker). Submit reads them under this lock.
+	lmMu sync.RWMutex
+
 	lastSummaryMu sync.RWMutex
 
 	// cancelMu protects the cancel function for the current active turn.
@@ -171,7 +175,22 @@ func (a *Agent) InboxLen() int {
 }
 
 // ModelName returns the model name used for context-window sizing.
-func (a *Agent) ModelName() string { return a.modelName }
+func (a *Agent) ModelName() string {
+	a.lmMu.RLock()
+	defer a.lmMu.RUnlock()
+	return a.modelName
+}
+
+// SetModel swaps the language model and model name used for subsequent turns.
+// Thread-safe; a turn already in flight finishes on the previous model, and the
+// next Submit picks up the new one. Used by the /model picker to switch the
+// active model at runtime.
+func (a *Agent) SetModel(lm fantasy.LanguageModel, modelName string) {
+	a.lmMu.Lock()
+	a.lm = lm
+	a.modelName = modelName
+	a.lmMu.Unlock()
+}
 
 // SystemPrompt returns the agent's current effective system prompt.
 func (a *Agent) SystemPrompt() string {
@@ -342,7 +361,9 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 	a.lastSummaryMu.RUnlock()
 
 	pool := a.pool
+	a.lmMu.RLock()
 	lm := a.lm
+	a.lmMu.RUnlock()
 	opts := a.opts
 
 	go func() {
@@ -384,6 +405,10 @@ func (a *Agent) executeTurn(
 		}
 		return
 	}
+
+	// Snapshot the model name once (guarded read; SetModel may swap it between
+	// turns). lm was already captured consistently with it in Submit.
+	modelName := a.ModelName()
 
 	// Resolve tools: prefer dynamic toolsFn, fall back to opts.Tools.
 	tools := opts.Tools
@@ -442,7 +467,7 @@ func (a *Agent) executeTurn(
 		contextWindow = pool.ContextWindow()
 	}
 	if contextWindow == 0 {
-		contextWindow = contextWindowForModel(a.modelName)
+		contextWindow = contextWindowForModel(modelName)
 	}
 	history := priorHistory
 	didCompact := false
@@ -486,11 +511,11 @@ func (a *Agent) executeTurn(
 		if c != "" {
 			outgoing = append(append([]sdk.Message{}, h...), sdk.Message{Role: sdk.RoleUser, Content: c})
 		}
-		redacted, newModel, blk, rsn := pool.interceptProviderRequest(a.id, outgoing, a.modelName)
+		redacted, newModel, blk, rsn := pool.interceptProviderRequest(a.id, outgoing, modelName)
 		if blk {
 			return nil, "", true, rsn
 		}
-		if newModel != "" && newModel != a.modelName {
+		if newModel != "" && newModel != modelName {
 			if newLM, lerr := pool.LanguageModelForModel(childCtx, newModel); lerr == nil {
 				lm = newLM
 				fa = fantasy.NewAgent(lm, agentOpts...)

@@ -129,8 +129,9 @@ func TestBuiltinModel_NoArgs(t *testing.T) {
 		t.Fatal("expected non-nil Cmd")
 	}
 	msg := cmd()
-	if _, ok := msg.(NotifyMsg); !ok {
-		t.Errorf("expected NotifyMsg for missing model arg, got %T", msg)
+	// /model with no args now opens the model picker instead of a usage notice.
+	if _, ok := msg.(showModelPickerMsg); !ok {
+		t.Errorf("expected showModelPickerMsg for /model with no args, got %T", msg)
 	}
 }
 

@@ -289,7 +289,7 @@ Built-in commands registered at startup:
 | `/help`         | true    | Shows `ShowModalMsg{Text: commands.HelpText()}`              |
 | `/clear`        | true    | Emits `clearMsg{}`                                           |
 | `/reload`       | true    | Emits `ReloadMsg{}`                                          |
-| `/model <name>` | true    | Emits `setModelMsg{Model: name}`                             |
+| `/model`        | true    | No arg → `showModelPickerMsg{}` (opens model picker); `/model <name>` → `setModelMsg{Model: name}` |
 | `/status`       | true    | Emits `StatusUpdateMsg{Key: "_override", Value: text}`       |
 | `/tools`        | true    | Emits `showToolsMsg{}`                                       |
 | `/prompt`       | false   | Shows accumulated base system prompt in a modal              |
@@ -449,6 +449,21 @@ Returns the current set of registered tools from `extHost.RegisteredTools()` as 
 **Invariant:** `OnMessageEnd` is called only when `responseContent != ""` (tool-only turns are excluded).
 
 **Invariant:** `OnUserMessage` is called only when `content != ""`.
+
+### Model Selection Hooks
+
+`harness.Model` exposes two callback fields for the `/model` picker (set by `cmd/main.go`):
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `ModelListFn` | `func() []ModelChoice` | Returns the active provider's selectable models for the picker. Nil ⇒ selection unavailable. |
+| `SelectModelFn` | `func(modelID string) error` | Switches the active model: rebuilds the main agent's LM (`Agent.SetModel`), updates the context window, and persists the choice. Nil ⇒ display-only. |
+
+Flow: `/model` with no arg emits `showModelPickerMsg` → `openModelPicker()` builds picker items from `ModelListFn` (marking the current model) and opens the picker with the reserved `modelPickerCallback` (`"__wllr:model"`). On selection, `updateKeyPressPicker` recognises the core callback and emits `setModelMsg{Model: id}` (rather than dispatching `EventOnCommand` to a WASM extension); the `setModelMsg` handler calls `applyModelSelection` → `SelectModelFn` + status update. `/model <name>` skips the picker and emits `setModelMsg` directly.
+
+**Invariant:** picker callbacks prefixed `"__wllr:"` are core-owned and route to harness handlers, never to `EventOnCommand`. Extension command names cannot collide (the prefix is reserved).
+
+**Invariant:** `SelectModelFn` errors surface as a notification and leave the active model unchanged; `activeModel`/status update only after a successful switch.
 
 ---
 

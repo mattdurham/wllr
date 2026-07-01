@@ -148,7 +148,9 @@ On each `Submit` call, the resolved system prompt sent to the LLM is:
 
 ## 9. Context Window and Compaction
 
-Each `Agent` stores a `modelName string` for context window lookup. On each `Submit` call, the agent uses `contextWindowForModel(a.modelName)` to determine the model's known input context limit.
+Each `Agent` stores a `modelName string` (and its `lm fantasy.LanguageModel`) for context window lookup and streaming. Both are guarded by `lmMu sync.RWMutex` and may be swapped at runtime via `SetModel(lm, modelName)` (used by the `/model` picker). `ModelName()` reads under the lock. On each `Submit` call, the agent captures `lm` under `lmMu.RLock()` and, inside the turn, snapshots `modelName` once via `ModelName()`; `contextWindowForModel(modelName)` determines the model's known input context limit.
+
+**Invariant:** `SetModel` is safe to call concurrently with turns. A turn already in flight finishes on the model it captured; the next `Submit` picks up the swapped model. `lm` and `modelName` are always read/written together under `lmMu`.
 
 Token estimation uses the `chars/4` heuristic (`estimateTokens`, `estimateStr`).
 `contextWindowForModel` currently returns `defaultContextWindow` (1,000,000) for all model

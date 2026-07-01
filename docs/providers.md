@@ -131,17 +131,35 @@ Bob reads provider and model from environment variables at startup.
 
 | Variable              | Default              | Description                         |
 |-----------------------|----------------------|-------------------------------------|
-| `BOB_PROVIDER`        | `anthropic`          | Provider name to use.               |
-| `BOB_MODEL`           | `claude-sonnet-4-5`  | Default model. Can be overridden at runtime with `/model <name>`. |
-| `ANTHROPIC_API_KEY`   | (none)               | Required when `BOB_PROVIDER=anthropic`. |
-| `BOB_EXTENSIONS_DIR`  | (none)               | Directory scanned for `.wasm` files.|
+| `WLLR_PROVIDER`       | `anthropic`          | Provider name (`anthropic`, `openai`, `gemini`). |
+| `WLLR_MODEL`          | `claude-sonnet-4-6`  | Default model. See precedence below. |
+| `ANTHROPIC_API_KEY`   | (none)               | Required when `WLLR_PROVIDER=anthropic`. |
+| `WLLR_EXTENSIONS_DIR` | (none)               | Directory scanned for `.wasm` files.|
 
-The active model can be changed at runtime without restarting using the `/model`
-slash command:
+### Selecting a model at runtime
+
+Run `/model` with no argument to open a **picker** listing the current
+provider's available models (the active one is marked). Selecting a model:
+
+- rebuilds the main agent's language model,
+- updates the context window,
+- **persists** the choice to `~/.config/wllr/config.json` (`wllr.model`), so it
+  is the default next launch.
 
 ```
-/model claude-haiku-3-5
+/model                 # open the picker
+/model claude-opus-4-8 # set directly by ID
 ```
+
+**Model precedence at startup:** `WLLR_MODEL` (env) > persisted selection
+(`config.json`) > built-in default (`claude-sonnet-4-6`).
+
+The model list is a curated catalog (`cmd/modelcatalog.go`) covering Anthropic,
+OpenAI, and Gemini, sourced from charmbracelet's Catwalk model-metadata service.
+
+> Some providers may require a login/OAuth flow rather than an API key. That
+> auth flow is a separate, forthcoming piece; today the built-in providers use
+> API keys via the environment variables above.
 
 ---
 
