@@ -87,7 +87,7 @@ func (m *Model) beginOAuthLogin(provider string) tea.Cmd {
 	m.oauthCaptureProvider = provider
 	m.modalContent = fmt.Sprintf(
 		"Sign in to %s\n\n"+
-			"1. Open this URL in a browser (on any machine):\n\n   %s\n\n"+
+			"1. Open this URL in a browser (on any machine):\n\n%s\n\n"+
 			"2. Approve access. You'll get an authorization code (or be redirected).\n"+
 			"3. Close this box (esc/enter), then paste the code or full redirect URL\n"+
 			"   into the input line and press Enter.",

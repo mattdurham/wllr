@@ -85,6 +85,14 @@ log, and reset behavior are covered by `wasmchat_test.go`, `tui_test.go`, and
 | `TestCompleteOAuthLogin_ErrorSurfaced` | Complete error surfaced | error `NotifyMsg` |
 | `TestBuiltinLogin_EmitsLoginMsg` | /login emits loginMsg | msg is `loginMsg` |
 
+### interactions_test.go (modal wrapping)
+
+| Test | Scenario | Assertions |
+|---|---|---|
+| `TestWrapModalLines_WrapsLongLine` | 50 runes at width 20 | wraps to 3 lines, none over width, content preserved |
+| `TestWrapModalLines_PreservesShortAndBlank` | short + blank + short | unchanged |
+| `TestWrapModalLines_WrapsOAuthURL` | long authorize URL | reconstructs exactly; wraps to ≥2 lines |
+
 ---
 
 ## Missing / Recommended Tests
