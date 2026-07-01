@@ -505,15 +505,20 @@ When the user chooses **OAuth** in the auth prompt (or runs `/login`), the harne
 
 | Field | Type | Purpose |
 |-------|------|---------|
-| `BeginOAuthFn` | `func(provider string) (authURL string, err error)` | Starts login (generates PKCE) and returns the authorize URL to open. Nil ⇒ login unavailable. |
-| `CompleteOAuthFn` | `func(provider, input string) error` | Exchanges the pasted authorization code / redirect URL for tokens, persists and applies them. Nil ⇒ completion unavailable. |
-| `AwaitOAuthFn` | `func() (input string, ok bool)` | Blocks until the local callback server captures the browser redirect (returns the raw redirect query + true), or false if cancelled/superseded or no server runs. Nil ⇒ no local callback (manual paste only). |
+| `BeginOAuthFn` | `func(provider string) (modalBody, clipboard string, err error)` | Starts login and returns the modal body to show (provider-specific sign-in instructions) plus a string to copy to the clipboard (the URL). Nil ⇒ login unavailable. |
+| `CompleteOAuthFn` | `func(provider, input string) error` | Exchanges the awaited material (per provider) for tokens, persists and applies them. Nil ⇒ completion unavailable. |
+| `AwaitOAuthFn` | `func() (input string, ok bool)` | Blocks until login resolves and returns the material `CompleteOAuthFn` needs (+ true), or false on cancel/error. Backed by the local callback server (Anthropic) or the device-code poll (Codex). Nil ⇒ login unavailable. |
 
-Flow: selecting OAuth (or `/login` → `loginMsg` → `openAuthPrompt(activeProvider)`) leads to `beginOAuthLogin` → `BeginOAuthFn` returns the authorize URL (and starts the local callback server), shown in a modal (copied to the system clipboard via `tea.SetClipboard`/OSC52). `beginOAuthLogin` returns a `tea.Batch` of the clipboard copy **and** a command that blocks on `AwaitOAuthFn` and yields an `oauthCallbackMsg`. Login completes **only** via the local callback server: the browser redirect hits `127.0.0.1:53692`, `AwaitOAuthFn` returns the query, and `oauthCallbackMsg{OK:true}` → `completeOAuthFromCallback` closes the modal and runs `CompleteOAuthFn` off-loop, reporting success/failure as a `NotifyMsg`. There is **no manual-paste fallback** — the browser must be able to reach the local callback server (i.e. run on the same machine, or tunnel the port). `/login` is available any time, not just first run.
+Flow: selecting OAuth (or `/login` → `loginMsg` → `openAuthPrompt(activeProvider)`) leads to `beginOAuthLogin` → `BeginOAuthFn` returns the modal body + URL. The body is shown in a modal and the URL copied to the clipboard (`tea.SetClipboard`/OSC52). `beginOAuthLogin` returns a `tea.Batch` of a command that blocks on `AwaitOAuthFn` (yielding `oauthCallbackMsg`) and the clipboard copy. Login completes automatically when `AwaitOAuthFn` resolves: `oauthCallbackMsg{OK:true}` → `completeOAuthFromCallback` closes the modal and runs `CompleteOAuthFn` off-loop, reporting success/failure as a `NotifyMsg`. There is **no manual-paste fallback**. The two provider styles:
+
+- **Anthropic** — browser + local callback server on `127.0.0.1:53692`; the browser must reach it (same machine, or tunnel the port).
+- **Codex (openai)** — device-code: the modal shows a verification URL + user code; `AwaitOAuthFn` polls until approval. Works anywhere (incl. SSH), no local server.
+
+`/login` is available any time, not just first run.
 
 **Invariant:** OAuth login requires both `BeginOAuthFn` and `AwaitOAuthFn`; if either is nil, `/login`'s OAuth path reports "not available" and does not enter capture mode. A normal `SubmitMsg` is never repurposed as an OAuth code.
 
-**Invariant:** OAuth login is provider-scoped; `BeginOAuthFn`/`CompleteOAuthFn` return an error for providers without a supported flow (today only Anthropic), surfaced as a notification.
+**Invariant:** OAuth login is provider-scoped; `BeginOAuthFn`/`CompleteOAuthFn` return an error for providers without a supported flow (today Anthropic and OpenAI/Codex), surfaced as a notification.
 
 ---
 

@@ -20,6 +20,24 @@ import (
 // providerAnthropic is the canonical provider name for Anthropic.
 const providerAnthropic = "anthropic"
 
+// newCodexProvider builds an OpenAI fantasy.Provider pointed at the ChatGPT
+// Codex backend, authenticated with an OAuth access token (Bearer) and the
+// ChatGPT account-id header. This is how a ChatGPT Plus/Pro subscription token
+// is used instead of a standard OpenAI API key — matching how Codex/pi route
+// these requests. The Responses API is used (Codex models are responses-based).
+func newCodexProvider(accessToken, accountID string) (fantasy.Provider, error) {
+	return fantasyopenapiprovider.New(
+		fantasyopenapiprovider.WithAPIKey(accessToken),
+		fantasyopenapiprovider.WithBaseURL("https://chatgpt.com/backend-api/codex"),
+		fantasyopenapiprovider.WithHeaders(map[string]string{
+			"chatgpt-account-id": accountID,
+			"OpenAI-Beta":        "responses=experimental",
+			"originator":         "codex_cli_go",
+		}),
+		fantasyopenapiprovider.WithUseResponsesAPI(),
+	)
+}
+
 // newAnthropicProvider builds an Anthropic fantasy.Provider for the given key.
 // OAuth tokens (sk-ant-oat... access tokens) are Claude Code subscription
 // tokens: they route through a higher-limit tier and require the Claude Code
@@ -53,9 +71,15 @@ func buildProvider(ctx context.Context, cfg *Config) (fantasy.Provider, fantasy.
 	case providerAnthropic:
 		prov, provErr = newAnthropicProvider(cfg.AnthropicAPIKey)
 	case "openai":
-		prov, provErr = fantasyopenapiprovider.New(
-			fantasyopenapiprovider.WithAPIKey(cfg.OpenAIAPIKey),
-		)
+		// A stored Codex OAuth token routes through the ChatGPT backend (with the
+		// account-id header); a plain API key uses the default OpenAI API.
+		if cred, ok := loadAuthCredential("openai"); ok && cred.Type == authTypeOAuth && cred.Access != "" {
+			prov, provErr = newCodexProvider(cred.Access, cred.AccountID)
+		} else {
+			prov, provErr = fantasyopenapiprovider.New(
+				fantasyopenapiprovider.WithAPIKey(cfg.OpenAIAPIKey),
+			)
+		}
 	case "gemini":
 		prov, provErr = fantasygoogleprovider.New(
 			fantasygoogleprovider.WithGeminiAPIKey(cfg.GeminiAPIKey),

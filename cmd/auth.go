@@ -42,6 +42,9 @@ type authCredential struct {
 	Access  string `json:"access,omitempty"`
 	Refresh string `json:"refresh,omitempty"`
 	Expires int64  `json:"expires,omitempty"`
+	// AccountID is the ChatGPT account id extracted from a Codex access token;
+	// required to route Codex API calls. Empty for providers that don't use it.
+	AccountID string `json:"account_id,omitempty"`
 }
 
 // isExpired reports whether an OAuth access token is past its (margin-adjusted)
