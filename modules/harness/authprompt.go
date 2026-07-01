@@ -27,6 +27,14 @@ type recordAuthMsg struct {
 // command so users can (re)authenticate on demand, not just on first run.
 type loginMsg struct{}
 
+// oauthCallbackMsg carries the result of the local OAuth callback server: the
+// raw redirect query ("code=…&state=…") and whether a code was actually
+// received (ok=false means the login was cancelled/superseded or no server ran).
+type oauthCallbackMsg struct {
+	Input string
+	OK    bool
+}
+
 // authPickerCallback is the reserved PickerView.Callback value that routes an
 // auth-prompt selection to the core recordAuthMsg handler instead of dispatching
 // EventOnCommand to a WASM extension. "__wllr:" is reserved for core pickers.
@@ -87,16 +95,39 @@ func (m *Model) beginOAuthLogin(provider string) tea.Cmd {
 	m.oauthCaptureProvider = provider
 	m.modalContent = fmt.Sprintf(
 		"Sign in to %s\n\n"+
-			"1. Open this URL in a browser (on any machine).\n"+
-			"   It has been copied to your clipboard.\n\n%s\n\n"+
-			"2. Approve access. You'll get an authorization code (or be redirected).\n"+
-			"3. Close this box (esc/enter), then paste the code or full redirect URL\n"+
-			"   into the input line and press Enter.",
+			"1. Open this URL in a browser (it's been copied to your clipboard):\n\n%s\n\n"+
+			"2. Approve access.\n\n"+
+			"If the browser is on THIS machine, you're done automatically once it\n"+
+			"redirects (the \"localhost\" page failing to load is fine).\n\n"+
+			"If the browser is on ANOTHER machine (e.g. SSH), copy the address it\n"+
+			"redirects to \u2014 close this box (esc), paste it into the input line, Enter.",
 		provider, authURL)
 	m.modalScroll = 0
 	// Copy the authorize URL to the system clipboard via OSC52 (works over SSH
 	// and tmux where the terminal supports it). Harmless if unsupported.
-	return tea.SetClipboard(authURL)
+	cmds := []tea.Cmd{tea.SetClipboard(authURL)}
+	// If a local callback server is available, race it against the manual paste:
+	// on a successful browser redirect the code is captured automatically.
+	if m.AwaitOAuthFn != nil {
+		await := m.AwaitOAuthFn
+		cmds = append(cmds, func() tea.Msg {
+			input, ok := await()
+			return oauthCallbackMsg{Input: input, OK: ok}
+		})
+	}
+	return tea.Batch(cmds...)
+}
+
+// completeOAuthFromCallback completes a login using the code auto-captured by
+// the local callback server. No-op if the login already finished (e.g. via a
+// manual paste) or was cancelled.
+func (m *Model) completeOAuthFromCallback(msg oauthCallbackMsg) tea.Cmd {
+	if !msg.OK || m.oauthCaptureProvider == "" {
+		return nil
+	}
+	m.modalContent = ""
+	m.modalScroll = 0
+	return m.completeOAuthLogin(msg.Input)
 }
 
 // completeOAuthLogin exchanges the pasted authorization input for tokens via

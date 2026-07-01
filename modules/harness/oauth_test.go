@@ -86,6 +86,49 @@ func TestCompleteOAuthLogin_ErrorSurfaced(t *testing.T) {
 	}
 }
 
+func TestCompleteOAuthFromCallback_CompletesWhenCapturing(t *testing.T) {
+	var gotInput string
+	m := &Model{
+		oauthCaptureProvider: "anthropic",
+		CompleteOAuthFn: func(_, input string) error {
+			gotInput = input
+			return nil
+		},
+	}
+	cmd := m.completeOAuthFromCallback(oauthCallbackMsg{Input: "code=abc&state=xyz", OK: true})
+	if cmd == nil {
+		t.Fatal("expected a completion command")
+	}
+	if m.oauthCaptureProvider != "" {
+		t.Error("capture mode should be cleared")
+	}
+	if _, ok := drainMsg(cmd).(NotifyMsg); !ok {
+		t.Error("expected a NotifyMsg")
+	}
+	if gotInput != "code=abc&state=xyz" {
+		t.Errorf("CompleteOAuthFn input = %q", gotInput)
+	}
+}
+
+func TestCompleteOAuthFromCallback_IgnoredWhenNotCapturing(t *testing.T) {
+	called := false
+	m := &Model{
+		oauthCaptureProvider: "", // login already finished (e.g. via paste)
+		CompleteOAuthFn:      func(string, string) error { called = true; return nil },
+	}
+	if cmd := m.completeOAuthFromCallback(oauthCallbackMsg{Input: "x", OK: true}); cmd != nil {
+		t.Error("expected nil command when not capturing")
+	}
+	// ok=false must also be a no-op.
+	m.oauthCaptureProvider = "anthropic"
+	if cmd := m.completeOAuthFromCallback(oauthCallbackMsg{OK: false}); cmd != nil {
+		t.Error("expected nil command when ok=false")
+	}
+	if called {
+		t.Error("CompleteOAuthFn should not be called")
+	}
+}
+
 func TestBuiltinLogin_EmitsLoginMsg(t *testing.T) {
 	r := NewRegistry()
 	registerBuiltins(r)

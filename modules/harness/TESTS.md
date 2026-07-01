@@ -83,6 +83,8 @@ log, and reset behavior are covered by `wasmchat_test.go`, `tui_test.go`, and
 | `TestBeginOAuthLogin_ErrorNoCapture` | Begin error ⇒ no capture | `oauthCaptureProvider` stays empty |
 | `TestCompleteOAuthLogin_CallsCompleteAndClears` | Complete calls fn and clears capture | `CompleteOAuthFn` invoked; capture cleared; success `NotifyMsg` |
 | `TestCompleteOAuthLogin_ErrorSurfaced` | Complete error surfaced | error `NotifyMsg` |
+| `TestCompleteOAuthFromCallback_CompletesWhenCapturing` | Callback code auto-completes login | closes modal; `CompleteOAuthFn` invoked with the query; `NotifyMsg` |
+| `TestCompleteOAuthFromCallback_IgnoredWhenNotCapturing` | No-op when not capturing or ok=false | nil command; `CompleteOAuthFn` not called |
 | `TestBuiltinLogin_EmitsLoginMsg` | /login emits loginMsg | msg is `loginMsg` |
 
 ### interactions_test.go (modal wrapping)
