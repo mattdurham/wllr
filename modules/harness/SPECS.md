@@ -479,6 +479,21 @@ Flow mirrors the model picker: `/thinking` with no arg emits `showThinkingPicker
 
 **Invariant:** `SelectThinkingFn` errors surface as a notification and leave the active level unchanged; `activeThinking`/status update only after a successful apply.
 
+### First-Run Provider Auth Prompt
+
+`harness.Model` supports a one-time, per-provider auth-method prompt shown at startup:
+
+| Field / Method | Type | Purpose |
+|----------------|------|---------|
+| `RecordAuthFn` | `func(provider, method string) error` | Persists the chosen auth method for a provider (so the prompt is not shown again). Nil ⇒ choice not persisted. |
+| `SetPendingAuthProvider(provider)` | method | Marks a provider as needing the first-run prompt. Called by `cmd/main.go` only when no auth choice is recorded for the provider. Must be called before `prog.Run()`. |
+
+Flow: when `pendingAuthProvider != ""`, `Init()` emits `showAuthPromptMsg{Provider}` → `openAuthPrompt()` opens a two-item picker ("Set up OAuth / login" = `"oauth"`, "Use an API key" = `"api_key"`) with the reserved `authPickerCallback` (`"__wllr:auth"`). On selection, `updateKeyPressPicker` emits `recordAuthMsg{Provider, Method}`; the handler calls `applyAuthChoice` → `RecordAuthFn` + a notification, and clears `authPromptProvider`.
+
+**Invariant:** the prompt is shown at most once per provider — `cmd/main.go` gates `SetPendingAuthProvider` on the absence of a recorded auth choice (credential presence in the auth file is the record). Cancelling the picker records nothing, so the prompt reappears next launch.
+
+**Invariant:** `"__wllr:auth"` joins `"__wllr:model"`/`"__wllr:thinking"` as a reserved core-owned picker callback; it never dispatches `EventOnCommand`.
+
 ---
 
 ## 26. SceneRenderer — Declarative, Extension-Driven UI (UI P1)

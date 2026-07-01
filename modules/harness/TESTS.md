@@ -67,6 +67,16 @@ log, and reset behavior are covered by `wasmchat_test.go`, `tui_test.go`, and
 
 ---
 
+### authprompt_test.go
+
+| Test | Scenario | Assertions |
+|---|---|---|
+| `TestApplyAuthChoice_RecordsAndClears` | Selecting an auth method records it and clears the pending provider | `RecordAuthFn` called with (provider, method); `authPromptProvider` cleared |
+| `TestApplyAuthChoice_NoProvider_NoOp` | No pending provider ⇒ no record | `RecordAuthFn` not called |
+| `TestSetPendingAuthProvider_DrivesInitPrompt` | Pending provider drives the startup prompt | `pendingAuthProvider` set; `Init()` returns a non-nil batch |
+
+---
+
 ## Missing / Recommended Tests
 
 The following scenarios are not currently covered and should be added:
