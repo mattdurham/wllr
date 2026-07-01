@@ -131,9 +131,11 @@ Bob reads provider and model from environment variables at startup.
 
 | Variable              | Default              | Description                         |
 |-----------------------|----------------------|-------------------------------------|
-| `WLLR_PROVIDER`       | `anthropic`          | Provider name (`anthropic`, `openai`, `gemini`). |
+| `WLLR_PROVIDER`       | `anthropic`          | Provider name (`anthropic`, `openai`, `gemini`, `local`). |
 | `WLLR_MODEL`          | `claude-sonnet-4-6`  | Default model. See precedence below. |
 | `ANTHROPIC_API_KEY`   | (none)               | Required when `WLLR_PROVIDER=anthropic`. |
+| `WLLR_LOCAL_BASE_URL` | `http://localhost:11434/v1` | OpenAI-compatible local endpoint used when `WLLR_PROVIDER=local`. |
+| `WLLR_LOCAL_API_KEY`  | `ollama`             | API key sent to the local endpoint. |
 | `WLLR_EXTENSIONS_DIR` | (none)               | Directory scanned for `.wasm` files.|
 
 ### Selecting a model at runtime
@@ -184,8 +186,26 @@ OpenAI, and Gemini, sourced from charmbracelet's Catwalk model-metadata service.
 
 ### Provider authentication
 
-The first time wllr starts with a provider that has no recorded auth choice, it
-asks once how you want to authenticate that provider:
+On a blank first run with no configured provider/model and no credentials, wllr
+opens a setup wizard in the TUI. The wizard lets you choose:
+
+- **ChatGPT** — starts the OpenAI/Codex device-code OAuth flow.
+- **Anthropic** — starts the Claude OAuth flow.
+- **Local model** — uses an OpenAI-compatible local endpoint and skips auth.
+
+The wizard persists both `wllr.provider` and a provider-appropriate default
+`wllr.model` in `~/.config/wllr/config.json`.
+
+You can also authenticate before starting the TUI:
+
+```sh
+wllr login --provider anthropic
+wllr login --provider openai
+```
+
+Or set the provider's API key environment variable directly. Once wllr can
+start with an explicitly configured cloud provider that has no recorded auth
+choice, it asks once how you want to authenticate that provider:
 
 - **Set up OAuth / login** — sign in via the provider
 - **Use an API key** — from the environment or auth file

@@ -55,6 +55,8 @@ extensions: $(DIST_DIR) $(BUILTINS)
 	cd extensions/agents    && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(BUILTINS)/agents.wasm .
 	cd extensions/history   && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(BUILTINS)/history.wasm .
 	cd extensions/logging   && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(BUILTINS)/logging.wasm .
+	cd extensions/statusline && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(DIST_DIR)/statusline.wasm .
+	cp $(DIST_DIR)/statusline.wasm $(BUILTINS)/statusline.wasm
 	mkdir -p $(EXT_DIR)/context $(EXT_DIR)/skills $(EXT_DIR)/tasks $(EXT_DIR)/lsp
 	cd extensions/context   && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(EXT_DIR)/context/context.wasm .
 	cp extensions/context/context.json $(EXT_DIR)/context/
@@ -67,9 +69,6 @@ extensions: $(DIST_DIR) $(BUILTINS)
 	mkdir -p $(EXT_DIR)/memory
 	cd extensions/memory  && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(EXT_DIR)/memory/memory.wasm .
 	cp extensions/memory/extension.yaml $(EXT_DIR)/memory/
-	mkdir -p $(EXT_DIR)/statusline
-	cd extensions/statusline && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(EXT_DIR)/statusline/statusline.wasm .
-	cp extensions/statusline/statusline.json $(EXT_DIR)/statusline/
 	@echo "Built all extensions"
 
 $(DIST_DIR):

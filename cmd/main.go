@@ -38,7 +38,14 @@ var historyWASM []byte
 //go:embed builtins/logging.wasm
 var loggingWASM []byte
 
+//go:embed builtins/statusline.wasm
+var statuslineWASM []byte
+
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "login" {
+		os.Exit(runLoginCommand(context.Background(), os.Args[2:], os.Stdout, os.Stderr))
+	}
+
 	execPrompt := flag.String("exec", "", "run a single prompt non-interactively and print the response to stdout")
 	flag.Parse()
 
@@ -50,15 +57,27 @@ func main() {
 
 	ctx := context.Background()
 
-	fantasyProv, langModel, err := buildProvider(ctx, cfg)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "wllr: %v\n", err)
+	missingAuthEnv, missingAuth := missingProviderAuth(cfg)
+	if missingAuth && *execPrompt != "" {
+		fmt.Fprintf(os.Stderr, "wllr: %v\n", missingAuthError(cfg.Provider, missingAuthEnv))
 		os.Exit(1)
+	}
+
+	var fantasyProv fantasy.Provider
+	var langModel fantasy.LanguageModel
+	if !missingAuth {
+		fantasyProv, langModel, err = buildProvider(ctx, cfg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "wllr: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	// Create agent pool and spawn the main agent.
 	pool := agent.NewPool()
-	pool.SetProvider(fantasyProv)
+	if fantasyProv != nil {
+		pool.SetProvider(fantasyProv)
+	}
 	pool.SetProviderName(cfg.Provider)
 	pool.SetDefaultModelName(cfg.Model)
 	if cfg.ContextWindow > 0 {
@@ -134,8 +153,56 @@ func main() {
 	// persist on selection. The switch rebuilds the main agent's language model,
 	// updates the context window, and saves the choice for next launch.
 	currentProvider := cfg.Provider
+	oauthState := newOAuthLoginState(ctx, pool, cfg.Model)
+	m.ProviderListFn = func() []harness.ProviderChoice {
+		return []harness.ProviderChoice{
+			{ID: "openai", Name: "ChatGPT", Sublabel: "sign in with a ChatGPT account"},
+			{ID: providerAnthropic, Name: "Anthropic", Sublabel: "sign in with a Claude account"},
+			{ID: providerLocal, Name: "Local model", Sublabel: cfg.LocalBaseURL},
+		}
+	}
+	m.SelectProviderFn = func(provider string) (string, bool, error) {
+		modelID := defaultModelForProvider(provider)
+		if modelID == "" {
+			return "", false, fmt.Errorf("unknown provider %q", provider)
+		}
+		currentProvider = provider
+		cfg.Provider = provider
+		cfg.Model = modelID
+		pool.SetProviderName(provider)
+		pool.SetDefaultModelName(modelID)
+		if cw := contextWindowFromCatalog(provider, modelID); cw > 0 {
+			pool.SetContextWindow(cw)
+		}
+		if saveErr := saveProvider(provider); saveErr != nil {
+			slog.Warn("wllr: could not persist provider selection", "provider", provider, "error", saveErr)
+		}
+		if saveErr := saveModel(modelID); saveErr != nil {
+			slog.Warn("wllr: could not persist model selection", "model", modelID, "error", saveErr)
+		}
+		oauthState.model = modelID
+		switch provider {
+		case "openai", providerAnthropic:
+			return modelID, true, nil
+		case providerLocal:
+			prov, lm, err := buildProvider(ctx, cfg)
+			if err != nil {
+				return "", false, err
+			}
+			pool.SetProvider(prov)
+			if main := pool.Get(agent.MainAgentID); main != nil {
+				main.SetModel(lm, modelID)
+			}
+			return modelID, false, nil
+		default:
+			return "", false, fmt.Errorf("unknown provider %q", provider)
+		}
+	}
 	m.ModelListFn = func() []harness.ModelChoice {
 		catalog := modelsForProvider(currentProvider)
+		if currentProvider == "openai" {
+			catalog = modelsForOpenAIAuth()
+		}
 		out := make([]harness.ModelChoice, 0, len(catalog))
 		for _, mi := range catalog {
 			out = append(out, harness.ModelChoice{ID: mi.ID, Name: mi.Name})
@@ -207,7 +274,6 @@ func main() {
 	// OAuth login flow: begin returns the modal body + a URL to copy; await blocks
 	// until login resolves (Anthropic local callback server, or Codex device-code
 	// poll); complete exchanges the result and swaps the live provider.
-	oauthState := newOAuthLoginState(ctx, pool, cfg.Model)
 	m.BeginOAuthFn = oauthState.begin
 	m.CompleteOAuthFn = oauthState.complete
 	m.AwaitOAuthFn = func() (string, bool) {
@@ -218,7 +284,9 @@ func main() {
 		}
 		return input, input != ""
 	}
-	if !hasAuthRecord(currentProvider) {
+	if missingAuth && !cfg.ModelConfigured && !cfg.ProviderConfigured {
+		m.SetPendingSetupWizard()
+	} else if missingAuth && !hasAuthRecord(currentProvider) {
 		m.SetPendingAuthProvider(currentProvider)
 	}
 
@@ -315,7 +383,7 @@ func registerAgentStatusTool(h *extension.Host, pool *agent.AgentPool) {
 	})
 }
 
-// loadBuiltinExtensions loads the trusted built-in WASM extensions (agents, history).
+// loadBuiltinExtensions loads the trusted built-in WASM extensions.
 func loadBuiltinExtensions(ctx context.Context, h *extension.Host) {
 	builtins := []struct {
 		name string
@@ -324,6 +392,7 @@ func loadBuiltinExtensions(ctx context.Context, h *extension.Host) {
 		{"agents", agentsWASM},
 		{"history", historyWASM},
 		{"logging", loggingWASM},
+		{"statusline", statuslineWASM},
 	}
 	for _, b := range builtins {
 		if loadErr := h.LoadBytes(ctx, b.name+".wasm", b.data, true); loadErr != nil {

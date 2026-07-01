@@ -62,6 +62,12 @@ func (s *liveState) setModel(model string) {
 	s.mu.Unlock()
 }
 
+func (s *liveState) setProvider(provider string) {
+	s.mu.Lock()
+	s.provider = provider
+	s.mu.Unlock()
+}
+
 func (s *liveState) setTokens(n int) {
 	s.mu.Lock()
 	s.tokens = n
@@ -119,6 +125,16 @@ type Model struct {
 	// active provider. Nil means model selection is unavailable. Set by cmd/main.go.
 	ModelListFn func() []ModelChoice
 
+	// ProviderListFn returns providers selectable in the first-run setup wizard.
+	// Nil means provider selection is unavailable. Set by cmd/main.go.
+	ProviderListFn func() []ProviderChoice
+
+	// SelectProviderFn applies the selected first-run provider and its default
+	// model. Returns the selected model and whether the provider requires OAuth
+	// login.
+	// Nil means selection is display-only. Set by cmd/main.go.
+	SelectProviderFn func(provider string) (model string, requiresLogin bool, err error)
+
 	// SelectModelFn switches the active model: it rebuilds the main agent's
 	// language model, updates the context window, and persists the choice.
 	// Returns an error if the switch fails. Nil means selection is display-only.
@@ -167,6 +183,7 @@ type Model struct {
 	activeThinking       string
 	authPromptProvider   string
 	pendingAuthProvider  string
+	pendingSetupWizard   bool
 	oauthCaptureProvider string
 
 	// Modal overlay state (non-empty when modal is open).
@@ -464,6 +481,13 @@ func (m *Model) SetPendingAuthProvider(provider string) {
 	m.pendingAuthProvider = provider
 }
 
+// SetPendingSetupWizard marks startup as needing the first-run provider wizard.
+// Used for blank config where provider/model are both defaulted and credentials
+// are unavailable.
+func (m *Model) SetPendingSetupWizard() {
+	m.pendingSetupWizard = true
+}
+
 // SetActiveThinking sets the displayed active reasoning level and reflects it in
 // the status bar. Used at startup to show the persisted level. Does not itself
 // change the agent's provider options.
@@ -485,6 +509,9 @@ func (m Model) Init() tea.Cmd {
 	if m.pendingAuthProvider != "" {
 		provider := m.pendingAuthProvider
 		cmds = append(cmds, func() tea.Msg { return showAuthPromptMsg{Provider: provider} })
+	}
+	if m.pendingSetupWizard {
+		cmds = append(cmds, func() tea.Msg { return showLoginProviderPickerMsg{} })
 	}
 	return tea.Batch(cmds...)
 }
@@ -651,6 +678,9 @@ func (m Model) updateKeyPressPicker(kp tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		if callback == authPickerCallback {
 			provider := m.authPromptProvider
 			return m, func() tea.Msg { return recordAuthMsg{Provider: provider, Method: id} }, true
+		}
+		if callback == loginProviderPickerCallback {
+			return m, func() tea.Msg { return loginProviderSelectedMsg{Provider: id} }, true
 		}
 		extHost := m.extHost
 		return m, func() tea.Msg {
@@ -900,6 +930,21 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 	case showAuthPromptMsg:
 		m.openAuthPrompt(msg.Provider)
 		return m, nil, true
+
+	case showLoginProviderPickerMsg:
+		m.openLoginProviderPicker()
+		return m, nil, true
+
+	case loginProviderSelectedMsg:
+		return m, m.applyLoginProviderSelection(msg.Provider), true
+
+	case startLoginMsg:
+		if m.RecordAuthFn != nil {
+			if err := m.RecordAuthFn(msg.Provider, authMethodOAuth); err != nil {
+				m.pushNotification(fmt.Sprintf("⚠ could not record auth choice: %v", err))
+			}
+		}
+		return m, m.beginOAuthLogin(msg.Provider), true
 
 	case recordAuthMsg:
 		m.applyAuthChoice(msg.Method)

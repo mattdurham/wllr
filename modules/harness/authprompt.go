@@ -16,6 +16,23 @@ type showAuthPromptMsg struct {
 	Provider string
 }
 
+// startLoginMsg begins OAuth login for a provider immediately. It is emitted at
+// startup for blank first-run config so the login modal opens without an
+// intermediate auth-method picker.
+type startLoginMsg struct {
+	Provider string
+}
+
+// showLoginProviderPickerMsg opens a startup provider picker before OAuth. It
+// is used when neither provider nor model has been configured.
+type showLoginProviderPickerMsg struct{}
+
+// loginProviderSelectedMsg carries the provider chosen from the startup login
+// picker.
+type loginProviderSelectedMsg struct {
+	Provider string
+}
+
 // recordAuthMsg records the user's chosen auth method for a provider. Emitted by
 // the auth prompt picker on selection.
 type recordAuthMsg struct {
@@ -39,6 +56,8 @@ type oauthCallbackMsg struct {
 // auth-prompt selection to the core recordAuthMsg handler instead of dispatching
 // EventOnCommand to a WASM extension. "__wllr:" is reserved for core pickers.
 const authPickerCallback = "__wllr:auth"
+
+const loginProviderPickerCallback = "__wllr:login_provider"
 
 // Auth method IDs presented in the prompt.
 const (
