@@ -228,8 +228,31 @@ headers for it automatically.
 ```
 
 You can still authenticate by setting `ANTHROPIC_API_KEY` directly (a normal
-API key or a pre-obtained `sk-ant-oat…` token). Other providers use API keys via
-the environment variables above; OAuth login is currently Anthropic-only.
+API key or a pre-obtained `sk-ant-oat…` token).
+
+### OAuth login (OpenAI Codex / ChatGPT Plus·Pro)
+
+With `WLLR_PROVIDER=openai`, choosing **OAuth** (or `/login`) uses the
+**device-code** flow — which works anywhere, including over SSH, with no local
+server or port forwarding:
+
+1. wllr shows a verification URL (copied to your clipboard) **and a short user
+   code**.
+2. Open the URL in a browser on any machine, enter the code, approve.
+3. wllr is polling in the background; login completes automatically once you
+   approve, and the box closes on its own.
+
+The access token is a ChatGPT subscription token. wllr routes Codex requests
+through the ChatGPT backend (`chatgpt.com/backend-api/codex`) with the
+`chatgpt-account-id` header (extracted from the token's JWT claims), matching how
+Codex authenticates. Tokens are stored in `auth.json` and refreshed on expiry.
+
+```json
+{ "openai": { "type": "oauth", "access": "…", "refresh": "…", "expires": 1750000000000, "account_id": "…" } }
+```
+
+You can still use a plain `OPENAI_API_KEY` instead. Gemini remains API-key only;
+OAuth login is available for Anthropic and OpenAI (Codex).
 
 ---
 

@@ -68,22 +68,26 @@ func LoadConfig() (*Config, error) {
 	// Auth-file OAuth credentials satisfy the provider key requirement: if no env
 	// key is set but a stored OAuth access token exists, seed the key from it so
 	// the initial provider build works. Refresh-on-expiry happens at startup
-	// (resolveStartupAnthropicOAuth). This lets a prior /login persist without an
-	// env var.
+	// (resolveStartupOAuth). This lets a prior /login persist without an env var.
 	if cfg.Provider == providerAnthropic && cfg.AnthropicAPIKey == "" {
 		if cred, ok := loadAuthCredential(providerAnthropic); ok && cred.Type == authTypeOAuth && cred.Access != "" {
 			cfg.AnthropicAPIKey = cred.Access
+		}
+	}
+	if cfg.Provider == "openai" && cfg.OpenAIAPIKey == "" {
+		if cred, ok := loadAuthCredential("openai"); ok && cred.Type == authTypeOAuth && cred.Access != "" {
+			cfg.OpenAIAPIKey = cred.Access
 		}
 	}
 
 	switch cfg.Provider {
 	case providerAnthropic:
 		if cfg.AnthropicAPIKey == "" {
-			return nil, fmt.Errorf("ANTHROPIC_API_KEY is required when BOB_PROVIDER=anthropic (or run /login)")
+			return nil, fmt.Errorf("ANTHROPIC_API_KEY is required when WLLR_PROVIDER=anthropic (or run /login)")
 		}
 	case "openai":
 		if cfg.OpenAIAPIKey == "" {
-			return nil, fmt.Errorf("OPENAI_API_KEY is required when BOB_PROVIDER=openai")
+			return nil, fmt.Errorf("OPENAI_API_KEY is required when WLLR_PROVIDER=openai (or run /login)")
 		}
 	case "gemini":
 		if cfg.GeminiAPIKey == "" {

@@ -82,6 +82,7 @@ log, and reset behavior are covered by `wasmchat_test.go`, `tui_test.go`, and
 | `TestBeginOAuthLogin_EntersCaptureMode` | Begin returns URL, enters capture mode | `oauthCaptureProvider` set; modal shown |
 | `TestBeginOAuthLogin_ErrorNoCapture` | Begin error ⇒ no capture | `oauthCaptureProvider` stays empty |
 | `TestCompleteOAuthLogin_CallsCompleteAndClears` | Complete calls fn and clears capture | `CompleteOAuthFn` invoked; capture cleared; success `NotifyMsg` |
+| `TestBeginOAuthLogin_EntersCaptureMode` | Begin shows modal + enters capture | `oauthCaptureProvider` set; modal body shown; non-nil cmd |
 | `TestBeginOAuthLogin_UnavailableWithoutCallback` | No `AwaitOAuthFn` ⇒ login unavailable | does not enter capture mode |
 | `TestCompleteOAuthFromCallback_CompletesWhenCapturing` | Callback code auto-completes login | closes modal; `CompleteOAuthFn` invoked with the query; `NotifyMsg` |
 | `TestCompleteOAuthFromCallback_ErrorSurfaced` | Complete error surfaced | error `NotifyMsg` |

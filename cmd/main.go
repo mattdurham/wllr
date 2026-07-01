@@ -195,24 +195,29 @@ func main() {
 	}
 
 	// Apply a stored, valid OAuth token at startup (refreshing if expired) so a
-	// prior /login persists across restarts.
-	resolveStartupAnthropicOAuth(ctx, pool, cfg)
+	// prior /login persists across restarts. Anthropic (browser+callback) and
+	// Codex/openai (device-code) are supported.
+	resolveStartupOAuth(ctx, pool, cfg)
 
 	// First-run provider auth: record the chosen auth method once per provider so
 	// the prompt is not shown again. RecordAuthFn persists to the 0600 auth file.
 	m.RecordAuthFn = func(provider, method string) error {
 		return saveAuthCredential(provider, authCredential{Type: authType(method)})
 	}
-	// OAuth login flow (Anthropic): begin returns the authorize URL; complete
-	// exchanges the pasted code for tokens and swaps the live provider.
-	oauthState := &oauthLoginState{}
-	m.BeginOAuthFn = oauthState.beginAnthropicOAuth
-	m.CompleteOAuthFn = func(provider, input string) error {
-		return oauthState.completeAnthropicOAuth(ctx, pool, cfg.Model, provider, input)
+	// OAuth login flow: begin returns the modal body + a URL to copy; await blocks
+	// until login resolves (Anthropic local callback server, or Codex device-code
+	// poll); complete exchanges the result and swaps the live provider.
+	oauthState := newOAuthLoginState(ctx, pool, cfg.Model)
+	m.BeginOAuthFn = oauthState.begin
+	m.CompleteOAuthFn = oauthState.complete
+	m.AwaitOAuthFn = func() (string, bool) {
+		input, err := oauthState.await()
+		if err != nil {
+			slog.Warn("wllr: oauth login failed", "error", err)
+			return "", false
+		}
+		return input, input != ""
 	}
-	// AwaitOAuthFn blocks on the local callback server so a local browser
-	// redirect completes login automatically (no manual paste needed).
-	m.AwaitOAuthFn = oauthState.awaitCallback
 	if !hasAuthRecord(currentProvider) {
 		m.SetPendingAuthProvider(currentProvider)
 	}
