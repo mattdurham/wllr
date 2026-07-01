@@ -44,3 +44,4 @@ features.md
 # Local agent working state and extension build artifacts
 .claude/
 extensions/agents/agents
+*.wasm

@@ -298,5 +298,5 @@ generate-models:
 
 clean:
 	rm -rf $(DIST_DIR)
-	rm -f $(BUILTINS)/agents.wasm $(BUILTINS)/history.wasm $(BUILTINS)/logging.wasm
+	rm -f $(BUILTINS)/*.wasm
 	rm -rf $(EXT_DIR)/memory
