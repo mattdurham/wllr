@@ -139,16 +139,27 @@ type Model struct {
 	// if persisting fails. Nil means the choice is not persisted. Set by cmd/main.go.
 	RecordAuthFn func(provider, method string) error
 
+	// BeginOAuthFn starts an OAuth login for a provider and returns the authorize
+	// URL the user should open. Nil means OAuth login is unavailable. Set by cmd/main.go.
+	BeginOAuthFn func(provider string) (authURL string, err error)
+
+	// CompleteOAuthFn exchanges the pasted authorization code/redirect URL for
+	// tokens, persisting and applying them. Returns an error if the exchange
+	// fails. Nil means OAuth completion is unavailable. Set by cmd/main.go.
+	CompleteOAuthFn func(provider, input string) error
+
 	// scene holds extension-driven UI areas (the declarative, node-based
 	// renderer). Shared by pointer with the harnessUIBridge so the bridge can
 	// mutate it off-loop and the View can read it.
 	scene *SceneRenderer
 
-	mainAgentID         string
-	activeModel         string
-	activeThinking      string
-	authPromptProvider  string
-	pendingAuthProvider string
+	mainAgentID          string
+	activeModel          string
+	activeProvider       string
+	activeThinking       string
+	authPromptProvider   string
+	pendingAuthProvider  string
+	oauthCaptureProvider string
 
 	// Modal overlay state (non-empty when modal is open).
 	modalContent string
@@ -212,8 +223,9 @@ func New(pool *agent.AgentPool, mainAgentID string, h *extension.Host) Model {
 		mainAgentID: mainAgentID,
 		extHost:     h,
 		console:     NewConsoleView(),
-		live:        &liveState{provider: provName, statuses: make(map[string]string)},
-		scene:       NewSceneRenderer(),
+		live:           &liveState{provider: provName, statuses: make(map[string]string)},
+		scene:          NewSceneRenderer(),
+		activeProvider: provName,
 	}
 	// Pre-create the statusline area so the placement slot is reserved before
 	// session_start fires and the bundled statusline extension sets its root.
@@ -842,6 +854,11 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 
 	case SubmitMsg:
 		m.closeSuggestions()
+		// While capturing an OAuth authorization code, the next submitted line is
+		// the pasted code/redirect URL — not a prompt to the agent.
+		if m.oauthCaptureProvider != "" {
+			return m, m.completeOAuthLogin(msg.Content), true
+		}
 		n, cmd := m.submitToAgent(msg.Content, msg.Display)
 		return n.(Model), cmd, true
 
@@ -883,6 +900,13 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 
 	case recordAuthMsg:
 		m.applyAuthChoice(msg.Method)
+		if msg.Method == authMethodOAuth {
+			return m, m.beginOAuthLogin(msg.Provider), true
+		}
+		return m, nil, true
+
+	case loginMsg:
+		m.openAuthPrompt(m.activeProvider)
 		return m, nil, true
 
 	case showModelPickerMsg:

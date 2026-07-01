@@ -20,6 +20,26 @@ import (
 // providerAnthropic is the canonical provider name for Anthropic.
 const providerAnthropic = "anthropic"
 
+// newAnthropicProvider builds an Anthropic fantasy.Provider for the given key.
+// OAuth tokens (sk-ant-oat... access tokens) are Claude Code subscription
+// tokens: they route through a higher-limit tier and require the Claude Code
+// beta headers to identify the client correctly — matching how pi/Claude Code
+// authenticate. Extracted so the OAuth login flow can rebuild the provider with
+// a freshly obtained access token.
+func newAnthropicProvider(apiKey string) (fantasy.Provider, error) {
+	opts := []fantasyanthropicprovider.Option{
+		fantasyanthropicprovider.WithAPIKey(apiKey),
+	}
+	if strings.HasPrefix(apiKey, "sk-ant-oat") {
+		opts = append(opts, fantasyanthropicprovider.WithHeaders(map[string]string{
+			"anthropic-beta": "claude-code-20250219,oauth-2025-04-20",
+			"user-agent":     "claude-cli/1.0.0",
+			"x-app":          "cli",
+		}))
+	}
+	return fantasyanthropicprovider.New(opts...)
+}
+
 // buildProvider constructs a fantasy.Provider and fetches the configured
 // LanguageModel from it. Returns an error if the provider name is unknown
 // or if the provider or model cannot be created.
@@ -31,20 +51,7 @@ func buildProvider(ctx context.Context, cfg *Config) (fantasy.Provider, fantasy.
 
 	switch cfg.Provider {
 	case providerAnthropic:
-		anthropicOpts := []fantasyanthropicprovider.Option{
-			fantasyanthropicprovider.WithAPIKey(cfg.AnthropicAPIKey),
-		}
-		// OAuth tokens (sk-ant-oat...) are Claude Code subscription tokens.
-		// They route through a higher-limit tier and require Claude Code beta headers
-		// to identify the client correctly — matching how pi/Claude Code authenticates.
-		if strings.HasPrefix(cfg.AnthropicAPIKey, "sk-ant-oat") {
-			anthropicOpts = append(anthropicOpts, fantasyanthropicprovider.WithHeaders(map[string]string{
-				"anthropic-beta": "claude-code-20250219,oauth-2025-04-20",
-				"user-agent":     "claude-cli/1.0.0",
-				"x-app":          "cli",
-			}))
-		}
-		prov, provErr = fantasyanthropicprovider.New(anthropicOpts...)
+		prov, provErr = newAnthropicProvider(cfg.AnthropicAPIKey)
 	case "openai":
 		prov, provErr = fantasyopenapiprovider.New(
 			fantasyopenapiprovider.WithAPIKey(cfg.OpenAIAPIKey),
