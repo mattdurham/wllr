@@ -19,6 +19,7 @@ func TestBeginOAuthLogin_EntersCaptureMode(t *testing.T) {
 		BeginOAuthFn: func(provider string) (string, error) {
 			return "https://claude.ai/oauth/authorize?x=1", nil
 		},
+		AwaitOAuthFn: func() (string, bool) { return "", false },
 	}
 	cmd := m.beginOAuthLogin("anthropic")
 
@@ -28,16 +29,16 @@ func TestBeginOAuthLogin_EntersCaptureMode(t *testing.T) {
 	if m.modalContent == "" {
 		t.Error("expected a modal with sign-in instructions")
 	}
-	// The URL is copied to the clipboard: begin returns a (SetClipboard) command.
+	// begin returns a batch (clipboard copy + await-callback).
 	if cmd == nil {
-		t.Error("expected a non-nil command (clipboard copy) from beginOAuthLogin")
+		t.Error("expected a non-nil command from beginOAuthLogin")
 	}
 }
 
 func TestBeginOAuthLogin_ErrorNoCapture(t *testing.T) {
 	m := &Model{
 		BeginOAuthFn: func(string) (string, error) { return "", errors.New("boom") },
-		extHost:      nil,
+		AwaitOAuthFn: func() (string, bool) { return "", false },
 	}
 	m.beginOAuthLogin("anthropic")
 	if m.oauthCaptureProvider != "" {
@@ -45,53 +46,23 @@ func TestBeginOAuthLogin_ErrorNoCapture(t *testing.T) {
 	}
 }
 
-func TestCompleteOAuthLogin_CallsCompleteAndClears(t *testing.T) {
+func TestBeginOAuthLogin_UnavailableWithoutCallback(t *testing.T) {
+	// No AwaitOAuthFn ⇒ login is unavailable (no manual-paste fallback exists).
+	m := &Model{
+		BeginOAuthFn: func(string) (string, error) { return "https://x", nil },
+	}
+	m.beginOAuthLogin("anthropic")
+	if m.oauthCaptureProvider != "" {
+		t.Error("should not enter capture mode without a callback awaiter")
+	}
+}
+
+func TestCompleteOAuthFromCallback_CompletesWhenCapturing(t *testing.T) {
 	var gotProvider, gotInput string
 	m := &Model{
 		oauthCaptureProvider: "anthropic",
 		CompleteOAuthFn: func(provider, input string) error {
 			gotProvider, gotInput = provider, input
-			return nil
-		},
-	}
-	cmd := m.completeOAuthLogin("the-code#state")
-	if m.oauthCaptureProvider != "" {
-		t.Error("capture mode should be cleared immediately")
-	}
-	msg := drainMsg(cmd)
-	n, ok := msg.(NotifyMsg)
-	if !ok {
-		t.Fatalf("expected NotifyMsg, got %T", msg)
-	}
-	if gotProvider != "anthropic" || gotInput != "the-code#state" {
-		t.Errorf("CompleteOAuthFn got (%q,%q)", gotProvider, gotInput)
-	}
-	if n.Text == "" {
-		t.Error("expected a success notification")
-	}
-}
-
-func TestCompleteOAuthLogin_ErrorSurfaced(t *testing.T) {
-	m := &Model{
-		oauthCaptureProvider: "anthropic",
-		CompleteOAuthFn:      func(string, string) error { return errors.New("bad code") },
-	}
-	msg := drainMsg(m.completeOAuthLogin("x"))
-	n, ok := msg.(NotifyMsg)
-	if !ok {
-		t.Fatalf("expected NotifyMsg, got %T", msg)
-	}
-	if n.Text == "" {
-		t.Error("expected an error notification")
-	}
-}
-
-func TestCompleteOAuthFromCallback_CompletesWhenCapturing(t *testing.T) {
-	var gotInput string
-	m := &Model{
-		oauthCaptureProvider: "anthropic",
-		CompleteOAuthFn: func(_, input string) error {
-			gotInput = input
 			return nil
 		},
 	}
@@ -105,8 +76,23 @@ func TestCompleteOAuthFromCallback_CompletesWhenCapturing(t *testing.T) {
 	if _, ok := drainMsg(cmd).(NotifyMsg); !ok {
 		t.Error("expected a NotifyMsg")
 	}
-	if gotInput != "code=abc&state=xyz" {
-		t.Errorf("CompleteOAuthFn input = %q", gotInput)
+	if gotProvider != "anthropic" || gotInput != "code=abc&state=xyz" {
+		t.Errorf("CompleteOAuthFn got (%q,%q)", gotProvider, gotInput)
+	}
+}
+
+func TestCompleteOAuthFromCallback_ErrorSurfaced(t *testing.T) {
+	m := &Model{
+		oauthCaptureProvider: "anthropic",
+		CompleteOAuthFn:      func(string, string) error { return errors.New("bad code") },
+	}
+	msg := drainMsg(m.completeOAuthFromCallback(oauthCallbackMsg{Input: "x", OK: true}))
+	n, ok := msg.(NotifyMsg)
+	if !ok {
+		t.Fatalf("expected NotifyMsg, got %T", msg)
+	}
+	if n.Text == "" {
+		t.Error("expected an error notification")
 	}
 }
 
