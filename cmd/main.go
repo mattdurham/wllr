@@ -20,7 +20,6 @@ import (
 	"github.com/mattdurham/wllr/modules/harness"
 	"github.com/mattdurham/wllr/modules/mcp"
 	"github.com/mattdurham/wllr/modules/sdk"
-	"github.com/mattdurham/wllr/modules/session"
 	"github.com/mattdurham/wllr/modules/tools"
 )
 
@@ -213,34 +212,10 @@ func main() {
 		slog.Log(ctx, l, msg)
 	})
 
-	// Open a JSONL session journal in ~/.wllr/sessions/.
-	j, journalPath := openSessionJournal()
-	if j != nil {
-		slog.Info("wllr: session journal opened", "path", journalPath)
-		m.OnUserMessage = func(content string) {
-			_ = j.WriteEntry(map[string]string{
-				"type":    "message",
-				"role":    string(sdk.RoleUser),
-				"content": content,
-				"ts":      time.Now().UTC().Format(time.RFC3339),
-			})
-		}
-		m.OnMessageEnd = func(role, content string) {
-			_ = j.WriteEntry(map[string]string{
-				"type":    "message",
-				"role":    role,
-				"content": content,
-				"ts":      time.Now().UTC().Format(time.RFC3339),
-			})
-		}
-		defer func() {
-			_ = j.WriteEntry(map[string]string{
-				"type": "session_end",
-				"ts":   time.Now().UTC().Format(time.RFC3339),
-			})
-			_ = j.Close()
-		}()
-	}
+	// Session recording (messages + tool calls) is handled by the bundled
+	// `history` WASM extension, which writes JSONL under ~/.wllr/sessions/ and
+	// provides browse/rollback UI. The former core session.Journal was redundant
+	// with it and has been removed.
 
 	prog := tea.NewProgram(&m)
 	m.SetProgram(prog)
@@ -416,39 +391,6 @@ func loadConfigGroup(group string) (json.RawMessage, error) {
 		return v, nil
 	}
 	return json.RawMessage("{}"), nil
-}
-
-// openSessionJournal creates ~/.wllr/sessions/ if needed, generates a session ID,
-// writes the session_start entry, and returns the open journal and its path.
-// Returns (nil, "") on any error — journal persistence is best-effort.
-func openSessionJournal() (*session.Journal, string) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		slog.Warn("wllr: session journal: cannot determine home dir", "error", err)
-		return nil, ""
-	}
-	sessDir := filepath.Join(home, ".wllr", "sessions")
-	if mkErr := os.MkdirAll(sessDir, 0o700); mkErr != nil {
-		slog.Warn("wllr: session journal: cannot create sessions dir", "error", mkErr)
-		return nil, ""
-	}
-	id := session.NewSessionID()
-	path := filepath.Join(sessDir, id+".jsonl")
-	j, openErr := session.OpenJournal(path)
-	if openErr != nil {
-		slog.Warn("wllr: session journal: cannot open journal", "error", openErr)
-		return nil, ""
-	}
-	if writeErr := j.WriteEntry(map[string]string{
-		"type": "session_start",
-		"id":   id,
-		"ts":   time.Now().UTC().Format(time.RFC3339),
-	}); writeErr != nil {
-		slog.Warn("wllr: session journal: cannot write session_start", "error", writeErr)
-		_ = j.Close()
-		return nil, ""
-	}
-	return j, path
 }
 
 // httpPost performs an HTTP POST request and returns the status code and body.
