@@ -509,14 +509,9 @@ When the user chooses **OAuth** in the auth prompt (or runs `/login`), the harne
 | `CompleteOAuthFn` | `func(provider, input string) error` | Exchanges the pasted authorization code / redirect URL for tokens, persists and applies them. Nil ⇒ completion unavailable. |
 | `AwaitOAuthFn` | `func() (input string, ok bool)` | Blocks until the local callback server captures the browser redirect (returns the raw redirect query + true), or false if cancelled/superseded or no server runs. Nil ⇒ no local callback (manual paste only). |
 
-Flow: selecting OAuth (or `/login` → `loginMsg` → `openAuthPrompt(activeProvider)`) leads to `beginOAuthLogin` → `BeginOAuthFn` returns the authorize URL, shown in a modal (copied to the system clipboard via `tea.SetClipboard`/OSC52), and the model enters **code-capture mode** (`oauthCaptureProvider != ""`). `beginOAuthLogin` returns a `tea.Batch` of the clipboard copy **and**, when `AwaitOAuthFn` is set, a command that blocks on the local callback server and yields an `oauthCallbackMsg`. Two completion paths race:
+Flow: selecting OAuth (or `/login` → `loginMsg` → `openAuthPrompt(activeProvider)`) leads to `beginOAuthLogin` → `BeginOAuthFn` returns the authorize URL (and starts the local callback server), shown in a modal (copied to the system clipboard via `tea.SetClipboard`/OSC52). `beginOAuthLogin` returns a `tea.Batch` of the clipboard copy **and** a command that blocks on `AwaitOAuthFn` and yields an `oauthCallbackMsg`. Login completes **only** via the local callback server: the browser redirect hits `127.0.0.1:53692`, `AwaitOAuthFn` returns the query, and `oauthCallbackMsg{OK:true}` → `completeOAuthFromCallback` closes the modal and runs `CompleteOAuthFn` off-loop, reporting success/failure as a `NotifyMsg`. There is **no manual-paste fallback** — the browser must be able to reach the local callback server (i.e. run on the same machine, or tunnel the port). `/login` is available any time, not just first run.
 
-- **Local callback (automatic):** the browser redirect hits the local server; `AwaitOAuthFn` returns the query; `oauthCallbackMsg{OK:true}` → `completeOAuthFromCallback` closes the modal and runs `CompleteOAuthFn`.
-- **Manual paste (SSH/remote fallback):** the user pastes the code/redirect URL; the next `SubmitMsg` in capture mode is routed to `completeOAuthLogin` (not the agent).
-
-Both run `CompleteOAuthFn` off-loop and report success/failure as a `NotifyMsg`. `/login` is available any time, not just first run.
-
-**Invariant:** while `oauthCaptureProvider != ""`, a submitted input line is treated as the OAuth code/URL and is NOT sent to the agent as a prompt. Capture mode is cleared as soon as completion starts (single-shot), so a failed exchange returns the user to normal input.
+**Invariant:** OAuth login requires both `BeginOAuthFn` and `AwaitOAuthFn`; if either is nil, `/login`'s OAuth path reports "not available" and does not enter capture mode. A normal `SubmitMsg` is never repurposed as an OAuth code.
 
 **Invariant:** OAuth login is provider-scoped; `BeginOAuthFn`/`CompleteOAuthFn` return an error for providers without a supported flow (today only Anthropic), surfaced as a notification.
 
