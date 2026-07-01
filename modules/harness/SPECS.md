@@ -172,9 +172,13 @@ there is no built-in message renderer.
 - `modalScroll` offsets the visible window into the content lines.
 - Bottom border: `╰──────────────────────────────╯`.
 
+Content lines are hard-wrapped to the content width by `wrapModalLines(lines, width)` before the scroll window is applied, so long unbreakable tokens (e.g. the OAuth authorize URL) wrap across rows and stay fully visible rather than being truncated. Blank lines are preserved.
+
 The caller (`View`) adds top and bottom blank-line margins to vertically center the modal in the chat area.
 
-**Invariant:** `modalScroll` is clamped to `[0, max(0, len(lines) - contentLines)]` on render.
+**Invariant:** `modalScroll` is clamped to `[0, max(0, len(lines) - contentLines)]` on render, where `lines` is the post-wrap line count.
+
+**Invariant:** `wrapModalLines` preserves content exactly — concatenating the output rows for a given input line reproduces that line.
 
 ---
 
