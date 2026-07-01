@@ -20,13 +20,17 @@ func TestBeginOAuthLogin_EntersCaptureMode(t *testing.T) {
 			return "https://claude.ai/oauth/authorize?x=1", nil
 		},
 	}
-	m.beginOAuthLogin("anthropic")
+	cmd := m.beginOAuthLogin("anthropic")
 
 	if m.oauthCaptureProvider != "anthropic" {
 		t.Errorf("oauthCaptureProvider = %q, want anthropic", m.oauthCaptureProvider)
 	}
 	if m.modalContent == "" {
 		t.Error("expected a modal with sign-in instructions")
+	}
+	// The URL is copied to the clipboard: begin returns a (SetClipboard) command.
+	if cmd == nil {
+		t.Error("expected a non-nil command (clipboard copy) from beginOAuthLogin")
 	}
 }
 
