@@ -161,6 +161,40 @@ func main() {
 		return nil
 	}
 
+	// Wire the /thinking picker: list reasoning levels, and apply + persist on
+	// selection. Applying sets the main agent's provider options (mapped to the
+	// active provider's native mechanism) for subsequent turns.
+	m.ThinkingListFn = func() []harness.ThinkingChoice {
+		out := make([]harness.ThinkingChoice, 0, len(thinkingLevels))
+		for _, lvl := range thinkingLevels {
+			out = append(out, harness.ThinkingChoice{ID: string(lvl), Label: thinkingLevelLabels[lvl]})
+		}
+		return out
+	}
+	m.SelectThinkingFn = func(levelID string) error {
+		if !isValidThinkingLevel(levelID) {
+			return fmt.Errorf("unknown thinking level %q", levelID)
+		}
+		level := thinkingLevel(levelID)
+		po := providerOptionsForThinking(currentProvider, level)
+		if main := pool.Get(agent.MainAgentID); main != nil {
+			main.SetProviderOptions(po)
+		}
+		if saveErr := saveThinkingLevel(level); saveErr != nil {
+			slog.Warn("wllr: could not persist thinking level", "level", levelID, "error", saveErr)
+		}
+		return nil
+	}
+
+	// Apply the persisted thinking level (if any) to the main agent at startup so
+	// the saved reasoning level survives restarts, and reflect it in the status.
+	if lvl := savedThinkingLevel(); lvl != thinkingOff {
+		if main := pool.Get(agent.MainAgentID); main != nil {
+			main.SetProviderOptions(providerOptionsForThinking(currentProvider, lvl))
+		}
+		m.SetActiveThinking(string(lvl))
+	}
+
 	m.SetLogFn(func(level int, msg string) {
 		lvl := []slog.Level{slog.LevelDebug, slog.LevelInfo, slog.LevelWarn, slog.LevelError}
 		l := slog.LevelError

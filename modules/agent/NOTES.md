@@ -407,3 +407,15 @@ The user chose the simple "always notify" design over per-turn suppression or an
 **Rationale:** `/model` was cosmetic — it updated the status display but never changed the model the main agent actually ran (the LM was fixed at spawn). The new model picker needs to genuinely switch the running model. `SetModel` swaps both the LM and the name atomically so the next turn uses the new model, while a turn already in flight finishes on the model it captured. Previously `lm`/`modelName` were read without synchronisation (safe only because they were write-once at spawn); making them mutable at runtime requires the mutex to avoid a data race with in-flight `Submit`/`executeTurn` reads. The provider-request reroute path (§ Provider-Request Interception) already rebuilt the LM per-turn locally; `SetModel` is the persistent counterpart driven by the user rather than an interceptor.
 
 **Consequence:** `Agent` gains `lmMu`; `ModelName()` is now a locked accessor (was a bare field read). No behavior change for spawn-time model assignment. The harness `SelectModelFn` (wired in cmd/main.go) calls `SetModel` on the main agent plus `pool.SetDefaultModelName` (so future sub-agents inherit it) and `pool.SetContextWindow`. Covered by `TestSetModel_SwapsModelForNextTurn` (next turn streams from the swapped LM).
+
+---
+
+## 28. Runtime provider-options switching — Agent.SetProviderOptions
+
+*Added: 2026-06-30*
+
+**Decision:** Add `Agent.SetProviderOptions(fantasy.ProviderOptions)` and a `providerOpts` field guarded by the existing `lmMu`. It is seeded from `opts.ProviderOptions` at spawn; `Submit` snapshots it under `lmMu.RLock()` (alongside `lm`) and assigns the snapshot to the per-turn `opts.ProviderOptions`.
+
+**Rationale:** The `/thinking` picker needs to change the reasoning level (Anthropic thinking budget / OpenAI reasoning effort / Gemini thinking budget) of the already-running main agent, not just at spawn. Provider options were previously write-once via SpawnOpts. Reusing `lmMu` (rather than a new mutex) keeps the "model + its request options are swapped together, atomically, between turns" story in one place and matches the SetModel design (§27). A nil value clears options so "thinking off" fully removes the provider option rather than sending a zero budget.
+
+**Consequence:** `Agent` gains `providerOpts`; `Submit` reads it under `lmMu` and overrides the captured `opts.ProviderOptions` for the turn. Spawn-time behavior is unchanged (providerOpts seeds from opts.ProviderOptions). The harness `SelectThinkingFn` (cmd/main.go) maps a level → provider options (cmd/thinking.go) and calls `SetProviderOptions` on the main agent. Covered by `TestSetProviderOptions_AppliedToNextTurn`.
