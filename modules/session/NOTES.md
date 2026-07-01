@@ -49,3 +49,13 @@
 **Rationale:** The journal needs to intercept both user input and completed assistant turns. Wiring via exported callbacks on the Model avoids adding a `session` import to the `harness` package (which would create a dependency on the journal) and keeps the harness package focused on rendering.
 
 **Consequence:** `cmd/main.go` is responsible for setting these hooks. Callers that do not set them get nil callbacks (no-op path in the model, already guarded by nil checks).
+
+## 6. Core session.Journal removed — history extension is the source of truth
+
+*Added: 2026-06-30*
+
+**Decision:** Remove `journal.go` (`Journal`, `OpenJournal`, `WriteEntry`, `Close`, `NewSessionID`, `LoadSession`, `journalEntry`, `splitLines`) and `journal_test.go` from this package, plus the `openSessionJournal()` wiring and the `OnUserMessage`/`OnMessageEnd` journal callbacks in `cmd/main.go`. `Wire`/`ConversationSession`/`Session` and the harness `OnUserMessage`/`OnMessageEnd` hooks themselves are KEPT.
+
+**Rationale:** The bundled `history` WASM extension strictly supersedes the core journal: it records the same messages plus tool calls, writes JSONL under `~/.wllr/sessions/`, and adds browse/rollback UI. `session.LoadSession` had zero production callers (test-only), so the read side was dead. Maintaining two parallel session-recording paths was redundant and risked divergence. This aligns with the project direction that history is the primary session storage.
+
+**Consequence:** `cmd/main.go` no longer opens a core journal or sets the two message callbacks for persistence (the harness hooks remain available for other consumers/extensions). NOTES §4 (best-effort journal writes) and §5 (hook wiring) describe the removed core-journal wiring; they are retained for history but no longer reflect active core behavior — recording now lives in the `history` extension. SPECS §8 rewritten accordingly; the Journal API table and its invariants (6–10) are removed.

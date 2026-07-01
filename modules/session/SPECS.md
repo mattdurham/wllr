@@ -19,12 +19,13 @@ The `Session` interface defines the public contract:
 ## 2. ConversationSession
 
 `ConversationSession` implements `Session`. It holds:
+
 - `host *extension.Host` — the WASM extension runtime
 - `pool *agent.AgentPool` — the agent registry
 - `mainID string` — ID of the primary agent (usually "main")
 - `renderer harness.Renderer` — the UI adapter (may be nil)
 
-Journal persistence is handled externally by `cmd/main.go` via the harness `OnUserMessage` and `OnMessageEnd` callbacks. `ConversationSession` does not hold a journal reference; it has no journal-related methods.
+Session recording (messages and tool calls) is handled by the bundled `history` WASM extension, which writes JSONL under `~/.wllr/sessions/` and provides browse/rollback UI. `ConversationSession` holds no persistence reference and has no journal-related methods. (The former core `session.Journal` was redundant with the `history` extension and has been removed.)
 
 ## 3. Wire Constructor
 
@@ -64,36 +65,6 @@ All methods check for nil host and nil pool and return without error (or appropr
 4. Cancel is always a no-op when not streaming (does not block).
 5. Close is idempotent: calling it multiple times does not error.
 
-## 8. Session Journal (JSONL Persistence)
+## 8. Session Persistence
 
-`journal.go` provides append-only JSONL session persistence. Each line is a valid JSON object.
-
-### Schema
-
-| Entry type | Required fields |
-|------------|----------------|
-| `session_start` | `type`, `id`, `ts` (RFC3339) |
-| `message` | `type`, `role` (`user`/`assistant`), `content`, `ts` |
-| `session_end` | `type`, `ts` |
-
-### Journal API
-
-| Symbol | Description |
-|--------|-------------|
-| `OpenJournal(path string) (*Journal, error)` | Opens or creates a JSONL file for append-only writing |
-| `(*Journal).WriteEntry(v any) error` | Marshals v and appends as a JSON line; goroutine-safe |
-| `(*Journal).Close() error` | Flushes buffered data and closes the file |
-| `NewSessionID() string` | Returns `YYYYMMDD-HHMMSS-XXXX` format ID using crypto/rand |
-| `LoadSession(path string) ([]sdk.Message, error)` | Reads a JSONL file and returns user/assistant messages |
-
-### File location
-
-`~/.wllr/sessions/<session-id>.jsonl` — created by `cmd/main.go` at startup.
-
-### Invariants
-
-6. `Journal.WriteEntry` is goroutine-safe via an internal mutex; concurrent callers produce N valid JSON lines.
-7. `newSessionID()` always returns a string matching `\d{8}-\d{6}-[0-9a-f]{4}`.
-8. `LoadSession` skips `session_start` and `session_end` lines; returns only `message` entries with role `user` or `assistant`.
-9. `OpenJournal` creates the file with permission 0600 (owner read/write only).
-10. Journal persistence is best-effort: errors are logged via `slog` but never propagate to the user.
+Session persistence is **not** a responsibility of this package. The bundled `history` WASM extension records messages and tool calls to JSONL under `~/.wllr/sessions/` and owns the browse/rollback UI. The core `session.Journal` (formerly `journal.go`) was redundant with it — its `LoadSession` had no production callers — and has been removed.
