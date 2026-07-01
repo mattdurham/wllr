@@ -210,6 +210,9 @@ func main() {
 	m.CompleteOAuthFn = func(provider, input string) error {
 		return oauthState.completeAnthropicOAuth(ctx, pool, cfg.Model, provider, input)
 	}
+	// AwaitOAuthFn blocks on the local callback server so a local browser
+	// redirect completes login automatically (no manual paste needed).
+	m.AwaitOAuthFn = oauthState.awaitCallback
 	if !hasAuthRecord(currentProvider) {
 		m.SetPendingAuthProvider(currentProvider)
 	}

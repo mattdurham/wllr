@@ -5,9 +5,20 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/mattdurham/wllr/modules/agent"
 )
+
+// useEphemeralCallbackPort points the callback server at an OS-assigned port for
+// the duration of a test, so tests never fight over the fixed 53692 and never
+// leak a listener across tests.
+func useEphemeralCallbackPort(t *testing.T) {
+	t.Helper()
+	orig := oauthCallbackAddr
+	oauthCallbackAddr = "127.0.0.1:0"
+	t.Cleanup(func() { oauthCallbackAddr = orig })
+}
 
 func TestOAuthLogin_BeginUnsupportedProvider(t *testing.T) {
 	s := &oauthLoginState{}
@@ -17,11 +28,13 @@ func TestOAuthLogin_BeginUnsupportedProvider(t *testing.T) {
 }
 
 func TestOAuthLogin_BeginStoresVerifier(t *testing.T) {
+	useEphemeralCallbackPort(t)
 	s := &oauthLoginState{}
 	u, err := s.beginAnthropicOAuth(providerAnthropic)
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
+	t.Cleanup(func() { s.mu.Lock(); s.stopLocked(); s.mu.Unlock() })
 	if s.verifier == "" {
 		t.Error("verifier should be stored after begin")
 	}
@@ -66,11 +79,14 @@ func TestOAuthLogin_CompleteRoundTrip(t *testing.T) {
 		t.Fatalf("spawn: %v", err)
 	}
 
+	useEphemeralCallbackPort(t)
 	s := &oauthLoginState{}
 	if _, err := s.beginAnthropicOAuth(providerAnthropic); err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	if err := s.completeAnthropicOAuth(context.Background(), pool, "claude-sonnet-4-6", providerAnthropic, "the-code#the-state"); err != nil {
+	// Paste the redirect with the matching state (= the verifier) the flow uses.
+	input := "the-code#" + s.verifier
+	if err := s.completeAnthropicOAuth(context.Background(), pool, "claude-sonnet-4-6", providerAnthropic, input); err != nil {
 		t.Fatalf("complete: %v", err)
 	}
 
@@ -82,6 +98,73 @@ func TestOAuthLogin_CompleteRoundTrip(t *testing.T) {
 	// Verifier cleared after completion.
 	if s.verifier != "" {
 		t.Error("verifier should be cleared after completion")
+	}
+}
+
+func TestOAuthLogin_CallbackServerCapturesCode(t *testing.T) {
+	useEphemeralCallbackPort(t)
+	s := &oauthLoginState{}
+	if _, err := s.beginAnthropicOAuth(providerAnthropic); err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	t.Cleanup(func() { s.mu.Lock(); s.stopLocked(); s.mu.Unlock() })
+
+	s.mu.Lock()
+	addr := s.boundAddr
+	s.mu.Unlock()
+	if addr == "" {
+		t.Fatal("callback server did not bind")
+	}
+
+	// awaitCallback blocks until the redirect arrives; run it in the background.
+	type result struct {
+		input string
+		ok    bool
+	}
+	res := make(chan result, 1)
+	go func() {
+		in, ok := s.awaitCallback()
+		res <- result{in, ok}
+	}()
+
+	// Simulate the browser redirect hitting the local callback.
+	url := "http://" + addr + "/callback?code=the-code&state=" + s.verifier
+	resp, err := http.Get(url) //nolint:noctx // test
+	if err != nil {
+		t.Fatalf("callback GET: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	select {
+	case r := <-res:
+		if !r.ok {
+			t.Fatal("awaitCallback returned ok=false")
+		}
+		code, state := parseAuthorizationInput(r.input)
+		if code != "the-code" || state != s.verifier {
+			t.Errorf("captured (code,state)=(%q,%q)", code, state)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for callback")
+	}
+}
+
+func TestOAuthLogin_StateMismatchRejected(t *testing.T) {
+	useEphemeralCallbackPort(t)
+	pool := agent.NewPool()
+	s := &oauthLoginState{}
+	if _, err := s.beginAnthropicOAuth(providerAnthropic); err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	t.Cleanup(func() { s.mu.Lock(); s.stopLocked(); s.mu.Unlock() })
+
+	err := s.completeAnthropicOAuth(context.Background(), pool, "claude-sonnet-4-6", providerAnthropic, "the-code#wrong-state")
+	if err == nil {
+		t.Fatal("expected state-mismatch error")
+	}
+	// Verifier must be restored so the user can retry.
+	if s.verifier == "" {
+		t.Error("verifier should be restored after a failed completion")
 	}
 }
 
