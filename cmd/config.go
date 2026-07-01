@@ -53,6 +53,11 @@ func LoadConfig() (*Config, error) {
 		ContextWindow:   parseContextWindow(os.Getenv("WLLR_CONTEXT_WINDOW")),
 	}
 
+	// Model precedence: env WLLR_MODEL > persisted selection (config.json wllr.model)
+	// > built-in default. The persisted value is written by the /model picker.
+	if cfg.Model == "" {
+		cfg.Model = savedModel()
+	}
 	if cfg.Model == "" {
 		cfg.Model = "claude-sonnet-4-6"
 	}

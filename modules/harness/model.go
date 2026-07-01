@@ -115,6 +115,16 @@ type Model struct {
 	// Nil means no callback. Set by cmd/main.go for session persistence.
 	OnUserMessage func(content string)
 
+	// ModelListFn returns the models selectable in the /model picker for the
+	// active provider. Nil means model selection is unavailable. Set by cmd/main.go.
+	ModelListFn func() []ModelChoice
+
+	// SelectModelFn switches the active model: it rebuilds the main agent's
+	// language model, updates the context window, and persists the choice.
+	// Returns an error if the switch fails. Nil means selection is display-only.
+	// Set by cmd/main.go.
+	SelectModelFn func(modelID string) error
+
 	// scene holds extension-driven UI areas (the declarative, node-based
 	// renderer). Shared by pointer with the harnessUIBridge so the bridge can
 	// mutate it off-loop and the View can read it.
@@ -568,6 +578,11 @@ func (m Model) updateKeyPressPicker(kp tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	}
 	if selected {
 		m.picker.Close()
+		// Core-owned pickers (callback prefixed "__wllr:") route to a harness
+		// handler instead of dispatching EventOnCommand to a WASM extension.
+		if callback == modelPickerCallback {
+			return m, func() tea.Msg { return setModelMsg{Model: id} }, true
+		}
 		extHost := m.extHost
 		return m, func() tea.Msg {
 			payload, _ := json.Marshal(sdk.OnCommandPayload{Name: callback, Args: []string{id}})
@@ -802,9 +817,11 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 		return m, nil, true
 
 	case setModelMsg:
-		m.activeModel = msg.Model
-		m.live.setModel(msg.Model)
-		m.pushNotification(fmt.Sprintf("Model set to: %s", msg.Model))
+		m.applyModelSelection(msg.Model)
+		return m, nil, true
+
+	case showModelPickerMsg:
+		m.openModelPicker()
 		return m, nil, true
 
 	case abortStreamMsg:

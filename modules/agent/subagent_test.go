@@ -71,6 +71,27 @@ func TestSpawnOpts_ModelName_Empty_UsesPoolDefault(t *testing.T) {
 	}
 }
 
+// TestSetModel_SwapsModelForNextTurn verifies SetModel updates the reported
+// model name and the LM used by the next turn (the /model picker path).
+func TestSetModel_SwapsModelForNextTurn(t *testing.T) {
+	pool := agent.NewPool()
+	a, err := pool.Spawn("main", &tokenStreamLM{tokens: []string{"from-original"}}, agent.SpawnOpts{ModelName: "claude-sonnet-4-6"})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	a.SetModel(&tokenStreamLM{tokens: []string{"from-swapped"}}, "claude-opus-4-8")
+	if got := a.ModelName(); got != "claude-opus-4-8" {
+		t.Errorf("ModelName after SetModel = %q, want claude-opus-4-8", got)
+	}
+
+	// The next turn must stream from the swapped LM.
+	got := collectResponse(t, a, "go")
+	if !strings.Contains(got, "from-swapped") {
+		t.Errorf("turn used old LM: got %q, want text from swapped LM", got)
+	}
+}
+
 // ─── InheritBasePrompt ────────────────────────────────────────────────────────
 
 func TestSpawnOpts_InheritBasePrompt_DefaultTrue_InheritsPrompt(t *testing.T) {
