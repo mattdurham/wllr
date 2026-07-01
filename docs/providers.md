@@ -204,16 +204,20 @@ per provider and never again once a choice exists.
 
 Choosing **OAuth** (or running `/login` any time) starts an interactive sign-in:
 
-1. wllr shows an authorize URL in a modal. Open it in a browser (on any
-   machine — the flow uses a paste-back code, so no local callback server is
-   needed and it works over SSH).
-2. Approve access. Claude shows an authorization code (or redirects to a URL
-   containing it).
-3. Close the modal, paste the code (or the full redirect URL) into the input
-   line, and press Enter.
+1. wllr shows an authorize URL in a modal (also copied to your clipboard). Open
+   it in a browser.
+2. Approve access.
+3. **If the browser is on the same machine**, you're done automatically: wllr
+   runs a local callback server on `127.0.0.1:53692`, so once the browser
+   redirects, login completes on its own.
+4. **If the browser is on another machine** (e.g. over SSH), the redirect to
+   `localhost` can't reach wllr — that page failing to load is expected. Copy
+   the address it redirected to, close the modal, paste it into the input line,
+   and press Enter.
 
-wllr exchanges the code for an access + refresh token (authorization-code +
-PKCE, matching the Claude Code client), stores them in `auth.json`, and switches
+Either way wllr exchanges the code for an access + refresh token
+(authorization-code + PKCE, matching the Claude Code client), stores them in
+`auth.json`, and switches
 the running provider to the new token — no restart. On the next launch the
 stored token is applied automatically and **refreshed if expired**. The access
 token is an `sk-ant-oat…` subscription token; wllr sends the Claude-Code beta

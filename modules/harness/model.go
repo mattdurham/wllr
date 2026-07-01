@@ -148,6 +148,12 @@ type Model struct {
 	// fails. Nil means OAuth completion is unavailable. Set by cmd/main.go.
 	CompleteOAuthFn func(provider, input string) error
 
+	// AwaitOAuthFn blocks until the local OAuth callback server captures the
+	// browser redirect, returning the raw redirect query and true — or false if
+	// the login was cancelled/superseded or no server is running. Nil means no
+	// local callback server (manual paste only). Set by cmd/main.go.
+	AwaitOAuthFn func() (input string, ok bool)
+
 	// scene holds extension-driven UI areas (the declarative, node-based
 	// renderer). Shared by pointer with the harnessUIBridge so the bridge can
 	// mutate it off-loop and the View can read it.
@@ -908,6 +914,9 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 	case loginMsg:
 		m.openAuthPrompt(m.activeProvider)
 		return m, nil, true
+
+	case oauthCallbackMsg:
+		return m, m.completeOAuthFromCallback(msg), true
 
 	case showModelPickerMsg:
 		m.openModelPicker()

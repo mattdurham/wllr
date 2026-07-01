@@ -507,8 +507,14 @@ When the user chooses **OAuth** in the auth prompt (or runs `/login`), the harne
 |-------|------|---------|
 | `BeginOAuthFn` | `func(provider string) (authURL string, err error)` | Starts login (generates PKCE) and returns the authorize URL to open. Nil ⇒ login unavailable. |
 | `CompleteOAuthFn` | `func(provider, input string) error` | Exchanges the pasted authorization code / redirect URL for tokens, persists and applies them. Nil ⇒ completion unavailable. |
+| `AwaitOAuthFn` | `func() (input string, ok bool)` | Blocks until the local callback server captures the browser redirect (returns the raw redirect query + true), or false if cancelled/superseded or no server runs. Nil ⇒ no local callback (manual paste only). |
 
-Flow: selecting OAuth (or `/login` → `loginMsg` → `openAuthPrompt(activeProvider)`) leads to `beginOAuthLogin` → `BeginOAuthFn` returns the authorize URL, shown in a modal with paste-back instructions and **copied to the system clipboard** (via `tea.SetClipboard`/OSC52 — the command `beginOAuthLogin` returns), and the model enters **code-capture mode** (`oauthCaptureProvider != ""`). While in capture mode, the next `SubmitMsg` is routed to `completeOAuthLogin` (not the agent), which runs `CompleteOAuthFn` off-loop and reports success/failure as a `NotifyMsg`. `/login` is available any time, not just first run.
+Flow: selecting OAuth (or `/login` → `loginMsg` → `openAuthPrompt(activeProvider)`) leads to `beginOAuthLogin` → `BeginOAuthFn` returns the authorize URL, shown in a modal (copied to the system clipboard via `tea.SetClipboard`/OSC52), and the model enters **code-capture mode** (`oauthCaptureProvider != ""`). `beginOAuthLogin` returns a `tea.Batch` of the clipboard copy **and**, when `AwaitOAuthFn` is set, a command that blocks on the local callback server and yields an `oauthCallbackMsg`. Two completion paths race:
+
+- **Local callback (automatic):** the browser redirect hits the local server; `AwaitOAuthFn` returns the query; `oauthCallbackMsg{OK:true}` → `completeOAuthFromCallback` closes the modal and runs `CompleteOAuthFn`.
+- **Manual paste (SSH/remote fallback):** the user pastes the code/redirect URL; the next `SubmitMsg` in capture mode is routed to `completeOAuthLogin` (not the agent).
+
+Both run `CompleteOAuthFn` off-loop and report success/failure as a `NotifyMsg`. `/login` is available any time, not just first run.
 
 **Invariant:** while `oauthCaptureProvider != ""`, a submitted input line is treated as the OAuth code/URL and is NOT sent to the agent as a prompt. Capture mode is cleared as soon as completion starts (single-shot), so a failed exchange returns the user to normal input.
 
