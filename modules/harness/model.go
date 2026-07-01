@@ -134,14 +134,21 @@ type Model struct {
 	// switch fails. Nil means selection is display-only. Set by cmd/main.go.
 	SelectThinkingFn func(levelID string) error
 
+	// RecordAuthFn records the user's chosen auth method for a provider (from the
+	// first-run auth prompt), so the prompt is not shown again. Returns an error
+	// if persisting fails. Nil means the choice is not persisted. Set by cmd/main.go.
+	RecordAuthFn func(provider, method string) error
+
 	// scene holds extension-driven UI areas (the declarative, node-based
 	// renderer). Shared by pointer with the harnessUIBridge so the bridge can
 	// mutate it off-loop and the View can read it.
 	scene *SceneRenderer
 
-	mainAgentID    string
-	activeModel    string
-	activeThinking string
+	mainAgentID         string
+	activeModel         string
+	activeThinking      string
+	authPromptProvider  string
+	pendingAuthProvider string
 
 	// Modal overlay state (non-empty when modal is open).
 	modalContent string
@@ -429,6 +436,14 @@ func (m *Model) SetExtensionPaths(paths []string) {
 	m.extPaths = paths
 }
 
+// SetPendingAuthProvider marks a provider as needing a first-run auth-method
+// prompt at startup. Called by cmd/main.go only when no auth choice is recorded
+// for the provider yet, so the prompt is shown once. Must be called before
+// prog.Run().
+func (m *Model) SetPendingAuthProvider(provider string) {
+	m.pendingAuthProvider = provider
+}
+
 // SetActiveThinking sets the displayed active reasoning level and reflects it in
 // the status bar. Used at startup to show the persisted level. Does not itself
 // change the agent's provider options.
@@ -441,10 +456,17 @@ func (m *Model) SetActiveThinking(level string) {
 
 // Init returns the initial command.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(
+	cmds := []tea.Cmd{
 		m.input.ta.Focus(),
 		m.cmdDispatchSessionStart(),
-	)
+	}
+	// First-run auth prompt: if a provider was set as needing an auth choice and
+	// no choice is recorded yet, open the prompt once at startup.
+	if m.pendingAuthProvider != "" {
+		provider := m.pendingAuthProvider
+		cmds = append(cmds, func() tea.Msg { return showAuthPromptMsg{Provider: provider} })
+	}
+	return tea.Batch(cmds...)
 }
 
 // cmdDispatchSessionStart sends EventSessionStart to all extensions asynchronously.
@@ -605,6 +627,10 @@ func (m Model) updateKeyPressPicker(kp tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		}
 		if callback == thinkingPickerCallback {
 			return m, func() tea.Msg { return setThinkingMsg{Level: id} }, true
+		}
+		if callback == authPickerCallback {
+			provider := m.authPromptProvider
+			return m, func() tea.Msg { return recordAuthMsg{Provider: provider, Method: id} }, true
 		}
 		extHost := m.extHost
 		return m, func() tea.Msg {
@@ -849,6 +875,14 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 
 	case showThinkingPickerMsg:
 		m.openThinkingPicker()
+		return m, nil, true
+
+	case showAuthPromptMsg:
+		m.openAuthPrompt(msg.Provider)
+		return m, nil, true
+
+	case recordAuthMsg:
+		m.applyAuthChoice(msg.Method)
 		return m, nil, true
 
 	case showModelPickerMsg:
