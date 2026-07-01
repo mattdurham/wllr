@@ -16,8 +16,8 @@ func drainMsg(cmd tea.Cmd) tea.Msg {
 
 func TestBeginOAuthLogin_EntersCaptureMode(t *testing.T) {
 	m := &Model{
-		BeginOAuthFn: func(provider string) (string, error) {
-			return "https://claude.ai/oauth/authorize?x=1", nil
+		BeginOAuthFn: func(provider string) (string, string, error) {
+			return "Sign in to anthropic\n\nhttps://claude.ai/oauth/authorize?x=1", "https://claude.ai/oauth/authorize?x=1", nil
 		},
 		AwaitOAuthFn: func() (string, bool) { return "", false },
 	}
@@ -29,7 +29,7 @@ func TestBeginOAuthLogin_EntersCaptureMode(t *testing.T) {
 	if m.modalContent == "" {
 		t.Error("expected a modal with sign-in instructions")
 	}
-	// begin returns a batch (clipboard copy + await-callback).
+	// begin returns a batch (await + clipboard copy).
 	if cmd == nil {
 		t.Error("expected a non-nil command from beginOAuthLogin")
 	}
@@ -37,7 +37,7 @@ func TestBeginOAuthLogin_EntersCaptureMode(t *testing.T) {
 
 func TestBeginOAuthLogin_ErrorNoCapture(t *testing.T) {
 	m := &Model{
-		BeginOAuthFn: func(string) (string, error) { return "", errors.New("boom") },
+		BeginOAuthFn: func(string) (string, string, error) { return "", "", errors.New("boom") },
 		AwaitOAuthFn: func() (string, bool) { return "", false },
 	}
 	m.beginOAuthLogin("anthropic")
@@ -47,9 +47,9 @@ func TestBeginOAuthLogin_ErrorNoCapture(t *testing.T) {
 }
 
 func TestBeginOAuthLogin_UnavailableWithoutCallback(t *testing.T) {
-	// No AwaitOAuthFn ⇒ login is unavailable (no manual-paste fallback exists).
+	// No AwaitOAuthFn ⇒ login is unavailable.
 	m := &Model{
-		BeginOAuthFn: func(string) (string, error) { return "https://x", nil },
+		BeginOAuthFn: func(string) (string, string, error) { return "body", "https://x", nil },
 	}
 	m.beginOAuthLogin("anthropic")
 	if m.oauthCaptureProvider != "" {

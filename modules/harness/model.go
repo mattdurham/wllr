@@ -139,9 +139,11 @@ type Model struct {
 	// if persisting fails. Nil means the choice is not persisted. Set by cmd/main.go.
 	RecordAuthFn func(provider, method string) error
 
-	// BeginOAuthFn starts an OAuth login for a provider and returns the authorize
-	// URL the user should open. Nil means OAuth login is unavailable. Set by cmd/main.go.
-	BeginOAuthFn func(provider string) (authURL string, err error)
+	// BeginOAuthFn starts an OAuth login for a provider. It returns the modal body
+	// to show the user (sign-in instructions, provider-specific — e.g. a URL to
+	// open, or a device code + verification URL) and a string to copy to the
+	// clipboard (the URL). Nil means OAuth login is unavailable. Set by cmd/main.go.
+	BeginOAuthFn func(provider string) (modalBody, clipboard string, err error)
 
 	// CompleteOAuthFn exchanges the pasted authorization code/redirect URL for
 	// tokens, persisting and applying them. Returns an error if the exchange

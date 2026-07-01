@@ -89,31 +89,27 @@ func (m *Model) beginOAuthLogin(provider string) tea.Cmd {
 		m.pushNotification(fmt.Sprintf("OAuth login is not available for %s.", provider))
 		return nil
 	}
-	authURL, err := m.BeginOAuthFn(provider)
+	modalBody, clipboard, err := m.BeginOAuthFn(provider)
 	if err != nil {
 		m.pushNotification(fmt.Sprintf("⚠ could not start OAuth login: %v", err))
 		return nil
 	}
 	m.oauthCaptureProvider = provider
-	m.modalContent = fmt.Sprintf(
-		"Sign in to %s\n\n"+
-			"1. Open this URL in a browser on THIS machine\n"+
-			"   (it's been copied to your clipboard):\n\n%s\n\n"+
-			"2. Approve access. You'll be logged in automatically once the browser\n"+
-			"   redirects back — this box will close on its own.",
-		provider, authURL)
+	m.modalContent = modalBody
 	m.modalScroll = 0
-	// Copy the authorize URL to the system clipboard via OSC52 (works over SSH
-	// and tmux where the terminal supports it). Harmless if unsupported.
-	// The local callback server auto-captures the code on the browser redirect.
+	// Copy the URL to the system clipboard via OSC52 (works over SSH/tmux where
+	// the terminal supports it; harmless otherwise). AwaitOAuthFn blocks until
+	// login completes: the local callback server (Anthropic) or device-code poll
+	// (Codex) captures approval and yields the result.
 	await := m.AwaitOAuthFn
-	return tea.Batch(
-		tea.SetClipboard(authURL),
-		func() tea.Msg {
-			input, ok := await()
-			return oauthCallbackMsg{Input: input, OK: ok}
-		},
-	)
+	cmds := []tea.Cmd{func() tea.Msg {
+		input, ok := await()
+		return oauthCallbackMsg{Input: input, OK: ok}
+	}}
+	if clipboard != "" {
+		cmds = append(cmds, tea.SetClipboard(clipboard))
+	}
+	return tea.Batch(cmds...)
 }
 
 // completeOAuthFromCallback completes a login using the code auto-captured by
