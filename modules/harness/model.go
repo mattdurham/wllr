@@ -216,13 +216,13 @@ func New(pool *agent.AgentPool, mainAgentID string, h *extension.Host) Model {
 	}
 
 	m := Model{
-		chat:        NewChatView(80, 20),
-		input:       NewInputArea(80),
-		commands:    NewRegistry(),
-		agentPool:   pool,
-		mainAgentID: mainAgentID,
-		extHost:     h,
-		console:     NewConsoleView(),
+		chat:           NewChatView(80, 20),
+		input:          NewInputArea(80),
+		commands:       NewRegistry(),
+		agentPool:      pool,
+		mainAgentID:    mainAgentID,
+		extHost:        h,
+		console:        NewConsoleView(),
 		live:           &liveState{provider: provName, statuses: make(map[string]string)},
 		scene:          NewSceneRenderer(),
 		activeProvider: provName,
