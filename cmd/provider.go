@@ -20,6 +20,8 @@ import (
 // providerAnthropic is the canonical provider name for Anthropic.
 const providerAnthropic = "anthropic"
 
+const providerLocal = "local"
+
 // newCodexProvider builds an OpenAI fantasy.Provider pointed at the ChatGPT
 // Codex backend, authenticated with an OAuth access token (Bearer) and the
 // ChatGPT account-id header. This is how a ChatGPT Plus/Pro subscription token
@@ -83,6 +85,11 @@ func buildProvider(ctx context.Context, cfg *Config) (fantasy.Provider, fantasy.
 	case "gemini":
 		prov, provErr = fantasygoogleprovider.New(
 			fantasygoogleprovider.WithGeminiAPIKey(cfg.GeminiAPIKey),
+		)
+	case providerLocal:
+		prov, provErr = fantasyopenapiprovider.New(
+			fantasyopenapiprovider.WithAPIKey(cfg.LocalAPIKey),
+			fantasyopenapiprovider.WithBaseURL(cfg.LocalBaseURL),
 		)
 	default:
 		return nil, nil, fmt.Errorf("unknown provider %q", cfg.Provider)

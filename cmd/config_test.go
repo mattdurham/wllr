@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -48,6 +49,8 @@ func TestLoadConfig_ModelDefault(t *testing.T) {
 }
 
 func TestLoadConfig_ModelOverride(t *testing.T) {
+	withConfigPath(t)
+	withAuthPath(t)
 	t.Setenv("ANTHROPIC_API_KEY", "key")
 	t.Setenv("WLLR_MODEL", "claude-haiku-3-5")
 
@@ -61,6 +64,8 @@ func TestLoadConfig_ModelOverride(t *testing.T) {
 }
 
 func TestLoadConfig_ProviderDefault(t *testing.T) {
+	withConfigPath(t)
+	withAuthPath(t)
 	t.Setenv("ANTHROPIC_API_KEY", "key")
 	t.Setenv("WLLR_PROVIDER", "")
 
@@ -86,13 +91,71 @@ func TestLoadConfig_ProviderOverride(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_SavedLocalProviderDefault(t *testing.T) {
+	withConfigPath(t)
+	if err := saveProvider("local"); err != nil {
+		t.Fatalf("saveProvider: %v", err)
+	}
+	t.Setenv("WLLR_PROVIDER", "")
+	t.Setenv("WLLR_MODEL", "")
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig returned error: %v", err)
+	}
+	if cfg.Provider != "local" {
+		t.Errorf("Provider = %q, want local", cfg.Provider)
+	}
+	if cfg.Model != "llama3.2" {
+		t.Errorf("Model = %q, want llama3.2", cfg.Model)
+	}
+	if cfg.ProviderConfigured != true {
+		t.Error("ProviderConfigured should be true for saved provider")
+	}
+	if _, missing := missingProviderAuth(cfg); missing {
+		t.Error("local provider should not require auth")
+	}
+}
+
+func TestLoadConfig_NormalizesUnsupportedCodexOAuthModel(t *testing.T) {
+	withConfigPath(t)
+	withAuthPath(t)
+	if err := saveProvider("openai"); err != nil {
+		t.Fatalf("saveProvider: %v", err)
+	}
+	if err := saveModel("gpt-5.3-codex"); err != nil {
+		t.Fatalf("saveModel: %v", err)
+	}
+	if err := saveAuthCredential("openai", authCredential{Type: authTypeOAuth, Access: "tok", AccountID: "acct"}); err != nil {
+		t.Fatalf("saveAuthCredential: %v", err)
+	}
+	t.Setenv("WLLR_PROVIDER", "")
+	t.Setenv("WLLR_MODEL", "")
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig returned error: %v", err)
+	}
+	if cfg.Model != "gpt-5.5" {
+		t.Errorf("Model = %q, want gpt-5.5", cfg.Model)
+	}
+}
+
 func TestLoadConfig_MissingAPIKeyError(t *testing.T) {
+	withAuthPath(t)
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("WLLR_PROVIDER", "anthropic")
 
-	_, err := LoadConfig()
-	if err == nil {
-		t.Fatal("expected error for missing ANTHROPIC_API_KEY, got nil")
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig returned error: %v", err)
+	}
+	envVar, missing := missingProviderAuth(cfg)
+	if !missing || envVar != "ANTHROPIC_API_KEY" {
+		t.Fatalf("missingProviderAuth = (%q,%v), want (ANTHROPIC_API_KEY,true)", envVar, missing)
+	}
+	if msg := missingAuthError(cfg.Provider, envVar).Error(); !strings.Contains(msg, "wllr login --provider anthropic") {
+		t.Fatalf("missing key error = %q, want standalone login guidance", msg)
 	}
 }
 
@@ -188,12 +251,20 @@ func TestLoadConfig_GeminiAPIKey(t *testing.T) {
 }
 
 func TestLoadConfig_MissingOpenAIKeyError(t *testing.T) {
+	withAuthPath(t)
 	t.Setenv("OPENAI_API_KEY", "")
 	t.Setenv("WLLR_PROVIDER", "openai")
 
-	_, err := LoadConfig()
-	if err == nil {
-		t.Fatal("expected error for missing OPENAI_API_KEY, got nil")
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig returned error: %v", err)
+	}
+	envVar, missing := missingProviderAuth(cfg)
+	if !missing || envVar != "OPENAI_API_KEY" {
+		t.Fatalf("missingProviderAuth = (%q,%v), want (OPENAI_API_KEY,true)", envVar, missing)
+	}
+	if msg := missingAuthError(cfg.Provider, envVar).Error(); !strings.Contains(msg, "wllr login --provider openai") {
+		t.Fatalf("missing key error = %q, want standalone login guidance", msg)
 	}
 }
 
@@ -201,8 +272,12 @@ func TestLoadConfig_MissingGeminiKeyError(t *testing.T) {
 	t.Setenv("GEMINI_API_KEY", "")
 	t.Setenv("WLLR_PROVIDER", "gemini")
 
-	_, err := LoadConfig()
-	if err == nil {
-		t.Fatal("expected error for missing GEMINI_API_KEY, got nil")
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig returned error: %v", err)
+	}
+	envVar, missing := missingProviderAuth(cfg)
+	if !missing || envVar != "GEMINI_API_KEY" {
+		t.Fatalf("missingProviderAuth = (%q,%v), want (GEMINI_API_KEY,true)", envVar, missing)
 	}
 }

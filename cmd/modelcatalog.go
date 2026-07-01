@@ -66,11 +66,62 @@ var modelCatalog = map[string][]modelInfo{
 		{ID: "gemini-2.5-pro", Name: "Gemini 2.5 Pro", ContextWindow: 1048576},
 		{ID: "gemini-2.5-flash", Name: "Gemini 2.5 Flash", ContextWindow: 1048576},
 	},
+	"local": {
+		{ID: "llama3.2", Name: "Llama 3.2", ContextWindow: 131072},
+		{ID: "qwen2.5-coder", Name: "Qwen2.5 Coder", ContextWindow: 131072},
+		{ID: "codellama", Name: "Code Llama", ContextWindow: 16384},
+	},
+}
+
+var chatGPTOAuthModels = []modelInfo{
+	{ID: "gpt-5.5", Name: "GPT-5.5", ContextWindow: 1050000},
+	{ID: "gpt-5.4", Name: "GPT-5.4", ContextWindow: 1050000},
+	{ID: "gpt-5.4-mini", Name: "GPT-5.4 Mini", ContextWindow: 400000},
+}
+
+var defaultModelsByProvider = map[string]string{
+	"anthropic": "claude-sonnet-4-6",
+	"openai":    "gpt-5.5",
+	"gemini":    "gemini-3-pro-preview",
+	"local":     "llama3.2",
 }
 
 // modelsForProvider returns the catalog for a provider, or nil if unknown.
 func modelsForProvider(provider string) []modelInfo {
 	return modelCatalog[provider]
+}
+
+func defaultModelForProvider(provider string) string {
+	if model := defaultModelsByProvider[provider]; model != "" {
+		return model
+	}
+	models := modelsForProvider(provider)
+	if len(models) == 0 {
+		return ""
+	}
+	return models[0].ID
+}
+
+func modelsForOpenAIAuth() []modelInfo {
+	if cred, ok := loadAuthCredential("openai"); ok && cred.Type == authTypeOAuth {
+		return chatGPTOAuthModels
+	}
+	return modelsForProvider("openai")
+}
+
+func normalizeModelForProvider(provider, model string) string {
+	if provider != "openai" {
+		return model
+	}
+	if cred, ok := loadAuthCredential("openai"); !ok || cred.Type != authTypeOAuth {
+		return model
+	}
+	for _, m := range chatGPTOAuthModels {
+		if m.ID == model {
+			return model
+		}
+	}
+	return defaultModelForProvider(provider)
 }
 
 // contextWindowFromCatalog returns the context window for a model ID within a

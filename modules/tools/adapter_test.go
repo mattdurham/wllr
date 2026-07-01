@@ -21,6 +21,30 @@ func TestParseInputSchema_Empty(t *testing.T) {
 	if len(required) != 0 {
 		t.Errorf("expected empty required, got %v", required)
 	}
+	if required == nil {
+		t.Error("expected required to be a non-nil empty slice")
+	}
+}
+
+func TestParseInputSchema_MissingRequiredNonNil(t *testing.T) {
+	schema := json.RawMessage(`{"type":"object","properties":{}}`)
+	_, required, err := tools.ParseInputSchema(schema)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(required) != 0 {
+		t.Errorf("expected empty required, got %v", required)
+	}
+	if required == nil {
+		t.Fatal("expected required to be a non-nil empty slice")
+	}
+	data, err := json.Marshal(required)
+	if err != nil {
+		t.Fatalf("marshal required: %v", err)
+	}
+	if string(data) != "[]" {
+		t.Fatalf("required marshaled as %s, want []", data)
+	}
 }
 
 func TestParseInputSchema_WithProperties(t *testing.T) {

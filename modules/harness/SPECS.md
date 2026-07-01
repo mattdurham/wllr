@@ -490,14 +490,21 @@ Flow mirrors the model picker: `/thinking` with no arg emits `showThinkingPicker
 
 | Field / Method | Type | Purpose |
 |----------------|------|---------|
+| `ProviderListFn` | `func() []ProviderChoice` | Returns providers selectable in the blank first-run setup wizard. Nil ⇒ selection unavailable. |
+| `SelectProviderFn` | `func(provider string) (model string, requiresLogin bool, err error)` | Applies a wizard provider and its default model. Returns whether OAuth should start. Nil ⇒ display-only. |
 | `RecordAuthFn` | `func(provider, method string) error` | Persists the chosen auth method for a provider (so the prompt is not shown again). Nil ⇒ choice not persisted. |
 | `SetPendingAuthProvider(provider)` | method | Marks a provider as needing the first-run prompt. Called by `cmd/main.go` only when no auth choice is recorded for the provider. Must be called before `prog.Run()`. |
+| `SetPendingSetupWizard()` | method | Marks startup as needing the blank first-run setup wizard. Used by `cmd/main.go` when provider/model are both defaults and credentials are unavailable. Must be called before `prog.Run()`. |
 
 Flow: when `pendingAuthProvider != ""`, `Init()` emits `showAuthPromptMsg{Provider}` → `openAuthPrompt()` opens a two-item picker ("Set up OAuth / login" = `"oauth"`, "Use an API key" = `"api_key"`) with the reserved `authPickerCallback` (`"__wllr:auth"`). On selection, `updateKeyPressPicker` emits `recordAuthMsg{Provider, Method}`; the handler calls `applyAuthChoice` → `RecordAuthFn` + a notification, and clears `authPromptProvider`.
 
+Blank first-run setup flow: when `pendingSetupWizard` is true, `Init()` emits `showLoginProviderPickerMsg{}`. `openLoginProviderPicker()` displays provider choices from `ProviderListFn` with the reserved `loginProviderPickerCallback` (`"__wllr:login_provider"`). On selection, `loginProviderSelectedMsg{Provider}` calls `SelectProviderFn`, updates active provider/model state from its return values, and either starts OAuth (when `requiresLogin` is true) or finishes without auth (for local providers).
+
 **Invariant:** the prompt is shown at most once per provider — `cmd/main.go` gates `SetPendingAuthProvider` on the absence of a recorded auth choice (credential presence in the auth file is the record). Cancelling the picker records nothing, so the prompt reappears next launch.
 
-**Invariant:** `"__wllr:auth"` joins `"__wllr:model"`/`"__wllr:thinking"` as a reserved core-owned picker callback; it never dispatches `EventOnCommand`.
+**Invariant:** the setup wizard is only selected by `cmd/main.go` for blank first-run config and missing credentials. Cloud choices use the same OAuth completion path as `/login`; local choices do not record an OAuth auth choice and do not call `BeginOAuthFn`.
+
+**Invariant:** `"__wllr:auth"` and `"__wllr:login_provider"` join `"__wllr:model"`/`"__wllr:thinking"` as reserved core-owned picker callbacks; they never dispatch `EventOnCommand`.
 
 ### OAuth Login Flow
 

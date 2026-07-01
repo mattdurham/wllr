@@ -319,6 +319,9 @@ func oauthCallbackHTML(msg string) string {
 // applyAnthropicToken rebuilds the Anthropic provider with the given access
 // token and points the pool + main agent at it (no restart).
 func applyAnthropicToken(ctx context.Context, pool *agent.AgentPool, model, accessToken string) error {
+	if pool == nil {
+		return nil
+	}
 	prov, err := newAnthropicProvider(accessToken)
 	if err != nil {
 		return fmt.Errorf("rebuild provider: %w", err)
@@ -330,6 +333,9 @@ func applyAnthropicToken(ctx context.Context, pool *agent.AgentPool, model, acce
 // backend with the OAuth access token + account id, and points the pool + main
 // agent at it (no restart).
 func applyCodexToken(ctx context.Context, pool *agent.AgentPool, model, accessToken, accountID string) error {
+	if pool == nil {
+		return nil
+	}
 	prov, err := newCodexProvider(accessToken, accountID)
 	if err != nil {
 		return fmt.Errorf("rebuild provider: %w", err)

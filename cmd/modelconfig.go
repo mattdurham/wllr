@@ -21,6 +21,13 @@ func savedModel() string { return savedWllrField("model") }
 // saveModel persists the model selection to the "wllr" group of the config file.
 func saveModel(modelID string) error { return saveWllrField("model", modelID) }
 
+// savedProvider returns the persisted provider selection, or "" if none is
+// stored or the config file is missing/unreadable.
+func savedProvider() string { return savedWllrField("provider") }
+
+// saveProvider persists the provider selection to the "wllr" group.
+func saveProvider(provider string) error { return saveWllrField("provider", provider) }
+
 // savedWllrField reads a single string field from the "wllr" config group, or
 // "" if absent/unreadable.
 func savedWllrField(field string) string {

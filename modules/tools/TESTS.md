@@ -7,6 +7,7 @@
 | Test | Scenario | Setup | Assertions |
 |------|----------|-------|------------|
 | `TestParseInputSchema_Empty` | Nil schema returns empty | nil input | Empty params + required, nil error |
+| `TestParseInputSchema_MissingRequiredNonNil` | Missing required returns array-safe empty slice | Schema with properties and no required | `required` is non-nil and marshals as `[]` |
 | `TestParseInputSchema_WithProperties` | Schema with properties + required | Valid JSON schema | Params has key; required slice populated |
 | `TestParseInputSchema_InvalidJSON` | Invalid JSON returns error | `{not json` | err != nil |
 | `TestBuildFantasyTools_NilHost` | Nil host returns nil | nil host | nil result |
