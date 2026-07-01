@@ -95,11 +95,11 @@ func registerBuiltins(r *Registry) {
 
 	r.Register(Command{
 		Name:    "model",
-		Desc:    "Switch the active model (e.g. /model claude-haiku-3-5)",
+		Desc:    "Select the active model (opens a picker; /model <name> sets directly)",
 		Instant: true,
 		Handler: func(args []string) tea.Cmd {
 			if len(args) == 0 {
-				return func() tea.Msg { return NotifyMsg{Text: "Usage: /model <name>"} }
+				return func() tea.Msg { return showModelPickerMsg{} }
 			}
 			return func() tea.Msg { return setModelMsg{Model: args[0]} }
 		},

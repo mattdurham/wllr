@@ -39,6 +39,14 @@
 |------|----------|-------|------------|
 | `TestPlaceholderForEmptyResponse` | Empty-response placeholder selection | 4 cases (text/empty × cancelled) | non-empty passes through; empty→tool-only; empty+cancelled→cancelled |
 
+### subagent_test.go (model switching)
+
+| Test | Scenario | Assertions |
+|------|----------|-----------|
+| `TestSpawnOpts_ModelName_OverridesPoolDefault` | Spawn with explicit model | `ModelName()` reflects override |
+| `TestSpawnOpts_ModelName_Empty_UsesPoolDefault` | Spawn with empty model | `ModelName()` is pool default |
+| `TestSetModel_SwapsModelForNextTurn` | `SetModel` at runtime (/model picker path) | `ModelName()` updates; next turn streams from the swapped LM |
+
 ### concurrent_submit_test.go
 
 | Test | Scenario | Setup | Assertions |
