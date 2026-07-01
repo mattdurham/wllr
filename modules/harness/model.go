@@ -860,11 +860,6 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 
 	case SubmitMsg:
 		m.closeSuggestions()
-		// While capturing an OAuth authorization code, the next submitted line is
-		// the pasted code/redirect URL — not a prompt to the agent.
-		if m.oauthCaptureProvider != "" {
-			return m, m.completeOAuthLogin(msg.Content), true
-		}
 		n, cmd := m.submitToAgent(msg.Content, msg.Display)
 		return n.(Model), cmd, true
 

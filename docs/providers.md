@@ -205,17 +205,17 @@ per provider and never again once a choice exists.
 Choosing **OAuth** (or running `/login` any time) starts an interactive sign-in:
 
 1. wllr shows an authorize URL in a modal (also copied to your clipboard). Open
-   it in a browser.
-2. Approve access.
-3. **If the browser is on the same machine**, you're done automatically: wllr
-   runs a local callback server on `127.0.0.1:53692`, so once the browser
-   redirects, login completes on its own.
-4. **If the browser is on another machine** (e.g. over SSH), the redirect to
-   `localhost` can't reach wllr — that page failing to load is expected. Copy
-   the address it redirected to, close the modal, paste it into the input line,
-   and press Enter.
+   it in a browser **on the same machine as wllr**.
+2. Approve access. You're logged in **automatically** once the browser redirects
+   back — wllr runs a local callback server on `127.0.0.1:53692` that captures
+   the code, and the modal closes on its own. No copy/paste.
 
-Either way wllr exchanges the code for an access + refresh token
+> **Running over SSH?** The browser redirect goes to *your* `localhost`, which
+> can't reach wllr on the remote host, so login won't complete. Forward the port
+> first — e.g. `ssh -L 53692:localhost:53692 …` — so the redirect reaches the
+> remote callback server. (There is no manual paste-back fallback.)
+
+wllr exchanges the code for an access + refresh token
 (authorization-code + PKCE, matching the Claude Code client), stores them in
 `auth.json`, and switches
 the running provider to the new token — no restart. On the next launch the

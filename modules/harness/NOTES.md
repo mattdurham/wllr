@@ -471,3 +471,15 @@ a separate `m.history` copy.
 **Rationale:** For local runs (the common case) the callback server makes login seamless — approve in the browser and you're done, no copy/paste. But a callback server can't work over SSH/remote (the user's browser redirects to *their* localhost, not the host's), so paste must stay. Racing them gives the best of both without asking the user which mode they're in. The server lives in cmd/ (oauthwire.go) with all the crypto/endpoints; the harness only knows "await a code" via the callback, preserving the [TUI-decoupling](../decisions/tui-decoupled-behind-renderer.md) boundary.
 
 **Consequence:** `Model` gains `AwaitOAuthFn` + `oauthCallbackMsg` + `completeOAuthFromCallback`; `updateActions` handles `oauthCallbackMsg`. The modal wording now distinguishes same-machine (automatic) from another-machine (paste) and notes the localhost page failing is expected. cmd/oauthwire.go's `oauthLoginState` now owns the http.Server, a buffered code channel, and a done channel; completion claims the verifier under a mutex (single-use exchange) and restores it on failure, and validates state==verifier. Covered by harness TestCompleteOAuthFromCallback_* and cmd TestOAuthLogin_CallbackServerCapturesCode / TestOAuthLogin_StateMismatchRejected.
+
+---
+
+## OAuth login: remove the manual-paste fallback — callback server only
+
+*Added: 2026-07-01*
+
+**Decision:** Remove the manual paste-back path for OAuth login. Login now completes *only* via the local callback server (`AwaitOAuthFn` → `oauthCallbackMsg` → `completeOAuthFromCallback`). `beginOAuthLogin` requires both `BeginOAuthFn` and `AwaitOAuthFn` (else "not available"), and a normal `SubmitMsg` is never repurposed as an OAuth code. Removed `completeOAuthLogin` and the capture-mode branch in the `SubmitMsg` handler; `oauthCaptureProvider` now only guards the callback completion.
+
+**Rationale:** The paste flow was the source of the "localhost failed → now what?" confusion, and with the callback server in place it was redundant for the common (local) case. Requiring the callback server makes the UX single-path and unambiguous: approve in the browser, done. SSH/remote users forward the port (`ssh -L 53692:localhost:53692`) rather than paste — a cleaner story than maintaining two completion paths that race. This is a deliberate reversal of the earlier "paste works over SSH" stance (NOTES entry "local callback server races manual paste").
+
+**Consequence:** `Model` keeps `oauthCaptureProvider` (guards the callback completion + modal) but no longer treats input-line submissions as codes. docs/providers.md documents the port-forward requirement for SSH. Covered by TestBeginOAuthLogin_UnavailableWithoutCallback and the retitled TestCompleteOAuthFromCallback_* tests. *Addendum to the prior "races manual paste" entry: the paste path is gone; the callback server is the sole completion mechanism.*
