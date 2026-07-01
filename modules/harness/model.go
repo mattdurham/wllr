@@ -228,9 +228,6 @@ const statuslineAreaID = "statusline"
 // streamStatusError is the status key value shown when a turn fails.
 const streamStatusError = "error"
 
-// inputAreaHeight = top border (1) + textarea rows (3) + bottom border (1)
-const inputAreaHeight = 5
-
 // New creates a Model wired to the given agent pool, main agent ID, and extension host.
 // The pool must have its provider name set via SetProviderName before calling New
 // for correct status bar display.
@@ -581,9 +578,9 @@ func (m Model) updateWindow(msg tea.Msg) (Model, tea.Cmd, bool) {
 		m.width = msg.Width
 		m.live.setWidth(msg.Width)
 		m.height = msg.Height
+		m.input.SetWidth(msg.Width - 4)
 		m.chat.SetSize(msg.Width, m.chatHeight())
 		m.picker.SetSize(msg.Width, m.chatHeight())
-		m.input.SetWidth(msg.Width - 4)
 		// Re-render the WASM transcript at the new width.
 		m.refreshWASMChat()
 		return m, nil, true
@@ -704,7 +701,7 @@ func (m Model) updateKeyPressModal(kp tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 			m.modalScroll--
 		}
 	case "down":
-		chatH := m.height - inputAreaHeight
+		chatH := m.height - m.inputBoxHeight()
 		if chatH < 5 {
 			chatH = 5
 		}
@@ -1244,11 +1241,22 @@ func (m Model) cmdReloadExtensions() tea.Cmd {
 // chatHeight returns the number of lines available for the chat viewport,
 // accounting for the input box and any visible suggestion dropdown.
 func (m Model) chatHeight() int {
-	h := m.height - inputAreaHeight - m.statusLineHeight() - m.dropdownHeight() - m.consoleHeight()
+	h := m.height - m.inputBoxHeight() - m.statusLineHeight() - m.dropdownHeight() - m.consoleHeight()
 	if h < 1 {
 		h = 1
 	}
 	return h
+}
+
+func (m Model) inputBoxHeight() int {
+	return renderedLineCount(m.renderInputBox())
+}
+
+func renderedLineCount(s string) int {
+	if s == "" {
+		return 0
+	}
+	return strings.Count(s, "\n") + 1
 }
 
 // statusLineHeight returns the total number of lines consumed by all UIAreaStatus
@@ -1438,7 +1446,7 @@ func (m Model) View() tea.View {
 	if m.picker.IsActive() {
 		sb.WriteString(strings.TrimRight(m.picker.View(), "\n") + "\n")
 	} else if m.modalContent != "" {
-		chatH := m.height - inputAreaHeight
+		chatH := m.height - renderedLineCount(inputBox)
 		if chatH < 5 {
 			chatH = 5
 		}

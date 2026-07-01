@@ -409,19 +409,20 @@ Returns the current set of registered tools from `extHost.RegisteredTools()` as 
 
 ```
 ┌──────────────────────────────────────┐
-│  chat viewport (scrollable)          │  area: "chat", height = m.height - statusLineHeight - inputAreaHeight - dropdownHeight
+│  chat viewport (scrollable)          │  area: "chat", height = m.height - statusLineHeight - inputBoxHeight - dropdownHeight
 │  [optional: suggestion dropdown]     │  dropdownHeight = min(8, len(suggestions)) + 2 borders (0 when hidden)
 │  [or: modal overlay (centered)]      │  height = chatHeight * 8/10, vertically centered
 ├──────────────────────────────────────┤
 │  statusline (1–N lines)              │  area: "statusline", placement: status; height = statusLineHeight()
 ├──────────────────────────────────────┤
-│  input box (5 lines, plain border)   │  top border + 3 textarea lines + bottom border
+│  input box (dynamic, usually 5 lines)│  rendered input box height (top border + textarea + bottom border)
 └──────────────────────────────────────┘
 ```
 
 - `AltScreen = true` is set on every `tea.View` returned from `View()`.
 - The output is padded to exactly `m.height` lines to prevent old content bleeding through on resize.
 - `statusLineHeight()` sums the constrained heights of all `UIAreaStatus` areas; it is called on every `View()` and `chatHeight()` invocation.
+- `inputBoxHeight()` counts the rendered input box lines instead of relying on a fixed constant, so the statusline cannot push the input bottom border off-screen if textarea rendering changes.
 - `UIAreaStatus` areas are NOT included in `renderScenes()` — they are rendered by `renderStatusLine()` between the console pane and the input box.
 
 ## 23. ConsoleView

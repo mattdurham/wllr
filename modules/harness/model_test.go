@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/mattdurham/wllr/modules/agent"
+	"github.com/mattdurham/wllr/modules/sdk"
 )
 
 // newTestPool creates an AgentPool with a mock LM and a spawned "main" agent.
@@ -532,6 +533,31 @@ func TestModel_chatHeight_AccountsForConsole(t *testing.T) {
 	h2 := m.chatHeight()
 	if h1-h2 != consolePaneLines {
 		t.Errorf("chatHeight diff: got %d, want %d (consolePaneLines)", h1-h2, consolePaneLines)
+	}
+}
+
+func TestModel_View_WithStatusLineFitsHeight(t *testing.T) {
+	m := newTestModel()
+	m.width = 80
+	m.height = 12
+	m.input.SetWidth(m.width - 4)
+	root := sdk.UINode{ID: "status-root", Type: sdk.UINodeText, Text: ">> ChatGPT  gpt-5.5"}
+	if err := m.scene.ApplyPatch(sdk.UIPatchParams{Area: statuslineAreaID, Ops: []sdk.UIPatchOp{
+		{Op: sdk.UIOpSetRoot, Node: &root},
+	}}); err != nil {
+		t.Fatalf("set statusline root: %v", err)
+	}
+	m.chat.SetSize(m.width, m.chatHeight())
+
+	view := m.View().Content
+	if lines := renderedLineCount(view); lines > m.height {
+		t.Fatalf("view rendered %d lines, want <= terminal height %d:\n%s", lines, m.height, view)
+	}
+	if !strings.Contains(view, ">> ChatGPT") {
+		t.Fatalf("view missing statusline content:\n%s", view)
+	}
+	if !strings.Contains(view, "╰") {
+		t.Fatalf("view missing input bottom border:\n%s", view)
 	}
 }
 

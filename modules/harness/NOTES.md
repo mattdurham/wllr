@@ -507,3 +507,15 @@ a separate `m.history` copy.
 **Rationale:** On a completely blank setup there is no meaningful reason to prefer Anthropic over ChatGPT or a local model. The user needs an explicit first decision: ChatGPT, Anthropic, or local. Keeping this as a setup wizard avoids changing `/login` or the explicit first-run auth picker used when the user has configured a provider/model and may intentionally want an API-key flow.
 
 **Consequence:** `Model` gains `ProviderListFn`, `SelectProviderFn`, `ProviderChoice`, `SetPendingSetupWizard`, `showLoginProviderPickerMsg`, and `loginProviderSelectedMsg`. Cloud selections record OAuth and reuse `beginOAuthLogin`; local selections do not record auth and do not call OAuth. Covered by `TestSetPendingSetupWizard_DrivesInitWizard`, `TestLoginProviderSelected_CloudRecordsOAuthAndBeginsLogin`, and `TestLoginProviderSelected_LocalDoesNotBeginLogin`.
+
+---
+
+## Statusline layout uses rendered input height
+
+*Added: 2026-07-01*
+
+**Decision:** Replace the fixed `inputAreaHeight` layout constant with `inputBoxHeight()`, which counts the rendered input box lines. The statusline remains a standalone scene area above the input box.
+
+**Rationale:** Once the statusline built-in was loaded, the extra rendered row exposed that the layout was trusting a hardcoded input height. If textarea rendering changes by a line, the total view can exceed the terminal height and crop the input bottom border. Counting the rendered input box keeps `chatHeight()` aligned with what `View()` actually emits.
+
+**Consequence:** `chatHeight()` and modal sizing use the dynamic input-box height. `TestModel_View_WithStatusLineFitsHeight` covers a small terminal with a one-line statusline and asserts the input bottom border remains visible.
