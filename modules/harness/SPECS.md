@@ -278,7 +278,7 @@ type Command struct {
 
 **Invariant:** Commands with `Instant=true` bypass the "queuing..." UI indicator in `updateActions`. When a `CommandMsg` for an Instant command arrives, `updateActions` invokes `cmd.Handler(msg.Args)` directly without setting `statusBar.statuses["stream"] = "queuing…"`.
 
-**Invariant:** All built-in commands (`/help`, `/clear`, `/reload`, `/model`, `/status`, `/tools`) have `Instant=true`. The zero value of `Command.Instant` is `false`. (The `/prompt` command is registered without `Instant=true` because it executes synchronously in the update loop via `ShowModalMsg`, not via WASM dispatch — it is intentionally excluded from the instant list.)
+**Invariant:** All built-in commands (`/help`, `/clear`, `/reload`, `/model`, `/thinking`, `/login`, `/status`, `/tools`) have `Instant=true`. The zero value of `Command.Instant` is `false`. (The `/prompt` command is registered without `Instant=true` because it executes synchronously in the update loop via `ShowModalMsg`, not via WASM dispatch — it is intentionally excluded from the instant list.)
 
 **Invariant:** Extension-registered commands set `Instant` from the `instant bool` parameter passed to `UIBridge.RegisterCommand(name, desc, instant bool)`. When `instant=true`, the flag is stored on the `Command`, suppressing the "queuing…" status. The handler still routes through `dispatchOnCommandMsg` → `EventOnCommand`.
 
@@ -291,6 +291,7 @@ Built-in commands registered at startup:
 | `/reload`       | true    | Emits `ReloadMsg{}`                                          |
 | `/model`        | true    | No arg → `showModelPickerMsg{}` (opens model picker); `/model <name>` → `setModelMsg{Model: name}` |
 | `/thinking`     | true    | No arg → `showThinkingPickerMsg{}` (opens level picker); `/thinking <level>` → `setThinkingMsg{Level: level}` |
+| `/login`        | true    | Emits `loginMsg{}` (opens the auth prompt for the active provider) |
 | `/status`       | true    | Emits `StatusUpdateMsg{Key: "_override", Value: text}`       |
 | `/tools`        | true    | Emits `showToolsMsg{}`                                       |
 | `/prompt`       | false   | Shows accumulated base system prompt in a modal              |
@@ -493,6 +494,21 @@ Flow: when `pendingAuthProvider != ""`, `Init()` emits `showAuthPromptMsg{Provid
 **Invariant:** the prompt is shown at most once per provider — `cmd/main.go` gates `SetPendingAuthProvider` on the absence of a recorded auth choice (credential presence in the auth file is the record). Cancelling the picker records nothing, so the prompt reappears next launch.
 
 **Invariant:** `"__wllr:auth"` joins `"__wllr:model"`/`"__wllr:thinking"` as a reserved core-owned picker callback; it never dispatches `EventOnCommand`.
+
+### OAuth Login Flow
+
+When the user chooses **OAuth** in the auth prompt (or runs `/login`), the harness drives an interactive OAuth login via two callbacks (set by `cmd/main.go`):
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `BeginOAuthFn` | `func(provider string) (authURL string, err error)` | Starts login (generates PKCE) and returns the authorize URL to open. Nil ⇒ login unavailable. |
+| `CompleteOAuthFn` | `func(provider, input string) error` | Exchanges the pasted authorization code / redirect URL for tokens, persists and applies them. Nil ⇒ completion unavailable. |
+
+Flow: selecting OAuth (or `/login` → `loginMsg` → `openAuthPrompt(activeProvider)`) leads to `beginOAuthLogin` → `BeginOAuthFn` returns the authorize URL, shown in a modal with paste-back instructions, and the model enters **code-capture mode** (`oauthCaptureProvider != ""`). While in capture mode, the next `SubmitMsg` is routed to `completeOAuthLogin` (not the agent), which runs `CompleteOAuthFn` off-loop and reports success/failure as a `NotifyMsg`. `/login` is available any time, not just first run.
+
+**Invariant:** while `oauthCaptureProvider != ""`, a submitted input line is treated as the OAuth code/URL and is NOT sent to the agent as a prompt. Capture mode is cleared as soon as completion starts (single-shot), so a failed exchange returns the user to normal input.
+
+**Invariant:** OAuth login is provider-scoped; `BeginOAuthFn`/`CompleteOAuthFn` return an error for providers without a supported flow (today only Anthropic), surfaced as a notification.
 
 ---
 
