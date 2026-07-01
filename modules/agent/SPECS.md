@@ -152,6 +152,10 @@ Each `Agent` stores a `modelName string` (and its `lm fantasy.LanguageModel`) fo
 
 **Invariant:** `SetModel` is safe to call concurrently with turns. A turn already in flight finishes on the model it captured; the next `Submit` picks up the swapped model. `lm` and `modelName` are always read/written together under `lmMu`.
 
+`Agent` also stores `providerOpts fantasy.ProviderOptions` (the provider-specific request options, e.g. extended-thinking budget / reasoning effort), seeded from `opts.ProviderOptions` at spawn and guarded by the same `lmMu`. `SetProviderOptions(po)` swaps them at runtime (used by the `/thinking` picker); a nil value clears them (thinking off). `Submit` snapshots `providerOpts` under `lmMu.RLock()` alongside `lm` and overrides `opts.ProviderOptions` with the snapshot for that turn.
+
+**Invariant:** `SetProviderOptions` is safe to call concurrently with turns; a turn in flight finishes on the options it captured, the next `Submit` picks up the swap. `providerOpts` is always read/written under `lmMu`.
+
 Token estimation uses the `chars/4` heuristic (`estimateTokens`, `estimateStr`).
 `contextWindowForModel` currently returns `defaultContextWindow` (1,000,000) for all model
 names. Explicit overrides are set via `pool.SetContextWindow`.

@@ -81,9 +81,16 @@ type Agent struct {
 	// Set via SetSystemPrompt; safe to call before the first Submit.
 	systemPromptMu sync.RWMutex
 
-	// lmMu guards lm and modelName, which can be swapped at runtime via SetModel
-	// (e.g. the /model picker). Submit reads them under this lock.
+	// lmMu guards lm, modelName, and providerOpts, which can be swapped at
+	// runtime via SetModel / SetProviderOptions (e.g. the /model and /thinking
+	// pickers). Submit reads them under this lock.
 	lmMu sync.RWMutex
+
+	// providerOpts holds the current provider-specific request options (e.g.
+	// extended-thinking / reasoning-effort settings). Seeded from
+	// opts.ProviderOptions at spawn and swappable at runtime via
+	// SetProviderOptions. Guarded by lmMu; read once per turn in Submit.
+	providerOpts fantasy.ProviderOptions
 
 	lastSummaryMu sync.RWMutex
 
@@ -189,6 +196,17 @@ func (a *Agent) SetModel(lm fantasy.LanguageModel, modelName string) {
 	a.lmMu.Lock()
 	a.lm = lm
 	a.modelName = modelName
+	a.lmMu.Unlock()
+}
+
+// SetProviderOptions swaps the provider-specific request options (e.g. the
+// extended-thinking / reasoning-effort level) used for subsequent turns. A nil
+// value clears them (thinking off). Thread-safe; a turn already in flight
+// finishes on the previous options, and the next Submit picks up the new ones.
+// Used by the /thinking picker to change the reasoning level at runtime.
+func (a *Agent) SetProviderOptions(po fantasy.ProviderOptions) {
+	a.lmMu.Lock()
+	a.providerOpts = po
 	a.lmMu.Unlock()
 }
 
@@ -363,8 +381,10 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 	pool := a.pool
 	a.lmMu.RLock()
 	lm := a.lm
+	providerOpts := a.providerOpts
 	a.lmMu.RUnlock()
 	opts := a.opts
+	opts.ProviderOptions = providerOpts
 
 	go func() {
 		defer cancel()

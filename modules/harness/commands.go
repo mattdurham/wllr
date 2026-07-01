@@ -106,6 +106,18 @@ func registerBuiltins(r *Registry) {
 	})
 
 	r.Register(Command{
+		Name:    "thinking",
+		Desc:    "Set the reasoning level (opens a picker; /thinking <level> sets directly)",
+		Instant: true,
+		Handler: func(args []string) tea.Cmd {
+			if len(args) == 0 {
+				return func() tea.Msg { return showThinkingPickerMsg{} }
+			}
+			return func() tea.Msg { return setThinkingMsg{Level: args[0]} }
+		},
+	})
+
+	r.Register(Command{
 		Name:    "status",
 		Desc:    "Override the status line (/status my text) or clear it (/status)",
 		Instant: true,

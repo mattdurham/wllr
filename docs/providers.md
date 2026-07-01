@@ -154,6 +154,31 @@ provider's available models (the active one is marked). Selecting a model:
 **Model precedence at startup:** `WLLR_MODEL` (env) > persisted selection
 (`config.json`) > built-in default (`claude-sonnet-4-6`).
 
+### Selecting a thinking level
+
+Run `/thinking` (no argument) to open a picker of reasoning levels, or
+`/thinking <level>` to set one directly:
+
+```
+/thinking          # open the picker
+/thinking high     # set directly
+```
+
+Levels are provider-agnostic and map to each provider's native mechanism:
+
+| Level | Anthropic (budget tokens) | OpenAI (`reasoning_effort`) | Gemini (budget tokens) |
+|---------|---------|---------|---------|
+| `off`     | disabled | none | disabled |
+| `minimal` | 2048 | minimal | 512 |
+| `low`     | 4096 | low | 4096 |
+| `medium`  | 16384 | medium | 16384 |
+| `high`    | 32768 | high | 32768 |
+| `xhigh`   | 65536 | xhigh | 65536 |
+
+The selection applies to the running main agent immediately and is **persisted**
+to `config.json` (`wllr.thinking`), so it survives restarts. Startup precedence:
+persisted level, else `off`.
+
 The model list is a curated catalog (`cmd/modelcatalog.go`) covering Anthropic,
 OpenAI, and Gemini, sourced from charmbracelet's Catwalk model-metadata service.
 

@@ -46,6 +46,7 @@
 | `TestSpawnOpts_ModelName_OverridesPoolDefault` | Spawn with explicit model | `ModelName()` reflects override |
 | `TestSpawnOpts_ModelName_Empty_UsesPoolDefault` | Spawn with empty model | `ModelName()` is pool default |
 | `TestSetModel_SwapsModelForNextTurn` | `SetModel` at runtime (/model picker path) | `ModelName()` updates; next turn streams from the swapped LM |
+| `TestSetProviderOptions_AppliedToNextTurn` | `SetProviderOptions` at runtime (/thinking picker path) | Options absent on turn 1; present on turn 2 after set; cleared on turn 3 after nil |
 
 ### concurrent_submit_test.go
 

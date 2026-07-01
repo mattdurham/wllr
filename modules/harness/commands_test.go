@@ -135,6 +135,38 @@ func TestBuiltinModel_NoArgs(t *testing.T) {
 	}
 }
 
+func TestBuiltinThinking_EmitsMsg(t *testing.T) {
+	r := NewRegistry()
+	registerBuiltins(r)
+
+	cmd := r.Dispatch("thinking", []string{"high"})
+	if cmd == nil {
+		t.Fatal("expected non-nil Cmd")
+	}
+	msg := cmd()
+	set, ok := msg.(setThinkingMsg)
+	if !ok {
+		t.Fatalf("expected setThinkingMsg, got %T", msg)
+	}
+	if set.Level != "high" {
+		t.Errorf("expected level %q, got %q", "high", set.Level)
+	}
+}
+
+func TestBuiltinThinking_NoArgs(t *testing.T) {
+	r := NewRegistry()
+	registerBuiltins(r)
+
+	cmd := r.Dispatch("thinking", nil)
+	if cmd == nil {
+		t.Fatal("expected non-nil Cmd")
+	}
+	msg := cmd()
+	if _, ok := msg.(showThinkingPickerMsg); !ok {
+		t.Errorf("expected showThinkingPickerMsg for /thinking with no args, got %T", msg)
+	}
+}
+
 func TestRegistry_ExtensionCommand_Callable(t *testing.T) {
 	r := NewRegistry()
 	var gotArgs []string
