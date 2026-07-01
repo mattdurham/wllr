@@ -150,6 +150,7 @@ The following scenarios are not currently covered and should be added:
 | `TestModel_Update_ConsoleMsg_Clear_ResetsConsole` | `ConsoleMsg{Clear}` empties console | Append then Clear msg | console empty |
 | `TestModel_Update_StreamDoneMsg_HidesConsole` | StreamDone hides console | `consoleVisible=true`; `StreamDoneMsg` | `consoleVisible == false` |
 | `TestModel_chatHeight_AccountsForConsole` | chatHeight subtracts console height | `consoleVisible` on/off | height changes by `consolePaneLines` |
+| `TestModel_View_WithStatusLineFitsHeight` | Statusline plus input stays within terminal height | one-line status scene; small terminal height | rendered view line count <= terminal height; input bottom border present |
 
 ### SceneRenderer constraint tests (scene_test.go)
 

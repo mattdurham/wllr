@@ -128,9 +128,9 @@ func patchAll() {
 	accent := UIProps{Fg: "accent"}
 
 	nodes := []UINode{
-		{ID: providerID, Type: "text", Text: lastProvider, Props: &muted},
+		{ID: providerID, Type: "text", Text: ">> " + providerLabel(lastProvider), Props: &muted},
 		UIText(sep1ID, "  "),
-		{ID: modelID, Type: "text", Text: lastModel},
+		{ID: modelID, Type: "text", Text: modelLabel(lastModel)},
 		UIText(sep2ID, "  "),
 		{ID: tokensID, Type: "text", Text: renderTokens(lastTokens), Props: &muted},
 		UIText(sep3ID, "  "),
@@ -140,6 +140,30 @@ func patchAll() {
 		nodes = append(nodes, UINode{ID: ctxID, Type: "text", Text: lastCtx, Props: &muted})
 	}
 	UIPatch(areaID, OpSetRoot(UIHStack(rootID, nodes...)))
+}
+
+func providerLabel(provider string) string {
+	switch provider {
+	case "openai":
+		return "ChatGPT"
+	case "anthropic":
+		return "Claude"
+	case "gemini":
+		return "Gemini"
+	case "local":
+		return "Local"
+	case "":
+		return "Provider"
+	default:
+		return provider
+	}
+}
+
+func modelLabel(model string) string {
+	if model == "" {
+		return "select model"
+	}
+	return model
 }
 
 func renderWorking(info StatusInfo) string {

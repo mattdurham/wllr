@@ -3,7 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
-	_ "embed"
+	"embed"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -23,23 +23,14 @@ import (
 	"github.com/mattdurham/wllr/modules/tools"
 )
 
-// Built-in extension WASM modules embedded at compile time.
-// These are trusted extensions that receive all permissions automatically.
+// builtinFS embeds generated built-in WASM modules when they are present.
+// `make build` runs `make extensions` first, so release binaries include them.
+// Clean checkouts still compile because cmd/builtins contains a tracked README.
+// read_file, write_file, exec, and get_env are native Go tools registered via
+// RegisterNativeTool; no WASM is needed for stateless I/O.
 //
-// read_file, write_file, exec, and get_env are now native Go tools registered
-// directly on the Host via RegisterNativeTool — no WASM needed for stateless I/O.
-
-//go:embed builtins/agents.wasm
-var agentsWASM []byte
-
-//go:embed builtins/history.wasm
-var historyWASM []byte
-
-//go:embed builtins/logging.wasm
-var loggingWASM []byte
-
-//go:embed builtins/statusline.wasm
-var statuslineWASM []byte
+//go:embed builtins/*
+var builtinFS embed.FS
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "login" {
@@ -385,18 +376,15 @@ func registerAgentStatusTool(h *extension.Host, pool *agent.AgentPool) {
 
 // loadBuiltinExtensions loads the trusted built-in WASM extensions.
 func loadBuiltinExtensions(ctx context.Context, h *extension.Host) {
-	builtins := []struct {
-		name string
-		data []byte
-	}{
-		{"agents", agentsWASM},
-		{"history", historyWASM},
-		{"logging", loggingWASM},
-		{"statusline", statuslineWASM},
-	}
-	for _, b := range builtins {
-		if loadErr := h.LoadBytes(ctx, b.name+".wasm", b.data, true); loadErr != nil {
-			fmt.Fprintf(os.Stderr, "wllr: load built-in extension %q: %v\n", b.name, loadErr)
+	for _, name := range []string{"agents", "history", "logging", "statusline"} {
+		filename := name + ".wasm"
+		data, err := builtinFS.ReadFile("builtins/" + filename)
+		if err != nil {
+			slog.Warn("wllr: built-in extension missing; run `make extensions` before building", "extension", name, "error", err)
+			continue
+		}
+		if loadErr := h.LoadBytes(ctx, filename, data, true); loadErr != nil {
+			fmt.Fprintf(os.Stderr, "wllr: load built-in extension %q: %v\n", name, loadErr)
 		}
 	}
 }
