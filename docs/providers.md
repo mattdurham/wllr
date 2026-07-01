@@ -182,9 +182,29 @@ persisted level, else `off`.
 The model list is a curated catalog (`cmd/modelcatalog.go`) covering Anthropic,
 OpenAI, and Gemini, sourced from charmbracelet's Catwalk model-metadata service.
 
-> Some providers may require a login/OAuth flow rather than an API key. That
-> auth flow is a separate, forthcoming piece; today the built-in providers use
-> API keys via the environment variables above.
+### Provider authentication
+
+The first time wllr starts with a provider that has no recorded auth choice, it
+asks once how you want to authenticate that provider:
+
+- **Set up OAuth / login** — sign in via the provider
+- **Use an API key** — from the environment or auth file
+
+The choice is recorded in a dedicated `0600` auth file
+(`~/.config/wllr/auth.json`), keyed by provider:
+
+```json
+{ "anthropic": { "type": "oauth" }, "openai": { "type": "api_key" } }
+```
+
+The **presence of an entry is the record** — the prompt is shown at most once
+per provider and never again once a choice exists.
+
+> The interactive OAuth token-exchange flow is a separate, forthcoming piece.
+> Today, choosing OAuth for Anthropic means providing a Claude Code subscription
+> token (`sk-ant-oat…`) via `ANTHROPIC_API_KEY`; wllr sends the Claude-Code beta
+> headers automatically for such tokens. Other providers use API keys via the
+> environment variables above.
 
 ---
 

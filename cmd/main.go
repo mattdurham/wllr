@@ -195,6 +195,15 @@ func main() {
 		m.SetActiveThinking(string(lvl))
 	}
 
+	// First-run provider auth: record the chosen auth method once per provider so
+	// the prompt is not shown again. RecordAuthFn persists to the 0600 auth file.
+	m.RecordAuthFn = func(provider, method string) error {
+		return saveAuthCredential(provider, authCredential{Type: authType(method)})
+	}
+	if !hasAuthRecord(currentProvider) {
+		m.SetPendingAuthProvider(currentProvider)
+	}
+
 	m.SetLogFn(func(level int, msg string) {
 		lvl := []slog.Level{slog.LevelDebug, slog.LevelInfo, slog.LevelWarn, slog.LevelError}
 		l := slog.LevelError
