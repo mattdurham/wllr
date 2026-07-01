@@ -290,6 +290,7 @@ Built-in commands registered at startup:
 | `/clear`        | true    | Emits `clearMsg{}`                                           |
 | `/reload`       | true    | Emits `ReloadMsg{}`                                          |
 | `/model`        | true    | No arg → `showModelPickerMsg{}` (opens model picker); `/model <name>` → `setModelMsg{Model: name}` |
+| `/thinking`     | true    | No arg → `showThinkingPickerMsg{}` (opens level picker); `/thinking <level>` → `setThinkingMsg{Level: level}` |
 | `/status`       | true    | Emits `StatusUpdateMsg{Key: "_override", Value: text}`       |
 | `/tools`        | true    | Emits `showToolsMsg{}`                                       |
 | `/prompt`       | false   | Shows accumulated base system prompt in a modal              |
@@ -461,9 +462,22 @@ Returns the current set of registered tools from `extHost.RegisteredTools()` as 
 
 Flow: `/model` with no arg emits `showModelPickerMsg` → `openModelPicker()` builds picker items from `ModelListFn` (marking the current model) and opens the picker with the reserved `modelPickerCallback` (`"__wllr:model"`). On selection, `updateKeyPressPicker` recognises the core callback and emits `setModelMsg{Model: id}` (rather than dispatching `EventOnCommand` to a WASM extension); the `setModelMsg` handler calls `applyModelSelection` → `SelectModelFn` + status update. `/model <name>` skips the picker and emits `setModelMsg` directly.
 
-**Invariant:** picker callbacks prefixed `"__wllr:"` are core-owned and route to harness handlers, never to `EventOnCommand`. Extension command names cannot collide (the prefix is reserved).
+**Invariant:** picker callbacks prefixed `"__wllr:"` are core-owned and route to harness handlers, never to `EventOnCommand`. Extension command names cannot collide (the prefix is reserved). Reserved callbacks: `"__wllr:model"`, `"__wllr:thinking"`.
 
 **Invariant:** `SelectModelFn` errors surface as a notification and leave the active model unchanged; `activeModel`/status update only after a successful switch.
+
+### Thinking-Level Hooks
+
+`harness.Model` exposes two callback fields for the `/thinking` picker (set by `cmd/main.go`):
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `ThinkingListFn` | `func() []ThinkingChoice` | Returns the selectable reasoning levels for the picker. Nil ⇒ selection unavailable. |
+| `SelectThinkingFn` | `func(levelID string) error` | Applies a reasoning level: sets the main agent's provider options (`Agent.SetProviderOptions`) and persists the choice. Nil ⇒ display-only. |
+
+Flow mirrors the model picker: `/thinking` with no arg emits `showThinkingPickerMsg` → `openThinkingPicker()` builds items from `ThinkingListFn` (marking the current level) and opens the picker with the reserved `thinkingPickerCallback` (`"__wllr:thinking"`). On selection, `updateKeyPressPicker` emits `setThinkingMsg{Level: id}`; the handler calls `applyThinkingSelection` → `SelectThinkingFn` + `activeThinking`/status (`think` key) update. `/thinking <level>` skips the picker. `SetActiveThinking(level)` reflects a persisted level at startup without changing agent options.
+
+**Invariant:** `SelectThinkingFn` errors surface as a notification and leave the active level unchanged; `activeThinking`/status update only after a successful apply.
 
 ---
 

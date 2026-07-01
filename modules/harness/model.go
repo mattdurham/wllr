@@ -125,13 +125,23 @@ type Model struct {
 	// Set by cmd/main.go.
 	SelectModelFn func(modelID string) error
 
+	// ThinkingListFn returns the reasoning levels selectable in the /thinking
+	// picker. Nil means thinking-level selection is unavailable. Set by cmd/main.go.
+	ThinkingListFn func() []ThinkingChoice
+
+	// SelectThinkingFn switches the active reasoning level: it updates the main
+	// agent's provider options and persists the choice. Returns an error if the
+	// switch fails. Nil means selection is display-only. Set by cmd/main.go.
+	SelectThinkingFn func(levelID string) error
+
 	// scene holds extension-driven UI areas (the declarative, node-based
 	// renderer). Shared by pointer with the harnessUIBridge so the bridge can
 	// mutate it off-loop and the View can read it.
 	scene *SceneRenderer
 
-	mainAgentID string
-	activeModel string
+	mainAgentID    string
+	activeModel    string
+	activeThinking string
 
 	// Modal overlay state (non-empty when modal is open).
 	modalContent string
@@ -419,6 +429,16 @@ func (m *Model) SetExtensionPaths(paths []string) {
 	m.extPaths = paths
 }
 
+// SetActiveThinking sets the displayed active reasoning level and reflects it in
+// the status bar. Used at startup to show the persisted level. Does not itself
+// change the agent's provider options.
+func (m *Model) SetActiveThinking(level string) {
+	m.activeThinking = level
+	if level != "" {
+		m.live.setStatus("think", level)
+	}
+}
+
 // Init returns the initial command.
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
@@ -582,6 +602,9 @@ func (m Model) updateKeyPressPicker(kp tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		// handler instead of dispatching EventOnCommand to a WASM extension.
 		if callback == modelPickerCallback {
 			return m, func() tea.Msg { return setModelMsg{Model: id} }, true
+		}
+		if callback == thinkingPickerCallback {
+			return m, func() tea.Msg { return setThinkingMsg{Level: id} }, true
 		}
 		extHost := m.extHost
 		return m, func() tea.Msg {
@@ -818,6 +841,14 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 
 	case setModelMsg:
 		m.applyModelSelection(msg.Model)
+		return m, nil, true
+
+	case setThinkingMsg:
+		m.applyThinkingSelection(msg.Level)
+		return m, nil, true
+
+	case showThinkingPickerMsg:
+		m.openThinkingPicker()
 		return m, nil, true
 
 	case showModelPickerMsg:

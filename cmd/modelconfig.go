@@ -16,24 +16,29 @@ const wllrConfigGroup = "wllr"
 
 // savedModel returns the persisted model selection, or "" if none is stored or
 // the config file is missing/unreadable.
-func savedModel() string {
+func savedModel() string { return savedWllrField("model") }
+
+// saveModel persists the model selection to the "wllr" group of the config file.
+func saveModel(modelID string) error { return saveWllrField("model", modelID) }
+
+// savedWllrField reads a single string field from the "wllr" config group, or
+// "" if absent/unreadable.
+func savedWllrField(field string) string {
 	raw, err := loadConfigGroup(wllrConfigGroup)
 	if err != nil {
 		return ""
 	}
-	var g struct {
-		Model string `json:"model"`
-	}
+	var g map[string]string
 	if json.Unmarshal(raw, &g) != nil {
 		return ""
 	}
-	return g.Model
+	return g[field]
 }
 
-// saveModel persists the model selection to the "wllr" group of the config
-// file, preserving all other groups and keys. Best-effort: returns an error the
-// caller may surface, but never partially writes (temp-file + rename).
-func saveModel(modelID string) error {
+// saveWllrField persists a single string field to the "wllr" group of the
+// config file, preserving all other groups and keys. Best-effort: returns an
+// error the caller may surface, but never partially writes (temp-file + rename).
+func saveWllrField(field, value string) error {
 	path := configPath()
 
 	// Read the whole config object (or start empty).
@@ -42,16 +47,16 @@ func saveModel(modelID string) error {
 		_ = json.Unmarshal(data, &all) // tolerate a malformed file by overwriting
 	}
 
-	// Merge model into the "wllr" group, preserving its other keys.
+	// Merge the field into the "wllr" group, preserving its other keys.
 	group := map[string]json.RawMessage{}
 	if existing, ok := all[wllrConfigGroup]; ok {
 		_ = json.Unmarshal(existing, &group)
 	}
-	mv, err := json.Marshal(modelID)
+	mv, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
-	group["model"] = mv
+	group[field] = mv
 	gv, err := json.Marshal(group)
 	if err != nil {
 		return err

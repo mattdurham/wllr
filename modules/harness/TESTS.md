@@ -48,7 +48,9 @@ log, and reset behavior are covered by `wasmchat_test.go`, `tui_test.go`, and
 | `TestBuiltinClear_EmitsMsg` | /clear emits `clearMsg` | `registerBuiltins(r)` | msg is `clearMsg{}` |
 | `TestBuiltinReload_EmitsMsg` | /reload emits `ReloadMsg` | `registerBuiltins(r)` | msg is `ReloadMsg{}` |
 | `TestBuiltinModel_EmitsMsg` | /model sets model name | args `["claude-haiku-3-5"]` | msg is `setModelMsg{Model: "claude-haiku-3-5"}` |
-| `TestBuiltinModel_NoArgs` | /model with no args yields usage hint | no args | msg is `NotifyMsg` |
+| `TestBuiltinModel_NoArgs` | /model with no args opens the picker | no args | msg is `showModelPickerMsg` |
+| `TestBuiltinThinking_EmitsMsg` | /thinking sets level directly | args `["high"]` | msg is `setThinkingMsg{Level: "high"}` |
+| `TestBuiltinThinking_NoArgs` | /thinking with no args opens the picker | no args | msg is `showThinkingPickerMsg` |
 | `TestRegistry_ExtensionCommand_Callable` | Extension-registered command receives args | custom handler captures args | `gotArgs == ["world"]` |
 
 ---

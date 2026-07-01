@@ -1,13 +1,59 @@
 package agent_test
 
 import (
+	"context"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"charm.land/fantasy"
+	anthropicprovider "charm.land/fantasy/providers/anthropic"
 	"github.com/mattdurham/wllr/modules/agent"
 )
+
+// providerOptsSpyLM captures the ProviderOptions passed to Stream on each turn.
+type providerOptsSpyLM struct {
+	mu     sync.Mutex
+	tokens []string
+	last   fantasy.ProviderOptions
+}
+
+func (s *providerOptsSpyLM) Model() string    { return "opts-spy" }
+func (s *providerOptsSpyLM) Provider() string { return "test" }
+
+func (s *providerOptsSpyLM) Stream(_ context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
+	s.mu.Lock()
+	s.last = call.ProviderOptions
+	toks := s.tokens
+	s.mu.Unlock()
+	return func(yield func(fantasy.StreamPart) bool) {
+		for _, tok := range toks {
+			if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, Delta: tok}) {
+				return
+			}
+		}
+		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop})
+	}, nil
+}
+
+func (s *providerOptsSpyLM) Generate(_ context.Context, _ fantasy.Call) (*fantasy.Response, error) {
+	return &fantasy.Response{}, nil
+}
+
+func (s *providerOptsSpyLM) GenerateObject(_ context.Context, _ fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
+	return nil, nil
+}
+
+func (s *providerOptsSpyLM) StreamObject(_ context.Context, _ fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
+	return nil, nil
+}
+
+func (s *providerOptsSpyLM) lastOptions() fantasy.ProviderOptions {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.last
+}
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -89,6 +135,43 @@ func TestSetModel_SwapsModelForNextTurn(t *testing.T) {
 	got := collectResponse(t, a, "go")
 	if !strings.Contains(got, "from-swapped") {
 		t.Errorf("turn used old LM: got %q, want text from swapped LM", got)
+	}
+}
+
+// TestSetProviderOptions_AppliedToNextTurn verifies SetProviderOptions is
+// threaded into the fantasy.Call for the next turn (the /thinking picker path),
+// and that clearing it (nil) removes the options.
+func TestSetProviderOptions_AppliedToNextTurn(t *testing.T) {
+	pool := agent.NewPool()
+	spy := &providerOptsSpyLM{tokens: []string{"ok"}}
+	a, err := pool.Spawn("main", spy, agent.SpawnOpts{})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	// No options set yet: first turn carries none. (fantasy normalizes nil to an
+	// empty map, so assert emptiness rather than nil.)
+	_ = collectResponse(t, a, "one")
+	if got := spy.lastOptions(); len(got) != 0 {
+		t.Errorf("turn 1 ProviderOptions = %v, want empty", got)
+	}
+
+	// Set options: next turn must carry them.
+	a.SetProviderOptions(fantasy.ProviderOptions{
+		anthropicprovider.Name: &anthropicprovider.ProviderOptions{
+			Thinking: &anthropicprovider.ThinkingProviderOption{BudgetTokens: 4096},
+		},
+	})
+	_ = collectResponse(t, a, "two")
+	if got := spy.lastOptions(); got == nil || got[anthropicprovider.Name] == nil {
+		t.Errorf("turn 2 ProviderOptions = %v, want anthropic present", got)
+	}
+
+	// Clear options: subsequent turn carries none again.
+	a.SetProviderOptions(nil)
+	_ = collectResponse(t, a, "three")
+	if got := spy.lastOptions(); len(got) != 0 {
+		t.Errorf("turn 3 ProviderOptions = %v, want empty after clear", got)
 	}
 }
 
