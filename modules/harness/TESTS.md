@@ -75,6 +75,16 @@ log, and reset behavior are covered by `wasmchat_test.go`, `tui_test.go`, and
 | `TestApplyAuthChoice_NoProvider_NoOp` | No pending provider ⇒ no record | `RecordAuthFn` not called |
 | `TestSetPendingAuthProvider_DrivesInitPrompt` | Pending provider drives the startup prompt | `pendingAuthProvider` set; `Init()` returns a non-nil batch |
 
+### oauth_test.go
+
+| Test | Scenario | Assertions |
+|---|---|---|
+| `TestBeginOAuthLogin_EntersCaptureMode` | Begin returns URL, enters capture mode | `oauthCaptureProvider` set; modal shown |
+| `TestBeginOAuthLogin_ErrorNoCapture` | Begin error ⇒ no capture | `oauthCaptureProvider` stays empty |
+| `TestCompleteOAuthLogin_CallsCompleteAndClears` | Complete calls fn and clears capture | `CompleteOAuthFn` invoked; capture cleared; success `NotifyMsg` |
+| `TestCompleteOAuthLogin_ErrorSurfaced` | Complete error surfaced | error `NotifyMsg` |
+| `TestBuiltinLogin_EmitsLoginMsg` | /login emits loginMsg | msg is `loginMsg` |
+
 ---
 
 ## Missing / Recommended Tests

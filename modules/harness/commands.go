@@ -118,6 +118,15 @@ func registerBuiltins(r *Registry) {
 	})
 
 	r.Register(Command{
+		Name:    "login",
+		Desc:    "Authenticate the active provider (OAuth/login or API key)",
+		Instant: true,
+		Handler: func(_ []string) tea.Cmd {
+			return func() tea.Msg { return loginMsg{} }
+		},
+	})
+
+	r.Register(Command{
 		Name:    "status",
 		Desc:    "Override the status line (/status my text) or clear it (/status)",
 		Instant: true,

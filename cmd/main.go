@@ -194,10 +194,21 @@ func main() {
 		m.SetActiveThinking(string(lvl))
 	}
 
+	// Apply a stored, valid OAuth token at startup (refreshing if expired) so a
+	// prior /login persists across restarts.
+	resolveStartupAnthropicOAuth(ctx, pool, cfg)
+
 	// First-run provider auth: record the chosen auth method once per provider so
 	// the prompt is not shown again. RecordAuthFn persists to the 0600 auth file.
 	m.RecordAuthFn = func(provider, method string) error {
 		return saveAuthCredential(provider, authCredential{Type: authType(method)})
+	}
+	// OAuth login flow (Anthropic): begin returns the authorize URL; complete
+	// exchanges the pasted code for tokens and swaps the live provider.
+	oauthState := &oauthLoginState{}
+	m.BeginOAuthFn = oauthState.beginAnthropicOAuth
+	m.CompleteOAuthFn = func(provider, input string) error {
+		return oauthState.completeAnthropicOAuth(ctx, pool, cfg.Model, provider, input)
 	}
 	if !hasAuthRecord(currentProvider) {
 		m.SetPendingAuthProvider(currentProvider)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // Provider authentication records live in a dedicated, 0600 auth file
@@ -33,9 +34,20 @@ const (
 type authCredential struct {
 	Type authType `json:"type"`
 	// Key, when set, is a stored API key. Optional: for api_key providers the
-	// key normally resolves from the environment. OAuth tokens obtained by a
-	// future login flow would be stored here.
+	// key normally resolves from the environment.
 	Key string `json:"key,omitempty"`
+	// Access/Refresh/Expires hold OAuth tokens (type == oauth). Access is the
+	// bearer token used as the API key; Refresh renews it; Expires is the access
+	// token's absolute expiry in unix ms (with a safety margin already applied).
+	Access  string `json:"access,omitempty"`
+	Refresh string `json:"refresh,omitempty"`
+	Expires int64  `json:"expires,omitempty"`
+}
+
+// isExpired reports whether an OAuth access token is past its (margin-adjusted)
+// expiry. A zero Expires is treated as not-expired (unknown lifetime).
+func (c authCredential) isExpired() bool {
+	return c.Expires != 0 && time.Now().UnixMilli() >= c.Expires
 }
 
 // authPath returns the path to the auth file. It honors WLLR_AUTH for tests and

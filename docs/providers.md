@@ -200,11 +200,32 @@ The choice is recorded in a dedicated `0600` auth file
 The **presence of an entry is the record** — the prompt is shown at most once
 per provider and never again once a choice exists.
 
-> The interactive OAuth token-exchange flow is a separate, forthcoming piece.
-> Today, choosing OAuth for Anthropic means providing a Claude Code subscription
-> token (`sk-ant-oat…`) via `ANTHROPIC_API_KEY`; wllr sends the Claude-Code beta
-> headers automatically for such tokens. Other providers use API keys via the
-> environment variables above.
+### OAuth login (Anthropic / Claude Pro·Max)
+
+Choosing **OAuth** (or running `/login` any time) starts an interactive sign-in:
+
+1. wllr shows an authorize URL in a modal. Open it in a browser (on any
+   machine — the flow uses a paste-back code, so no local callback server is
+   needed and it works over SSH).
+2. Approve access. Claude shows an authorization code (or redirects to a URL
+   containing it).
+3. Close the modal, paste the code (or the full redirect URL) into the input
+   line, and press Enter.
+
+wllr exchanges the code for an access + refresh token (authorization-code +
+PKCE, matching the Claude Code client), stores them in `auth.json`, and switches
+the running provider to the new token — no restart. On the next launch the
+stored token is applied automatically and **refreshed if expired**. The access
+token is an `sk-ant-oat…` subscription token; wllr sends the Claude-Code beta
+headers for it automatically.
+
+```json
+{ "anthropic": { "type": "oauth", "access": "sk-ant-oat…", "refresh": "…", "expires": 1750000000000 } }
+```
+
+You can still authenticate by setting `ANTHROPIC_API_KEY` directly (a normal
+API key or a pre-obtained `sk-ant-oat…` token). Other providers use API keys via
+the environment variables above; OAuth login is currently Anthropic-only.
 
 ---
 
