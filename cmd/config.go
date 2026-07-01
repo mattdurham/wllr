@@ -18,6 +18,14 @@ type Config struct {
 	// GeminiAPIKey is the Google Gemini API key (GEMINI_API_KEY).
 	GeminiAPIKey string
 
+	// LocalAPIKey is the API key sent to an OpenAI-compatible local endpoint
+	// (WLLR_LOCAL_API_KEY, default: "ollama").
+	LocalAPIKey string
+
+	// LocalBaseURL is the OpenAI-compatible local endpoint base URL
+	// (WLLR_LOCAL_BASE_URL, default: http://localhost:11434/v1).
+	LocalBaseURL string
+
 	// ExtensionsDir is the directory scanned for .wasm extension files (BOB_EXTENSIONS_DIR).
 	ExtensionsDir string
 
@@ -30,6 +38,13 @@ type Config struct {
 	// ContextWindow overrides the model's context window in tokens (WLLR_CONTEXT_WINDOW).
 	// When 0, wllr queries the provider at startup to determine the window.
 	ContextWindow int64
+
+	// ModelConfigured reports whether a model came from env or persisted config,
+	// rather than the built-in default.
+	ModelConfigured bool
+
+	// ProviderConfigured reports whether a provider was explicitly set.
+	ProviderConfigured bool
 }
 
 // LoadConfig reads configuration from environment variables.
@@ -47,22 +62,43 @@ func LoadConfig() (*Config, error) {
 		AnthropicAPIKey: os.Getenv("ANTHROPIC_API_KEY"),
 		OpenAIAPIKey:    os.Getenv("OPENAI_API_KEY"),
 		GeminiAPIKey:    os.Getenv("GEMINI_API_KEY"),
+		LocalAPIKey:     os.Getenv("WLLR_LOCAL_API_KEY"),
+		LocalBaseURL:    os.Getenv("WLLR_LOCAL_BASE_URL"),
 		ExtensionsDir:   expandTilde(os.Getenv("WLLR_EXTENSIONS_DIR")),
 		Model:           os.Getenv("WLLR_MODEL"),
 		Provider:        os.Getenv("WLLR_PROVIDER"),
 		ContextWindow:   parseContextWindow(os.Getenv("WLLR_CONTEXT_WINDOW")),
 	}
 
+	// Provider precedence: env WLLR_PROVIDER > persisted selection
+	// (config.json wllr.provider) > built-in default.
+	if cfg.Provider == "" {
+		cfg.Provider = savedProvider()
+	}
+	cfg.ProviderConfigured = cfg.Provider != ""
+	if cfg.Provider == "" {
+		cfg.Provider = providerAnthropic
+	}
+
 	// Model precedence: env WLLR_MODEL > persisted selection (config.json wllr.model)
-	// > built-in default. The persisted value is written by the /model picker.
+	// > provider-specific built-in default. The persisted value is written by the
+	// /model picker and setup wizard.
 	if cfg.Model == "" {
 		cfg.Model = savedModel()
 	}
+	cfg.ModelConfigured = cfg.Model != ""
 	if cfg.Model == "" {
-		cfg.Model = "claude-sonnet-4-6"
+		cfg.Model = defaultModelForProvider(cfg.Provider)
+		if cfg.Model == "" {
+			cfg.Model = "claude-sonnet-4-6"
+		}
 	}
-	if cfg.Provider == "" {
-		cfg.Provider = providerAnthropic
+	cfg.Model = normalizeModelForProvider(cfg.Provider, cfg.Model)
+	if cfg.LocalBaseURL == "" {
+		cfg.LocalBaseURL = "http://localhost:11434/v1"
+	}
+	if cfg.LocalAPIKey == "" {
+		cfg.LocalAPIKey = "ollama"
 	}
 
 	// Auth-file OAuth credentials satisfy the provider key requirement: if no env
@@ -80,24 +116,33 @@ func LoadConfig() (*Config, error) {
 		}
 	}
 
+	return cfg, nil
+}
+
+func missingProviderAuth(cfg *Config) (string, bool) {
+	if cfg == nil {
+		return "", false
+	}
 	switch cfg.Provider {
 	case providerAnthropic:
-		if cfg.AnthropicAPIKey == "" {
-			return nil, fmt.Errorf("ANTHROPIC_API_KEY is required when WLLR_PROVIDER=anthropic (or run /login)")
-		}
+		return "ANTHROPIC_API_KEY", cfg.AnthropicAPIKey == ""
 	case "openai":
-		if cfg.OpenAIAPIKey == "" {
-			return nil, fmt.Errorf("OPENAI_API_KEY is required when WLLR_PROVIDER=openai (or run /login)")
-		}
+		return "OPENAI_API_KEY", cfg.OpenAIAPIKey == ""
 	case "gemini":
-		if cfg.GeminiAPIKey == "" {
-			return nil, fmt.Errorf("GEMINI_API_KEY is required when BOB_PROVIDER=gemini")
-		}
+		return "GEMINI_API_KEY", cfg.GeminiAPIKey == ""
 	default:
-		// Unknown/custom providers: no built-in key requirement.
+		return "", false
 	}
+}
 
-	return cfg, nil
+func missingAuthError(provider, envVar string) error {
+	msg := fmt.Sprintf("%s is required when WLLR_PROVIDER=%s", envVar, provider)
+	switch provider {
+	case providerAnthropic, "openai":
+		return fmt.Errorf("%s. Set %s, or run `wllr login --provider %s` to authenticate with OAuth before starting the TUI", msg, envVar, provider)
+	default:
+		return fmt.Errorf("%s. Set %s before starting wllr", msg, envVar)
+	}
 }
 
 // parseContextWindow converts a string like "1000000" or "1m" to int64 tokens.

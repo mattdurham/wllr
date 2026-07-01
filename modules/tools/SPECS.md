@@ -34,5 +34,5 @@ Converts all registered tools from an `*extension.Host` into `[]fantasy.AgentToo
 **Invariants:**
 7. Unknown keys in the schema are silently ignored.
 8. Missing "properties" key → empty params map (not an error).
-9. Missing "required" key → empty required slice (not an error).
+9. Missing "required" key → non-nil empty required slice (not an error; marshals as `[]`, not `null`).
 10. Invalid JSON → error returned, no partial result.

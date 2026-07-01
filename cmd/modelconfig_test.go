@@ -37,6 +37,20 @@ func TestSaveModel_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestSaveProvider_RoundTrip(t *testing.T) {
+	withConfigPath(t)
+
+	if got := savedProvider(); got != "" {
+		t.Errorf("savedProvider on missing file = %q, want empty", got)
+	}
+	if err := saveProvider("local"); err != nil {
+		t.Fatalf("saveProvider: %v", err)
+	}
+	if got := savedProvider(); got != "local" {
+		t.Errorf("savedProvider = %q, want local", got)
+	}
+}
+
 func TestSaveModel_PreservesOtherGroups(t *testing.T) {
 	path := withConfigPath(t)
 
@@ -80,7 +94,7 @@ func TestSaveModel_PreservesOtherGroups(t *testing.T) {
 }
 
 func TestModelCatalog_KnownProviders(t *testing.T) {
-	for _, p := range []string{"anthropic", "openai", "gemini"} {
+	for _, p := range []string{"anthropic", "openai", "gemini", "local"} {
 		models := modelsForProvider(p)
 		if len(models) == 0 {
 			t.Errorf("provider %q has no models in catalog", p)
@@ -93,6 +107,38 @@ func TestModelCatalog_KnownProviders(t *testing.T) {
 	}
 	if modelsForProvider("nonexistent") != nil {
 		t.Error("unknown provider should return nil catalog")
+	}
+}
+
+func TestDefaultModelForProvider(t *testing.T) {
+	tests := map[string]string{
+		"anthropic": "claude-sonnet-4-6",
+		"openai":    "gpt-5.5",
+		"local":     "llama3.2",
+	}
+	for provider, want := range tests {
+		if got := defaultModelForProvider(provider); got != want {
+			t.Errorf("defaultModelForProvider(%q) = %q, want %q", provider, got, want)
+		}
+	}
+}
+
+func TestModelsForOpenAIAuth_ChatGPTOAuthSubset(t *testing.T) {
+	withAuthPath(t)
+	if err := saveAuthCredential("openai", authCredential{Type: authTypeOAuth, Access: "tok", AccountID: "acct"}); err != nil {
+		t.Fatalf("saveAuthCredential: %v", err)
+	}
+	models := modelsForOpenAIAuth()
+	if len(models) == 0 {
+		t.Fatal("modelsForOpenAIAuth returned no models")
+	}
+	if models[0].ID != "gpt-5.5" {
+		t.Fatalf("first ChatGPT OAuth model = %q, want gpt-5.5", models[0].ID)
+	}
+	for _, m := range models {
+		if m.ID == "gpt-5.3-codex" || m.ID == "gpt-5.2-codex" {
+			t.Fatalf("ChatGPT OAuth model list should not include unsupported Codex-suffixed model %q", m.ID)
+		}
 	}
 }
 

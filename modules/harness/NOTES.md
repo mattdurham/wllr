@@ -495,3 +495,15 @@ a separate `m.history` copy.
 **Rationale:** The user wanted Codex OAuth (ChatGPT Plus/Pro is subscription auth, like Claude Pro/Max), and pi's reference implementation shows Codex uses a device-code flow. Device-code is also the clean answer to the SSH problem we'd punted on (port-forwarding) — nothing listens locally, so it works anywhere. Rather than special-case two flows in the harness, the harness stays provider-agnostic: it shows a modal body, copies a URL, and awaits a result. All provider specifics (endpoints, PKCE, device polling, JWT account-id extraction, ChatGPT-backend routing) live in cmd/ (oauth_codex.go, devicecode.go, oauthwire.go dispatch).
 
 **Consequence:** `BeginOAuthFn` signature changed (breaking for the callback; only cmd/main.go wires it). cmd gains: `devicecode.go` (RFC 8628 poll primitive), `oauth_codex.go` (Codex device-code + token exchange + `chatGPTAccountID` JWT decode + `refreshCodexToken`), `newCodexProvider` (OpenAI provider pointed at `chatgpt.com/backend-api/codex` with `chatgpt-account-id` header + Responses API). `authCredential` gains `AccountID`. `oauthLoginState` dispatches begin/await/complete by provider and owns both the callback server and the device state; `resolveStartupOAuth` covers both providers; `LoadConfig` seeds the openai key from a stored Codex token. Covered by cmd TestOAuthLogin_CodexDeviceFlow, TestExchangeCodexCode_*, TestChatGPTAccountID, TestParseFlexibleInt, and the retitled Anthropic/round-trip tests. *Addendum to the "callback server only" entry: the callback server remains Anthropic's mechanism; Codex uses device-code, which is the general SSH-friendly path.*
+
+---
+
+## Blank first-run config opens a provider setup wizard
+
+*Added: 2026-07-01*
+
+**Decision:** Add a blank first-run setup wizard instead of assuming Anthropic. `SetPendingSetupWizard` makes `Init()` emit `showLoginProviderPickerMsg`, which opens a core-owned provider picker (`"__wllr:login_provider"`). Selecting a provider calls `SelectProviderFn`, updates active provider/model state, and starts OAuth only when the selected provider requires it. Cloud choices (ChatGPT/OpenAI and Anthropic) start the existing OAuth flow; local choices skip auth.
+
+**Rationale:** On a completely blank setup there is no meaningful reason to prefer Anthropic over ChatGPT or a local model. The user needs an explicit first decision: ChatGPT, Anthropic, or local. Keeping this as a setup wizard avoids changing `/login` or the explicit first-run auth picker used when the user has configured a provider/model and may intentionally want an API-key flow.
+
+**Consequence:** `Model` gains `ProviderListFn`, `SelectProviderFn`, `ProviderChoice`, `SetPendingSetupWizard`, `showLoginProviderPickerMsg`, and `loginProviderSelectedMsg`. Cloud selections record OAuth and reuse `beginOAuthLogin`; local selections do not record auth and do not call OAuth. Covered by `TestSetPendingSetupWizard_DrivesInitWizard`, `TestLoginProviderSelected_CloudRecordsOAuthAndBeginsLogin`, and `TestLoginProviderSelected_LocalDoesNotBeginLogin`.

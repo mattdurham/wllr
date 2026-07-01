@@ -29,7 +29,7 @@ type sdkToolAdapter struct {
 // Exported for use in tests and session package.
 func ParseInputSchema(schema json.RawMessage) (map[string]any, []string, error) {
 	if len(schema) == 0 {
-		return map[string]any{}, nil, nil
+		return map[string]any{}, []string{}, nil
 	}
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(schema, &obj); err != nil {
@@ -51,6 +51,9 @@ func ParseInputSchema(schema json.RawMessage) (map[string]any, []string, error) 
 		if err := json.Unmarshal(raw, &required); err != nil {
 			return nil, nil, fmt.Errorf("parse required: %w", err)
 		}
+	}
+	if required == nil {
+		required = []string{}
 	}
 
 	return params, required, nil
