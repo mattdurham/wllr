@@ -107,7 +107,7 @@ func init() {
 	)
 	RegisterTool(
 		"list_agents",
-		"List all running agents",
+		"List live agents with is_running and pending_messages. Use this to check whether a child is busy; do not ping a running child.",
 		json.RawMessage(`{"type":"object","properties":{}}`),
 	)
 	RegisterTool(
@@ -132,7 +132,7 @@ func init() {
 	)
 	RegisterTool(
 		"send_message",
-		"Send a message to an agent",
+		"Send a message to an agent and wake it. If the agent is already running, the message is queued for its next turn; do not use as a ping.",
 		json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string","description":"Agent ID"},"message":{"type":"string","description":"Message text"}},"required":["agent_id","message"]}`),
 	)
 	RegisterCommandInstant("agents", "Show running sub-agents and their status")
@@ -231,13 +231,16 @@ Stop an agent and free its resources. Always shut down agents when their
 task is complete. Leaked agents continue consuming memory.
 
 **list_agents()**
-Returns all running agent IDs and names.
+Returns all live agents with IDs, names, is_running, and pending_messages.
+Use is_running to tell "working" from "idle"; do not ping a running child.
 
 **get_agent_status(agent_id, history_limit?)**
 Diagnostic tool — returns is_running (true if mid-turn), turn_count, and
 recent conversation history. Use ONCE to diagnose a stuck agent; do not poll.
 - is_running=true: agent is currently working; do not interrupt, end your turn
 - is_running=false: agent is idle; read "recent" field to see what it did last
+- pending_messages>0: messages are queued for the next turn; the child may not
+  have read your latest message yet
 - Always use history_limit=20 to see enough context to understand what happened
 history_limit defaults to 10 messages.
 
@@ -387,8 +390,10 @@ func onAgentsCommand(_ []string) {
 	result := agentCall("agent_list", map[string]string{})
 	var poolResp struct {
 		Agents []struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
+			ID              string `json:"id"`
+			Name            string `json:"name"`
+			IsRunning       bool   `json:"is_running"`
+			PendingMessages int    `json:"pending_messages"`
 		} `json:"agents"`
 	}
 	if result != "" {
@@ -416,6 +421,14 @@ func onAgentsCommand(_ []string) {
 			sb.WriteString("  (" + a.Name + ")")
 		}
 		sb.WriteString("\n")
+		if a.IsRunning {
+			sb.WriteString("  Status: running\n")
+		} else {
+			sb.WriteString("  Status: idle\n")
+		}
+		if a.PendingMessages > 0 {
+			sb.WriteString(fmt.Sprintf("  Pending messages: %d\n", a.PendingMessages))
+		}
 		if r, ok := meta[a.ID]; ok {
 			if r.task != "" {
 				sb.WriteString("  Task: " + r.task + "\n")

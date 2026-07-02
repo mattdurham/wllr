@@ -82,9 +82,11 @@ func (e *earlyAgentBridge) Close(_ string) error { return fmt.Errorf("not starte
 func (e *earlyAgentBridge) SendMessage(_ string, _ sdk.Message) error {
 	return fmt.Errorf("not started")
 }
+
 func (e *earlyAgentBridge) Deliver(_ string, _ sdk.Message, _ bool) error {
 	return fmt.Errorf("not started")
 }
+
 func (e *earlyAgentBridge) Run(_ string) error                      { return fmt.Errorf("not started") }
 func (e *earlyAgentBridge) List() ([]extension.AgentInfo, error)    { return nil, nil }
 func (e *earlyAgentBridge) TokenCount() int64                       { return 0 }
@@ -161,10 +163,19 @@ func (b *harnessAgentBridge) List() ([]extension.AgentInfo, error) {
 	infos := make([]extension.AgentInfo, 0, len(ids))
 	for _, id := range ids {
 		agentName := id
+		isRunning := false
+		pendingMessages := 0
 		if a := b.pool.Get(id); a != nil {
 			agentName = a.Name()
+			isRunning = a.IsRunning()
+			pendingMessages = a.InboxLen()
 		}
-		infos = append(infos, extension.AgentInfo{ID: id, Name: agentName})
+		infos = append(infos, extension.AgentInfo{
+			ID:              id,
+			Name:            agentName,
+			IsRunning:       isRunning,
+			PendingMessages: pendingMessages,
+		})
 	}
 	return infos, nil
 }
