@@ -95,6 +95,8 @@ Sub-agents spawned via `harnessAgentBridge.Spawn` (delegated to `agent.Spawner`)
 
 After all sub-handlers return false, remaining messages are forwarded to `m.input` (all messages) and `m.chat` (non-key messages only, to prevent viewport key bindings from stealing typed characters).
 
+`Esc` is special-cased before picker/modal/input handling: it always sends a best-effort cancellation request to the agent pool. If a turn was active at the time the key was pressed, the event is consumed and the stream status is set to `cancelling…`; otherwise normal idle `Esc` behavior continues (picker/modal close, dropdown close, or input clear). Agent-pool cancellation is a no-op when no turn is running.
+
 ---
 
 ## 5. Token Batching (tokenBatcher)
