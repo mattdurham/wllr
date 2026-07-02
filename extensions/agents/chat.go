@@ -12,7 +12,10 @@ import "fmt"
 // drive the primary UI surface, with the Go side acting only as a bridge to the
 // underlying agent layer.
 
-const chatArea = "chat"
+const (
+	chatArea   = "chat"
+	chatRootID = "chat-root"
+)
 
 var (
 	chatEnabled  bool
@@ -34,7 +37,7 @@ func initChat() {
 func onChatSessionStart() {
 	chatEnabled = true
 	UICreateArea(chatArea, "main", 0, "", "", "", "")
-	UIPatch(chatArea, OpSetRoot(UIVStack("chat-root")))
+	UIPatch(chatArea, OpSetRoot(UIVStack(chatRootID)))
 }
 
 // onChatUserPrompt appends a user message box and opens a fresh assistant text
@@ -62,8 +65,8 @@ func onChatUserPrompt(prompt string) {
 	}
 	UIPatch(
 		chatArea,
-		OpInsert("chat-root", userBox),
-		OpInsert("chat-root", asstBox),
+		OpInsert(chatRootID, userBox),
+		OpInsert(chatRootID, asstBox),
 	)
 }
 
@@ -92,5 +95,5 @@ func onChatNotify(text string) {
 		Text:  "» " + text,
 		Props: &UIProps{Fg: "muted", Italic: true, Width: "fill", Wrap: true},
 	}
-	UIPatch(chatArea, OpInsert("chat-root", node))
+	UIPatch(chatArea, OpInsert(chatRootID, node))
 }

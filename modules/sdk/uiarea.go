@@ -17,9 +17,6 @@ package sdk
 type UIArea struct {
 	ID        string          `json:"id"`
 	Placement UIAreaPlacement `json:"placement"`
-	// Weight is a relative size hint among areas sharing a placement. Zero means
-	// "harness default". Higher weights receive proportionally more space.
-	Weight int `json:"weight,omitempty"`
 
 	// Height constraints. "" means unconstrained.
 	// Values: "3" (absolute lines) or "20%" (percent of terminal height).
@@ -31,4 +28,7 @@ type UIArea struct {
 	// Values: "80" (absolute cols) or "50%" (percent of terminal width).
 	MinWidth string `json:"min_width,omitempty"`
 	MaxWidth string `json:"max_width,omitempty"`
+	// Weight is a relative size hint among areas sharing a placement. Zero means
+	// "harness default". Higher weights receive proportionally more space.
+	Weight int `json:"weight,omitempty"`
 }

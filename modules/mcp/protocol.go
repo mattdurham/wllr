@@ -6,6 +6,8 @@ import (
 	"fmt"
 )
 
+const jsonrpcVersion = "2.0"
+
 // JSONRPCRequest represents a JSON-RPC 2.0 request.
 
 // JSONRPCResponse represents a JSON-RPC 2.0 response.

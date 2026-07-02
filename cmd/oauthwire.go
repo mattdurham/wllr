@@ -36,21 +36,21 @@ var oauthCallbackAddr = "127.0.0.1:53692"
 // begin returns (modalBody, clipboard); await blocks until login resolves and
 // returns the material complete needs (encoded per provider), or an error.
 type oauthLoginState struct {
-	mu       sync.Mutex
+	ctx    context.Context
+	pool   *agent.AgentPool
+	server *http.Server
+	codeCh chan string   // buffered(1); callback handler sends the raw redirect query
+	done   chan struct{} // closed to cancel a pending await
+
+	// Codex (device-code):
+	device   *codexDeviceAuth
 	provider string
-	ctx      context.Context
-	pool     *agent.AgentPool
 	model    string
 
 	// Anthropic (callback server):
 	verifier  string
-	server    *http.Server
-	boundAddr string        // actual listen address (tests use an ephemeral port)
-	codeCh    chan string   // buffered(1); callback handler sends the raw redirect query
-	done      chan struct{} // closed to cancel a pending await
-
-	// Codex (device-code):
-	device *codexDeviceAuth
+	boundAddr string // actual listen address (tests use an ephemeral port)
+	mu        sync.Mutex
 }
 
 // newOAuthLoginState binds the login coordinator to the context, pool, and model
@@ -66,7 +66,7 @@ func (s *oauthLoginState) begin(provider string) (modalBody, clipboard string, e
 	switch provider {
 	case providerAnthropic:
 		return s.beginAnthropic()
-	case "openai":
+	case providerOpenAI:
 		return s.beginCodex()
 	default:
 		return "", "", fmt.Errorf("OAuth login is not supported for provider %q", provider)
@@ -83,7 +83,7 @@ func (s *oauthLoginState) await() (string, error) {
 	switch provider {
 	case providerAnthropic:
 		return s.awaitAnthropic()
-	case "openai":
+	case providerOpenAI:
 		return s.awaitCodex()
 	default:
 		return "", nil
@@ -96,7 +96,7 @@ func (s *oauthLoginState) complete(provider, input string) error {
 	switch provider {
 	case providerAnthropic:
 		return s.completeAnthropic(input)
-	case "openai":
+	case providerOpenAI:
 		return s.completeCodex(input)
 	default:
 		return fmt.Errorf("OAuth login is not supported for provider %q", provider)
@@ -144,7 +144,7 @@ func (s *oauthLoginState) startServerLocked() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if r.URL.Query().Get("code") == "" {
+		if r.URL.Query().Get(oauthParamCode) == "" {
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = io.WriteString(w, oauthCallbackHTML("Sign-in did not complete. You can close this window and try /login again."))
 			return
@@ -227,7 +227,7 @@ func (s *oauthLoginState) beginCodex() (string, string, error) {
 	}
 	s.mu.Lock()
 	s.stopLocked()
-	s.provider = "openai"
+	s.provider = providerOpenAI
 	s.device = &device
 	s.mu.Unlock()
 
@@ -270,7 +270,7 @@ func (s *oauthLoginState) completeCodex(input string) error {
 	s.device = nil
 	s.mu.Unlock()
 
-	if saveErr := saveAuthCredential("openai", authCredential{
+	if saveErr := saveAuthCredential(providerOpenAI, authCredential{
 		Type:      authTypeOAuth,
 		Access:    tok.Access,
 		Refresh:   tok.Refresh,
@@ -366,7 +366,7 @@ func resolveStartupOAuth(ctx context.Context, pool *agent.AgentPool, cfg *Config
 	switch cfg.Provider {
 	case providerAnthropic:
 		return resolveStartupAnthropicOAuth(ctx, pool, cfg)
-	case "openai":
+	case providerOpenAI:
 		return resolveStartupCodexOAuth(ctx, pool, cfg)
 	default:
 		return false
@@ -397,7 +397,7 @@ func resolveStartupAnthropicOAuth(ctx context.Context, pool *agent.AgentPool, cf
 }
 
 func resolveStartupCodexOAuth(ctx context.Context, pool *agent.AgentPool, cfg *Config) bool {
-	cred, ok := loadAuthCredential("openai")
+	cred, ok := loadAuthCredential(providerOpenAI)
 	if !ok || cred.Type != authTypeOAuth || cred.Access == "" {
 		return false
 	}
@@ -411,7 +411,7 @@ func resolveStartupCodexOAuth(ctx context.Context, pool *agent.AgentPool, cfg *C
 		if id := chatGPTAccountID(tok.Access); id != "" {
 			cred.AccountID = id
 		}
-		if saveErr := saveAuthCredential("openai", cred); saveErr != nil {
+		if saveErr := saveAuthCredential(providerOpenAI, cred); saveErr != nil {
 			slog.Warn("wllr: could not persist refreshed codex token", "error", saveErr)
 		}
 	}

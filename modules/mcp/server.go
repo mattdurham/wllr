@@ -168,7 +168,7 @@ func (s *Server) call(ctx context.Context, method string, params interface{}, re
 	id := int(s.nextID.Add(1))
 
 	req := JSONRPCRequest{
-		JSONRPC: "2.0",
+		JSONRPC: jsonrpcVersion,
 		ID:      id,
 		Method:  method,
 		Params:  params,
@@ -226,7 +226,7 @@ func (s *Server) call(ctx context.Context, method string, params interface{}, re
 // notify sends a JSON-RPC notification (no response expected).
 func (s *Server) notify(method string, params interface{}) error {
 	req := JSONRPCRequest{
-		JSONRPC: "2.0",
+		JSONRPC: jsonrpcVersion,
 		Method:  method,
 		Params:  params,
 	}

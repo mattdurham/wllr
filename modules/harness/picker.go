@@ -51,7 +51,7 @@ func (p *PickerView) SetSize(width, height int) {
 //   - otherwise (false, "", false) meaning key was consumed but no action yet
 func (p *PickerView) HandleKey(kp tea.KeyPressMsg) (selected bool, id string, cancelled bool) {
 	switch kp.String() {
-	case "esc":
+	case keyEsc:
 		return false, "", true
 	case "enter":
 		if len(p.Items) == 0 {

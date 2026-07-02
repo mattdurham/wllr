@@ -29,9 +29,9 @@ import (
 const codexOAuthClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
 
 var (
-	codexTokenURL          = "https://auth.openai.com/oauth/token"
+	codexTokenURL          = "https://auth.openai.com/oauth/token" //nolint:gosec // OAuth token endpoint URL, not a credential.
 	codexDeviceUserCodeURL = "https://auth.openai.com/api/accounts/deviceauth/usercode"
-	codexDeviceTokenURL    = "https://auth.openai.com/api/accounts/deviceauth/token"
+	codexDeviceTokenURL    = "https://auth.openai.com/api/accounts/deviceauth/token" //nolint:gosec // OAuth token endpoint URL, not a credential.
 	// codexDeviceVerificationURI is shown to the user (where they enter the code).
 	codexDeviceVerificationURI = "https://auth.openai.com/codex/device"
 	// codexDeviceRedirectURI is echoed on the final code→token exchange.
@@ -43,11 +43,11 @@ const codexDeviceTimeout = 15 * time.Minute
 
 // codexDeviceAuth is the response to a user-code request.
 type codexDeviceAuth struct {
-	DeviceAuthID    string
-	UserCode        string
-	IntervalSeconds int
+	DeviceAuthID string
+	UserCode     string
 	// VerificationURI is where the user enters the code (constant, surfaced for the UI).
 	VerificationURI string
+	IntervalSeconds int
 }
 
 // codexToken is a Codex OAuth token set, plus the ChatGPT account id extracted
@@ -55,13 +55,13 @@ type codexDeviceAuth struct {
 type codexToken struct {
 	Access    string
 	Refresh   string
-	ExpiresAt int64
 	AccountID string
+	ExpiresAt int64
 }
 
 // startCodexDeviceAuth requests a device/user code from the Codex auth server.
 func startCodexDeviceAuth(ctx context.Context, client *http.Client) (codexDeviceAuth, error) {
-	body, _ := json.Marshal(map[string]string{"client_id": codexOAuthClientID})
+	body, _ := json.Marshal(map[string]string{oauthParamClientID: codexOAuthClientID})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, codexDeviceUserCodeURL, bytes.NewReader(body))
 	if err != nil {
 		return codexDeviceAuth{}, err
@@ -155,11 +155,11 @@ func pollCodexDeviceAuth(ctx context.Context, client *http.Client, device codexD
 // extracts the ChatGPT account id from the access token.
 func exchangeCodexCode(ctx context.Context, client *http.Client, code, verifier string) (codexToken, error) {
 	form := url.Values{
-		"grant_type":    {"authorization_code"},
-		"client_id":     {codexOAuthClientID},
-		"code":          {code},
-		"code_verifier": {verifier},
-		"redirect_uri":  {codexDeviceRedirectURI},
+		oauthParamGrantType:    {oauthGrantAuthorizationCode},
+		oauthParamClientID:     {codexOAuthClientID},
+		oauthParamCode:         {code},
+		oauthParamCodeVerifier: {verifier},
+		oauthParamRedirectURI:  {codexDeviceRedirectURI},
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, codexTokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
@@ -176,8 +176,8 @@ func exchangeCodexCode(ctx context.Context, client *http.Client, code, verifier 
 		return codexToken{}, fmt.Errorf("codex token exchange failed: status=%d body=%s", resp.StatusCode, string(data))
 	}
 	var parsed struct {
-		AccessToken  string `json:"access_token"`
-		RefreshToken string `json:"refresh_token"`
+		AccessToken  string `json:"access_token"`  //nolint:gosec // OAuth token response field name.
+		RefreshToken string `json:"refresh_token"` //nolint:gosec // OAuth token response field name.
 		ExpiresIn    int64  `json:"expires_in"`
 	}
 	if err := json.Unmarshal(data, &parsed); err != nil {
@@ -201,9 +201,9 @@ func exchangeCodexCode(ctx context.Context, client *http.Client, code, verifier 
 // refreshCodexToken exchanges a refresh token for a fresh Codex access token.
 func refreshCodexToken(ctx context.Context, client *http.Client, refreshToken string) (codexToken, error) {
 	form := url.Values{
-		"grant_type":    {"refresh_token"},
-		"refresh_token": {refreshToken},
-		"client_id":     {codexOAuthClientID},
+		oauthParamGrantType:    {oauthGrantRefreshToken},
+		oauthParamRefreshToken: {refreshToken},
+		oauthParamClientID:     {codexOAuthClientID},
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, codexTokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
@@ -220,8 +220,8 @@ func refreshCodexToken(ctx context.Context, client *http.Client, refreshToken st
 		return codexToken{}, fmt.Errorf("codex token refresh failed: status=%d body=%s", resp.StatusCode, string(data))
 	}
 	var parsed struct {
-		AccessToken  string `json:"access_token"`
-		RefreshToken string `json:"refresh_token"`
+		AccessToken  string `json:"access_token"`  //nolint:gosec // OAuth token response field name.
+		RefreshToken string `json:"refresh_token"` //nolint:gosec // OAuth token response field name.
 		ExpiresIn    int64  `json:"expires_in"`
 	}
 	if err := json.Unmarshal(data, &parsed); err != nil {
@@ -244,7 +244,7 @@ func doOAuthHTTP(client *http.Client, req *http.Request) (*http.Response, error)
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
-	return client.Do(req)
+	return client.Do(req) //nolint:gosec // OAuth requests use provider endpoints or test-injected URLs.
 }
 
 // codexErrorCode extracts the `error` / `error.code` field from a JSON body.

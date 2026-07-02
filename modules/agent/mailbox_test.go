@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 
@@ -109,5 +110,5 @@ func TestMailbox_ConcurrentAppendDrain(t *testing.T) {
 }
 
 func msgKey(w, i int) string {
-	return "w" + string(rune('0'+w)) + "-" + string(rune('0'+i/10)) + string(rune('0'+i%10))
+	return fmt.Sprintf("w%d-%02d", w, i)
 }

@@ -32,7 +32,7 @@ import (
 //go:embed builtins/*
 var builtinFS embed.FS
 
-func main() {
+func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI callbacks in one startup path.
 	if len(os.Args) > 1 && os.Args[1] == "login" {
 		os.Exit(runLoginCommand(context.Background(), os.Args[2:], os.Stdout, os.Stderr))
 	}
@@ -151,7 +151,7 @@ func main() {
 	oauthState := newOAuthLoginState(ctx, pool, cfg.Model)
 	m.ProviderListFn = func() []harness.ProviderChoice {
 		return []harness.ProviderChoice{
-			{ID: "openai", Name: "ChatGPT", Sublabel: "sign in with a ChatGPT account"},
+			{ID: providerOpenAI, Name: "ChatGPT", Sublabel: "sign in with a ChatGPT account"},
 			{ID: providerAnthropic, Name: "Anthropic", Sublabel: "sign in with a Claude account"},
 			{ID: providerLocal, Name: "Local model", Sublabel: localProviderSublabel(cfg)},
 		}
@@ -183,7 +183,7 @@ func main() {
 		}
 		oauthState.model = modelID
 		switch provider {
-		case "openai", providerAnthropic:
+		case providerOpenAI, providerAnthropic:
 			return modelID, true, nil
 		case providerLocal:
 			prov, lm, err := buildProvider(ctx, cfg)
@@ -200,11 +200,14 @@ func main() {
 		}
 	}
 	m.ModelListFn = func() []harness.ModelChoice {
-		catalog := modelsForProvider(currentProvider)
-		if currentProvider == "openai" {
+		var catalog []modelInfo
+		switch currentProvider {
+		case providerOpenAI:
 			catalog = modelsForOpenAIAuth()
-		} else if currentProvider == providerLocal {
+		case providerLocal:
 			catalog = localModels(ctx, cfg)
+		default:
+			catalog = modelsForProvider(currentProvider)
 		}
 		out := make([]harness.ModelChoice, 0, len(catalog))
 		for _, mi := range catalog {
