@@ -63,33 +63,25 @@ func init() {
 		info, _ := GetStatusInfo()
 		lastProvider = info.Provider
 		lastModel = info.Model
-		lastTokens = info.Tokens
+		syncDynamicStatus(info)
 		patchAll()
 	})
 
 	// EventToken fires during streaming — update the working indicator.
 	OnToken(func(_, _ string) {
 		info, _ := GetStatusInfo()
-		working := renderWorking(info)
-		tokens := info.Tokens
-		if working == lastWorking && tokens == lastTokens {
+		if !syncDynamicStatus(info) {
 			return
 		}
-		lastWorking = working
-		lastTokens = tokens
 		patchAll()
 	})
 
 	// EventAfterProviderResponse fires when the LLM turn completes.
 	OnAfterProviderResponse(func(_, _ int) {
 		info, _ := GetStatusInfo()
-		working := renderWorking(info)
-		tokens := info.Tokens
-		if working == lastWorking && tokens == lastTokens {
+		if !syncDynamicStatus(info) {
 			return
 		}
-		lastWorking = working
-		lastTokens = tokens
 		patchAll()
 	})
 
@@ -98,7 +90,7 @@ func init() {
 		desired := ""
 		if ctxWindow > 0 {
 			remaining := 80.0 - percent
-			desired = fmt.Sprintf("  ctx:%+.0f%%", remaining)
+			desired = fmt.Sprintf("  ctx:%.0f%%", remaining)
 		}
 		if desired == lastCtx {
 			return
@@ -107,14 +99,23 @@ func init() {
 		patchAll()
 	})
 
-	// EventTick (1s) — refresh provider/model in case they change.
+	// EventTick (1s) keeps the working timer moving while the provider is silent.
 	OnTick(func() {
 		info, _ := GetStatusInfo()
-		if info.Provider == lastProvider && info.Model == lastModel {
+		if !syncDynamicStatus(info) {
 			return
 		}
-		lastProvider = info.Provider
-		lastModel = info.Model
+		patchAll()
+	})
+
+	OnModelChanged(func(provider, model string) {
+		info, _ := GetStatusInfo()
+		changed := syncDynamicStatus(info)
+		if provider == lastProvider && model == lastModel && !changed {
+			return
+		}
+		lastProvider = provider
+		lastModel = model
 		patchAll()
 	})
 }
@@ -180,6 +181,30 @@ func renderWorking(info StatusInfo) string {
 		return fmt.Sprintf("working%-3s %s", dots, formatElapsed(elapsed))
 	}
 	return fmt.Sprintf("working%s", dots)
+}
+
+func syncDynamicStatus(info StatusInfo) bool {
+	working := renderWorking(info)
+	tokens := info.Tokens
+	ctx := renderContext(info)
+	if working == lastWorking && tokens == lastTokens && ctx == lastCtx {
+		return false
+	}
+	lastWorking = working
+	lastTokens = tokens
+	lastCtx = ctx
+	return true
+}
+
+func renderContext(info StatusInfo) string {
+	if info.Statuses == nil {
+		return ""
+	}
+	remaining := strings.TrimSpace(info.Statuses["ctx rem"])
+	if remaining == "" {
+		return ""
+	}
+	return "  ctx:" + remaining
 }
 
 func renderTokens(n int) string {

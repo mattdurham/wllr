@@ -4,6 +4,8 @@ package harness
 
 // ToolLogEntry records one tool call during the current agent turn.
 type ToolLogEntry struct {
+	ID      string
+	AgentID string
 	Name    string
 	Preview string
 	Done    bool

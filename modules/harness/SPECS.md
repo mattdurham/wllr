@@ -36,6 +36,7 @@ func New(pool *agent.AgentPool, mainAgentID string, h *extension.Host) Model
 - `mainAgentID` is the pool-registered ID of the primary agent.
 - `h` may be nil; extension bridge installation is skipped when nil.
 - Reads `pool.ProviderName()` at construction to initialise the status bar.
+- Reads the spawned main agent's `ModelName()` at construction, when present, to initialise active model/status state before extension `session_start`.
 - Registers built-in commands (`/help`, `/clear`, `/reload`, `/model`) and a `/prompt` command (when pool is non-nil) that shows the accumulated base system prompt in a modal.
 - Immediately installs an `earlyUIBridge` on the extension host so that extensions can register commands during `_init` (before `SetProgram`).
 - Immediately installs an `earlyAgentBridge` stub on the extension host so that extensions calling `agent_spawn` during `_init` receive a clear error instead of a nil-pointer dereference.
@@ -73,9 +74,9 @@ Must be called after creating the bubbletea program and before calling `prog.Run
 - `SetOnToken`: a batched token callback (see §5).
 - `SetOnDone`: calls flush on the batcher, then `p.Send(StreamDoneMsg{Err})`.
 - `SetToolsFn`: returns `tools.BuildFantasyTools(extHost, "main", logFn)`.
-- `SetOnToolCall`: `p.Send(ToolCallStartMsg{ID, ToolName, Input})`.
+- `SetOnToolCall`: `p.Send(ToolCallStartMsg{AgentID: mainID, ID, ToolName, Input})`.
 
-Sub-agents spawned via `harnessAgentBridge.Spawn` (delegated to `agent.Spawner`) receive similar wiring with the spawned agent's ID.
+Sub-agents spawned via `harnessAgentBridge.Spawn` (delegated to `agent.Spawner`) receive similar wiring with the spawned agent's ID. Their token output is not routed to the main chat, but their tool-call starts are routed to the tool activity pane/log with `AgentID` populated.
 
 ---
 
@@ -106,14 +107,14 @@ type tokenBatcher struct {
     p        *tea.Program
     dispatch func(string) // optional: forward each batch to WASM (EventToken)
 }
-const tokenBatchInterval = 30 * time.Millisecond
+const tokenBatchInterval = 75 * time.Millisecond
 ```
 
-`makeBatchedOnToken(p, dispatch)` returns `(onToken func(string), flush func())`. Tokens are coalesced and sent as a single `TokenMsg` at most every 30ms. `flush()` drains any buffered tail tokens immediately and must be called from `onDone`. When `dispatch` is non-nil, each flushed batch is also passed to it; `wireMainAgentCallbacks` supplies a closure that marshals a `sdk.TokenPayload` and calls `Host.DispatchEvent(EventToken)` so streamed text reaches WASM extensions. The dispatch runs on the agent goroutine, not the bubbletea loop.
+`makeBatchedOnToken(p, dispatch)` returns `(onToken func(string), flush func())`. Tokens are coalesced and sent as a single `TokenMsg` at most every 75ms. `flush()` drains any buffered tail tokens immediately and must be called from `onDone`. When `dispatch` is non-nil, each flushed batch is also passed to it; `wireMainAgentCallbacks` supplies a closure that marshals a `sdk.TokenPayload` and calls `Host.DispatchEvent(EventToken)` so streamed text reaches WASM extensions. The dispatch runs on the agent goroutine, not the bubbletea loop.
 
 **Invariant:** The batcher uses time-based coalescing with no goroutines or channels — it is safe to call `flush()` multiple times across turns without panics. Locking is purely `sync.Mutex` on the buffer.
 
-**Invariant:** Tokens emitted faster than 30ms are batched together; the TUI renders at most ~33 frames per second regardless of LLM streaming speed, preventing O(n²) viewport reflow work.
+**Invariant:** Tokens emitted faster than 75ms are batched together; the TUI renders at most ~13 token-driven frames per second regardless of LLM streaming speed, preventing O(n²) viewport reflow work.
 
 ---
 
@@ -150,14 +151,15 @@ there is no built-in message renderer.
 
 ### Key Methods
 
-- `SetExternalContent(content)`: replaces the viewport content and scrolls to bottom.
+- `SetExternalContent(content)`: replaces the viewport content; scrolls to bottom only if the viewport was already at bottom, preserving manual scrollback during streaming.
 - `SetSize(width, height)`: resizes the viewport and re-applies `externalContent`.
 - `ScrollUp(n)` / `ScrollDown(n)`: scroll the viewport.
 - `AddToolCall(id, name, input)` / `UpdateToolCall(id, isError, output)` / `ClearToolLog()`: maintain the per-turn tool log.
+- `ToolActivityLines(width, height)`: renders the most recent tool log entries as compact single-line status rows, truncated to `width` runes and capped at `height` rows.
 - `ToolLogModal()`: renders the tool log for the `/tools` modal.
 - `View()`: returns the viewport view.
 
-**Invariant:** The viewport (scroll, size, `GotoBottom`) is harness-owned; transcript content is always external. The tool log is independent of the transcript and never appears in it (tool calls remain hidden from the transcript, as before).
+**Invariant:** The viewport (scroll, size, tail-follow behavior) is harness-owned; transcript content is always external. The tool log is independent of the transcript and never appears in it. The harness always renders a separate tool activity pane below the transcript in the normal view.
 
 ---
 
@@ -223,6 +225,8 @@ Called after every key event. Computes `slashWordAt(input.Value())`. If a slash 
 
 `InputArea` wraps a `bubbles/textarea` with command detection.
 
+InputArea only receives key events that the model-level overlay/global handlers do not consume.
+
 - **Enter**: submits trimmed content. Empty → no-op. `/word...` → `CommandMsg`. Plain text → `SubmitMsg`.
 - **Shift+Enter**: inserts a newline (overrides default Enter binding in textarea).
 - **Esc (first press)**: clears the textarea, sets `lastWasEsc = true`. No message emitted.
@@ -245,10 +249,12 @@ No key is forwarded to the input area while the modal is open.
 
 ---
 
-## 16. Key Handling: Ctrl+C
+## 16. Key Handling: Esc, Ctrl+C
 
-- If `m.streaming == true`: calls `m.agentPool.CancelAll()` (cancels main and all sub-agents), sets status to "cancelling…". Does NOT quit.
-- If `m.streaming == false`: returns `tea.Quit`.
+- If `m.streaming == true` or any agent in the pool reports `IsRunning()`, `Esc` calls `m.agentPool.CancelAll()` (cancels main and all sub-agents), sets status to "cancelling…", and does not quit.
+- Active-turn cancellation has priority over modal, picker, autocomplete, and input Esc handling.
+- If `m.streaming == false`, `Esc` is not a global hotkey. It may still be consumed by active pickers, modals, autocomplete, or the input component.
+- `Ctrl+C` always returns `tea.Quit`, regardless of streaming state.
 - `Ctrl+Q` always quits regardless of streaming state.
 
 ---
@@ -314,6 +320,8 @@ Update loop and WASM bridge goroutines. It holds:
 - `provider string` — active provider name.
 - `statuses map[string]string` — keyed status values that the `statusline` extension
   and `get_status_info` read. Updated via `setStatus(key, value)`; empty value deletes.
+- `tokens int` — latest total token count copied from `AgentPool.TokenCount()` on
+  each `TokenMsg` and `StreamDoneMsg`.
 - `width int` — terminal width.
 - `hasError bool` — true when the last turn completed with an error.
 
@@ -348,8 +356,8 @@ and at least one turn has completed. Updated once per `StreamDoneMsg`.
 | `StatusUpdateMsg{Key,Value}`| extension → TUI    | Update keyed status in the status bar                           |
 | `SubmitMsg{Content,Display}`| input/ext → TUI    | Submit content to the agent; Display shown in chat if non-empty |
 | `CommandMsg{Name,Args}`     | input → TUI        | User typed a slash command                                      |
-| `ToolCallStartMsg{ID,...}`  | agent → TUI        | Agent dispatched a tool call                                    |
-| `ToolCallDoneMsg{ID,...}`   | OnAfterToolCall → TUI | Tool call completed                                          |
+| `ToolCallStartMsg{AgentID,ID,...}` | agent → TUI  | Agent dispatched a tool call                                    |
+| `ToolCallDoneMsg{AgentID,ID,...}`  | OnAfterToolCall → TUI | Tool call completed                                     |
 | `ShowModalMsg{Text}`        | any → TUI          | Open the modal overlay                                          |
 | `abortStreamMsg`            | OnAbort/Esc → TUI  | Cancel the active agent turn                                    |
 | `dispatchOnCommandMsg`      | command → TUI      | Dispatch EventOnCommand for an extension-registered command     |
@@ -409,13 +417,15 @@ Returns the current set of registered tools from `extHost.RegisteredTools()` as 
 
 ```
 ┌──────────────────────────────────────┐
-│  chat viewport (scrollable)          │  area: "chat", height = m.height - statusLineHeight - inputBoxHeight - dropdownHeight
+│  chat viewport (scrollable)          │  area: "chat", height = m.height - statusLineHeight - inputBoxHeight - dropdownHeight - bottomGutterHeight
+│  tool activity pane                  │  3 content lines + border
 │  [optional: suggestion dropdown]     │  dropdownHeight = min(8, len(suggestions)) + 2 borders (0 when hidden)
 │  [or: modal overlay (centered)]      │  height = chatHeight * 8/10, vertically centered
 ├──────────────────────────────────────┤
 │  statusline (1–N lines)              │  area: "statusline", placement: status; height = statusLineHeight()
 ├──────────────────────────────────────┤
 │  input box (dynamic, usually 5 lines)│  rendered input box height (top border + textarea + bottom border)
+│  bottom gutter (1 line)              │  keeps the input bottom border off the terminal edge
 └──────────────────────────────────────┘
 ```
 
@@ -423,6 +433,9 @@ Returns the current set of registered tools from `extHost.RegisteredTools()` as 
 - The output is padded to exactly `m.height` lines to prevent old content bleeding through on resize.
 - `statusLineHeight()` sums the constrained heights of all `UIAreaStatus` areas; it is called on every `View()` and `chatHeight()` invocation.
 - `inputBoxHeight()` counts the rendered input box lines instead of relying on a fixed constant, so the statusline cannot push the input bottom border off-screen if textarea rendering changes.
+- `toolActivityHeight()` returns 5 rows in the normal layout; those 5 rows are subtracted from `chatHeight()`.
+- `bottomGutterHeight()` reserves one trailing row when the terminal has more than one row, so the input bottom border is not rendered on the final terminal line.
+- `chatHeight()` bottoms out at 0 in very small terminals; when collapsed, `View()` omits the chat viewport row so the fixed lower UI can still fit.
 - `UIAreaStatus` areas are NOT included in `renderScenes()` — they are rendered by `renderStatusLine()` between the console pane and the input box.
 
 ## 23. ConsoleView
@@ -466,7 +479,7 @@ Returns the current set of registered tools from `extHost.RegisteredTools()` as 
 | `ModelListFn` | `func() []ModelChoice` | Returns the active provider's selectable models for the picker. Nil ⇒ selection unavailable. |
 | `SelectModelFn` | `func(modelID string) error` | Switches the active model: rebuilds the main agent's LM (`Agent.SetModel`), updates the context window, and persists the choice. Nil ⇒ display-only. |
 
-Flow: `/model` with no arg emits `showModelPickerMsg` → `openModelPicker()` builds picker items from `ModelListFn` (marking the current model) and opens the picker with the reserved `modelPickerCallback` (`"__wllr:model"`). On selection, `updateKeyPressPicker` recognises the core callback and emits `setModelMsg{Model: id}` (rather than dispatching `EventOnCommand` to a WASM extension); the `setModelMsg` handler calls `applyModelSelection` → `SelectModelFn` + status update. `/model <name>` skips the picker and emits `setModelMsg` directly.
+Flow: `/model` with no arg emits `showModelPickerMsg` → `openModelPicker()` builds picker items from `ModelListFn` (marking the current model) and opens the picker with the reserved `modelPickerCallback` (`"__wllr:model"`). On selection, `updateKeyPressPicker` recognises the core callback and emits `setModelMsg{Model: id}` (rather than dispatching `EventOnCommand` to a WASM extension); the `setModelMsg` handler calls `applyModelSelection` → `SelectModelFn` + status update + `EventModelChanged`. `/model <name>` skips the picker and emits `setModelMsg` directly.
 
 **Invariant:** picker callbacks prefixed `"__wllr:"` are core-owned and route to harness handlers, never to `EventOnCommand`. Extension command names cannot collide (the prefix is reserved). Reserved callbacks: `"__wllr:model"`, `"__wllr:thinking"`.
 
@@ -499,7 +512,7 @@ Flow mirrors the model picker: `/thinking` with no arg emits `showThinkingPicker
 
 Flow: when `pendingAuthProvider != ""`, `Init()` emits `showAuthPromptMsg{Provider}` → `openAuthPrompt()` opens a two-item picker ("Set up OAuth / login" = `"oauth"`, "Use an API key" = `"api_key"`) with the reserved `authPickerCallback` (`"__wllr:auth"`). On selection, `updateKeyPressPicker` emits `recordAuthMsg{Provider, Method}`; the handler calls `applyAuthChoice` → `RecordAuthFn` + a notification, and clears `authPromptProvider`.
 
-Blank first-run setup flow: when `pendingSetupWizard` is true, `Init()` emits `showLoginProviderPickerMsg{}`. `openLoginProviderPicker()` displays provider choices from `ProviderListFn` with the reserved `loginProviderPickerCallback` (`"__wllr:login_provider"`). On selection, `loginProviderSelectedMsg{Provider}` calls `SelectProviderFn`, updates active provider/model state from its return values, and either starts OAuth (when `requiresLogin` is true) or finishes without auth (for local providers).
+Blank first-run setup flow: when `pendingSetupWizard` is true, `Init()` emits `showLoginProviderPickerMsg{}`. `openLoginProviderPicker()` displays provider choices from `ProviderListFn` with the reserved `loginProviderPickerCallback` (`"__wllr:login_provider"`). On selection, `loginProviderSelectedMsg{Provider}` calls `SelectProviderFn`, updates active provider/model state from its return values, dispatches `EventModelChanged`, and either starts OAuth (when `requiresLogin` is true) or finishes without auth (for local providers).
 
 **Invariant:** the prompt is shown at most once per provider — `cmd/main.go` gates `SetPendingAuthProvider` on the absence of a recorded auth choice (credential presence in the auth file is the record). Cancelling the picker records nothing, so the prompt reappears next launch.
 
@@ -541,6 +554,8 @@ Flow: selecting OAuth (or `/login` → `loginMsg` → `openAuthPrompt(activeProv
 | `UpdateArea(sdk.UIUpdateAreaParams) error` | Updates constraints/weight of an existing area; errors if ID not found. Omitted fields leave current values unchanged. |
 | `ApplyPatch(sdk.UIPatchParams) error` | Applies an op batch atomically to an area; rejects the whole batch (live tree unchanged) if the area or any referenced node is missing. |
 | `Render(areaID string, width int) string` | Renders an area's tree to a string via lipgloss; `""` for unknown/empty areas. |
+| `RenderNode(areaID, nodeID string, width int, textOverride *string) (string, bool)` | Renders one node with optional text override for append fast paths; does not mutate the live scene. |
+| `RenderAppendTextNode(areaID, nodeID string, width int, appendedText string) (previous, current string, ok bool)` | Renders previous/current states of one appended text node with one scene lookup; does not mutate the live scene. |
 | `AreasByPlacement(p) []string` | Area IDs with a placement, in creation order. |
 | `ConstrainWidth(id string, termWidth int) int` | Returns the render width clamped to the area's MinWidth/MaxWidth constraints resolved against `termWidth`. Passthrough for unknown areas or absent constraints. |
 | `ConstrainHeight(id string, lines int, termHeight int) int` | Returns `lines` clamped to the area's MinHeight/MaxHeight constraints resolved against `termHeight`. Passthrough for unknown areas or absent constraints. |
@@ -553,7 +568,7 @@ Flow: selecting OAuth (or `/login` → `loginMsg` → `openAuthPrompt(activeProv
 - `UIOpAppendText` targets only `UINodeText` nodes; appending to a non-text node errors.
 - An unknown `UINodeType` renders as an empty box (forward-compatibility).
 - Colour props resolve through `themeColor` (named tokens → hex); unknown non-hex tokens yield no colour, so the host keeps theming control.
-- The `harnessUIBridge` shares the `Model.scene` pointer, mutates it synchronously off the bubbletea loop (the renderer is mutex-guarded), and sends `sceneDirtyMsg{}` to force a re-render. `sceneDirtyMsg` is a no-op in `Update` other than triggering `View`.
+- The `harnessUIBridge` shares the `Model.scene` pointer, mutates it synchronously off the bubbletea loop (the renderer is mutex-guarded), and sends `sceneDirtyMsg{Area, AppendOnly, AppendID, AppendText}` to force a re-render. `sceneDirtyMsg` refreshes the chat viewport immediately only when `Area == "chat"` and the change is structural, or when the area is unknown/empty. Append-only chat patches schedule a delayed coalesced refresh; other areas only trigger `View`.
 - `ConstrainWidth` and `ConstrainHeight` never return negative values.
 - `UpdateArea` with an empty string for a constraint field leaves that constraint unchanged (does not clear it). To clear a constraint, use `"0%"` or remove the area and re-create it.
 - `UIAreaStatus` areas are NOT rendered by `renderScenes()`; they are composited by `renderStatusLine()` between the console pane and the input box (see §28).
@@ -591,6 +606,11 @@ is served entirely from `liveState` via `harnessUIBridge.GetStatusInfo` (provide
 model, tokens, statuses, working, elapsed, active-agent count). The `StatusBar` struct
 has been removed; no parallel status state exists.
 
+`New()` seeds `activeProvider`/`live.provider` from `AgentPool.ProviderName()` and seeds
+`activeModel`/`live.model` from the spawned main agent's `ModelName()` when available.
+`Init()` dispatches `EventModelChanged` with that initial state. Runtime provider/model
+selection paths update live state first, then dispatch `EventModelChanged`.
+
 **Invariants:**
 
 - The `statusline` area is always present from `New()` onwards (empty tree until the
@@ -603,15 +623,16 @@ has been removed; no parallel status state exists.
 
 The main chat transcript content is produced by a WASM extension (the bundled `agents` extension) that owns the `wasmChatAreaID` (`"chat"`) scene area. The harness owns the scrollable viewport; the *content* is always external. There is no built-in message renderer.
 
-- `Model.refreshWASMChat()` is called on `sceneDirtyMsg` and on `WindowSizeMsg`; once the `chat` area exists it feeds `scene.Render("chat", width)` into the chat viewport via `ChatView.SetExternalContent`.
+- `Model.refreshWASMChat()` is called immediately on structural `sceneDirtyMsg{Area:"chat"}` and on `WindowSizeMsg`; append-only chat dirty messages coalesce into a delayed refresh. When the append batch targets one trailing text node, `refreshWASMChatAppend()` renders only that node with previous/current text and splices the cached viewport suffix; mixed targets or non-suffix layouts fall back to full `scene.Render("chat", width)`. Once the `chat` area exists, refresh feeds content into the chat viewport via `ChatView.SetExternalContent`. Non-chat scene updates such as the statusline must not refresh the chat viewport.
 - `Model.resetChatArea()` (used by `/clear` and history-restore) patches the `chat` area root back to an empty `vstack` (`"chat-root"`, matching the structure the extension expects) and clears the viewport.
 - `Model.streamContent` accumulates streamed assistant text from `TokenMsg` so the completed response can be captured for `OnMessageEnd`/logging; it is reset on `StreamDoneMsg` and `/clear`.
 - `Model.pushNotification(text)` dispatches `sdk.EventNotify` (in a goroutine) so the transcript-owning extension renders notifications; it no longer writes to `ChatView`.
 - `renderScenes` always skips the `chat` area (it is rendered inside the viewport, not stacked below it).
+- `renderToolActivity()` renders a persistent pane below the chat viewport with the latest three tool call rows. When no tools have run this turn, the pane renders as three empty content rows. Rows for non-main agents include the agent ID so sub-agent activity is distinguishable from main-agent tool calls.
 
 **Invariants:**
 
-- The viewport (scroll, size, `GotoBottom`) is harness-owned; input/scroll never route to WASM.
+- The viewport (scroll, size, tail-follow behavior) is harness-owned; input/scroll never route to WASM.
 - If no extension creates the `chat` area (e.g. the `agents` extension is not loaded), `refreshWASMChat` no-ops and the viewport is empty — there is no fallback renderer.
 - `/clear` and history-restore reset the transcript area to empty; restored history remains in agent context but is not re-rendered into the transcript.
-- The per-turn tool log is cleared at turn start (`submitToAgent`) and surfaced via `/tools`; it is independent of the transcript.
+- The per-turn tool log is cleared at turn start (`submitToAgent`) and surfaced via `/tools`; it is independent of the transcript and also feeds the persistent tool activity pane.

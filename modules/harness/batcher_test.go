@@ -19,7 +19,7 @@ func TestTokenBatcher_FlushSendsBuffered(t *testing.T) {
 	}
 
 	b := &tokenBatcher{}
-	// Simulate onToken without the 30ms gating (set lastSend to zero so
+	// Simulate onToken without the interval gating (set lastSend to zero so
 	// first token triggers send immediately — but we test flush here).
 	b.mu.Lock()
 	b.buf.WriteString("hello ")

@@ -91,7 +91,7 @@ func (f *fakeUIBridge) SetSystemPrompt(_ string)                              {}
 func (f *fakeUIBridge) AppendSystemPrompt(_ string)                           {}
 func (f *fakeUIBridge) ResetHistory(_ []sdk.Message) error                    { return nil }
 func (f *fakeUIBridge) ToolResult(_, _ string, _ bool)                        {}
-func (f *fakeUIBridge) AfterToolCall(_, _, _ string, _ bool)                  {}
+func (f *fakeUIBridge) AfterToolCall(_, _, _, _ string, _ bool)               {}
 func (f *fakeUIBridge) ConsoleOutput(_ string)                                {}
 func (f *fakeUIBridge) ConsoleClear()                                         {}
 func (f *fakeUIBridge) CreateArea(_ sdk.UIArea) error                         { return nil }

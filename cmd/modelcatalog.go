@@ -66,11 +66,6 @@ var modelCatalog = map[string][]modelInfo{
 		{ID: "gemini-2.5-pro", Name: "Gemini 2.5 Pro", ContextWindow: 1048576},
 		{ID: "gemini-2.5-flash", Name: "Gemini 2.5 Flash", ContextWindow: 1048576},
 	},
-	"local": {
-		{ID: "llama3.2", Name: "Llama 3.2", ContextWindow: 131072},
-		{ID: "qwen2.5-coder", Name: "Qwen2.5 Coder", ContextWindow: 131072},
-		{ID: "codellama", Name: "Code Llama", ContextWindow: 16384},
-	},
 }
 
 var chatGPTOAuthModels = []modelInfo{
@@ -83,7 +78,6 @@ var defaultModelsByProvider = map[string]string{
 	"anthropic": "claude-sonnet-4-6",
 	"openai":    "gpt-5.5",
 	"gemini":    "gemini-3-pro-preview",
-	"local":     "llama3.2",
 }
 
 // modelsForProvider returns the catalog for a provider, or nil if unknown.
@@ -133,4 +127,11 @@ func contextWindowFromCatalog(provider, id string) int64 {
 		}
 	}
 	return 0
+}
+
+func contextWindowForSelection(provider, id string, cfg *Config) int64 {
+	if provider == providerLocal && cfg != nil && cfg.LocalContextWindow > 0 {
+		return cfg.LocalContextWindow
+	}
+	return contextWindowFromCatalog(provider, id)
 }

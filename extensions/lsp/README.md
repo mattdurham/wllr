@@ -1,83 +1,3 @@
----
-name: lsp
-description: LSP (Language Server Protocol) client for code intelligence
-version: 1.0.0
-schema:
-  type: object
-  properties:
-    action:
-      type: string
-      enum: [detect, start, call, stop, list]
-      description: Action to perform
-    name:
-      type: string
-      description: Server name/identifier
-    server:
-      type: string
-      description: Server name (alias for name)
-    cmd:
-      type: string
-      description: Command to run (e.g., "gopls", "pylsp")
-    args:
-      type: array
-      items:
-        type: string
-      description: Additional command-line arguments
-    method:
-      type: string
-      description: LSP method to call
-    params:
-      type: object
-      description: Parameters for the LSP method
-    file:
-      type: string
-      description: File path for auto-detection of language and LSP server
-  anyOf:
-    - required: [action]
-    - required: [file]
-examples:
-  - description: Detect installed LSP servers
-    input:
-      action: detect
-  - description: Auto-start LSP server based on file extension
-    input:
-      file: main.go
-  - description: Start a specific LSP server
-    input:
-      action: start
-      name: go-server
-      cmd: gopls
-  - description: Get code completion
-    input:
-      action: call
-      server: go-server
-      method: textDocument/completion
-      params:
-        textDocument:
-          uri: file:///path/to/file.go
-        position:
-          line: 10
-          character: 5
-  - description: Get hover information
-    input:
-      action: call
-      server: python
-      method: textDocument/hover
-      params:
-        textDocument:
-          uri: file:///path/to/file.py
-        position:
-          line: 5
-          character: 10
-  - description: List running servers
-    input:
-      action: list
-  - description: Stop a server
-    input:
-      action: stop
-      name: go-server
----
-
 # LSP Extension
 
 Provides Language Server Protocol (LSP) integration for advanced code intelligence.
@@ -110,6 +30,8 @@ The extension includes built-in mappings for common languages:
 | Bash       | bash-language-server           | .sh                |
 | JSON       | vscode-json-languageserver     | .json              |
 | YAML       | yaml-language-server           | .yaml, .yml        |
+| HTML       | html-languageserver            | .html              |
+| CSS        | css-languageserver             | .css               |
 
 ## Usage
 
@@ -120,21 +42,6 @@ Find out which LSP servers are available on your system:
 ```json
 {
   "action": "detect"
-}
-```
-
-Response:
-```json
-{
-  "success": true,
-  "message": "Found 3 LSP servers",
-  "data": {
-    "installed": {
-      "go": "gopls",
-      "python": "pylsp",
-      "rust": "rust-analyzer"
-    }
-  }
 }
 ```
 
@@ -166,7 +73,15 @@ Start a specific LSP server with custom configuration:
 }
 ```
 
-### 4. Call LSP methods
+### 4. List running servers
+
+```json
+{
+  "action": "list"
+}
+```
+
+### 5. Send LSP requests
 
 Once a server is running, call any LSP method:
 
@@ -238,15 +153,41 @@ Once a server is running, call any LSP method:
 }
 ```
 
-### 5. List running servers
+### 6. Open/Close documents
 
+**Open a document:**
 ```json
 {
-  "action": "list"
+  "action": "open",
+  "server": "go",
+  "uri": "file:///home/user/project/main.go",
+  "languageId": "go",
+  "version": 1,
+  "text": "package main\n\nfunc main() {\n    fmt.Println(\"hello\")\n}\n"
 }
 ```
 
-### 6. Stop a server
+**Change a document:**
+```json
+{
+  "action": "change",
+  "server": "go",
+  "uri": "file:///home/user/project/main.go",
+  "version": 2,
+  "text": "package main\n\nimport \"fmt\"\n\nfunc main() {\n    fmt.Println(\"hello\")\n}\n"
+}
+```
+
+**Close a document:**
+```json
+{
+  "action": "close",
+  "server": "go",
+  "uri": "file:///home/user/project/main.go"
+}
+```
+
+### 7. Stop a server
 
 ```json
 {
@@ -304,7 +245,7 @@ See [langserver.org](https://langserver.org/) for a comprehensive list.
 ## Implementation Details
 
 - Written in Go using only the standard library
-- Implements JSON-RPC 2.0 protocol
+- Implements JSON-RPC 2.0 protocol over stdio
 - Proper Content-Length header framing
 - Async request/response correlation
 - Graceful server initialization and shutdown
@@ -316,13 +257,10 @@ See [langserver.org](https://langserver.org/) for a comprehensive list.
 Run the test suite:
 ```bash
 cd extensions/lsp
-go test -v
+go build
+./test_integration.sh
 ```
 
-Tests cover:
-- Message framing
-- Language detection
-- LSP command mapping
-- Auto-detection logic
-- Request ID generation
-- Command availability checking
+## License
+
+MIT

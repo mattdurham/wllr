@@ -4,6 +4,7 @@ package harness
 
 // ToolCallStartMsg is sent when the agent dispatches a tool call.
 type ToolCallStartMsg struct {
+	AgentID  string
 	ID       string
 	ToolName string
 	Input    string

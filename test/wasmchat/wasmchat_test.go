@@ -20,26 +20,26 @@ import (
 // real harness.SceneRenderer and treating everything else as a no-op.
 type sceneUIBridge struct{ scene *harness.SceneRenderer }
 
-func (b *sceneUIBridge) Notify(string)                                   {}
-func (b *sceneUIBridge) ShowModal(string)                                {}
-func (b *sceneUIBridge) ShowPicker(string, []sdk.ShowPickerItem, string) {}
-func (b *sceneUIBridge) Abort()                                          {}
-func (b *sceneUIBridge) SetStatus(string, string)                        {}
-func (b *sceneUIBridge) GetStatusInfo() sdk.StatusInfo                   { return sdk.StatusInfo{} }
-func (b *sceneUIBridge) SendMessage(sdk.Message)                         {}
-func (b *sceneUIBridge) RegisterCommand(string, string, bool) error      { return nil }
-func (b *sceneUIBridge) RegisterTool(sdk.Tool) error                     { return nil }
-func (b *sceneUIBridge) SetSystemPrompt(string)                          {}
-func (b *sceneUIBridge) AppendSystemPrompt(string)                       {}
-func (b *sceneUIBridge) ResetHistory([]sdk.Message) error                { return nil }
-func (b *sceneUIBridge) ToolResult(string, string, bool)                 {}
-func (b *sceneUIBridge) AfterToolCall(string, string, string, bool)      {}
-func (b *sceneUIBridge) ConsoleOutput(string)                            {}
-func (b *sceneUIBridge) ConsoleClear()                                   {}
-func (b *sceneUIBridge) CreateArea(a sdk.UIArea) error                   { return b.scene.CreateArea(a) }
-func (b *sceneUIBridge) PatchUI(p sdk.UIPatchParams) error               { return b.scene.ApplyPatch(p) }
-func (b *sceneUIBridge) RemoveArea(id string)                            { b.scene.RemoveArea(id) }
-func (b *sceneUIBridge) UpdateArea(p sdk.UIUpdateAreaParams) error       { return b.scene.UpdateArea(p) }
+func (b *sceneUIBridge) Notify(string)                                      {}
+func (b *sceneUIBridge) ShowModal(string)                                   {}
+func (b *sceneUIBridge) ShowPicker(string, []sdk.ShowPickerItem, string)    {}
+func (b *sceneUIBridge) Abort()                                             {}
+func (b *sceneUIBridge) SetStatus(string, string)                           {}
+func (b *sceneUIBridge) GetStatusInfo() sdk.StatusInfo                      { return sdk.StatusInfo{} }
+func (b *sceneUIBridge) SendMessage(sdk.Message)                            {}
+func (b *sceneUIBridge) RegisterCommand(string, string, bool) error         { return nil }
+func (b *sceneUIBridge) RegisterTool(sdk.Tool) error                        { return nil }
+func (b *sceneUIBridge) SetSystemPrompt(string)                             {}
+func (b *sceneUIBridge) AppendSystemPrompt(string)                          {}
+func (b *sceneUIBridge) ResetHistory([]sdk.Message) error                   { return nil }
+func (b *sceneUIBridge) ToolResult(string, string, bool)                    {}
+func (b *sceneUIBridge) AfterToolCall(string, string, string, string, bool) {}
+func (b *sceneUIBridge) ConsoleOutput(string)                               {}
+func (b *sceneUIBridge) ConsoleClear()                                      {}
+func (b *sceneUIBridge) CreateArea(a sdk.UIArea) error                      { return b.scene.CreateArea(a) }
+func (b *sceneUIBridge) PatchUI(p sdk.UIPatchParams) error                  { return b.scene.ApplyPatch(p) }
+func (b *sceneUIBridge) RemoveArea(id string)                               { b.scene.RemoveArea(id) }
+func (b *sceneUIBridge) UpdateArea(p sdk.UIUpdateAreaParams) error          { return b.scene.UpdateArea(p) }
 
 // envCapabilities implements the subset of extension.CapabilityProvider needed
 // to answer GetEnv("WLLR_WASM_CHAT"); other methods are unused no-ops.

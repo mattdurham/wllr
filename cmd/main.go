@@ -38,6 +38,7 @@ func main() {
 	}
 
 	execPrompt := flag.String("exec", "", "run a single prompt non-interactively and print the response to stdout")
+	pprofAddr := flag.String("pprof", defaultPprofAddr(), "listen address for net/http/pprof debug server (use empty string to disable)")
 	flag.Parse()
 
 	cfg, err := LoadConfig()
@@ -47,6 +48,7 @@ func main() {
 	}
 
 	ctx := context.Background()
+	resolveLocalProviderConfig(ctx, cfg)
 
 	missingAuthEnv, missingAuth := missingProviderAuth(cfg)
 	if missingAuth && *execPrompt != "" {
@@ -88,6 +90,8 @@ func main() {
 	// extension, fed by the dispatchLogHandler via EventLog. See cmd/loghandler.go.
 	cleanupLog := setupLogging(h, *execPrompt == "")
 	defer cleanupLog()
+	cleanupPprof := startPprofServer(*pprofAddr)
+	defer cleanupPprof()
 	// Route the host's own diagnostic logs through the configured default handler
 	// too (the dispatch handler's reentrancy guard makes this safe).
 	h.SetLogger(slog.Default())
@@ -149,11 +153,17 @@ func main() {
 		return []harness.ProviderChoice{
 			{ID: "openai", Name: "ChatGPT", Sublabel: "sign in with a ChatGPT account"},
 			{ID: providerAnthropic, Name: "Anthropic", Sublabel: "sign in with a Claude account"},
-			{ID: providerLocal, Name: "Local model", Sublabel: cfg.LocalBaseURL},
+			{ID: providerLocal, Name: "Local model", Sublabel: localProviderSublabel(cfg)},
 		}
 	}
 	m.SelectProviderFn = func(provider string) (string, bool, error) {
 		modelID := defaultModelForProvider(provider)
+		if provider == providerLocal {
+			models := localModels(ctx, cfg)
+			if len(models) > 0 {
+				modelID = models[0].ID
+			}
+		}
 		if modelID == "" {
 			return "", false, fmt.Errorf("unknown provider %q", provider)
 		}
@@ -162,7 +172,7 @@ func main() {
 		cfg.Model = modelID
 		pool.SetProviderName(provider)
 		pool.SetDefaultModelName(modelID)
-		if cw := contextWindowFromCatalog(provider, modelID); cw > 0 {
+		if cw := contextWindowForSelection(provider, modelID, cfg); cw > 0 {
 			pool.SetContextWindow(cw)
 		}
 		if saveErr := saveProvider(provider); saveErr != nil {
@@ -193,6 +203,8 @@ func main() {
 		catalog := modelsForProvider(currentProvider)
 		if currentProvider == "openai" {
 			catalog = modelsForOpenAIAuth()
+		} else if currentProvider == providerLocal {
+			catalog = localModels(ctx, cfg)
 		}
 		out := make([]harness.ModelChoice, 0, len(catalog))
 		for _, mi := range catalog {
@@ -209,7 +221,7 @@ func main() {
 			main.SetModel(lm, modelID)
 		}
 		pool.SetDefaultModelName(modelID)
-		if cw := contextWindowFromCatalog(currentProvider, modelID); cw > 0 {
+		if cw := contextWindowForSelection(currentProvider, modelID, cfg); cw > 0 {
 			pool.SetContextWindow(cw)
 		}
 		if saveErr := saveModel(modelID); saveErr != nil {

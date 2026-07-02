@@ -48,20 +48,15 @@ func (m *Model) applyLoginProviderSelection(provider string) tea.Cmd {
 			return nil
 		}
 	}
-	m.activeProvider = provider
-	m.live.setProvider(provider)
-	if model != "" {
-		m.activeModel = model
-		m.live.setModel(model)
-	}
+	modelChangedCmd := m.setActiveProviderModel(provider, model)
 	if !requiresLogin {
 		m.pushNotification("Provider set to: " + provider)
-		return nil
+		return modelChangedCmd
 	}
 	if m.RecordAuthFn != nil {
 		if err := m.RecordAuthFn(provider, authMethodOAuth); err != nil {
 			m.pushNotification(fmt.Sprintf("⚠ could not record auth choice: %v", err))
 		}
 	}
-	return m.beginOAuthLogin(provider)
+	return tea.Batch(modelChangedCmd, m.beginOAuthLogin(provider))
 }

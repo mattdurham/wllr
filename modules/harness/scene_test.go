@@ -60,6 +60,48 @@ func TestSceneAppendTextStreaming(t *testing.T) {
 	}
 }
 
+func TestSceneRenderNodeWithTextOverride(t *testing.T) {
+	s := NewSceneRenderer()
+	_ = s.CreateArea(sdk.UIArea{ID: "a"})
+	_ = s.ApplyPatch(sdk.UIPatchParams{Area: "a", Ops: []sdk.UIPatchOp{
+		{Op: sdk.UIOpSetRoot, Node: &sdk.UINode{ID: "txt", Type: sdk.UINodeText, Text: "current", Props: &sdk.UIProps{Border: "rounded"}}},
+	}})
+
+	override := "previous"
+	out, ok := s.RenderNode("a", "txt", 40, &override)
+	if !ok {
+		t.Fatal("RenderNode should find text node")
+	}
+	if !strings.Contains(out, "previous") || strings.Contains(out, "current") {
+		t.Fatalf("RenderNode should render override text with node style, got %q", out)
+	}
+	if live := s.Render("a", 40); !strings.Contains(live, "current") || strings.Contains(live, "previous") {
+		t.Fatalf("RenderNode must not mutate live scene, got %q", live)
+	}
+}
+
+func TestSceneRenderAppendTextNode(t *testing.T) {
+	s := NewSceneRenderer()
+	_ = s.CreateArea(sdk.UIArea{ID: "a"})
+	_ = s.ApplyPatch(sdk.UIPatchParams{Area: "a", Ops: []sdk.UIPatchOp{
+		{Op: sdk.UIOpSetRoot, Node: &sdk.UINode{ID: "txt", Type: sdk.UINodeText, Text: "hello world", Props: &sdk.UIProps{Border: "rounded"}}},
+	}})
+
+	previous, current, ok := s.RenderAppendTextNode("a", "txt", 40, " world")
+	if !ok {
+		t.Fatal("RenderAppendTextNode should find appended text node")
+	}
+	if !strings.Contains(previous, "hello") || strings.Contains(previous, "world") {
+		t.Fatalf("previous render should omit appended suffix, got %q", previous)
+	}
+	if !strings.Contains(current, "hello world") {
+		t.Fatalf("current render should include full text, got %q", current)
+	}
+	if live := s.Render("a", 40); !strings.Contains(live, "hello world") {
+		t.Fatalf("RenderAppendTextNode must not mutate live scene, got %q", live)
+	}
+}
+
 func TestSceneInsertAndRemove(t *testing.T) {
 	s := NewSceneRenderer()
 	_ = s.CreateArea(sdk.UIArea{ID: "a"})

@@ -21,7 +21,7 @@ what keeps the two sides decoupled and cycle-free.
 
 # Key Types
 
-- `Event` / `EventType` — the 17 lifecycle events (see [WASM Extension API](../patterns/wasm-extension-authoring.md))
+- `Event` / `EventType` — the 18 lifecycle events (see [WASM Extension API](../patterns/wasm-extension-authoring.md))
 - `EventResponse` — transform-capable interceptor result (`Payload`, block/reason)
 - `Message` / `Role` — conversation history entries
 - `Tool` — tool name/description/JSON schema

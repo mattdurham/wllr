@@ -358,6 +358,12 @@ interceptor can never crash a turn.
 
 **Empty-response placeholders:** Providers reject empty text content blocks and require strictly alternating user/assistant messages, so an assistant turn is never recorded as an empty string. `placeholderForEmptyResponse(collected, cancelled)` returns `collected` when non-empty, otherwise `placeholderCancelled` (`"[response cancelled]"`) when the turn's context was cancelled, or `placeholderToolOnly` (`"[tool calls only]"`) for a turn that did tool work but produced no text. These are the single source of truth for the placeholder strings (`agent.go`).
 
+### Spawner Tool-Call Observer
+
+`Spawner.SetToolCallObserver(fn)` installs an optional callback for tool calls made by agents spawned through that spawner. The callback receives `(agentID, toolCallID, toolName, input)` and is invoked from the sub-agent turn goroutine through `Agent.SetOnToolCall`.
+
+**Invariant:** Sub-agent tokens remain silent by default; only tool-call lifecycle starts are surfaced through this observer. A nil observer is valid and preserves the previous no-op behavior.
+
 ---
 
 ## 10. AgentPool.ProviderName

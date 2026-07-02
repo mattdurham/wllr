@@ -383,14 +383,14 @@ still observes the result exactly as before.
 2. Runs `runBeforeToolCall`; if blocked, returns the block result.
 3. If found, calls the native function with the **final (possibly rewritten) input** (no `pendingTools` channel).
 4. Runs `runAfterToolCall` on the result so interceptors can rewrite/redact/block the output.
-5. Calls `h.ui.AfterToolCall(toolCallID, toolName, result, isError)` via UIBridge (if set) with the **final result**, then returns.
+5. Calls `h.ui.AfterToolCall(agentID, toolCallID, toolName, result, isError)` via UIBridge (if set) with the **final result**, then returns.
 
 **WASM dispatch path (when no native handler is registered):**
 
 1. Registers a `chan toolResult{1}` buffered channel keyed by `toolCallID` in `h.pendingTools` **first** (the implementing extension is itself a `before_tool_call` subscriber and calls `tool_result` synchronously during the chain).
 2. Runs `runBeforeToolCall` (the interceptor chain). The implementing extension, running later in priority order, sees the threaded final input and calls `tool_result`. If a lower-priority interceptor blocks, the chain stops before the implementer runs, the pending entry is removed, and the block result is returned.
 3. Blocks on `select { case result := <-ch: ...; case <-ctx.Done(): ... }`.
-4. On result: runs `runAfterToolCall` (the output transform chain), then calls `h.ui.AfterToolCall(toolCallID, toolName, result, isError)` via UIBridge (if set) with the final result.
+4. On result: runs `runAfterToolCall` (the output transform chain), then calls `h.ui.AfterToolCall(agentID, toolCallID, toolName, result, isError)` via UIBridge (if set) with the final result.
 
 **Invariants:**
 
@@ -399,7 +399,7 @@ still observes the result exactly as before.
 - `EventAfterToolCall` **is** dispatched (as a transform chain) for both native and WASM tools — interceptors can rewrite/redact/block the result, and observers (no `Payload`) work uniformly.
 - The WASM channel is registered in `pendingTools` **before** running the chain, so a `tool_result` called synchronously by the implementing extension during the chain is never dropped.
 - A blocked tool call returns an error `toolResult` and the implementing tool never executes; for the WASM path the pending channel entry is removed.
-- The UIBridge `AfterToolCall` is always called with the **post-interception** result, so the TUI shows what the model actually received.
+- The UIBridge `AfterToolCall` is always called with the originating `agentID` and the **post-interception** result, so the TUI shows what the model actually received and can attribute the call to the correct agent.
 - `AgentID` is included in both `BeforeToolCallPayload` and `AfterToolCallPayload` so extensions can correlate tool calls with the originating agent.
 - On context cancellation (WASM path), the pending entry is cleaned up before returning.
 - `handleToolResult` always calls `h.ui.ToolResult(toolCallID, result, isError)` via UIBridge in addition to signalling any pending channel.
