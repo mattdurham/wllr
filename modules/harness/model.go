@@ -183,7 +183,6 @@ type Model struct {
 	activeThinking       string
 	authPromptProvider   string
 	pendingAuthProvider  string
-	pendingSetupWizard   bool
 	oauthCaptureProvider string
 
 	// Modal overlay state (non-empty when modal is open).
@@ -191,8 +190,10 @@ type Model struct {
 	// streamContent accumulates the in-flight assistant response text so it can
 	// be captured for session persistence (OnMessageEnd) and logging when the
 	// turn completes. The transcript itself is rendered by the WASM extension.
-	streamContent string
-	input         InputArea
+	streamContent  string
+	chatAppendID   string
+	chatAppendText string
+	input          InputArea
 
 	// Loaded extension paths for reload.
 	extPaths []string
@@ -211,20 +212,22 @@ type Model struct {
 	suggestionIdx  int
 	dropdownOffset int // first visible suggestion index
 
-	modalScroll    int
-	streaming      bool
-	consoleVisible bool
+	modalScroll        int
+	pendingSetupWizard bool
+	streaming          bool
+	consoleVisible     bool
 
 	chatAppendDirty            bool
 	chatAppendRefreshScheduled bool
-	chatAppendID               string
-	chatAppendText             string
 }
 
 // wasmChatAreaID is the scene area ID the WASM extension uses to own the main
 // chat transcript. The harness feeds this area's rendered content into the
 // (still harness-owned) scrollable chat viewport.
-const wasmChatAreaID = "chat"
+const (
+	wasmChatAreaID = "chat"
+	wasmChatRootID = "chat-root"
+)
 
 // statuslineAreaID is the scene area ID the statusline extension uses to drive
 // the standalone status row rendered above the input box.
@@ -657,7 +660,7 @@ func (m Model) updateKeyPress(msg tea.Msg) (Model, tea.Cmd, bool) {
 		return m, nil, false
 	}
 
-	if kp.String() == "esc" && m.hasActiveTurn() {
+	if kp.String() == keyEsc && m.hasActiveTurn() {
 		m.cancelActiveTurn()
 		return m, nil, true
 	}
@@ -677,7 +680,7 @@ func (m Model) updateKeyPress(msg tea.Msg) (Model, tea.Cmd, bool) {
 	switch kp.String() {
 	case "ctrl+c":
 		return m, tea.Quit, true
-	case "esc":
+	case keyEsc:
 	case "ctrl+q":
 		return m, tea.Quit, true
 	case "ctrl+t":
@@ -758,7 +761,7 @@ func (m Model) updateKeyPressPicker(kp tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 // updateKeyPressModal handles key events when the modal overlay is open.
 func (m Model) updateKeyPressModal(kp tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	switch kp.String() {
-	case "esc", "enter", "q":
+	case keyEsc, "enter", "q":
 		m.modalContent = ""
 		m.modalScroll = 0
 	case "up":
@@ -824,7 +827,7 @@ func (m Model) updateKeyPressDropdown(kp tea.KeyPressMsg) (Model, tea.Cmd, bool)
 			m.closeSuggestions()
 			return m, cmd.Handler(nil), true
 		}
-	case "esc":
+	case keyEsc:
 		m.closeSuggestions()
 		return m, nil, true
 	}
@@ -961,7 +964,7 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 		return n.(Model), cmd, true
 
 	case CommandMsg:
-		if msg.Name == "help" {
+		if msg.Name == commandHelp {
 			return m, func() tea.Msg { return ShowModalMsg{Text: m.commands.HelpText()} }, true
 		}
 		// Instant commands bypass WASM dispatch: invoke the handler directly
@@ -1208,7 +1211,7 @@ func (m *Model) resetChatArea() {
 		return
 	}
 	_ = m.scene.ApplyPatch(sdk.UIPatchParams{Area: wasmChatAreaID, Ops: []sdk.UIPatchOp{
-		{Op: sdk.UIOpSetRoot, Node: &sdk.UINode{ID: "chat-root", Type: sdk.UINodeVStack}},
+		{Op: sdk.UIOpSetRoot, Node: &sdk.UINode{ID: wasmChatRootID, Type: sdk.UINodeVStack}},
 	}})
 	m.chat.SetExternalContent("")
 }
@@ -1358,7 +1361,7 @@ func (m Model) cmdReloadExtensions() tea.Cmd {
 // chatHeight returns the number of lines available for the chat viewport,
 // accounting for the input box and any visible suggestion dropdown.
 func (m Model) chatHeight() int {
-	h := m.height - m.inputBoxHeight() - m.statusLineHeight() - m.dropdownHeight() - m.consoleHeight() - m.toolActivityHeight() - m.bottomGutterHeight()
+	h := m.height - m.sceneStackHeight() - m.inputBoxHeight() - m.statusLineHeight() - m.dropdownHeight() - m.consoleHeight() - m.toolActivityHeight() - m.bottomGutterHeight()
 	if h < 0 {
 		h = 0
 	}
@@ -1426,6 +1429,14 @@ func (m Model) renderStatusLine() string {
 		return ""
 	}
 	return strings.Join(parts, "\n")
+}
+
+func (m Model) sceneStackHeight() int {
+	rendered := m.renderScenes()
+	if rendered == "" {
+		return 0
+	}
+	return renderedLineCount(rendered)
 }
 
 // dropdownHeight returns the rendered height of the suggestion dropdown (0 when hidden).
@@ -1587,12 +1598,12 @@ func (m Model) View() tea.View {
 			sb.WriteString(blank + "\n")
 		}
 	} else {
-		if m.chat.height > 0 {
-			sb.WriteString(strings.TrimRight(m.chat.View(), "\n") + "\n")
-		}
 		if scenes := m.renderScenes(); scenes != "" {
 			sb.WriteString(scenes)
 			sb.WriteString("\n")
+		}
+		if m.chat.height > 0 {
+			sb.WriteString(strings.TrimRight(m.chat.View(), "\n") + "\n")
 		}
 		if tools := m.renderToolActivity(); tools != "" {
 			sb.WriteString(tools)

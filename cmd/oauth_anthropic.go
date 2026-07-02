@@ -27,7 +27,7 @@ const anthropicOAuthClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 
 var (
 	anthropicAuthorizeURL = "https://claude.ai/oauth/authorize"
-	anthropicTokenURL     = "https://platform.claude.com/v1/oauth/token"
+	anthropicTokenURL     = "https://platform.claude.com/v1/oauth/token" //nolint:gosec // OAuth token endpoint URL, not a credential.
 )
 
 // anthropicOAuthRedirectURI is the redirect_uri sent with the authorize request
@@ -70,14 +70,14 @@ func generatePKCE() (pkcePair, error) {
 // state is set to the PKCE verifier (matching the client's convention).
 func anthropicAuthorizeURLFor(challenge, state string) string {
 	q := url.Values{
-		"code":                  {"true"},
-		"client_id":             {anthropicOAuthClientID},
-		"response_type":         {"code"},
-		"redirect_uri":          {anthropicOAuthRedirectURI},
-		"scope":                 {anthropicOAuthScopes},
-		"code_challenge":        {challenge},
-		"code_challenge_method": {"S256"},
-		"state":                 {state},
+		oauthParamCode:                {"true"},
+		oauthParamClientID:            {anthropicOAuthClientID},
+		oauthParamResponseType:        {oauthParamCode},
+		oauthParamRedirectURI:         {anthropicOAuthRedirectURI},
+		oauthParamScope:               {anthropicOAuthScopes},
+		oauthParamCodeChallenge:       {challenge},
+		oauthParamCodeChallengeMethod: {"S256"},
+		oauthParamState:               {state},
 	}
 	return anthropicAuthorizeURL + "?" + q.Encode()
 }
@@ -91,15 +91,15 @@ func parseAuthorizationInput(input string) (code, state string) {
 		return "", ""
 	}
 	if u, err := url.Parse(v); err == nil && (u.Scheme == "http" || u.Scheme == "https") {
-		return u.Query().Get("code"), u.Query().Get("state")
+		return u.Query().Get(oauthParamCode), u.Query().Get(oauthParamState)
 	}
 	if strings.Contains(v, "#") {
 		parts := strings.SplitN(v, "#", 2)
 		return parts[0], parts[1]
 	}
-	if strings.Contains(v, "code=") {
+	if strings.Contains(v, oauthParamCode+"=") {
 		if q, err := url.ParseQuery(v); err == nil {
-			return q.Get("code"), q.Get("state")
+			return q.Get(oauthParamCode), q.Get(oauthParamState)
 		}
 	}
 	return v, ""
@@ -120,7 +120,7 @@ func postOAuthJSON(ctx context.Context, client *http.Client, endpoint string, bo
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //nolint:gosec // OAuth endpoint is fixed by provider code or test-injected client URL.
 	if err != nil {
 		return oauthToken{}, err
 	}
@@ -130,8 +130,8 @@ func postOAuthJSON(ctx context.Context, client *http.Client, endpoint string, bo
 		return oauthToken{}, fmt.Errorf("oauth request failed: status=%d body=%s", resp.StatusCode, string(data))
 	}
 	var parsed struct {
-		AccessToken  string `json:"access_token"`
-		RefreshToken string `json:"refresh_token"`
+		AccessToken  string `json:"access_token"`  //nolint:gosec // OAuth token response field name.
+		RefreshToken string `json:"refresh_token"` //nolint:gosec // OAuth token response field name.
 		ExpiresIn    int64  `json:"expires_in"`
 	}
 	if err := json.Unmarshal(data, &parsed); err != nil {
@@ -148,20 +148,20 @@ func postOAuthJSON(ctx context.Context, client *http.Client, endpoint string, bo
 // exchangeAnthropicCode swaps an authorization code (+ PKCE verifier) for tokens.
 func exchangeAnthropicCode(ctx context.Context, client *http.Client, code, state, verifier string) (oauthToken, error) {
 	return postOAuthJSON(ctx, client, anthropicTokenURL, map[string]string{
-		"grant_type":    "authorization_code",
-		"client_id":     anthropicOAuthClientID,
-		"code":          code,
-		"state":         state,
-		"redirect_uri":  anthropicOAuthRedirectURI,
-		"code_verifier": verifier,
+		oauthParamGrantType:    oauthGrantAuthorizationCode,
+		oauthParamClientID:     anthropicOAuthClientID,
+		oauthParamCode:         code,
+		oauthParamState:        state,
+		oauthParamRedirectURI:  anthropicOAuthRedirectURI,
+		oauthParamCodeVerifier: verifier,
 	})
 }
 
 // refreshAnthropicToken exchanges a refresh token for a fresh access token.
 func refreshAnthropicToken(ctx context.Context, client *http.Client, refreshToken string) (oauthToken, error) {
 	return postOAuthJSON(ctx, client, anthropicTokenURL, map[string]string{
-		"grant_type":    "refresh_token",
-		"client_id":     anthropicOAuthClientID,
-		"refresh_token": refreshToken,
+		oauthParamGrantType:    oauthGrantRefreshToken,
+		oauthParamClientID:     anthropicOAuthClientID,
+		oauthParamRefreshToken: refreshToken,
 	})
 }

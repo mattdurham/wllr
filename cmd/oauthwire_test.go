@@ -121,7 +121,7 @@ func TestOAuthLogin_CallbackServerCapturesCode(t *testing.T) {
 	}()
 
 	url := "http://" + addr + "/callback?code=the-code&state=" + s.verifier
-	resp, err := http.Get(url) //nolint:noctx // test
+	resp, err := http.Get(url) //nolint:gosec,noctx // Test callback URL is served by httptest-style local listener.
 	if err != nil {
 		t.Fatalf("callback GET: %v", err)
 	}

@@ -90,12 +90,12 @@ func saveWllrField(field, value string) error {
 	tmp := f.Name()
 	if _, err := f.Write(out); err != nil {
 		_ = f.Close()
-		_ = os.Remove(tmp)
+		_ = os.Remove(tmp) //nolint:gosec // tmp is returned by os.CreateTemp in the config directory.
 		return err
 	}
 	if err := f.Close(); err != nil {
-		_ = os.Remove(tmp)
+		_ = os.Remove(tmp) //nolint:gosec // tmp is returned by os.CreateTemp in the config directory.
 		return err
 	}
-	return os.Rename(tmp, path)
+	return os.Rename(tmp, path) //nolint:gosec // tmp is returned by os.CreateTemp in the config directory.
 }

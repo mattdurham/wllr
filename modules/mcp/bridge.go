@@ -156,7 +156,7 @@ func formatToolResult(result *CallToolResult) string {
 	// TODO: handle other content types (images, resources)
 	var out string
 	for _, item := range result.Content {
-		if item.Type == "text" {
+		if item.Type == contentTypeText {
 			out += item.Text
 		}
 	}

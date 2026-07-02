@@ -31,20 +31,20 @@ const (
 
 // devicePollResult is what a poll function returns for one attempt.
 type devicePollResult[T any] struct {
-	Status deviceCodeStatus
 	Value  T
 	Err    error
+	Status deviceCodeStatus
 }
 
 // devicePollOptions configures pollDeviceCode.
 type devicePollOptions[T any] struct {
+	// Poll performs one attempt against the provider's device-token endpoint.
+	Poll func(context.Context) devicePollResult[T]
 	// IntervalSeconds is the initial poll interval. Values below 1s are clamped
 	// to 1s; a zero/negative value defaults to 5s (RFC 8628 §3.2).
 	IntervalSeconds int
 	// ExpiresInSeconds bounds the whole flow. Zero means no deadline.
 	ExpiresInSeconds int
-	// Poll performs one attempt against the provider's device-token endpoint.
-	Poll func(context.Context) devicePollResult[T]
 }
 
 const (

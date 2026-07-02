@@ -17,10 +17,16 @@ import (
 	"github.com/mattdurham/wllr/modules/sdk"
 )
 
-// providerAnthropic is the canonical provider name for Anthropic.
-const providerAnthropic = "anthropic"
+const (
+	// providerAnthropic is the canonical provider name for Anthropic.
+	providerAnthropic = "anthropic"
+	providerOpenAI    = "openai"
+	providerGemini    = "gemini"
+	providerLocal     = "local"
 
-const providerLocal = "local"
+	defaultAnthropicModel = "claude-sonnet-4-6"
+	defaultOpenAIModel    = "gpt-5.5"
+)
 
 // newCodexProvider builds an OpenAI fantasy.Provider pointed at the ChatGPT
 // Codex backend, authenticated with an OAuth access token (Bearer) and the
@@ -72,17 +78,17 @@ func buildProvider(ctx context.Context, cfg *Config) (fantasy.Provider, fantasy.
 	switch cfg.Provider {
 	case providerAnthropic:
 		prov, provErr = newAnthropicProvider(cfg.AnthropicAPIKey)
-	case "openai":
+	case providerOpenAI:
 		// A stored Codex OAuth token routes through the ChatGPT backend (with the
 		// account-id header); a plain API key uses the default OpenAI API.
-		if cred, ok := loadAuthCredential("openai"); ok && cred.Type == authTypeOAuth && cred.Access != "" {
+		if cred, ok := loadAuthCredential(providerOpenAI); ok && cred.Type == authTypeOAuth && cred.Access != "" {
 			prov, provErr = newCodexProvider(cred.Access, cred.AccountID)
 		} else {
 			prov, provErr = fantasyopenapiprovider.New(
 				fantasyopenapiprovider.WithAPIKey(cfg.OpenAIAPIKey),
 			)
 		}
-	case "gemini":
+	case providerGemini:
 		prov, provErr = fantasygoogleprovider.New(
 			fantasygoogleprovider.WithGeminiAPIKey(cfg.GeminiAPIKey),
 		)

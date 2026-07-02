@@ -24,11 +24,15 @@ func (c *ChatView) SetSize(width, height int) {
 	if c.width == width && c.height == height {
 		return
 	}
+	wasAtBottom := c.vp.AtBottom()
 	c.width = width
 	c.height = height
 	c.vp.SetWidth(width)
 	c.vp.SetHeight(height)
 	c.vp.SetContent(c.externalContent)
+	if wasAtBottom {
+		c.vp.GotoBottom()
+	}
 }
 
 // ClearToolLog resets the per-turn tool-call log. Called at the start of a turn.

@@ -33,6 +33,12 @@ type Agent struct {
 
 	toolsFn func() []fantasy.AgentTool
 
+	// providerOpts holds the current provider-specific request options (e.g.
+	// extended-thinking / reasoning-effort settings). Seeded from
+	// opts.ProviderOptions at spawn and swappable at runtime via
+	// SetProviderOptions. Guarded by lmMu; read once per turn in Submit.
+	providerOpts fantasy.ProviderOptions
+
 	id           string
 	name         string
 	modelName    string // for context window lookup
@@ -50,13 +56,13 @@ type Agent struct {
 	// finishTurn, which runs after isRunning transitions — no separate lock needed.
 	pendingShutdownFrom string
 
-	// inbox is the agent's pending-message queue (see mailbox). It owns its own
-	// mutex; the agent does not lock it directly.
-	inbox mailbox
-
 	history []sdk.Message
 
 	opts SpawnOpts
+
+	// inbox is the agent's pending-message queue (see mailbox). It owns its own
+	// mutex; the agent does not lock it directly.
+	inbox mailbox
 
 	// lastUsage is the token usage from the most recently completed turn.
 	// Updated after each turn by setLastUsage. Read by LastUsage().
@@ -85,12 +91,6 @@ type Agent struct {
 	// runtime via SetModel / SetProviderOptions (e.g. the /model and /thinking
 	// pickers). Submit reads them under this lock.
 	lmMu sync.RWMutex
-
-	// providerOpts holds the current provider-specific request options (e.g.
-	// extended-thinking / reasoning-effort settings). Seeded from
-	// opts.ProviderOptions at spawn and swappable at runtime via
-	// SetProviderOptions. Guarded by lmMu; read once per turn in Submit.
-	providerOpts fantasy.ProviderOptions
 
 	lastSummaryMu sync.RWMutex
 
@@ -404,7 +404,7 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 // It builds the fantasy agent, performs optional proactive compaction, streams
 // the turn, handles reactive fallback on context-too-long errors, records
 // history, and delegates to finishTurn for drain-until-empty / shutdown logic.
-func (a *Agent) executeTurn(
+func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates compaction, interception, streaming, retry, usage, and history.
 	ctx context.Context,
 	childCtx context.Context,
 	content string,
