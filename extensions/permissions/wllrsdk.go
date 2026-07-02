@@ -22,24 +22,24 @@ func hostCall(reqPtr uint32, reqLen uint32, respPtrPtr uint32, respLenPtr uint32
 
 // HostCallResponse is the JSON-RPC response from host_call.
 
-//export _alloc
+//go:wasmexport _alloc
 func _alloc(size uint32) uint32 {
 	buf := make([]byte, size)
 	return uint32(uintptr(unsafe.Pointer(&buf[0])))
 }
 
-//export _free
+//go:wasmexport _free
 func _free(ptr uint32) {
 	// No-op: Go GC handles this.
 }
 
-//export _init
+//go:wasmexport _init
 func _init() int32 {
 	// init() is called automatically by Go runtime before _init export is invoked.
 	return 0
 }
 
-//export _on_event
+//go:wasmexport _on_event
 func _on_event(ptr uint32, length uint32) uint32 {
 	data := ptrToBytes(ptr, length)
 	var evt Event
