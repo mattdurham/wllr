@@ -21,6 +21,7 @@ import (
 	"github.com/mattdurham/wllr/modules/mcp"
 	"github.com/mattdurham/wllr/modules/sdk"
 	"github.com/mattdurham/wllr/modules/tools"
+	yaml "gopkg.in/yaml.v3"
 )
 
 // builtinFS embeds generated built-in WASM modules when they are present.
@@ -459,13 +460,13 @@ func configPath() string {
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return ".wllr/config.json"
+		return ".wllr/config.yaml"
 	}
-	return filepath.Join(home, ".config", "wllr", "config.json")
+	return filepath.Join(home, ".config", "wllr", "config.yaml")
 }
 
-// loadConfigGroup reads the config file and returns the JSON blob for the given group.
-// Returns {} if the group does not exist. The config file is a flat JSON object
+// loadConfigGroup reads the config file and returns the YAML blob for the given group.
+// Returns {} if the group does not exist. The config file is a flat YAML object
 // keyed by group name (extension name or "wllr" for the main app).
 func loadConfigGroup(group string) (json.RawMessage, error) {
 	data, err := os.ReadFile(configPath())
@@ -475,13 +476,22 @@ func loadConfigGroup(group string) (json.RawMessage, error) {
 		}
 		return nil, err
 	}
-	var all map[string]json.RawMessage
-	if err := json.Unmarshal(data, &all); err != nil {
+
+	// Parse YAML into map
+	var all map[string]yaml.Node
+	if err := yaml.Unmarshal(data, &all); err != nil {
 		return nil, fmt.Errorf("config: parse error: %w", err)
 	}
+
 	if v, ok := all[group]; ok {
-		return v, nil
+		// Marshal the node back to JSON bytes
+		out, err := yaml.Marshal(v)
+		if err != nil {
+			return nil, fmt.Errorf("config: marshal error: %w", err)
+		}
+		return json.RawMessage(out), nil
 	}
+
 	return json.RawMessage("{}"), nil
 }
 
