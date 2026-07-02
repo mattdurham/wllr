@@ -2,6 +2,14 @@
 
 A persistent, searchable memory store for wllr conversations. Memories are stored as engrams — discrete units with semantic embeddings, contextual attributes, and similarity-based retrieval.
 
+Current implementation note: the bundled WASM extension registers only
+`memory_install` as a wllr tool. It installs or upgrades the external Engram
+binary and injects guidance for Engram MCP tools such as `mem_save` and
+`mem_search`. The `memory_install` input and output contract is documented in
+[`docs/tool-contracts.md`](../../docs/tool-contracts.md#memory-extension).
+The tool designs below describe the Engram-backed memory surface, not additional
+statically registered wllr extension tools.
+
 ---
 
 ## Storage

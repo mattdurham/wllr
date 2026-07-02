@@ -21,6 +21,7 @@ This is the project knowledge catalog. Start here, then navigate to the relevant
 * **How to write one:** [Authoring a WASM extension](patterns/wasm-extension-authoring.md) — copy `wllrsdk.go`, write `main.go`.
 * **Drawing UI:** [Scene-graph UI](patterns/scene-graph-ui.md) — `ui_*` host calls into named areas the harness renders.
 * **Changing behavior:** [Interceptor transform chain](patterns/interceptor-transform-chain.md) — transform/block tool calls and provider requests.
+* **Tool contracts:** [Tool contracts](../docs/tool-contracts.md) — input fields, defaults, output shapes, and fatal vs non-fatal errors for native and bundled extension tools.
 * **The host side:** [extension package](packages/extension.md) — the five bridges an embedder implements.
 
 ## Quick reference — the most important things to know

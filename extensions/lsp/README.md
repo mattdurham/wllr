@@ -7,7 +7,8 @@ diagnostics, linting, code navigation, finding references, and refactor previews
 All tool results are JSON strings. Errors that mean "bad tool input" return an
 error-shaped JSON result and mark the tool call as failed. Missing optional
 backends return structured, non-fatal JSON so the agent can continue with normal
-file reads, searches, and tests.
+file reads, searches, and tests. The central contract reference is
+[`docs/tool-contracts.md`](../../docs/tool-contracts.md#lsp-extension).
 
 ## Tools
 
