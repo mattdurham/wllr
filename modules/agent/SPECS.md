@@ -97,6 +97,11 @@ A `Team` is a lightweight membership set — it does not own goroutines or resou
 - `Send(id, content string)` calls `agent.Submit(context.Background(), content)`, which starts a new turn immediately (non-blocking goroutine). The turn drains the inbox first.
 - `Deliver(id, msg sdk.Message, wake bool)` is the **atomic deliver-and-process primitive**. It appends `msg` to the inbox and, when `wake` is true, calls `Submit(ctx, "")` so the message is processed immediately (or picked up by drain-until-empty if a turn is already running). It replaces the prior two-call `SendMessage` + `Send`/`Run` pattern at every call site. Returns `ErrAgentNotFound` for unknown IDs and an error for empty content.
 
+`Agent.IsRunning()` and `Agent.InboxLen()` are non-mutating runtime status checks. Use
+them for liveness/status reporting. Sending a "ping" message to a running agent only
+queues that message for a later turn; it cannot be observed by the child until the active
+turn finishes and the inbox is drained.
+
 **Invariant:** `Send` and `Deliver` always return immediately. The agent goroutine may be running concurrently with the caller.
 
 **Invariant:** `Deliver(id, msg, wake=true)` guarantees the message is *processed*, not merely queued. A delivered message can never be silently stranded in the inbox by a missing follow-up trigger — this is the failure mode the two-call pattern allowed (e.g. the tasks extension queued a `TASK_DONE` notification but never triggered a turn).

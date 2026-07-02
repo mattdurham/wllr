@@ -37,9 +37,12 @@ func (b *sceneUIBridge) AfterToolCall(string, string, string, string, bool) {}
 func (b *sceneUIBridge) ConsoleOutput(string)                               {}
 func (b *sceneUIBridge) ConsoleClear()                                      {}
 func (b *sceneUIBridge) CreateArea(a sdk.UIArea) error                      { return b.scene.CreateArea(a) }
-func (b *sceneUIBridge) PatchUI(p sdk.UIPatchParams) error                  { return b.scene.ApplyPatch(p) }
-func (b *sceneUIBridge) RemoveArea(id string)                               { b.scene.RemoveArea(id) }
-func (b *sceneUIBridge) UpdateArea(p sdk.UIUpdateAreaParams) error          { return b.scene.UpdateArea(p) }
+
+func (b *sceneUIBridge) PatchUI(p sdk.UIPatchParams) error { return b.scene.ApplyPatch(p) }
+
+func (b *sceneUIBridge) RemoveArea(id string) { b.scene.RemoveArea(id) }
+
+func (b *sceneUIBridge) UpdateArea(p sdk.UIUpdateAreaParams) error { return b.scene.UpdateArea(p) }
 
 // envCapabilities implements the subset of extension.CapabilityProvider needed
 // to answer GetEnv("WLLR_WASM_CHAT"); other methods are unused no-ops.

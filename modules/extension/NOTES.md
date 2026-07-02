@@ -338,3 +338,15 @@ implementations.
 **Rationale:** `AfterToolCallPayload` already includes `AgentID`, but the internal UI bridge dropped it. That made TUI logs ambiguous when sub-agents executed tools: completions could appear without a visible matching start and without source attribution. Carrying the agent ID through the bridge keeps the UI and logs aligned with the host's event payload.
 
 **Consequence:** All `UIBridge` implementations and tests update their method signature. The WASM extension ABI is unchanged; this is an internal Go bridge contract change.
+
+---
+
+## 29. Agent List Includes Runtime State
+
+*Added: 2026-07-02*
+
+**Decision:** `AgentInfo` includes `is_running` and `pending_messages` alongside `id` and `name`, and `agent_list` returns those fields for each live agent.
+
+**Rationale:** Parent agents were treating a busy child that had not replied yet as "not responding" and sometimes sent a ping via `send_message`. Because inbox delivery is sequential, a ping sent during an active child turn cannot be handled until that turn finishes. Exposing running and pending state gives extensions and LLM-visible tools a system-level status check that does not enqueue work or perturb the child.
+
+**Consequence:** Existing consumers that only read `id` and `name` remain compatible. New consumers should prefer `is_running=true` as the signal that the child is alive and busy, and only nudge an idle child after inspecting recent history.

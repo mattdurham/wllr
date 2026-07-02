@@ -577,3 +577,15 @@ a separate `m.history` copy.
 *Addendum (2026-07-01):* The tool activity pane is now persistent in the normal layout rather than transient. It always reserves three content rows plus border between the chat viewport and lower UI, rendering blank rows when no tools are active. This keeps the layout stable and makes tool activity easier to notice when calls are fast. Covered by `TestModel_ToolActivityPane_AlwaysRendersAndShowsRecentTools` and `TestModel_ToolActivityPane_RemainsOnStreamDone`.
 
 *Addendum (2026-07-02):* Tool lifecycle messages now carry `AgentID`, and sub-agent tool-call starts are routed through the same pane as main-agent calls. Non-main rows render with the agent ID, and a completion with no matching start creates a completed row when tool metadata is available. This keeps logs and the live pane coherent when sub-agents are doing work while the main stream remains open.
+
+---
+
+## Agent List Runtime State
+
+*Added: 2026-07-02*
+
+**Decision:** The harness agent bridge populates `extension.AgentInfo.IsRunning` from `Agent.IsRunning()` and `PendingMessages` from `Agent.InboxLen()` when serving `agent_list`.
+
+**Rationale:** Runtime state already lives in the agent package; surfacing it through the bridge lets the bundled agents extension distinguish a working child from an idle child without sending a probe message into the child's inbox.
+
+**Consequence:** `list_agents` and `/agents` can show whether an agent is running and whether messages are queued for its next turn.

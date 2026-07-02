@@ -126,7 +126,8 @@ func (s *oauthLoginState) beginAnthropic() (string, string, error) {
 			"   (it's been copied to your clipboard):\n\n%s\n\n"+
 			"2. Approve access. You'll be logged in automatically once the browser\n"+
 			"   redirects back — this box will close on its own.",
-		authURL)
+		authURL,
+	)
 	return body, authURL, nil
 }
 
@@ -237,7 +238,8 @@ func (s *oauthLoginState) beginCodex() (string, string, error) {
 			"2. Enter this code when prompted:\n\n   %s\n\n"+
 			"3. Approve access. You'll be logged in automatically once you do —\n"+
 			"   this box will close on its own. (Waiting…)",
-		device.VerificationURI, device.UserCode)
+		device.VerificationURI, device.UserCode,
+	)
 	return body, device.VerificationURI, nil
 }
 

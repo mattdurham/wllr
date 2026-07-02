@@ -390,8 +390,10 @@ func interceptProviderRequest(extHost *extension.Host, agentID string, messages 
 	return fp.Messages, outModel, false, ""
 }
 
-const tokenBatchInterval = 75 * time.Millisecond
-const chatAppendRefreshInterval = 75 * time.Millisecond
+const (
+	tokenBatchInterval        = 75 * time.Millisecond
+	chatAppendRefreshInterval = 75 * time.Millisecond
+)
 
 func (b *tokenBatcher) onToken(token string) {
 	b.mu.Lock()
@@ -1775,9 +1777,11 @@ func (m Model) renderInputBox() string {
 	return top + "\n" + body.String() + bottom
 }
 
-const consolePaneLines = 10
-const toolActivityContentLines = 3
-const toolActivityPaneLines = toolActivityContentLines + 2
+const (
+	consolePaneLines         = 10
+	toolActivityContentLines = 3
+	toolActivityPaneLines    = toolActivityContentLines + 2
+)
 
 func (m Model) toolActivityHeight() int {
 	return toolActivityPaneLines

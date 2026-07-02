@@ -48,9 +48,9 @@ type devicePollOptions[T any] struct {
 }
 
 const (
-	deviceMinInterval        = 1 * time.Second
-	deviceDefaultInterval    = 5 * time.Second
-	deviceSlowDownIncrement  = 5 * time.Second
+	deviceMinInterval       = 1 * time.Second
+	deviceDefaultInterval   = 5 * time.Second
+	deviceSlowDownIncrement = 5 * time.Second
 )
 
 // errDeviceTimeout is returned when the flow exceeds ExpiresInSeconds.
