@@ -70,6 +70,7 @@ extensions: $(DIST_DIR) $(BUILTINS)
 	cp extensions/memory/extension.yaml $(EXT_DIR)/memory/
 	cd extensions/permissions && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(EXT_DIR)/permissions/permissions.wasm .
 	cd extensions/mcp-bridge && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(EXT_DIR)/mcp-bridge/mcp-bridge.wasm .
+	cp extensions/permissions/extension.yaml $(EXT_DIR)/permissions/
 	cp extensions/mcp-bridge/mcp-bridge.json $(EXT_DIR)/mcp-bridge/
 	cd extensions/otel-traces && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(EXT_DIR)/otel-traces/otel-traces.wasm .
 	cp extensions/otel-traces/extension.yaml $(EXT_DIR)/otel-traces/
