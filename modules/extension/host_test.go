@@ -1235,7 +1235,7 @@ func TestHost_HandleAgentList_ReturnsAgents(t *testing.T) {
 
 	h.SetAgentBridge(&testAgentBridge{onList: func() ([]AgentInfo, error) {
 		return []AgentInfo{
-			{ID: "a1", Name: "worker"},
+			{ID: "a1", Name: "worker", IsRunning: true, PendingMessages: 2},
 			{ID: "a2", Name: "reviewer"},
 		}, nil
 	}})
@@ -1254,6 +1254,21 @@ func TestHost_HandleAgentList_ReturnsAgents(t *testing.T) {
 	}
 	if len(resp.Result) == 0 {
 		t.Fatal("expected non-empty result from agent_list")
+	}
+	var out struct {
+		Agents []AgentInfo `json:"agents"`
+	}
+	if err := json.Unmarshal(resp.Result, &out); err != nil {
+		t.Fatalf("unmarshal agent_list result: %v", err)
+	}
+	if len(out.Agents) != 2 {
+		t.Fatalf("agent_list returned %d agents, want 2", len(out.Agents))
+	}
+	if !out.Agents[0].IsRunning {
+		t.Error("agent_list did not preserve is_running")
+	}
+	if out.Agents[0].PendingMessages != 2 {
+		t.Errorf("pending_messages = %d, want 2", out.Agents[0].PendingMessages)
 	}
 }
 

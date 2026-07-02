@@ -61,7 +61,7 @@ Must be called after creating the bubbletea program and before calling `prog.Run
 | `harnessTeamBridge`    | `h.SetTeamBridge`        | (none; first install)   |
 | `harnessUIBridge`      | `h.SetUIBridge`          | `earlyUIBridge` stub    |
 
-`harnessAgentBridge` wraps an `agent.Spawner` (which owns sub-agent lifecycle) and the pool (for close/send/list). `harnessTeamBridge` delegates directly to the pool. `harnessUIBridge` sends bubbletea messages to `p` for all UI operations.
+`harnessAgentBridge` wraps an `agent.Spawner` (which owns sub-agent lifecycle) and the pool (for close/send/list). Its list operation returns each agent's ID, display name, running state, and pending inbox message count. `harnessTeamBridge` delegates directly to the pool. `harnessUIBridge` sends bubbletea messages to `p` for all UI operations.
 
 `CapabilityProvider` and `MCPBridge` are NOT installed by SetProgram — `CapabilityProvider` is installed by `cmd/main.go` via `h.SetCapabilities`, and `MCPBridge` is not currently used.
 

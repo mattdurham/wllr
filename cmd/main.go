@@ -340,7 +340,7 @@ func setupLogging(h *extension.Host, tuiMode bool) func() {
 func registerAgentStatusTool(h *extension.Host, pool *agent.AgentPool) {
 	h.RegisterNativeTool(sdk.Tool{
 		Name:        "get_agent_status",
-		Description: "Get the status and recent conversation history of a running agent. Returns is_running (true if mid-turn), turn_count, and the last N messages. Use is_running=false to confirm an agent has finished before reading its output.",
+		Description: "No-side-effect status check for an agent. Returns is_running, pending_messages, turn_count, and recent history. If is_running=true, the child is working; do not ping it.",
 		InputSchema: json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string","description":"Agent ID to inspect"},"history_limit":{"type":"integer","description":"Number of recent messages to include (default 10)"}},"required":["agent_id"]}`),
 	}, func(_ context.Context, input json.RawMessage) (string, bool) {
 		var in struct {
@@ -376,11 +376,12 @@ func registerAgentStatusTool(h *extension.Host, pool *agent.AgentPool) {
 			msgs = append(msgs, msgOut{Role: string(m.Role), Preview: preview})
 		}
 		out, _ := json.Marshal(map[string]any{
-			"agent_id":     in.AgentID,
-			"is_running":   a.IsRunning(),
-			"turn_count":   len(history) / 2,
-			"last_summary": a.LastSummary(),
-			"recent":       msgs,
+			"agent_id":         in.AgentID,
+			"is_running":       a.IsRunning(),
+			"pending_messages": a.InboxLen(),
+			"turn_count":       len(history) / 2,
+			"last_summary":     a.LastSummary(),
+			"recent":           msgs,
 		})
 		return string(out), false
 	})
