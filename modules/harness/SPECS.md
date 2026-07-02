@@ -378,14 +378,15 @@ Called once from `updateExtension` when `sessionStartDoneMsg` arrives — after 
 Produces a markdown section injected via `pool.AppendBaseSystemPrompt`:
 
 ```
-## Capabilities
+## Action Rules
 
-Act immediately on user requests using your tools. Read files, run commands, edit code — don't describe what you plan to do, just do it.
+You are an action-taking agent...
 
-### Tools
+Available tools: exec, lsp_diagnostics, lsp_lint, read_file, ...
 
-- **tool_name** — description
-...
+### Code Intelligence
+
+- Prefer LSP tools for diagnostics, linting, code navigation...
 
 ### Slash commands
 
@@ -393,9 +394,11 @@ Act immediately on user requests using your tools. Read files, run commands, edi
 ...
 ```
 
-**Invariant:** Tools are sorted alphabetically before rendering. Commands appear in the order returned by `Registry.List()` (sorted by name). Empty descriptions are replaced with `"(no description)"`.
+**Invariant:** Tool names are sorted alphabetically before rendering. Tool descriptions are not duplicated in the prompt because schemas/descriptions are already sent through the provider tool API. Commands appear in the order returned by `Registry.List()` (sorted by name). Empty descriptions are replaced with `"(no description)"`.
 
-**Invariant:** If `tools` is empty, the Tools section is omitted. If `commands` is empty, the Slash commands section is omitted.
+**Invariant:** If any primary LSP tool is registered (`lsp_diagnostics`, `lsp_lint`, `lsp_definition`, or `lsp_references`), the prompt includes a `Code Intelligence` section that tells agents to prefer LSP tools for diagnostics, linting, code navigation, finding references, and refactor reconnaissance. The guidance names `lsp_symbols`, `lsp_definition`, `lsp_references`, `lsp_refactor_preview`, `lsp_diagnostics`, `lsp_lint`, and `lsp_capabilities`, and instructs agents to apply refactor edits with normal file-editing tools after reviewing preview output.
+
+**Invariant:** If `tools` is empty, the available-tool list is omitted. If `commands` is empty, the Slash commands section is omitted.
 
 **Invariant:** Called at most once per session (from `sessionStartDoneMsg`). Subsequent tool/command registrations (e.g. from hot-reload) do not re-inject the prompt.
 

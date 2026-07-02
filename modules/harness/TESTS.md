@@ -64,6 +64,15 @@ log, and reset behavior are covered by `wasmchat_test.go`, `tui_test.go`, and
 
 ---
 
+### default_prompt_test.go
+
+| Test | Scenario | Setup | Assertions |
+|---|---|---|---|
+| `TestBuildDefaultActionPrompt_IncludesLSPGuidance` | LSP code-intelligence tools are available | tools include `lsp_diagnostics`, `lsp_lint`, navigation/reference tools, refactor preview, and `lsp_capabilities` | prompt includes Code Intelligence guidance for diagnostics, linting, navigation, references, refactor previews, and capability/output-contract discovery |
+| `TestBuildDefaultActionPrompt_OmitsLSPGuidanceWithoutDiagnosticsTool` | LSP diagnostics tool is unavailable | tools include only non-LSP tools | prompt does not include Code Intelligence guidance |
+
+---
+
 ### integration_test.go
 
 | Test | Scenario | Setup | Assertions |

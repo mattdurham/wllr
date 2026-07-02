@@ -1,266 +1,191 @@
 # LSP Extension
 
-Provides Language Server Protocol (LSP) integration for advanced code intelligence.
+This extension exposes agent-facing code intelligence tools. It does not ask the
+agent to manage language-server processes directly; the useful workflows are
+diagnostics, linting, code navigation, finding references, and refactor previews.
 
-## Features
+All tool results are JSON strings. Errors that mean "bad tool input" return an
+error-shaped JSON result and mark the tool call as failed. Missing optional
+backends return structured, non-fatal JSON so the agent can continue with normal
+file reads, searches, and tests.
 
-- **Auto-detection**: Automatically detects language from file extension and starts appropriate LSP server
-- **Multi-server**: Run multiple LSP servers simultaneously for different languages
-- **Full LSP support**: All LSP methods (completion, hover, goto definition, diagnostics, etc.)
-- **Server discovery**: Detect which LSP servers are installed on your system
-- **Graceful lifecycle**: Proper initialization and shutdown handshake
+## Tools
 
-## Supported Languages
+### `lsp_capabilities`
 
-The extension includes built-in mappings for common languages:
-
-| Language   | LSP Server                     | Extension          |
-|------------|--------------------------------|--------------------|
-| Go         | gopls                          | .go                |
-| Python     | pylsp                          | .py                |
-| JavaScript | typescript-language-server     | .js, .jsx          |
-| TypeScript | typescript-language-server     | .ts, .tsx          |
-| Rust       | rust-analyzer                  | .rs                |
-| C/C++      | clangd                         | .c, .cpp, .h, .hpp |
-| Java       | jdtls                          | .java              |
-| Ruby       | solargraph                     | .rb                |
-| PHP        | intelephense                   | .php               |
-| C#         | omnisharp                      | .cs                |
-| Lua        | lua-language-server            | .lua               |
-| Bash       | bash-language-server           | .sh                |
-| JSON       | vscode-json-languageserver     | .json              |
-| YAML       | yaml-language-server           | .yaml, .yml        |
-| HTML       | html-languageserver            | .html              |
-| CSS        | css-languageserver             | .css               |
-
-## Usage
-
-### 1. Detect installed LSP servers
-
-Find out which LSP servers are available on your system:
+Input:
 
 ```json
-{
-  "action": "detect"
-}
+{}
 ```
 
-### 2. Auto-start server (easiest way)
-
-Just provide a file path and the extension will detect the language and start the appropriate server:
+Output:
 
 ```json
 {
-  "file": "main.go"
-}
-```
-
-This will:
-- Detect language as "go" from the .go extension
-- Start gopls server
-- Initialize it with the current workspace
-
-### 3. Manual server start
-
-Start a specific LSP server with custom configuration:
-
-```json
-{
-  "action": "start",
-  "name": "my-python-server",
-  "cmd": "pylsp",
-  "args": ["-v"]
-}
-```
-
-### 4. List running servers
-
-```json
-{
-  "action": "list"
-}
-```
-
-### 5. Send LSP requests
-
-Once a server is running, call any LSP method:
-
-**Code Completion:**
-```json
-{
-  "action": "call",
-  "server": "go",
-  "method": "textDocument/completion",
-  "params": {
-    "textDocument": {
-      "uri": "file:///home/user/project/main.go"
-    },
-    "position": {
-      "line": 10,
-      "character": 5
+  "tools": ["lsp_diagnostics: run file-scoped diagnostics"],
+  "backends": [
+    {
+      "language": "go",
+      "extensions": [".go"],
+      "diagnostic_command": "go vet",
+      "lsp_server": "gopls"
     }
-  }
+  ],
+  "note": "These tools provide agent-facing code intelligence..."
 }
 ```
 
-**Hover (documentation):**
+### `lsp_diagnostics`
+
+Runs file-scoped diagnostics when a backend is configured.
+
+Input:
+
 ```json
-{
-  "action": "call",
-  "server": "go",
-  "method": "textDocument/hover",
-  "params": {
-    "textDocument": {
-      "uri": "file:///home/user/project/main.go"
-    },
-    "position": {
-      "line": 15,
-      "character": 8
-    }
-  }
-}
+{"file": "modules/harness/default_prompt.go"}
 ```
 
-**Go to Definition:**
-```json
-{
-  "action": "call",
-  "server": "go",
-  "method": "textDocument/definition",
-  "params": {
-    "textDocument": {
-      "uri": "file:///home/user/project/main.go"
-    },
-    "position": {
-      "line": 20,
-      "character": 12
-    }
-  }
-}
-```
-
-**Diagnostics (errors/warnings):**
-```json
-{
-  "action": "call",
-  "server": "python",
-  "method": "textDocument/publishDiagnostics",
-  "params": {
-    "textDocument": {
-      "uri": "file:///home/user/project/script.py"
-    }
-  }
-}
-```
-
-### 6. Open/Close documents
-
-**Open a document:**
-```json
-{
-  "action": "open",
-  "server": "go",
-  "uri": "file:///home/user/project/main.go",
-  "languageId": "go",
-  "version": 1,
-  "text": "package main\n\nfunc main() {\n    fmt.Println(\"hello\")\n}\n"
-}
-```
-
-**Change a document:**
-```json
-{
-  "action": "change",
-  "server": "go",
-  "uri": "file:///home/user/project/main.go",
-  "version": 2,
-  "text": "package main\n\nimport \"fmt\"\n\nfunc main() {\n    fmt.Println(\"hello\")\n}\n"
-}
-```
-
-**Close a document:**
-```json
-{
-  "action": "close",
-  "server": "go",
-  "uri": "file:///home/user/project/main.go"
-}
-```
-
-### 7. Stop a server
+Output:
 
 ```json
 {
-  "action": "stop",
-  "name": "go"
+  "kind": "diagnostics",
+  "target": "modules/harness/default_prompt.go",
+  "language": "go",
+  "command": "go vet 'modules/harness/default_prompt.go'",
+  "ok": true,
+  "output": "no issues found"
 }
 ```
 
-## Common LSP Methods
+### `lsp_lint`
 
-- `textDocument/completion` - Code completion
-- `textDocument/hover` - Documentation on hover
-- `textDocument/definition` - Go to definition
-- `textDocument/references` - Find references
-- `textDocument/documentSymbol` - Document outline
-- `textDocument/formatting` - Format document
-- `textDocument/codeAction` - Quick fixes and refactorings
-- `textDocument/rename` - Rename symbol
-- `textDocument/signatureHelp` - Function signature help
+Runs the broadest available validation for a file or project path. For Go
+projects this uses `go test ./...` from the relevant directory.
 
-## Installing LSP Servers
+Input:
 
-### Go
-```bash
-go install golang.org/x/tools/gopls@latest
+```json
+{"path": "."}
 ```
 
-### Python
-```bash
-pip install python-lsp-server
+Output:
+
+```json
+{
+  "kind": "lint",
+  "target": ".",
+  "language": "",
+  "command": "go test ./...",
+  "ok": true,
+  "output": "ok ..."
+}
 ```
 
-### TypeScript/JavaScript
-```bash
-npm install -g typescript-language-server typescript
+### `lsp_symbols`
+
+Lists likely symbol definitions in one file.
+
+Input:
+
+```json
+{"file": "extensions/lsp/logic.go"}
 ```
 
-### Rust
-```bash
-rustup component add rust-analyzer
+Output:
+
+```json
+{
+  "kind": "symbols",
+  "target": "extensions/lsp/logic.go",
+  "pattern": "\\b(func|type|var|const)\\s+[A-Za-z_][A-Za-z0-9_]*\\b",
+  "ok": true,
+  "matches": ["12:func capabilities() string {"]
+}
 ```
 
-### C/C++
-```bash
-# Ubuntu/Debian
-sudo apt install clangd
+### `lsp_definition`
 
-# macOS
-brew install llvm
+Finds likely definition sites for a symbol.
+
+Input:
+
+```json
+{"symbol": "runDiagnostics", "path": "extensions/lsp"}
 ```
 
-### More servers
-See [langserver.org](https://langserver.org/) for a comprehensive list.
+Output:
 
-## Implementation Details
-
-- Written in Go using only the standard library
-- Implements JSON-RPC 2.0 protocol over stdio
-- Proper Content-Length header framing
-- Async request/response correlation
-- Graceful server initialization and shutdown
-- Thread-safe multi-server management
-- Stderr capturing for debugging
-
-## Testing
-
-Run the test suite:
-```bash
-cd extensions/lsp
-go build
-./test_integration.sh
+```json
+{
+  "kind": "definition",
+  "target": "extensions/lsp",
+  "pattern": "\\brunDiagnostics\\b",
+  "ok": true,
+  "matches": ["logic.go:61:func runDiagnostics(input map[string]any) (string, bool) {"]
+}
 ```
 
-## License
+### `lsp_references`
 
-MIT
+Finds likely references for a symbol.
+
+Input:
+
+```json
+{"symbol": "runDiagnostics", "path": "extensions/lsp"}
+```
+
+Output:
+
+```json
+{
+  "kind": "references",
+  "target": "extensions/lsp",
+  "pattern": "\\brunDiagnostics\\b",
+  "ok": true,
+  "matches": ["main.go:51:return runDiagnostics(m)"]
+}
+```
+
+### `lsp_refactor_preview`
+
+Previews all likely references before a rename or refactor. This tool does not
+edit files; the agent must review the matches and then use normal file-editing
+tools.
+
+Input:
+
+```json
+{"symbol": "runDiagnostics", "new_name": "checkFileDiagnostics", "path": "extensions/lsp"}
+```
+
+Output:
+
+```json
+{
+  "kind": "refactor_preview",
+  "path": "extensions/lsp",
+  "symbol": "runDiagnostics",
+  "new_name": "checkFileDiagnostics",
+  "pattern": "\\brunDiagnostics\\b",
+  "matches": ["logic.go:61:func runDiagnostics(input map[string]any) (string, bool) {"],
+  "ok": true,
+  "note": "Preview only. Review matches and apply edits with normal file-editing tools."
+}
+```
+
+## Backends
+
+Diagnostics are configured for:
+
+| Language | Extensions | Diagnostic command |
+| --- | --- | --- |
+| Go | `.go` | `go vet <file>` |
+| Python | `.py` | `python3 -m py_compile <file>` |
+| Rust | `.rs` | `rustc --edition=2021 --error-format=json <file>` |
+
+The capability output also lists known language-server commands for discovery.
+Those commands are metadata today; the primary agent tools above do not expose
+server lifecycle management.

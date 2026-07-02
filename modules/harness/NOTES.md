@@ -589,3 +589,15 @@ a separate `m.history` copy.
 **Rationale:** Runtime state already lives in the agent package; surfacing it through the bridge lets the bundled agents extension distinguish a working child from an idle child without sending a probe message into the child's inbox.
 
 **Consequence:** `list_agents` and `/agents` can show whether an agent is running and whether messages are queued for its next turn.
+
+---
+
+## LSP guidance in default action prompt
+
+*Added: 2026-07-02*
+
+**Decision:** Add a conditional `Code Intelligence` section to `buildDefaultActionPrompt` whenever primary LSP tools such as `lsp_diagnostics`, `lsp_lint`, `lsp_definition`, or `lsp_references` are registered.
+
+**Rationale:** The model already receives tool schemas, but the default prompt only named available tools. Agents were not reliably choosing code-intelligence tools because nothing explained where they fit into an agentic coding workflow. The new guidance makes diagnostics, linting, navigation, references, and refactor previews first-class tool uses, and points capability checks at backend and output-contract discovery.
+
+**Consequence:** Sessions with the LSP extension loaded include stronger system guidance for the primary LSP tools without adding per-tool descriptions for every registered tool. Covered by `TestBuildDefaultActionPrompt_IncludesLSPGuidance` and `TestBuildDefaultActionPrompt_OmitsLSPGuidanceWithoutDiagnosticsTool`.

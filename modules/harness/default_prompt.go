@@ -31,10 +31,20 @@ func buildDefaultActionPrompt(tools []sdk.Tool, commands []Command) string {
 		sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
 
 		names := make([]string, len(sorted))
+		toolNames := make(map[string]bool, len(sorted))
 		for i, t := range sorted {
 			names[i] = t.Name
+			toolNames[t.Name] = true
 		}
 		fmt.Fprintf(&sb, "\nAvailable tools: %s\n", strings.Join(names, ", "))
+		if toolNames["lsp_diagnostics"] || toolNames["lsp_lint"] || toolNames["lsp_definition"] || toolNames["lsp_references"] {
+			sb.WriteString("\n### Code Intelligence\n\n")
+			sb.WriteString("- Prefer LSP tools for diagnostics, linting, code navigation, finding references, and refactor reconnaissance before broad manual searching.\n")
+			sb.WriteString("- Use `lsp_diagnostics` or `lsp_lint` after editing supported source files to catch compiler/type/language issues before you finish.\n")
+			sb.WriteString("- Use `lsp_symbols`, `lsp_definition`, and `lsp_references` to understand code before changing it.\n")
+			sb.WriteString("- Use `lsp_refactor_preview` before renames or refactors, then apply reviewed edits with normal file-editing tools.\n")
+			sb.WriteString("- Use `lsp_capabilities` when you need to know which languages, tools, and output contracts are available.\n")
+		}
 	}
 
 	if len(commands) > 0 {
