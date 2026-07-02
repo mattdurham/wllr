@@ -30,7 +30,7 @@ const (
 	// context window usage as a ContextUsagePayload.
 	EventContextUsage EventType = "context_usage"
 	// EventToken is dispatched with a batch of streamed assistant text (a
-	// TokenPayload) as the agent produces it. Batched (~30ms) to keep the WASM
+	// TokenPayload) as the agent produces it. Batched (~75ms) to keep the WASM
 	// boundary crossing rate bounded. Used to route streaming text through
 	// extensions that drive the UI scene graph.
 	EventToken EventType = "token"
@@ -45,6 +45,9 @@ const (
 	// dispatch path is reentrancy-guarded: logs emitted while dispatching EventLog
 	// are not re-dispatched.
 	EventLog EventType = "log"
+	// EventModelChanged is dispatched after the active provider/model status
+	// changes. It lets display extensions update immediately without polling.
+	EventModelChanged EventType = "model_changed"
 )
 
 // Event is dispatched to extensions via _on_event.

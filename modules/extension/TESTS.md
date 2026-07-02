@@ -178,8 +178,13 @@ original input unchanged and returns its result.
 #### TestRunAfterToolCall_NoInterceptorsKeepsResult
 
 **Scenario:** With no subscribed interceptors, `runAfterToolCall` is a
-passthrough — returns the original result and error flag unchanged. Output-side
-counterpart of `TestRunBeforeToolCall_NoInterceptorsKeepsInput`.
+passthrough.
+
+#### TestHost_ExecuteTool_AfterToolCallDispatched
+
+**Scenario:** A WASM-handled tool result completes.
+**Assertions:** `UIBridge.AfterToolCall` receives the originating agent ID, tool call ID,
+tool name, final result, and error flag.
 
 ### loghandler_test.go (cmd)
 

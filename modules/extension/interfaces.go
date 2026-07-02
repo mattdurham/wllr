@@ -129,7 +129,7 @@ type UIBridge interface {
 	AppendSystemPrompt(text string)
 	ResetHistory(messages []sdk.Message) error
 	ToolResult(toolCallID, result string, isError bool)
-	AfterToolCall(toolCallID, toolName, result string, isError bool)
+	AfterToolCall(agentID, toolCallID, toolName, result string, isError bool)
 	ConsoleOutput(line string)
 	ConsoleClear()
 	// CreateArea registers a new UI scene-graph area owned by an extension.

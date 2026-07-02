@@ -20,9 +20,13 @@ type ChatView struct {
 }
 
 // SetExternalContent replaces the viewport content with the supplied string
-// (produced by the WASM transcript) and scrolls to the bottom.
+// (produced by the WASM transcript). It follows the tail only when the viewport
+// was already at the bottom, preserving manual scrollback during streaming.
 func (c *ChatView) SetExternalContent(content string) {
+	wasAtBottom := c.vp.AtBottom()
 	c.externalContent = content
 	c.vp.SetContent(content)
-	c.vp.GotoBottom()
+	if wasAtBottom {
+		c.vp.GotoBottom()
+	}
 }

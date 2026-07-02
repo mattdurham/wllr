@@ -64,6 +64,8 @@
 | `TestSpawner_Spawn_AgentIdentitySuffix` | System prompt gets identity suffix | Spawn with base prompt | Agent spawned (suffix verified via pool.Get) |
 | `TestSpawner_Spawn_UnknownModel` | Unknown model returns error | Non-existent model name | Error returned |
 
+`Spawner.SetToolCallObserver` is covered indirectly by harness tool activity tests; the nil-observer path is exercised by existing spawner tests.
+
 ### deliver_test.go
 
 | Test | Scenario | Setup | Assertions |

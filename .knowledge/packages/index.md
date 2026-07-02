@@ -18,6 +18,7 @@ Spec-driven Go packages — each has SPECS.md / NOTES.md / TESTS.md.
 * [agents (built-in)](ext-agents.md) — Sub-agent orchestration, message passing, the WASM-driven chat transcript.
 * [history (built-in)](ext-history.md) — Records sessions to JSONL; `/history` browses and replays from a chosen point.
 * [logging (built-in)](ext-logging.md) — The log sink; appends `log`-event records to a per-run file.
+* [statusline (built-in)](ext-statusline.md) — Renders the status-line scene area from live harness state.
 
 ## Installed Extensions (`~/.wllr/extensions/`)
 
@@ -26,7 +27,6 @@ Spec-driven Go packages — each has SPECS.md / NOTES.md / TESTS.md.
 * [tasks (installed)](ext-tasks.md) — In-memory task lists with atomic multi-worker claiming.
 * [lsp (installed)](ext-lsp.md) — Bridges Language Server Protocol servers for code navigation/diagnostics.
 * [memory (installed)](ext-memory.md) — Persistent agent memory across sessions.
-* [statusline (installed)](ext-statusline.md) — Renders the status-line scene area from live harness state.
 * [mcp-bridge (installed)](ext-mcp-bridge.md) — Extension-side glue for MCP server subprocesses.
 * [otel-traces (installed)](ext-otel-traces.md) — Ships log/telemetry records to an OpenTelemetry collector.
 * [permissions (installed)](ext-permissions.md) — Interactive permission gating — the sandbox's consent layer.

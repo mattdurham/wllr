@@ -17,9 +17,10 @@ import (
 // It encapsulates the parent-ID derivation, agent-identity system prompt suffix,
 // and provider-option construction that was previously inline in harness/model.go SetProgram.
 type Spawner struct {
-	pool     *AgentPool
-	toolsFn  func(agentID string) []fantasy.AgentTool
-	notifyFn func(text string)
+	pool       *AgentPool
+	toolsFn    func(agentID string) []fantasy.AgentTool
+	notifyFn   func(text string)
+	toolCallFn func(agentID, id, toolName, input string)
 }
 
 // NewSpawner creates a Spawner bound to the given pool.
@@ -31,6 +32,12 @@ func NewSpawner(pool *AgentPool, toolsFn func(agentID string) []fantasy.AgentToo
 		toolsFn:  toolsFn,
 		notifyFn: notifyFn,
 	}
+}
+
+// SetToolCallObserver installs an optional callback invoked when spawned
+// sub-agents dispatch tool calls.
+func (s *Spawner) SetToolCallObserver(fn func(agentID, id, toolName, input string)) {
+	s.toolCallFn = fn
 }
 
 // Spawn creates and registers a sub-agent with the given parameters.
@@ -106,7 +113,12 @@ func (s *Spawner) Spawn(ctx context.Context, req extension.SpawnRequest) error {
 		}
 		return toolsFn(agentID)
 	})
-	a.SetOnToolCall(func(_, _, _ string) {}) // sub-agent tool calls are silent
+	toolCallFn := s.toolCallFn
+	a.SetOnToolCall(func(id, toolName, input string) {
+		if toolCallFn != nil {
+			toolCallFn(agentID, id, toolName, input)
+		}
+	})
 
 	if req.InitialPrompt != "" {
 		if err := pool.Send(req.ID, req.InitialPrompt); err != nil {

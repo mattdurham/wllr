@@ -47,6 +47,24 @@ func TestModel_View_ReturnsNonEmpty(t *testing.T) {
 	}
 }
 
+func TestNew_SeedsActiveModelFromMainAgent(t *testing.T) {
+	pool := agent.NewPool()
+	pool.SetProviderName("openai")
+	pool.SetDefaultModelName("gpt-5.5")
+	_, _ = pool.Spawn("main", newMockLM("ok"), agent.SpawnOpts{})
+
+	m := New(pool, "main", nil)
+	if m.activeProvider != "openai" {
+		t.Errorf("activeProvider = %q, want openai", m.activeProvider)
+	}
+	if m.activeModel != "gpt-5.5" {
+		t.Errorf("activeModel = %q, want gpt-5.5", m.activeModel)
+	}
+	if m.live.model != "gpt-5.5" {
+		t.Errorf("live.model = %q, want gpt-5.5", m.live.model)
+	}
+}
+
 func TestModel_Update_TokenMsg_AccumulatesResponse(t *testing.T) {
 	m := newTestModel()
 
@@ -58,6 +76,20 @@ func TestModel_Update_TokenMsg_AccumulatesResponse(t *testing.T) {
 	m, _ = callUpdate(m, TokenMsg{Token: " world"})
 	if m.streamContent != "hello world" {
 		t.Errorf("streamContent: got %q, want %q", m.streamContent, "hello world")
+	}
+}
+
+func TestModel_Update_TokenMsg_UpdatesLiveTokenSnapshot(t *testing.T) {
+	m := newTestModel()
+	m.agentPool.AddTokens(7)
+
+	m, _ = callUpdate(m, TokenMsg{Token: "hello"})
+
+	m.live.mu.RLock()
+	tokens := m.live.tokens
+	m.live.mu.RUnlock()
+	if tokens != 7 {
+		t.Fatalf("live.tokens = %d, want 7", tokens)
 	}
 }
 
@@ -536,6 +568,53 @@ func TestModel_chatHeight_AccountsForConsole(t *testing.T) {
 	}
 }
 
+func TestModel_ToolActivityPane_AlwaysRendersAndShowsRecentTools(t *testing.T) {
+	m := newTestModel()
+	m.width = 80
+	m.height = 30
+	m.chat.SetSize(m.width, m.chatHeight())
+
+	if got := m.toolActivityHeight(); got != toolActivityPaneLines {
+		t.Fatalf("toolActivityHeight = %d, want %d", got, toolActivityPaneLines)
+	}
+	emptyView := m.View().Content
+	if !strings.Contains(emptyView, "─ tools ") {
+		t.Fatalf("view should render empty tool activity pane:\n%s", emptyView)
+	}
+
+	m.streaming = true
+	m, _ = callUpdate(m, ToolCallStartMsg{ID: "call-1", ToolName: "exec", Input: `{"command":"go test ./..."}`})
+	view := m.View().Content
+	if !strings.Contains(view, "─ tools ") || !strings.Contains(view, "running exec") {
+		t.Fatalf("view missing pending tool activity:\n%s", view)
+	}
+
+	m, _ = callUpdate(m, ToolCallDoneMsg{ID: "call-1"})
+	doneView := m.View().Content
+	if !strings.Contains(doneView, "─ tools ") || !strings.Contains(doneView, "done exec") {
+		t.Fatalf("tool activity pane should remain visible with completed call:\n%s", doneView)
+	}
+}
+
+func TestModel_ToolActivityPane_RemainsOnStreamDone(t *testing.T) {
+	m := newTestModel()
+	m.width = 80
+	m.height = 30
+	m.streaming = true
+	m, _ = callUpdate(m, ToolCallStartMsg{ID: "call-1", ToolName: "exec", Input: `{}`})
+	if m.toolActivityHeight() == 0 {
+		t.Fatal("tool activity should be visible while a tool is pending")
+	}
+
+	m, _ = callUpdate(m, StreamDoneMsg{})
+	if m.toolActivityHeight() != toolActivityPaneLines {
+		t.Fatalf("tool activity height after stream done = %d, want %d", m.toolActivityHeight(), toolActivityPaneLines)
+	}
+	if !strings.Contains(m.View().Content, "─ tools ") {
+		t.Fatalf("tool activity pane should remain visible after stream ends:\n%s", m.View().Content)
+	}
+}
+
 func TestModel_View_WithStatusLineFitsHeight(t *testing.T) {
 	m := newTestModel()
 	m.width = 80
@@ -553,11 +632,21 @@ func TestModel_View_WithStatusLineFitsHeight(t *testing.T) {
 	if lines := renderedLineCount(view); lines > m.height {
 		t.Fatalf("view rendered %d lines, want <= terminal height %d:\n%s", lines, m.height, view)
 	}
+	if lines := renderedLineCount(view); lines != m.height {
+		t.Fatalf("view rendered %d lines, want exactly terminal height %d:\n%s", lines, m.height, view)
+	}
 	if !strings.Contains(view, ">> ChatGPT") {
 		t.Fatalf("view missing statusline content:\n%s", view)
 	}
 	if !strings.Contains(view, "╰") {
 		t.Fatalf("view missing input bottom border:\n%s", view)
+	}
+	lines := strings.Split(view, "\n")
+	if len(lines) < 2 {
+		t.Fatalf("view rendered too few lines:\n%s", view)
+	}
+	if !strings.Contains(lines[len(lines)-2], "╰") {
+		t.Fatalf("input bottom border should render above final gutter line; got penultimate=%q final=%q\n%s", lines[len(lines)-2], lines[len(lines)-1], view)
 	}
 }
 

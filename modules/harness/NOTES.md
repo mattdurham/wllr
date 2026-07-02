@@ -316,6 +316,12 @@ a separate `m.history` copy.
 
 **Consequence:** `Model` gains a `scene *SceneRenderer` field (constructed in `New`, passed to the bridge in `SetProgram`). `Update` handles `sceneDirtyMsg` as a redraw-only no-op. `View` calls `renderScenes()` in the normal (non-modal, non-picker) branch. The patch protocol is intentionally clone-validated for atomicity, trading an allocation per batch for the guarantee that a failed batch never corrupts the live tree. P1 keeps View integration minimal (stack below chat); placement-aware compositing and moving the chat into a scene area are deferred to later phases.
 
+*Addendum (2026-07-01):* `sceneDirtyMsg` now carries the mutated area ID. Only `sceneDirtyMsg{Area:"chat"}` refreshes the chat viewport from the scene; statusline and other non-chat scene updates simply trigger a re-render. This avoids recomputing the entire transcript viewport for every statusline timer tick.
+
+*Addendum (2026-07-01):* `sceneDirtyMsg` also marks append-only patches. Append-only chat patches schedule one delayed refresh instead of refreshing the whole transcript immediately for every token batch. Structural chat patches still refresh immediately so user messages, notifications, clear/history restore, and resize remain prompt.
+
+*Addendum (2026-07-01):* Append-only chat refreshes now carry the append target and appended text. If the batch targets the trailing assistant text node, the harness renders only that node and replaces the cached viewport suffix. This keeps streaming updates proportional to the current assistant block instead of the full transcript; mixed-target batches fall back to the full render.
+
 ---
 
 ## Token batcher EventToken dispatch (UI P2)
@@ -327,6 +333,8 @@ a separate `m.history` copy.
 **Rationale:** Routing streamed assistant text through WASM (so an extension can render it via the scene graph) requires the text to reach the extension host. Reusing the batcher's existing 30ms coalescing keeps the WASM crossing rate bounded (~33/sec) instead of one dispatch per token. Keeping the direct chat path avoids regressing the main transcript while the WASM-driven rendering path is proven incrementally.
 
 **Consequence:** `makeBatchedOnToken`'s signature changed to `(p, dispatch)`. EventToken dispatch only occurs when an extension host is present. The dispatch executes on the agent's streaming goroutine; `DispatchEvent` is safe there (it does not touch the bubbletea loop).
+
+*Addendum (2026-07-01):* Increase `tokenBatchInterval` from 30ms to 75ms. The profile showed terminal layout/rendering dominating perceived streaming latency, so reducing token-driven render frequency is a better tradeoff than pushing ~33 frames/sec through the viewport.
 
 ---
 
@@ -375,6 +383,8 @@ a separate `m.history` copy.
 **Rationale:** With user prompts, streamed text, and notifications all routed through WASM (EventToken/EventNotify) and the WASM transcript at parity, the dual rendering path was redundant maintenance surface. Removing it commits fully to "the transcript is produced by a WASM component; the harness is a bridge that owns only the viewport." The previous commit retained the legacy path as a safety net; this removes it (restorable from history).
 
 **Consequence:** If the `agents` extension is not loaded, the chat viewport is empty (no fallback). `/clear` and history-restore reset the transcript area to empty rather than re-rendering messages (restored history remains in agent context). The skill `display` echo (compact label instead of raw XML) is no longer applied to the transcript, since `before_agent_start` carries the raw prompt. The per-turn tool log is retained on `ChatView` for `/tools`, cleared at turn start. Rendering tests that asserted on `ChatView` internals were removed; transcript behavior is covered end-to-end by `test/wasmchat`.
+
+*Addendum (2026-07-01):* `ChatView.SetExternalContent` now follows the tail only when the viewport was already at bottom. Streaming transcript refreshes preserve manual scrollback instead of forcing the user back to the newest output.
 
 ---
 
@@ -519,3 +529,51 @@ a separate `m.history` copy.
 **Rationale:** Once the statusline built-in was loaded, the extra rendered row exposed that the layout was trusting a hardcoded input height. If textarea rendering changes by a line, the total view can exceed the terminal height and crop the input bottom border. Counting the rendered input box keeps `chatHeight()` aligned with what `View()` actually emits.
 
 **Consequence:** `chatHeight()` and modal sizing use the dynamic input-box height. `TestModel_View_WithStatusLineFitsHeight` covers a small terminal with a one-line statusline and asserts the input bottom border remains visible.
+
+*Addendum (2026-07-01):* View padding now uses `renderedLineCount(out)` instead of raw newline counting, so the final rendered frame is padded to exactly the terminal height rather than occasionally leaving the chat/input composition one row off. `chatHeight()` also reserves a one-line bottom gutter so the input bottom border renders above the terminal's final row instead of being clipped at the screen edge.
+
+---
+
+## Provider/model status emits a lifecycle event
+
+*Added: 2026-07-01*
+
+**Decision:** Seed the harness active model from the spawned main agent during `New()`, and dispatch `EventModelChanged` after startup and after runtime provider/model changes.
+
+**Rationale:** The statusline extension previously read `get_status_info` on `session_start`, but `live.model` was empty at startup even when the main agent had a configured model. Polling on `tick` was also a delayed, indirect way to discover model changes.
+
+**Consequence:** Statusline displays the startup model immediately and updates promptly after `/model` or first-run provider selection. `TestNew_SeedsActiveModelFromMainAgent` covers the startup state.
+
+*Addendum (2026-07-01):* The statusline still uses `EventTick` for the working timer/tokens while a provider is silent. `EventModelChanged` replaces tick polling only for provider/model identity.
+
+*Addendum (2026-07-01):* `TokenMsg` now copies `AgentPool.TokenCount()` into `liveState.tokens` during streaming, not only on `StreamDoneMsg`. The statusline extension reads tokens via `get_status_info`, so delaying the snapshot until turn completion made the statusline appear stuck while the model was actively producing text.
+
+---
+
+## Esc cancels active turns; Ctrl+C exits
+
+*Added: 2026-07-01*
+
+**Decision:** Move active-turn cancellation from `Ctrl+C` to `Esc` in the global key handler. `Ctrl+C` now always returns `tea.Quit`; when `m.streaming` is true, `Esc` calls `AgentPool.CancelAll()` and sets the stream status to `cancelling…`.
+
+**Rationale:** The user expectation for this terminal assistant is that `Esc` stops the current agent turn, especially when a provider hangs or fails locally, while `Ctrl+C` should exit the program consistently. Overlay-specific Esc handling still runs first, so pickers, modals, and autocomplete keep their existing close/cancel behavior.
+
+**Consequence:** A streaming turn is cancelled with `Esc`; exiting is done with `Ctrl+C` or `Ctrl+Q`. The harness spec's key handling section is updated, and `TestModel_Esc_DuringStream_SetsCancellingStatus` / `TestModel_CtrlC_DuringStream_Quits` cover the new contract.
+
+*Addendum (2026-07-02):* Esc cancellation now runs before modal, picker, autocomplete, or input Esc handlers when an active turn exists. The active-turn check also consults `Agent.IsRunning()` across the pool, not only `m.streaming`, so Esc still cancels if the UI streaming flag is stale. Covered by `TestModel_Esc_DuringStream_CancelsBeforeModalClose` and `TestModel_Esc_CancelsRunningAgentWhenStreamingStateIsStale`.
+
+---
+
+## Transient tool activity pane
+
+*Added: 2026-07-01*
+
+**Decision:** Render a compact tool activity pane below the chat viewport while a turn is streaming and at least one tool call is pending. The pane shows the latest three tool call rows from the existing per-turn `toolLog` and hides when all tools finish or the stream ends.
+
+**Rationale:** Tool calls should be visible as they happen without becoming permanent transcript content. Reusing `toolLog` keeps `/tools` and live activity consistent, while keeping the pane separate from `ChatView` preserves the WASM-owned transcript boundary.
+
+**Consequence:** `chatHeight()` subtracts `toolActivityPaneLines` only while the pane is visible. `ToolLogEntry` now stores the tool call ID so completions update the matching call instead of the last pending entry. Covered by `TestChatView_ToolActivityLines_ShowsLastThreeAndMatchesDoneByID`, `TestModel_ToolActivityPane_RendersWhilePendingAndHidesWhenDone`, and `TestModel_ToolActivityPane_HidesOnStreamDone`.
+
+*Addendum (2026-07-01):* The tool activity pane is now persistent in the normal layout rather than transient. It always reserves three content rows plus border between the chat viewport and lower UI, rendering blank rows when no tools are active. This keeps the layout stable and makes tool activity easier to notice when calls are fast. Covered by `TestModel_ToolActivityPane_AlwaysRendersAndShowsRecentTools` and `TestModel_ToolActivityPane_RemainsOnStreamDone`.
+
+*Addendum (2026-07-02):* Tool lifecycle messages now carry `AgentID`, and sub-agent tool-call starts are routed through the same pane as main-agent calls. Non-main rows render with the agent ID, and a completion with no matching start creates a completed row when tool metadata is available. This keeps logs and the live pane coherent when sub-agents are doing work while the main stream remains open.

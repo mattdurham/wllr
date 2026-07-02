@@ -1,0 +1,1 @@
+{"permissions": ["exec", "read"], "tools": [{"name": "lsp_detect", "description": "Detect installed LSP servers on the system", "inputSchema": {"type": "object", "properties": {}}}]}

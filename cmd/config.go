@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
@@ -18,13 +19,18 @@ type Config struct {
 	// GeminiAPIKey is the Google Gemini API key (GEMINI_API_KEY).
 	GeminiAPIKey string
 
-	// LocalAPIKey is the API key sent to an OpenAI-compatible local endpoint
-	// (WLLR_LOCAL_API_KEY, default: "ollama").
+	// LocalAPIKey is the optional API key sent to an OpenAI-compatible local
+	// endpoint (WLLR_LOCAL_API_KEY or wllr.local_api_key).
 	LocalAPIKey string
 
 	// LocalBaseURL is the OpenAI-compatible local endpoint base URL
-	// (WLLR_LOCAL_BASE_URL, default: http://localhost:11434/v1).
+	// (WLLR_LOCAL_BASE_URL or wllr.local_base_url).
 	LocalBaseURL string
+
+	// LocalContextWindow is the default context window for models discovered
+	// from the configured local endpoint (WLLR_LOCAL_CONTEXT_WINDOW or
+	// wllr.local_context_window).
+	LocalContextWindow int64
 
 	// ExtensionsDir is the directory scanned for .wasm extension files (BOB_EXTENSIONS_DIR).
 	ExtensionsDir string
@@ -58,16 +64,21 @@ type Config struct {
 //
 // Returns an error if the active provider's API key is empty.
 func LoadConfig() (*Config, error) {
+	fileCfg := loadWllrSettings()
 	cfg := &Config{
 		AnthropicAPIKey: os.Getenv("ANTHROPIC_API_KEY"),
 		OpenAIAPIKey:    os.Getenv("OPENAI_API_KEY"),
 		GeminiAPIKey:    os.Getenv("GEMINI_API_KEY"),
-		LocalAPIKey:     os.Getenv("WLLR_LOCAL_API_KEY"),
-		LocalBaseURL:    os.Getenv("WLLR_LOCAL_BASE_URL"),
+		LocalAPIKey:     firstNonEmpty(os.Getenv("WLLR_LOCAL_API_KEY"), fileCfg.LocalAPIKey),
+		LocalBaseURL:    firstNonEmpty(os.Getenv("WLLR_LOCAL_BASE_URL"), fileCfg.LocalBaseURL),
 		ExtensionsDir:   expandTilde(os.Getenv("WLLR_EXTENSIONS_DIR")),
 		Model:           os.Getenv("WLLR_MODEL"),
 		Provider:        os.Getenv("WLLR_PROVIDER"),
-		ContextWindow:   parseContextWindow(os.Getenv("WLLR_CONTEXT_WINDOW")),
+		ContextWindow:   firstPositive(parseContextWindow(os.Getenv("WLLR_CONTEXT_WINDOW")), fileCfg.ContextWindow),
+		LocalContextWindow: firstPositive(
+			parseContextWindow(os.Getenv("WLLR_LOCAL_CONTEXT_WINDOW")),
+			fileCfg.LocalContextWindow,
+		),
 	}
 
 	// Provider precedence: env WLLR_PROVIDER > persisted selection
@@ -89,18 +100,11 @@ func LoadConfig() (*Config, error) {
 	cfg.ModelConfigured = cfg.Model != ""
 	if cfg.Model == "" {
 		cfg.Model = defaultModelForProvider(cfg.Provider)
-		if cfg.Model == "" {
+		if cfg.Model == "" && cfg.Provider != providerLocal {
 			cfg.Model = "claude-sonnet-4-6"
 		}
 	}
 	cfg.Model = normalizeModelForProvider(cfg.Provider, cfg.Model)
-	if cfg.LocalBaseURL == "" {
-		cfg.LocalBaseURL = "http://localhost:11434/v1"
-	}
-	if cfg.LocalAPIKey == "" {
-		cfg.LocalAPIKey = "ollama"
-	}
-
 	// Auth-file OAuth credentials satisfy the provider key requirement: if no env
 	// key is set but a stored OAuth access token exists, seed the key from it so
 	// the initial provider build works. Refresh-on-expiry happens at startup
@@ -117,6 +121,67 @@ func LoadConfig() (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+type wllrSettings struct {
+	Provider              string          `json:"provider"`
+	Model                 string          `json:"model"`
+	LocalAPIKey           string          `json:"local_api_key"`
+	LocalBaseURL          string          `json:"local_base_url"`
+	ContextWindow         int64           `json:"-"`
+	LocalContextWindow    int64           `json:"-"`
+	RawContextWindow      json.RawMessage `json:"context_window"`
+	RawLocalContextWindow json.RawMessage `json:"local_context_window"`
+}
+
+func loadWllrSettings() wllrSettings {
+	raw, err := loadConfigGroup(wllrConfigGroup)
+	if err != nil {
+		return wllrSettings{}
+	}
+	var settings wllrSettings
+	if err := json.Unmarshal(raw, &settings); err != nil {
+		return wllrSettings{}
+	}
+	settings.ContextWindow = parseContextWindowJSON(settings.RawContextWindow)
+	settings.LocalContextWindow = parseContextWindowJSON(settings.RawLocalContextWindow)
+	return settings
+}
+
+func parseContextWindowJSON(raw json.RawMessage) int64 {
+	if len(raw) == 0 || string(raw) == "null" {
+		return 0
+	}
+	var n int64
+	if err := json.Unmarshal(raw, &n); err == nil {
+		if n > 0 {
+			return n
+		}
+		return 0
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return parseContextWindow(s)
+	}
+	return 0
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func firstPositive(values ...int64) int64 {
+	for _, v := range values {
+		if v > 0 {
+			return v
+		}
+	}
+	return 0
 }
 
 func missingProviderAuth(cfg *Config) (string, bool) {

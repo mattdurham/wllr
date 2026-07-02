@@ -5,6 +5,7 @@ package harness
 import (
 	"fmt"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/mattdurham/wllr/modules/sdk"
 )
 
@@ -43,17 +44,17 @@ func (m *Model) openModelPicker() {
 // applyModelSelection switches the active model via SelectModelFn (which rebuilds
 // the main agent's language model, updates the context window, and persists the
 // choice), then updates the status display. Errors are surfaced as notifications.
-func (m *Model) applyModelSelection(modelID string) {
+func (m *Model) applyModelSelection(modelID string) tea.Cmd {
 	if modelID == "" {
-		return
+		return nil
 	}
 	if m.SelectModelFn != nil {
 		if err := m.SelectModelFn(modelID); err != nil {
 			m.pushNotification(fmt.Sprintf("⚠ could not switch model: %v", err))
-			return
+			return nil
 		}
 	}
-	m.activeModel = modelID
-	m.live.setModel(modelID)
+	cmd := m.setActiveProviderModel("", modelID)
 	m.pushNotification("Model set to: " + modelID)
+	return cmd
 }

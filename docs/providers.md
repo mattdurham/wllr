@@ -134,8 +134,9 @@ Bob reads provider and model from environment variables at startup.
 | `WLLR_PROVIDER`       | `anthropic`          | Provider name (`anthropic`, `openai`, `gemini`, `local`). |
 | `WLLR_MODEL`          | `claude-sonnet-4-6`  | Default model. See precedence below. |
 | `ANTHROPIC_API_KEY`   | (none)               | Required when `WLLR_PROVIDER=anthropic`. |
-| `WLLR_LOCAL_BASE_URL` | `http://localhost:11434/v1` | OpenAI-compatible local endpoint used when `WLLR_PROVIDER=local`. |
-| `WLLR_LOCAL_API_KEY`  | `ollama`             | API key sent to the local endpoint. |
+| `WLLR_LOCAL_BASE_URL` | config file          | OpenAI-compatible local endpoint used when `WLLR_PROVIDER=local`. |
+| `WLLR_LOCAL_API_KEY`  | (none)               | Optional API key sent to the local endpoint. |
+| `WLLR_LOCAL_CONTEXT_WINDOW` | config file    | Context window applied to local models, e.g. `100k`. |
 | `WLLR_EXTENSIONS_DIR` | (none)               | Directory scanned for `.wasm` files.|
 
 ### Selecting a model at runtime
@@ -183,6 +184,27 @@ persisted level, else `off`.
 
 The model list is a curated catalog (`cmd/modelcatalog.go`) covering Anthropic,
 OpenAI, and Gemini, sourced from charmbracelet's Catwalk model-metadata service.
+For `provider: "local"`, wllr queries the configured OpenAI-compatible
+`/models` endpoint instead of using a hardcoded local catalog.
+
+### Local provider config
+
+Configure local models in `~/.config/wllr/config.json` under the `wllr` group:
+
+```json
+{
+  "wllr": {
+    "provider": "local",
+    "model": "deepseek-v4-flash",
+    "local_base_url": "http://localhost:8000/v1",
+    "local_context_window": 100000
+  }
+}
+```
+
+`local_api_key` is optional and omitted for endpoints that do not require
+authorization. Environment variables (`WLLR_LOCAL_BASE_URL`,
+`WLLR_LOCAL_API_KEY`, `WLLR_LOCAL_CONTEXT_WINDOW`) override the config file.
 
 ### Provider authentication
 

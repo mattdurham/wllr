@@ -390,6 +390,53 @@ func (s *SceneRenderer) Render(areaID string, width int) string {
 	return renderNode(*root, width)
 }
 
+// RenderNode renders a single node in an area. When textOverride is non-nil and
+// the node is a text node, the override is rendered with the node's current
+// styling without mutating the live scene.
+func (s *SceneRenderer) RenderNode(areaID, nodeID string, width int, textOverride *string) (string, bool) {
+	s.mu.RLock()
+	area, ok := s.areas[areaID]
+	var node *sdk.UINode
+	if ok {
+		node = cloneNode(findNode(area.root, nodeID))
+	}
+	s.mu.RUnlock()
+	if !ok || node == nil {
+		return "", false
+	}
+	if textOverride != nil && node.Type == sdk.UINodeText {
+		node.Text = *textOverride
+	}
+	return renderNode(*node, width), true
+}
+
+// RenderAppendTextNode renders the current and previous states of an appended
+// text node. The previous state is derived by removing appendedText from the
+// current node text; the live scene is not mutated.
+func (s *SceneRenderer) RenderAppendTextNode(areaID, nodeID string, width int, appendedText string) (previous, current string, ok bool) {
+	if appendedText == "" {
+		return "", "", false
+	}
+	s.mu.RLock()
+	area, areaOK := s.areas[areaID]
+	var node *sdk.UINode
+	if areaOK {
+		node = cloneNode(findNode(area.root, nodeID))
+	}
+	s.mu.RUnlock()
+	if !areaOK || node == nil || node.Type != sdk.UINodeText {
+		return "", "", false
+	}
+	previousText, hasSuffix := strings.CutSuffix(node.Text, appendedText)
+	if !hasSuffix {
+		return "", "", false
+	}
+	current = renderNode(*node, width)
+	node.Text = previousText
+	previous = renderNode(*node, width)
+	return previous, current, true
+}
+
 // renderNode renders a single node and its subtree to a string given the
 // available content width.
 func renderNode(n sdk.UINode, width int) string {

@@ -42,25 +42,20 @@ func TestModel_Tab_CompletesSelectedSuggestion(t *testing.T) {
 	}
 }
 
-// ─── Esc-esc aborts stream ────────────────────────────────────────────────────
+// ─── Esc aborts stream ────────────────────────────────────────────────────────
 
-func TestModel_EscEsc_DuringStream_GeneratesAbort(t *testing.T) {
+func TestModel_Esc_DuringStream_CancelsTurn(t *testing.T) {
 	m := newTestModel()
 	m.streaming = true
 
-	// First esc: sets lastWasEsc in input area
-	next1, _ := m.Update(keyMsg(tea.KeyEscape, 0))
-	m = next1.(Model)
+	next, cmd := m.Update(keyMsg(tea.KeyEscape, 0))
+	m = next.(Model)
 
-	// Second esc: should generate abortStreamMsg via the input Cmd
-	_, cmd2 := m.Update(keyMsg(tea.KeyEscape, 0))
-	if cmd2 == nil {
-		t.Skip("second esc produced nil cmd — input may not have lastWasEsc set")
+	if cmd != nil {
+		t.Error("esc cancellation should not emit a follow-up command")
 	}
-	// Execute the cmd to get the message
-	msg := cmd2()
-	if _, ok := msg.(abortStreamMsg); !ok {
-		t.Errorf("second esc should produce abortStreamMsg, got %T", msg)
+	if v := m.live.getStatus("stream"); v != "cancelling…" {
+		t.Errorf("expected stream status 'cancelling…', got %q", v)
 	}
 }
 
@@ -98,7 +93,7 @@ func TestModel_ToolCallDoneMsg_UpdatesToolLog(t *testing.T) {
 	m.chat.SetSize(80, 30)
 
 	// Add a pending tool call first
-	m.chat.AddToolCall("call-1", "exec", `{"command":"ls"}`)
+	m.chat.AddToolCall("call-1", "main", "exec", `{"command":"ls"}`)
 	if m.chat.toolLog[0].Done {
 		t.Fatal("tool call should start as pending (Done=false)")
 	}
@@ -114,7 +109,7 @@ func TestModel_ToolCallDoneMsg_UpdatesToolLog(t *testing.T) {
 
 func TestModel_ToolCallDoneMsg_ErrorFlag(t *testing.T) {
 	m := newTestModel()
-	m.chat.AddToolCall("call-1", "exec", `{"command":"bad"}`)
+	m.chat.AddToolCall("call-1", "main", "exec", `{"command":"bad"}`)
 
 	next, _ := m.Update(ToolCallDoneMsg{ID: "call-1", IsError: true, Output: "permission denied"})
 	m = next.(Model)
@@ -152,7 +147,7 @@ func TestModel_ClearMsg_ClearsChat(t *testing.T) {
 		{Op: sdk.UIOpSetRoot, Node: &sdk.UINode{ID: "chat-root", Type: sdk.UINodeText, Text: "should be cleared"}},
 	}})
 	m.streamContent = "partial"
-	m.chat.AddToolCall("1", "exec", `{"command":"ls"}`)
+	m.chat.AddToolCall("1", "main", "exec", `{"command":"ls"}`)
 
 	next, _ := m.Update(clearMsg{})
 	m = next.(Model)

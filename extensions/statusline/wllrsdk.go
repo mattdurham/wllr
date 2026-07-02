@@ -599,6 +599,19 @@ func OnTick(fn func()) {
 	_sdkOn("tick", func(_ json.RawMessage) { fn() })
 }
 
+// OnModelChanged registers a handler called when the active provider/model changes.
+func OnModelChanged(fn func(provider, model string)) {
+	_sdkOn("model_changed", func(payload json.RawMessage) {
+		var p struct {
+			Provider string `json:"provider"`
+			Model    string `json:"model"`
+		}
+		if err := json.Unmarshal(payload, &p); err == nil {
+			fn(p.Provider, p.Model)
+		}
+	})
+}
+
 // OnAfterProviderResponse registers a handler called after the LLM provider
 // returns a response. usage contains token counts for the completed turn.
 func OnAfterProviderResponse(fn func(inputTokens, outputTokens int)) {

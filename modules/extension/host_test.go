@@ -164,7 +164,7 @@ type testUIBridge struct {
 	onAppendSP        func(text string)
 	onResetHistory    func(messages []sdk.Message) error
 	onToolResult      func(toolCallID, result string, isError bool)
-	onAfterToolCall   func(toolCallID, toolName, result string, isError bool)
+	onAfterToolCall   func(agentID, toolCallID, toolName, result string, isError bool)
 	onConsoleOutput   func(line string)
 	onConsoleClear    func()
 	createdAreas      []string
@@ -254,9 +254,9 @@ func (b *testUIBridge) ToolResult(toolCallID, result string, isError bool) {
 	}
 }
 
-func (b *testUIBridge) AfterToolCall(toolCallID, toolName, result string, isError bool) {
+func (b *testUIBridge) AfterToolCall(agentID, toolCallID, toolName, result string, isError bool) {
 	if b.onAfterToolCall != nil {
-		b.onAfterToolCall(toolCallID, toolName, result, isError)
+		b.onAfterToolCall(agentID, toolCallID, toolName, result, isError)
 	}
 }
 
@@ -925,8 +925,8 @@ func TestHost_ExecuteTool_AfterToolCallDispatched(t *testing.T) {
 
 	// Track whether AfterToolCall was invoked (proves EventAfterToolCall path ran).
 	afterCh := make(chan struct{}, 1)
-	h.SetUIBridge(&testUIBridge{onAfterToolCall: func(id, name, result string, isError bool) {
-		if id == toolCallID && name == toolName && result == toolResultStr && !isError {
+	h.SetUIBridge(&testUIBridge{onAfterToolCall: func(agentID, id, name, result string, isError bool) {
+		if agentID == "test-agent" && id == toolCallID && name == toolName && result == toolResultStr && !isError {
 			afterCh <- struct{}{}
 		}
 	}})
@@ -970,14 +970,15 @@ func TestHost_OnAfterToolCall_Callback(t *testing.T) {
 	const toolResultStr = "callback-result"
 
 	type callArgs struct {
+		agentID string
 		id      string
 		name    string
 		result  string
 		isError bool
 	}
 	gotCh := make(chan callArgs, 1)
-	h.SetUIBridge(&testUIBridge{onAfterToolCall: func(id, name, result string, isError bool) {
-		gotCh <- callArgs{id, name, result, isError}
+	h.SetUIBridge(&testUIBridge{onAfterToolCall: func(agentID, id, name, result string, isError bool) {
+		gotCh <- callArgs{agentID, id, name, result, isError}
 	}})
 
 	h.mu.Lock()
@@ -998,6 +999,9 @@ func TestHost_OnAfterToolCall_Callback(t *testing.T) {
 
 	select {
 	case got := <-gotCh:
+		if got.agentID != "test-agent" {
+			t.Errorf("OnAfterToolCall agentID: got %q, want %q", got.agentID, "test-agent")
+		}
 		if got.id != toolCallID {
 			t.Errorf("OnAfterToolCall toolCallID: got %q, want %q", got.id, toolCallID)
 		}

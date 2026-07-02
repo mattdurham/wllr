@@ -35,12 +35,33 @@ func (c *ChatView) SetSize(width, height int) {
 func (c *ChatView) ClearToolLog() { c.toolLog = nil }
 
 // AddToolCall records a tool call in the per-turn log (shown via /tools).
-func (c *ChatView) AddToolCall(_, toolName, input string) {
-	c.toolLog = append(c.toolLog, ToolLogEntry{Name: toolName, Preview: toolInputPreview(input)})
+func (c *ChatView) AddToolCall(id, agentID, toolName, input string) {
+	c.toolLog = append(c.toolLog, ToolLogEntry{ID: id, AgentID: agentID, Name: toolName, Preview: toolInputPreview(input)})
 }
 
-// UpdateToolCall marks the last pending tool log entry as done.
-func (c *ChatView) UpdateToolCall(_ string, isError bool, _ string) {
+// UpdateToolCall marks the matching pending tool log entry as done.
+// If the ID is missing (legacy/internal callers), it falls back to the last
+// pending entry so the log still completes.
+func (c *ChatView) UpdateToolCall(id, agentID, toolName string, isError bool, _ string) {
+	if id != "" {
+		for i := len(c.toolLog) - 1; i >= 0; i-- {
+			if c.toolLog[i].ID == id {
+				c.toolLog[i].Done = true
+				c.toolLog[i].IsError = isError
+				if c.toolLog[i].AgentID == "" {
+					c.toolLog[i].AgentID = agentID
+				}
+				if c.toolLog[i].Name == "" {
+					c.toolLog[i].Name = toolName
+				}
+				return
+			}
+		}
+		if toolName != "" {
+			c.toolLog = append(c.toolLog, ToolLogEntry{ID: id, AgentID: agentID, Name: toolName, Done: true, IsError: isError})
+			return
+		}
+	}
 	for i := len(c.toolLog) - 1; i >= 0; i-- {
 		if !c.toolLog[i].Done {
 			c.toolLog[i].Done = true
@@ -48,6 +69,34 @@ func (c *ChatView) UpdateToolCall(_ string, isError bool, _ string) {
 			break
 		}
 	}
+}
+
+func (c *ChatView) ToolActivityLines(width, height int) []string {
+	if height <= 0 || len(c.toolLog) == 0 {
+		return nil
+	}
+	start := len(c.toolLog) - height
+	if start < 0 {
+		start = 0
+	}
+	lines := make([]string, 0, len(c.toolLog)-start)
+	for _, e := range c.toolLog[start:] {
+		status := "running"
+		if e.Done && e.IsError {
+			status = "error"
+		} else if e.Done {
+			status = "done"
+		}
+		line := status + " " + e.Name
+		if e.AgentID != "" && e.AgentID != "main" {
+			line += " [" + e.AgentID + "]"
+		}
+		if e.Preview != "" {
+			line += "  " + e.Preview
+		}
+		lines = append(lines, truncateRunes(line, width))
+	}
+	return lines
 }
 
 // Update handles viewport scrolling.
@@ -102,6 +151,20 @@ func toolInputPreview(input string) string {
 		break
 	}
 	return ""
+}
+
+func truncateRunes(s string, width int) string {
+	if width <= 0 {
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= width {
+		return s
+	}
+	if width == 1 {
+		return "…"
+	}
+	return string(r[:width-1]) + "…"
 }
 
 // ToolLogModal returns a formatted string for display in the modal overlay.

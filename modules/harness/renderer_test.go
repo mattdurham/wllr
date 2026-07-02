@@ -20,8 +20,8 @@ func (f *fakeRenderer) AddNotification(_ string)                              { 
 func (f *fakeRenderer) SetStreaming(_ bool, _ error)                          {}
 func (f *fakeRenderer) ShowModal(_ string)                                    {}
 func (f *fakeRenderer) ShowPicker(_ string, _ []sdk.ShowPickerItem, _ string) {}
-func (f *fakeRenderer) AddToolCall(_, _, _ string)                            {}
-func (f *fakeRenderer) UpdateToolCall(_ string, _ bool, _ string)             {}
+func (f *fakeRenderer) AddToolCall(_, _, _, _ string)                         {}
+func (f *fakeRenderer) UpdateToolCall(_, _, _ string, _ bool, _ string)       {}
 func (f *fakeRenderer) SetStatus(_, _ string)                                 {}
 func (f *fakeRenderer) AppendConsoleLine(_ string)                            {}
 func (f *fakeRenderer) ClearConsole()                                         {}

@@ -8,7 +8,9 @@
 |---|---|---|---|
 | `TestModel_Init_ReturnsCmd` | Init returns a non-nil Cmd | `newTestModel()` | `Init()` result is non-nil |
 | `TestModel_View_ReturnsNonEmpty` | View produces content | `newTestModel()` | `View().Content != ""` |
+| `TestNew_SeedsActiveModelFromMainAgent` | Startup status state reflects the spawned main agent's model | pool with provider/default model and main agent | `activeProvider`, `activeModel`, and `live.model` are seeded |
 | `TestModel_Update_TokenMsg_AppendsToChat` | Tokens accumulate in `chat.current` | `m.streaming = true`; send two `TokenMsg` | `chat.current` equals concatenated tokens after each append |
+| `TestModel_Update_TokenMsg_UpdatesLiveTokenSnapshot` | Token batches refresh statusline token state during streaming | pool token count set; send `TokenMsg` | `live.tokens` matches `AgentPool.TokenCount()` |
 | `TestModel_Update_StreamDoneMsg_ClearsStreaming` | StreamDoneMsg ends stream | `m.streaming = true`, token appended | `streaming == false` after `StreamDoneMsg{Err: nil}` |
 | `TestModel_Update_StreamDoneMsg_Error_ShowsError` | Non-canceled error adds notification | `m.streaming = true` | `streaming == false`; `chat.messages` is non-empty (error notification added) |
 | `TestModel_Update_StreamDoneMsg_ContextCanceled_NoError` | `context.Canceled` is not shown as error | `m.streaming = true`, partial token | `streaming == false`; no system notification message in chat |
@@ -34,6 +36,13 @@ by a WASM extension via the scene graph). Its rendering tests
 covered end-to-end by `test/wasmchat`; the harness-side viewport/scroll, tool
 log, and reset behavior are covered by `wasmchat_test.go`, `tui_test.go`, and
 `interactions_test.go`.
+
+| Test | Scenario | Setup | Expected |
+|---|---|---|---|
+| `TestChatView_SetExternalContent_FollowsWhenAtBottom` | transcript content grows while viewport is at bottom | set external content, then replace with more lines | viewport remains at bottom |
+| `TestChatView_SetExternalContent_PreservesScrollback` | transcript content grows while user is scrolled up | set external content, scroll up, then replace with more lines | viewport offset is preserved and does not jump to bottom |
+| `TestChatView_ToolActivityLines_ShowsLastThreeAndMatchesDoneByID` | compact tool rows use the latest entries and completion matches by ID | add four calls, complete the second by ID | latest three rows render; matching entry is done with its sub-agent label, last pending is unchanged |
+| `TestChatView_UpdateToolCall_CreatesEntryForMissingStart` | completion arrives without a visible start (e.g. legacy/sub-agent bridge edge) | update an unknown tool call ID with agent/tool metadata | a completed log row is created and rendered with the sub-agent label |
 
 ---
 
@@ -61,7 +70,7 @@ log, and reset behavior are covered by `wasmchat_test.go`, `tui_test.go`, and
 |---|---|---|---|
 | `TestIntegration_FullStreamingFlow` | Full submit → stream → done cycle | mock provider with tokens | streaming true then false; history has 1 user message; `CallCount == 1` |
 | `TestIntegration_UserMessageInHistory` | User message recorded immediately on SubmitMsg | mock provider | `history[0].Role == RoleUser`; `history[0].Content == "hello world"`; `chat.messages` has 1 entry |
-| `TestIntegration_CtrlC_CancelsStream` | ctrl+c while streaming invokes cancel but does not quit | streaming started | `streaming` remains true (StreamDoneMsg not yet arrived); `cancelStream` still set |
+| `TestIntegration_Esc_CancelsStream` | esc while streaming invokes cancel but does not quit | streaming started | `streaming` remains true (StreamDoneMsg not yet arrived); stream status is `cancelling…` |
 | `TestIntegration_NilExtensionHost_Safe` | nil extension host never panics | `New(p, nil)` | No panic on Init, SubmitMsg, stream execution |
 | `TestIntegration_ExtensionHost_NoExtensions_Safe` | Real host with no extensions loaded | `extension.NewHost(nil)` | No panic; `StreamDoneMsg.Err == nil` |
 
@@ -96,6 +105,9 @@ log, and reset behavior are covered by `wasmchat_test.go`, `tui_test.go`, and
 
 | Test | Scenario | Assertions |
 |---|---|---|
+| `TestModel_Esc_DuringStream_CancelsTurn` | Esc while streaming is handled globally | no follow-up command; stream status is `cancelling…` |
+| `TestModel_Esc_DuringStream_CancelsBeforeModalClose` | Esc cancellation has priority over modal close handling | stream status is `cancelling…`; modal remains open |
+| `TestModel_Esc_CancelsRunningAgentWhenStreamingStateIsStale` | Esc cancels a running agent even if `m.streaming` is stale false | stream status is `cancelling…`; blocking agent stops |
 | `TestWrapModalLines_WrapsLongLine` | 50 runes at width 20 | wraps to 3 lines, none over width, content preserved |
 | `TestWrapModalLines_PreservesShortAndBlank` | short + blank + short | unchanged |
 | `TestWrapModalLines_WrapsOAuthURL` | long authorize URL | reconstructs exactly; wraps to ≥2 lines |
@@ -150,7 +162,9 @@ The following scenarios are not currently covered and should be added:
 | `TestModel_Update_ConsoleMsg_Clear_ResetsConsole` | `ConsoleMsg{Clear}` empties console | Append then Clear msg | console empty |
 | `TestModel_Update_StreamDoneMsg_HidesConsole` | StreamDone hides console | `consoleVisible=true`; `StreamDoneMsg` | `consoleVisible == false` |
 | `TestModel_chatHeight_AccountsForConsole` | chatHeight subtracts console height | `consoleVisible` on/off | height changes by `consolePaneLines` |
-| `TestModel_View_WithStatusLineFitsHeight` | Statusline plus input stays within terminal height | one-line status scene; small terminal height | rendered view line count <= terminal height; input bottom border present |
+| `TestModel_ToolActivityPane_AlwaysRendersAndShowsRecentTools` | Tool pane is permanent and displays recent tool state | no tools, then running and completed tool | view always contains tools pane; row changes from running to done |
+| `TestModel_ToolActivityPane_RemainsOnStreamDone` | Stream completion does not remove the tool pane | streaming model; pending tool; `StreamDoneMsg` | pane height remains `toolActivityPaneLines` and view contains tools pane |
+| `TestModel_View_WithStatusLineFitsHeight` | Statusline plus input stays within terminal height | one-line status scene; small terminal height | rendered view line count equals terminal height; input bottom border present above final gutter row |
 
 ### SceneRenderer constraint tests (scene_test.go)
 
@@ -171,6 +185,8 @@ The following scenarios are not currently covered and should be added:
 | `TestSceneCreateAndDuplicateArea` | Create an area, create it again, remove it | Duplicate errors; `HasArea` reflects create/remove |
 | `TestSceneSetRootAndRender` | `set_root` a vstack with a text child, render | Output contains the text |
 | `TestSceneAppendTextStreaming` | Seed a text node, append two deltas | Render shows the concatenated text |
+| `TestSceneRenderNodeWithTextOverride` | Render one text node with a temporary text override | Output uses override and live scene remains unchanged |
+| `TestSceneRenderAppendTextNode` | Render previous/current states for an appended text node | Previous omits appended suffix; current includes it; live scene remains unchanged |
 | `TestSceneInsertAndRemove` | Insert two children (one at index 0), then remove one | Index-0 child renders first; removed node absent |
 | `TestSceneBatchAtomicOnError` | Batch with a valid op then an op on a missing node | Batch errors; live tree unchanged (no partial apply) |
 | `TestScenePatchUnknownArea` | Patch an area that does not exist | Returns an error |
@@ -192,4 +208,8 @@ The following scenarios are not currently covered and should be added:
 | `TestRefreshWASMChat_FeedsSceneIntoViewport` | `wasmChat=true`, scene has a `chat` area | `ChatView` enters external mode; viewport content includes the scene text |
 | `TestRefreshWASMChat_DisabledIsNoOp` | `wasmChat=false` | `ChatView` does not enter external mode |
 | `TestRefreshWASMChat_NoAreaIsNoOp` | `wasmChat=true` but no `chat` area | `ChatView` does not enter external mode |
+| `TestSceneDirty_StatuslineDoesNotRefreshChat` | statusline scene area changes | chat viewport external content is unchanged |
+| `TestSceneDirty_ChatRefreshesChat` | chat scene area changes | chat viewport external content refreshes |
+| `TestSceneDirty_AppendOnlyChatCoalescesRefresh` | append-only chat scene area changes | refresh is scheduled, not immediate; delayed message refreshes viewport |
+| `TestSceneDirty_AppendOnlyChatUsesFastSuffixRefresh` | append-only update to trailing assistant text node | delayed refresh updates viewport by replacing the rendered node suffix |
 | `TestRenderScenes_SkipsChatAreaInWASMMode` | `wasmChat=true`, `chat` area present | `renderScenes` output excludes the chat transcript (rendered in viewport instead) |

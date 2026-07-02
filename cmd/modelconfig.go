@@ -35,11 +35,15 @@ func savedWllrField(field string) string {
 	if err != nil {
 		return ""
 	}
-	var g map[string]string
+	var g map[string]json.RawMessage
 	if json.Unmarshal(raw, &g) != nil {
 		return ""
 	}
-	return g[field]
+	var value string
+	if json.Unmarshal(g[field], &value) != nil {
+		return ""
+	}
+	return value
 }
 
 // saveWllrField persists a single string field to the "wllr" group of the
