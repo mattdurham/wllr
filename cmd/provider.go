@@ -1,13 +1,18 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
+	"time"
 
 	fantasy "charm.land/fantasy"
 	fantasyanthropicprovider "charm.land/fantasy/providers/anthropic"
@@ -26,6 +31,14 @@ const (
 
 	defaultAnthropicModel = "claude-sonnet-4-6"
 	defaultOpenAIModel    = "gpt-5.5"
+
+	defaultExecTimeout = 30 * time.Second
+	execKillGrace      = time.Second
+)
+
+var (
+	errExecCancelled = errors.New("exec cancelled")
+	errExecTimedOut  = errors.New("exec timed out")
 )
 
 // newCodexProvider builds an OpenAI fantasy.Provider pointed at the ChatGPT
@@ -164,24 +177,27 @@ func registerNativeTools(h *extension.Host) {
 	h.RegisterNativeTool(sdk.Tool{
 		Name:        "exec",
 		Description: "Execute a shell command on the host system",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute"},"dir":{"type":"string","description":"Working directory (optional, defaults to current)"}},"required":["command"]}`),
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute"},"dir":{"type":"string","description":"Working directory (optional, defaults to current)"},"timeout_ms":{"type":"integer","description":"Optional timeout in milliseconds (defaults to 30000)"}},"required":["command"]}`),
 	}, func(ctx context.Context, input json.RawMessage) (string, bool) {
 		var in struct {
-			Command string `json:"command"`
-			Dir     string `json:"dir"`
+			Command   string `json:"command"`
+			Dir       string `json:"dir"`
+			TimeoutMS int    `json:"timeout_ms"`
 		}
 		if err := json.Unmarshal(input, &in); err != nil || in.Command == "" {
 			return "command is required", true
 		}
-		cmd := exec.CommandContext(ctx, "sh", "-c", in.Command)
-		if in.Dir != "" {
-			cmd.Dir = in.Dir
+		timeout := defaultExecTimeout
+		if in.TimeoutMS > 0 {
+			timeout = time.Duration(in.TimeoutMS) * time.Millisecond
 		}
-		out, err := cmd.CombinedOutput()
-		output := string(out)
+		output, err := runShellCommand(ctx, in.Command, in.Dir, timeout)
 		if err != nil {
-			if ctx.Err() != nil {
+			if errors.Is(err, errExecCancelled) {
 				return "exec cancelled", true
+			}
+			if errors.Is(err, errExecTimedOut) {
+				return fmt.Sprintf("exec timed out after %s", timeout), true
 			}
 			if output == "" {
 				return err.Error(), true
@@ -207,4 +223,79 @@ func registerNativeTools(h *extension.Host) {
 		data, _ := json.Marshal(vars)
 		return string(data), false
 	})
+}
+
+type lockedBuffer struct {
+	mu sync.Mutex
+	bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.Buffer.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.Buffer.String()
+}
+
+func runShellCommand(ctx context.Context, command, dir string, timeout time.Duration) (string, error) {
+	if timeout <= 0 {
+		timeout = defaultExecTimeout
+	}
+	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	cmd := exec.Command("sh", "-c", command)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if dir != "" {
+		cmd.Dir = dir
+	}
+
+	var output lockedBuffer
+	cmd.Stdout = &output
+	cmd.Stderr = &output
+
+	if err := cmd.Start(); err != nil {
+		return output.String(), err
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+
+	select {
+	case err := <-done:
+		return output.String(), err
+	case <-runCtx.Done():
+		terminateProcessGroup(cmd.Process.Pid, syscall.SIGTERM)
+		select {
+		case <-done:
+			return output.String(), execContextError(runCtx)
+		case <-time.After(execKillGrace):
+			terminateProcessGroup(cmd.Process.Pid, syscall.SIGKILL)
+			<-done
+			return output.String(), execContextError(runCtx)
+		}
+	}
+}
+
+func execContextError(ctx context.Context) error {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return errExecTimedOut
+	}
+	return errExecCancelled
+}
+
+func terminateProcessGroup(pid int, sig syscall.Signal) {
+	if pid <= 0 {
+		return
+	}
+	if err := syscall.Kill(-pid, sig); err != nil && !errors.Is(err, syscall.ESRCH) {
+		_ = syscall.Kill(pid, sig)
+	}
 }
