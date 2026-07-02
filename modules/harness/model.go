@@ -660,9 +660,13 @@ func (m Model) updateKeyPress(msg tea.Msg) (Model, tea.Cmd, bool) {
 		return m, nil, false
 	}
 
-	if kp.String() == keyEsc && m.hasActiveTurn() {
-		m.cancelActiveTurn()
-		return m, nil, true
+	if kp.String() == keyEsc {
+		active := m.hasActiveTurn()
+		m.requestTurnCancel()
+		if active {
+			m.live.setStatus("stream", "cancelling…")
+			return m, nil, true
+		}
 	}
 
 	if m.picker.IsActive() {
@@ -716,10 +720,14 @@ func (m Model) hasActiveTurn() bool {
 }
 
 func (m Model) cancelActiveTurn() {
+	m.requestTurnCancel()
+	m.live.setStatus("stream", "cancelling…")
+}
+
+func (m Model) requestTurnCancel() {
 	if m.agentPool != nil {
 		m.agentPool.CancelAll()
 	}
-	m.live.setStatus("stream", "cancelling…")
 }
 
 // updateKeyPressPicker handles key events when the picker overlay is active.
@@ -1032,10 +1040,7 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 		return m, nil, true
 
 	case abortStreamMsg:
-		if m.agentPool != nil {
-			m.agentPool.CancelAll()
-		}
-		m.live.setStatus("stream", "cancelling…")
+		m.cancelActiveTurn()
 		return m, nil, true
 
 	case dispatchOnCommandMsg:
