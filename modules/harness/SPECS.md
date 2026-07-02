@@ -152,7 +152,7 @@ there is no built-in message renderer.
 ### Key Methods
 
 - `SetExternalContent(content)`: replaces the viewport content; scrolls to bottom only if the viewport was already at bottom, preserving manual scrollback during streaming.
-- `SetSize(width, height)`: resizes the viewport and re-applies `externalContent`.
+- `SetSize(width, height)`: resizes the viewport and re-applies `externalContent`; if the viewport was at the tail before resize, it remains at the tail afterward.
 - `ScrollUp(n)` / `ScrollDown(n)`: scroll the viewport.
 - `AddToolCall(id, name, input)` / `UpdateToolCall(id, isError, output)` / `ClearToolLog()`: maintain the per-turn tool log.
 - `ToolActivityLines(width, height)`: renders the most recent tool log entries as compact single-line status rows, truncated to `width` runes and capped at `height` rows.
@@ -627,7 +627,7 @@ The main chat transcript content is produced by a WASM extension (the bundled `a
 - `Model.resetChatArea()` (used by `/clear` and history-restore) patches the `chat` area root back to an empty `vstack` (`"chat-root"`, matching the structure the extension expects) and clears the viewport.
 - `Model.streamContent` accumulates streamed assistant text from `TokenMsg` so the completed response can be captured for `OnMessageEnd`/logging; it is reset on `StreamDoneMsg` and `/clear`.
 - `Model.pushNotification(text)` dispatches `sdk.EventNotify` (in a goroutine) so the transcript-owning extension renders notifications; it no longer writes to `ChatView`.
-- `renderScenes` always skips the `chat` area (it is rendered inside the viewport, not stacked below it).
+- `renderScenes` always skips the `chat` area (it is rendered inside the viewport, not stacked below it). Non-chat scene areas are rendered above the chat viewport; their height is subtracted by `chatHeight()` so the chat history viewport is what shrinks when extra UI appears.
 - `renderToolActivity()` renders a persistent pane below the chat viewport with the latest three tool call rows. When no tools have run this turn, the pane renders as three empty content rows. Rows for non-main agents include the agent ID so sub-agent activity is distinguishable from main-agent tool calls.
 
 **Invariants:**

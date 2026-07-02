@@ -41,10 +41,10 @@ type authCredential struct {
 	// token's absolute expiry in unix ms (with a safety margin already applied).
 	Access  string `json:"access,omitempty"`
 	Refresh string `json:"refresh,omitempty"`
-	Expires int64  `json:"expires,omitempty"`
 	// AccountID is the ChatGPT account id extracted from a Codex access token;
 	// required to route Codex API calls. Empty for providers that don't use it.
 	AccountID string `json:"account_id,omitempty"`
+	Expires   int64  `json:"expires,omitempty"`
 }
 
 // isExpired reports whether an OAuth access token is past its (margin-adjusted)
@@ -124,17 +124,17 @@ func saveAuthCredential(provider string, cred authCredential) error {
 	tmp := f.Name()
 	if err := f.Chmod(0o600); err != nil {
 		_ = f.Close()
-		_ = os.Remove(tmp)
+		_ = os.Remove(tmp) //nolint:gosec // tmp is returned by os.CreateTemp in the auth directory.
 		return err
 	}
 	if _, err := f.Write(out); err != nil {
 		_ = f.Close()
-		_ = os.Remove(tmp)
+		_ = os.Remove(tmp) //nolint:gosec // tmp is returned by os.CreateTemp in the auth directory.
 		return err
 	}
 	if err := f.Close(); err != nil {
-		_ = os.Remove(tmp)
+		_ = os.Remove(tmp) //nolint:gosec // tmp is returned by os.CreateTemp in the auth directory.
 		return err
 	}
-	return os.Rename(tmp, path)
+	return os.Rename(tmp, path) //nolint:gosec // tmp is returned by os.CreateTemp in the auth directory.
 }

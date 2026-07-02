@@ -68,7 +68,7 @@ func (i InputArea) Update(msg tea.Msg) (InputArea, tea.Cmd) {
 			}
 			return i, func() tea.Msg { return SubmitMsg{Content: content} }
 
-		case "esc":
+		case keyEsc:
 			if i.lastWasEsc {
 				i.lastWasEsc = false
 				i.ta.Reset()

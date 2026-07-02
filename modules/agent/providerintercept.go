@@ -21,16 +21,3 @@ type ProviderRequestInterceptor func(
 	messages []sdk.Message,
 	model string,
 ) (outMessages []sdk.Message, outModel string, blocked bool, reason string)
-
-// ProviderRequestBlockedError is returned from a turn when an interceptor blocks
-// the provider request. It carries the reason supplied by the interceptor.
-type ProviderRequestBlockedError struct {
-	Reason string
-}
-
-func (e *ProviderRequestBlockedError) Error() string {
-	if e.Reason == "" {
-		return "provider request blocked by interceptor"
-	}
-	return "provider request blocked: " + e.Reason
-}

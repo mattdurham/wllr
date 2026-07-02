@@ -27,11 +27,6 @@ type Config struct {
 	// (WLLR_LOCAL_BASE_URL or wllr.local_base_url).
 	LocalBaseURL string
 
-	// LocalContextWindow is the default context window for models discovered
-	// from the configured local endpoint (WLLR_LOCAL_CONTEXT_WINDOW or
-	// wllr.local_context_window).
-	LocalContextWindow int64
-
 	// ExtensionsDir is the directory scanned for .wasm extension files (BOB_EXTENSIONS_DIR).
 	ExtensionsDir string
 
@@ -40,6 +35,11 @@ type Config struct {
 
 	// Provider is the LLM provider name (BOB_PROVIDER, default: anthropic).
 	Provider string
+
+	// LocalContextWindow is the default context window for models discovered
+	// from the configured local endpoint (WLLR_LOCAL_CONTEXT_WINDOW or
+	// wllr.local_context_window).
+	LocalContextWindow int64
 
 	// ContextWindow overrides the model's context window in tokens (WLLR_CONTEXT_WINDOW).
 	// When 0, wllr queries the provider at startup to determine the window.
@@ -101,7 +101,7 @@ func LoadConfig() (*Config, error) {
 	if cfg.Model == "" {
 		cfg.Model = defaultModelForProvider(cfg.Provider)
 		if cfg.Model == "" && cfg.Provider != providerLocal {
-			cfg.Model = "claude-sonnet-4-6"
+			cfg.Model = defaultAnthropicModel
 		}
 	}
 	cfg.Model = normalizeModelForProvider(cfg.Provider, cfg.Model)
@@ -114,8 +114,8 @@ func LoadConfig() (*Config, error) {
 			cfg.AnthropicAPIKey = cred.Access
 		}
 	}
-	if cfg.Provider == "openai" && cfg.OpenAIAPIKey == "" {
-		if cred, ok := loadAuthCredential("openai"); ok && cred.Type == authTypeOAuth && cred.Access != "" {
+	if cfg.Provider == providerOpenAI && cfg.OpenAIAPIKey == "" {
+		if cred, ok := loadAuthCredential(providerOpenAI); ok && cred.Type == authTypeOAuth && cred.Access != "" {
 			cfg.OpenAIAPIKey = cred.Access
 		}
 	}
@@ -128,10 +128,10 @@ type wllrSettings struct {
 	Model                 string          `json:"model"`
 	LocalAPIKey           string          `json:"local_api_key"`
 	LocalBaseURL          string          `json:"local_base_url"`
-	ContextWindow         int64           `json:"-"`
-	LocalContextWindow    int64           `json:"-"`
 	RawContextWindow      json.RawMessage `json:"context_window"`
 	RawLocalContextWindow json.RawMessage `json:"local_context_window"`
+	ContextWindow         int64           `json:"-"`
+	LocalContextWindow    int64           `json:"-"`
 }
 
 func loadWllrSettings() wllrSettings {
@@ -191,9 +191,9 @@ func missingProviderAuth(cfg *Config) (string, bool) {
 	switch cfg.Provider {
 	case providerAnthropic:
 		return "ANTHROPIC_API_KEY", cfg.AnthropicAPIKey == ""
-	case "openai":
+	case providerOpenAI:
 		return "OPENAI_API_KEY", cfg.OpenAIAPIKey == ""
-	case "gemini":
+	case providerGemini:
 		return "GEMINI_API_KEY", cfg.GeminiAPIKey == ""
 	default:
 		return "", false
@@ -203,7 +203,7 @@ func missingProviderAuth(cfg *Config) (string, bool) {
 func missingAuthError(provider, envVar string) error {
 	msg := fmt.Sprintf("%s is required when WLLR_PROVIDER=%s", envVar, provider)
 	switch provider {
-	case providerAnthropic, "openai":
+	case providerAnthropic, providerOpenAI:
 		return fmt.Errorf("%s. Set %s, or run `wllr login --provider %s` to authenticate with OAuth before starting the TUI", msg, envVar, provider)
 	default:
 		return fmt.Errorf("%s. Set %s before starting wllr", msg, envVar)

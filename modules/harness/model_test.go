@@ -568,6 +568,35 @@ func TestModel_chatHeight_AccountsForConsole(t *testing.T) {
 	}
 }
 
+func TestModel_chatHeight_AccountsForSceneStack(t *testing.T) {
+	m := newTestModel()
+	m.width = 80
+	m.height = 40
+	before := m.chatHeight()
+	if err := m.scene.CreateArea(sdk.UIArea{ID: "extra", Placement: sdk.UIAreaSidebar}); err != nil {
+		t.Fatalf("create extra scene area: %v", err)
+	}
+	root := sdk.UINode{
+		ID:   "extra-root",
+		Type: sdk.UINodeVStack,
+		Children: []sdk.UINode{
+			{ID: "extra-1", Type: sdk.UINodeText, Text: "extra one"},
+			{ID: "extra-2", Type: sdk.UINodeText, Text: "extra two"},
+		},
+	}
+	if err := m.scene.ApplyPatch(sdk.UIPatchParams{Area: "extra", Ops: []sdk.UIPatchOp{
+		{Op: sdk.UIOpSetRoot, Node: &root},
+	}}); err != nil {
+		t.Fatalf("patch extra scene area: %v", err)
+	}
+
+	after := m.chatHeight()
+
+	if before-after != 2 {
+		t.Fatalf("chatHeight should shrink by extra scene lines, before=%d after=%d", before, after)
+	}
+}
+
 func TestModel_ToolActivityPane_AlwaysRendersAndShowsRecentTools(t *testing.T) {
 	m := newTestModel()
 	m.width = 80

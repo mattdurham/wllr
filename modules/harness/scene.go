@@ -29,12 +29,12 @@ type sceneArea struct {
 	root      *sdk.UINode
 	id        string
 	placement sdk.UIAreaPlacement
-	weight    int
 	// Sizing constraints — each accepts "" (unconstrained), "N" (absolute), or "N%" (percent).
 	minHeight string
 	maxHeight string
 	minWidth  string
 	maxWidth  string
+	weight    int
 }
 
 // NewSceneRenderer returns an empty SceneRenderer.
@@ -535,7 +535,7 @@ func styleFromProps(p *sdk.UIProps, width int) (lipgloss.Style, int) {
 	case "normal":
 		style = style.Border(lipgloss.NormalBorder())
 		inner -= 2
-	case "rounded":
+	case borderRounded:
 		style = style.Border(lipgloss.RoundedBorder())
 		inner -= 2
 	case "thick":

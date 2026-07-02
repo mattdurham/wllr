@@ -11,31 +11,22 @@ import (
 	"sync"
 )
 
-// LSP Server State
+// LSPServer tracks native LSP process state.
 type LSPServer struct {
+	StdinPipe    io.WriteCloser
+	Cmd          *exec.Cmd
+	StdoutPipe   *bufio.Reader
 	Name         string
 	Command      string
+	WorkspaceURI string
 	Args         []string
-	Cmd          *exec.Cmd
-	StdinPipe    io.WriteCloser
-	StdoutPipe   *bufio.Reader
 	Stderr       []byte
 	RequestID    int
-	Initialized  bool
-	WorkspaceURI string
 	Mutex        sync.Mutex
+	Initialized  bool
 }
 
-type LSPServerInfo struct {
-	ID           string   `json:"id"`
-	Command      string   `json:"command"`
-	Args         []string `json:"args,omitempty"`
-	Role         string   `json:"role"`
-	FilePatterns []string `json:"file_patterns,omitempty"`
-	Languages    []string `json:"languages,omitempty"`
-}
-
-var LSP_SERVERS = map[string]LSPServerInfo{
+var lspServers = map[string]LSPServerInfo{
 	"gopls": {
 		ID:           "gopls",
 		Command:      "gopls",
@@ -45,10 +36,7 @@ var LSP_SERVERS = map[string]LSPServerInfo{
 	},
 }
 
-var fileToServer = map[string][]string{
-	".go": {"gopls"},
-}
-
 func main() {
+	_ = lspServers
 	fmt.Println("LSP extension native mode")
 }

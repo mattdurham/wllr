@@ -10,9 +10,9 @@ package harness
 // such as the statusline.
 type sceneDirtyMsg struct {
 	Area       string
-	AppendOnly bool
 	AppendID   string
 	AppendText string
+	AppendOnly bool
 }
 
 type chatAppendRefreshMsg struct{}

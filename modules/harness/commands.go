@@ -65,7 +65,7 @@ func (r *Registry) HelpText() string {
 // registerBuiltins installs the built-in commands into r.
 func registerBuiltins(r *Registry) {
 	r.Register(Command{
-		Name:    "help",
+		Name:    commandHelp,
 		Desc:    "Show available commands",
 		Instant: true,
 		Handler: func(_ []string) tea.Cmd {
