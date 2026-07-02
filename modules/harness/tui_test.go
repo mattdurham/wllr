@@ -5,10 +5,13 @@ package harness
 // as model_test.go) — no real terminal or program required.
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/fantasy"
 	"github.com/mattdurham/wllr/modules/agent"
 )
 
@@ -121,9 +124,9 @@ func TestModel_PgDown_ScrollsChat(t *testing.T) {
 	}
 }
 
-// ---- ctrl+c during streaming sets cancelling status ----
+// ---- esc during streaming cancels, ctrl+c exits ----
 
-func TestModel_CtrlC_DuringStream_SetsCancellingStatus(t *testing.T) {
+func TestModel_Esc_DuringStream_SetsCancellingStatus(t *testing.T) {
 	pool := agent.NewPool()
 	lm := newMockLM("hello", " ", "world")
 	_, _ = pool.Spawn("main", lm, agent.SpawnOpts{})
@@ -132,10 +135,70 @@ func TestModel_CtrlC_DuringStream_SetsCancellingStatus(t *testing.T) {
 	// Force streaming state on.
 	m.streaming = true
 
-	m, _ = callUpdate(m, keyMsg('c', tea.ModCtrl))
+	m, _ = callUpdate(m, keyMsg(tea.KeyEsc, 0))
 
 	if v := m.live.getStatus("stream"); v != "cancelling…" {
 		t.Errorf("expected 'cancelling…', got %q", v)
+	}
+}
+
+func TestModel_Esc_DuringStream_CancelsBeforeModalClose(t *testing.T) {
+	m := newTestModel()
+	m.streaming = true
+	m.modalContent = "help"
+
+	m, _ = callUpdate(m, keyMsg(tea.KeyEsc, 0))
+
+	if v := m.live.getStatus("stream"); v != "cancelling…" {
+		t.Errorf("expected 'cancelling…', got %q", v)
+	}
+	if m.modalContent == "" {
+		t.Fatal("modal should remain open when esc is used to cancel an active turn")
+	}
+}
+
+func TestModel_Esc_CancelsRunningAgentWhenStreamingStateIsStale(t *testing.T) {
+	lm := &blockingLM{started: make(chan struct{})}
+	pool := agent.NewPool()
+	a, err := pool.Spawn(agent.MainAgentID, lm, agent.SpawnOpts{TurnTimeout: -1})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	a.Submit(context.Background(), "block")
+	select {
+	case <-lm.started:
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for blocking LM to start")
+	}
+
+	m := New(pool, agent.MainAgentID, nil)
+	m.streaming = false
+	m, _ = callUpdate(m, keyMsg(tea.KeyEsc, 0))
+
+	if v := m.live.getStatus("stream"); v != "cancelling…" {
+		t.Errorf("expected 'cancelling…', got %q", v)
+	}
+	deadline := time.After(time.Second)
+	for a.IsRunning() {
+		select {
+		case <-deadline:
+			t.Fatal("agent should stop after esc cancellation")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
+
+func TestModel_CtrlC_DuringStream_Quits(t *testing.T) {
+	m := newTestModel()
+	m.streaming = true
+
+	m, cmd := callUpdate(m, keyMsg('c', tea.ModCtrl))
+	if cmd == nil {
+		t.Fatal("expected quit cmd from ctrl+c when streaming")
+	}
+	if v := m.live.getStatus("stream"); v == "cancelling…" {
+		t.Errorf("ctrl+c should quit without setting cancelling status, got %q", v)
 	}
 }
 
@@ -150,6 +213,35 @@ func TestModel_CtrlC_NotStreaming_Quits(t *testing.T) {
 	// We can't easily check tea.Quit without running the program, but we
 	// can verify a cmd was returned (not nil).
 }
+
+type blockingLM struct {
+	started chan struct{}
+}
+
+var _ fantasy.LanguageModel = (*blockingLM)(nil)
+
+func (b *blockingLM) Generate(_ context.Context, _ fantasy.Call) (*fantasy.Response, error) {
+	return &fantasy.Response{}, nil
+}
+
+func (b *blockingLM) Stream(ctx context.Context, _ fantasy.Call) (fantasy.StreamResponse, error) {
+	return func(yield func(fantasy.StreamPart) bool) {
+		close(b.started)
+		<-ctx.Done()
+		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeError, Error: ctx.Err()})
+	}, nil
+}
+
+func (b *blockingLM) GenerateObject(_ context.Context, _ fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
+	return nil, nil
+}
+
+func (b *blockingLM) StreamObject(_ context.Context, _ fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
+	return nil, nil
+}
+
+func (b *blockingLM) Provider() string { return "blocking" }
+func (b *blockingLM) Model() string    { return "blocking-model" }
 
 // ---- StreamDoneMsg clears working indicator ----
 

@@ -23,9 +23,9 @@ type Renderer interface {
 	// ShowPicker opens an interactive item picker.
 	ShowPicker(title string, items []sdk.ShowPickerItem, callback string)
 	// AddToolCall records a tool call start.
-	AddToolCall(id, toolName, input string)
+	AddToolCall(id, agentID, toolName, input string)
 	// UpdateToolCall records a tool call completion.
-	UpdateToolCall(id string, isError bool, output string)
+	UpdateToolCall(id, agentID, toolName string, isError bool, output string)
 	// SetStatus updates a keyed status entry.
 	SetStatus(key, value string)
 	// AppendConsoleLine adds a line to the console pane.

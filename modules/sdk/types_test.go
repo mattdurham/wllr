@@ -322,9 +322,14 @@ func TestEventTypeConstants(t *testing.T) {
 		sdk.EventAfterToolCall,
 		sdk.EventOnCommand,
 		sdk.EventTick,
+		sdk.EventContextUsage,
+		sdk.EventToken,
+		sdk.EventNotify,
+		sdk.EventLog,
+		sdk.EventModelChanged,
 	}
-	if len(types) != 13 {
-		t.Errorf("expected 13 event types, got %d", len(types))
+	if len(types) != 18 {
+		t.Errorf("expected 18 event types, got %d", len(types))
 	}
 	for _, et := range types {
 		if et == "" {

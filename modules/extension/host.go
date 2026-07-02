@@ -1497,7 +1497,7 @@ func (h *Host) ExecuteTool(
 		tr := toolResult{Result: result, IsError: isError}
 
 		if h.uiBridge() != nil {
-			h.uiBridge().AfterToolCall(toolCallID, toolName, result, isError)
+			h.uiBridge().AfterToolCall(agentID, toolCallID, toolName, result, isError)
 		}
 		return tr, nil
 	}
@@ -1532,7 +1532,7 @@ func (h *Host) ExecuteTool(
 
 		// Notify the UI bridge so the TUI can update the tool call display.
 		if ui := h.uiBridge(); ui != nil {
-			ui.AfterToolCall(toolCallID, toolName, result.Result, result.IsError)
+			ui.AfterToolCall(agentID, toolCallID, toolName, result.Result, result.IsError)
 		}
 		return result, nil
 	case <-ctx.Done():

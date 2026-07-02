@@ -33,18 +33,20 @@ These types cross the host/WASM boundary via JSON; their wire format is stable a
 | `EventOnCommand`              | `"on_command"`              | User invoked a slash command registered by an extension      |
 | `EventTick`                   | `"tick"`                    | Periodic heartbeat dispatched by the host at a configured interval |
 | `EventContextUsage`           | `"context_usage"`           | Dispatched after each completed turn with context window usage |
-| `EventToken`                  | `"token"`                   | Dispatched with a batch (~30ms) of streamed assistant text (TokenPayload) |
+| `EventToken`                  | `"token"`                   | Dispatched with a batch (~75ms) of streamed assistant text (TokenPayload) |
 | `EventNotify`                 | `"notify"`                  | Dispatched when a system notification line is shown in chat (NotifyPayload) |
 | `EventLog`                    | `"log"`                     | Dispatched with a batch (~30ms) of structured log records (LogBatchPayload) |
+| `EventModelChanged`           | `"model_changed"`           | Dispatched after active provider/model status changes (ModelChangedPayload) |
 
 **Invariants:**
 
 - The set of `EventType` string values must not change between ABI versions without a version bump.
 - An unknown `EventType` must be silently ignored by extensions (forward-compatibility).
-- There are exactly 17 defined event types.
-- `EventToken` carries a `TokenPayload{AgentID, Text}`; batches are coalesced by the harness so the WASM crossing rate stays bounded (~33/sec) regardless of provider speed.
+- There are exactly 18 defined event types.
+- `EventToken` carries a `TokenPayload{AgentID, Text}`; batches are coalesced by the harness so the WASM crossing rate stays bounded (~13/sec) regardless of provider speed.
 - `EventNotify` carries a `NotifyPayload{Text}`; it is dispatched for every notification line shown in the chat, regardless of origin (extension `notify` call, model change, reload, extension error). Handlers must not call `notify` to avoid a dispatch loop.
 - `EventLog` carries a `LogBatchPayload{Records []LogRecord}`; the host's slog handler coalesces records (~30ms) and forwards them so extensions can act as log sinks. The dispatch path is reentrancy-guarded — logs emitted while dispatching `EventLog` are not re-dispatched — so handlers must not rely on logging from within an `EventLog` handler.
+- `EventModelChanged` carries a `ModelChangedPayload{Provider, Model}` and is dispatched after the harness updates its live status state for provider/model changes.
 
 ---
 
@@ -75,7 +77,7 @@ All fields are `omitempty`.
 
 ---
 
-## Payload Types (14 total)
+## Payload Types
 
 ### SessionStartPayload (`EventSessionStart`)
 
@@ -178,6 +180,13 @@ No payload fields — the event carries no structured data beyond the event type
 | `compacted` | bool         | `true` when `compactHistory` ran and succeeded during the turn                  |
 
 **Note for extension authors:** `ContextUsage.Percent` is expressed as a percentage (0–100, e.g. 75.4 means 75.4% full). This is distinct from the pool's internal `ThresholdPct`, which is a fraction (0.0–1.0). Do not compare `Percent` directly to `ThresholdPct`; convert as needed.
+
+### ModelChangedPayload (`EventModelChanged`)
+
+| Field      | Type   | Description                         |
+|------------|--------|-------------------------------------|
+| `provider` | string | Active provider identifier          |
+| `model`    | string | Active model identifier, if known   |
 
 ---
 
@@ -311,7 +320,7 @@ Note: Percent is 0–100. CompactConfig.ThresholdPct is a fraction 0.0–1.0.
 
 ---
 
-## host_call Method Constants (30 total)
+## host_call Method Constants (50 total)
 
 ### Core methods
 
@@ -329,11 +338,16 @@ Note: Percent is 0–100. CompactConfig.ThresholdPct is a fraction 0.0–1.0.
 | `MethodAbort`             | `"abort"`              | Signal the host to abort the current agent operation          |
 | `MethodRequestPermission` | `"request_permission"` | Check whether the extension holds a given permission          |
 | `MethodGetEnv`            | `"get_env"`            | Read a host environment variable (no permission required)     |
+| `MethodGetOS`             | `"get_os"`             | Returns the host operating system and architecture strings    |
 | `MethodConfigRead`        | `"config_read"`        | Read the calling extension's config group from the shared config file |
 | `MethodModal`             | `"modal"`              | Display text in a modal overlay window                        |
 | `MethodSetSystemPrompt`   | `"set_system_prompt"`  | Replace the base system prompt on all agents                  |
 | `MethodAppendSystemPrompt`| `"append_system_prompt"`| Append text to the existing base system prompt               |
 | `MethodExec`              | `"exec"`               | Execute a shell command on the host (requires PermExec)       |
+| `MethodReadFile`          | `"read_file"`          | Read file contents on the host (requires PermFileRead)        |
+| `MethodWriteFile`         | `"write_file"`         | Write content to a file on the host (requires PermFileWrite)  |
+| `MethodAppendFile`        | `"append_file"`        | Append content to a file, creating it if absent (requires PermFileWrite) |
+| `MethodHTTPPost`          | `"http_post"`          | Make an HTTP POST request (requires PermNetworkWrite)         |
 | `MethodBeforeToolCall`    | `"before_tool_call"`   | Intercept a tool call before execution (observation constant) |
 | `MethodAfterToolCall`     | `"after_tool_call"`    | Observe a tool result after execution (observation constant)  |
 
@@ -344,8 +358,11 @@ Note: Percent is 0–100. CompactConfig.ThresholdPct is a fraction 0.0–1.0.
 | `MethodAgentSpawn`        | `"agent_spawn"`         | Create and register a new sub-agent           |
 | `MethodAgentClose`        | `"agent_close"`         | Cancel and remove a sub-agent                 |
 | `MethodAgentSendMessage`  | `"agent_send_message"`  | Send a message to a named agent               |
+| `MethodAgentDeliver`      | `"agent_deliver"`       | Append message to inbox and trigger execution |
+| `MethodAgentRun`          | `"agent_run"`           | Trigger an immediate agent turn               |
 | `MethodAgentList`         | `"agent_list"`          | Return all live agent IDs and names           |
 | `MethodAgentTokenCount`   | `"agent_token_count"`   | Return total token count across all agents    |
+| `MethodAgentResetHistory` | `"agent_reset_history"` | Replace agent's conversation history          |
 
 ### Team management methods
 
@@ -355,6 +372,8 @@ Note: Percent is 0–100. CompactConfig.ThresholdPct is a fraction 0.0–1.0.
 | `MethodTeamClose`         | `"team_close"`          | Cancel all members and remove the team        |
 | `MethodTeamAddMember`     | `"team_add_member"`     | Add an agent to a team                        |
 | `MethodTeamRemoveMember`  | `"team_remove_member"`  | Remove an agent from a team (no cancel)       |
+| `MethodTeamGetInfo`       | `"team_get_info"`       | Return member agent IDs for a team            |
+| `MethodTeamList`          | `"team_list"`           | Return all registered team IDs                |
 
 ### MCP bridge methods
 
@@ -364,10 +383,24 @@ Note: Percent is 0–100. CompactConfig.ThresholdPct is a fraction 0.0–1.0.
 | `MethodMCPClose` | `"mcp_close"` | Terminate an MCP server subprocess                 |
 | `MethodMCPSend`  | `"mcp_send"`  | Write JSON-RPC data to an MCP server's stdin       |
 | `MethodMCPRead`  | `"mcp_read"`  | Read a JSON-RPC response from an MCP server's stdout |
-| `MethodUICreateArea` | `"ui_create_area"` | Register a UI scene-graph area (requires `ui`)  |
-| `MethodUIPatch`  | `"ui_patch"`  | Apply a batch of scene-graph patch ops (requires `ui`) |
-| `MethodUIRemoveArea` | `"ui_remove_area"` | Remove a UI area and its scene graph (requires `ui`) |
+
+### UI methods
+
+| Constant           | Wire value         | Purpose                                                |
+|-------------------|--------------------|--------------------------------------------------------|
+| `MethodUICreateArea` | `"ui_create_area"` | Register a UI scene-graph area (requires `ui`)         |
+| `MethodUIPatch`    | `"ui_patch"`       | Apply a batch of scene-graph patch ops (requires `ui`) |
+| `MethodUIRemoveArea` | `"ui_remove_area"` | Remove a UI area and its scene graph (requires `ui`)   |
 | `MethodUIUpdateArea` | `"ui_update_area"` | Update constraints/weight of an existing area (requires `ui`) |
+
+### Observability / Status methods
+
+| Constant               | Wire value           | Purpose                                                      |
+|------------------------|----------------------|--------------------------------------------------------------|
+| `MethodShowPicker`     | `"show_picker"`      | Open an interactive TUI list picker                          |
+| `MethodGetStatusInfo`  | `"get_status_info"`  | Get current status bar state (no permission required)       |
+| `MethodGetContextUsage`| `"get_context_usage"`| Get current context window usage (no permission required)   |
+| `MethodSetStatusLine`  | `"set_status_line"`  | Replace entire status bar text (no permission required)     |
 
 **Invariant:** Method strings must not change between ABI versions without a version bump.
 
@@ -456,6 +489,42 @@ Returns an error if the area ID does not exist.
 
 ---
 
+## Event Payloads (Detailed)
+
+### TokenPayload (`EventToken`)
+
+| Field    | Type   | Description                         |
+|----------|--------|-------------------------------------|
+| `agent`  | string | Agent that produced the token       |
+| `text`   | string | Chunk of streamed assistant text    |
+
+Batches are coalesced (~75ms) to keep the WASM boundary crossing rate bounded regardless of provider speed.
+
+### NotifyPayload (`EventNotify`)
+
+| Field | Type   | Description                            |
+|-------|--------|----------------------------------------|
+| `text`| string | Notification text shown in the chat    |
+
+Dispatched for every notification line regardless of origin. Handlers must not call `notify` to avoid a dispatch loop.
+
+### LogBatchPayload (`EventLog`)
+
+| Field    | Type        | Description                                      |
+|----------|-------------|--------------------------------------------------|
+| `records`| []LogRecord | Structured log records emitted by the host's slog handler |
+
+Batches are coalesced (~30ms) and dispatched with reentrancy protection.
+
+### ModelChangedPayload (`EventModelChanged`)
+
+| Field      | Type   | Description                         |
+|------------|--------|-------------------------------------|
+| `provider` | string | Active provider identifier          |
+| `model`    | string | Active model identifier, if known   |
+
+---
+
 ## Error Codes
 
 Returned as `int32` from the `host_call` WASM import (not the JSON layer).
@@ -487,3 +556,4 @@ Returned as `int32` from the `host_call` WASM import (not the JSON layer).
 13. `EventContextUsage` (`"context_usage"`) is fired once per completed turn, after the turn's usage is stored, only on success (not on error or cancellation).
 14. `MethodGetContextUsage` (`"get_context_usage"`) requires no permission; it returns a zero-valued `ContextUsage` when the agent bridge is unavailable.
 15. UI scene-graph types (`UINode`, `UIProps`, `UIPatchOp`, `UIPatchParams`, `UIArea`, `UICreateAreaParams`) are pure JSON data definitions; `UIPatchOp.Index` is a `*int` so a valid index of `0` survives the wire while a nil index (append) is omitted.
+16. All 47 `Method*` constants are documented above; missing methods in SPECS.md indicate incomplete documentation rather than missing implementation.

@@ -326,3 +326,15 @@ implementations.
 **Rationale:** The core slog handler (cmd/loghandler.go) batches log records and dispatches `EventLog`, but only once a sink exists — `HasSubscribers` lets it cheaply check without building/marshalling a payload that nothing consumes (and lets it keep buffering startup logs in a ring until the `logging` extension subscribes). `SetLogger` is needed because logging is configured *after* `NewHost` (the handler must hold the host to dispatch), so the host's own diagnostic logger is swapped in post-construction. `AppendFile` is the capability the log sink needs: `WriteFile` truncates, which would discard prior log lines; append is the correct semantics and is generically useful. `CapabilityProvider` gaining a method is a breaking interface change for out-of-tree implementations, but all in-tree impls (osCapabilityProvider + test doubles) are updated.
 
 **Consequence:** `CapabilityProvider` interface grows `AppendFile(path, content string) error` — every implementation (cmd/capability.go, host_test.go, interfaces_test.go, test/wasmchat) updated. `append_file` is permission-gated identically to `write_file`. `HasSubscribers` copies the extension slice under `mu.RLock` like `DispatchEvent`. The reentrancy-guarded log dispatch lives in `cmd` (the handler), not the host — the host just provides `DispatchEvent`/`HasSubscribers`; the guard is the handler's `inDispatch` atomic.
+
+---
+
+## 28. UIBridge.AfterToolCall carries agent identity
+
+*Added: 2026-07-02*
+
+**Decision:** Extend `UIBridge.AfterToolCall` to include the originating `agentID` alongside the tool call ID, tool name, final result, and error flag.
+
+**Rationale:** `AfterToolCallPayload` already includes `AgentID`, but the internal UI bridge dropped it. That made TUI logs ambiguous when sub-agents executed tools: completions could appear without a visible matching start and without source attribution. Carrying the agent ID through the bridge keeps the UI and logs aligned with the host's event payload.
+
+**Consequence:** All `UIBridge` implementations and tests update their method signature. The WASM extension ABI is unchanged; this is an internal Go bridge contract change.

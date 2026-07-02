@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -106,14 +107,62 @@ func TestLoadConfig_SavedLocalProviderDefault(t *testing.T) {
 	if cfg.Provider != "local" {
 		t.Errorf("Provider = %q, want local", cfg.Provider)
 	}
-	if cfg.Model != "llama3.2" {
-		t.Errorf("Model = %q, want llama3.2", cfg.Model)
+	if cfg.Model != "" {
+		t.Errorf("Model = %q, want empty before local model discovery", cfg.Model)
 	}
 	if cfg.ProviderConfigured != true {
 		t.Error("ProviderConfigured should be true for saved provider")
 	}
 	if _, missing := missingProviderAuth(cfg); missing {
 		t.Error("local provider should not require auth")
+	}
+}
+
+func TestLoadConfig_LocalSettingsFromConfig(t *testing.T) {
+	path := withConfigPath(t)
+	seed := map[string]any{
+		"wllr": map[string]any{
+			"provider":             "local",
+			"model":                "deepseek-v4-flash",
+			"local_base_url":       "http://localhost:8000/v1",
+			"local_api_key":        "local-key",
+			"local_context_window": 300000,
+		},
+	}
+	data, _ := json.MarshalIndent(seed, "", "  ")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("seed write: %v", err)
+	}
+	t.Setenv("WLLR_PROVIDER", "")
+	t.Setenv("WLLR_MODEL", "")
+	t.Setenv("WLLR_LOCAL_BASE_URL", "")
+	t.Setenv("WLLR_LOCAL_API_KEY", "")
+	t.Setenv("WLLR_LOCAL_CONTEXT_WINDOW", "")
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig returned error: %v", err)
+	}
+	if cfg.Provider != providerLocal {
+		t.Fatalf("Provider = %q, want local", cfg.Provider)
+	}
+	if cfg.Model != "deepseek-v4-flash" {
+		t.Errorf("Model = %q, want deepseek-v4-flash", cfg.Model)
+	}
+	if !cfg.ProviderConfigured {
+		t.Error("ProviderConfigured should be true for saved provider")
+	}
+	if !cfg.ModelConfigured {
+		t.Error("ModelConfigured should be true for saved model")
+	}
+	if cfg.LocalBaseURL != "http://localhost:8000/v1" {
+		t.Errorf("LocalBaseURL = %q", cfg.LocalBaseURL)
+	}
+	if cfg.LocalAPIKey != "local-key" {
+		t.Errorf("LocalAPIKey = %q", cfg.LocalAPIKey)
+	}
+	if cfg.LocalContextWindow != 300000 {
+		t.Errorf("LocalContextWindow = %d, want 300000", cfg.LocalContextWindow)
 	}
 }
 

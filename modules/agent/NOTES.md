@@ -419,3 +419,15 @@ The user chose the simple "always notify" design over per-turn suppression or an
 **Rationale:** The `/thinking` picker needs to change the reasoning level (Anthropic thinking budget / OpenAI reasoning effort / Gemini thinking budget) of the already-running main agent, not just at spawn. Provider options were previously write-once via SpawnOpts. Reusing `lmMu` (rather than a new mutex) keeps the "model + its request options are swapped together, atomically, between turns" story in one place and matches the SetModel design (§27). A nil value clears options so "thinking off" fully removes the provider option rather than sending a zero budget.
 
 **Consequence:** `Agent` gains `providerOpts`; `Submit` reads it under `lmMu` and overrides the captured `opts.ProviderOptions` for the turn. Spawn-time behavior is unchanged (providerOpts seeds from opts.ProviderOptions). The harness `SelectThinkingFn` (cmd/main.go) maps a level → provider options (cmd/thinking.go) and calls `SetProviderOptions` on the main agent. Covered by `TestSetProviderOptions_AppliedToNextTurn`.
+
+---
+
+## 29. Spawner tool-call observer for sub-agent UI attribution
+
+*Added: 2026-07-02*
+
+**Decision:** Add `Spawner.SetToolCallObserver` so harness code can receive sub-agent tool-call starts with the spawned agent ID.
+
+**Rationale:** Sub-agent tokens should remain silent in the main transcript, but hiding their tool starts made the tool activity pane and logs hard to reconcile with the subagents window. The host already reports completions through `AfterToolCall`; starts needed equivalent attribution.
+
+**Consequence:** The observer is optional and nil-safe. Existing spawner behavior is preserved unless the harness installs an observer.

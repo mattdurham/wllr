@@ -181,6 +181,8 @@ Append-only design decision log. Never delete entries; add an `*Addendum (date):
 
 **Consequence:** Event type count rises to 15. The harness token batcher gains an optional dispatch hook that forwards each flushed batch to `Host.DispatchEvent(EventToken)` on the agent goroutine, in addition to the existing `TokenMsg` chat path (the two coexist; a later phase may remove the direct chat path once the WASM path renders the transcript). `wllrsdk.go` gains `OnToken(func(agentID, text string))`.
 
+*Addendum (2026-07-01):* Token batches are now coalesced at ~75ms instead of ~30ms to reduce terminal render/layout pressure while preserving streaming feel.
+
 ---
 
 ## 15. EventNotify — notifications to extensions (UI P4)
@@ -228,3 +230,15 @@ Append-only design decision log. Never delete entries; add an `*Addendum (date):
 **Rationale:** File-log writing moved out of the Go core into a bundled `logging` WASM extension, and any extension can now hook logs (observability, shipping to a backend — pairs naturally with the existing otel-traces extension). The host's slog handler converts records to `LogRecord` (level name lowercased, time RFC3339Nano UTC, attrs pre-stringified to `LogAttr{Key,Value}` preserving emission order so extensions never need slog's typed Value) and dispatches batches via `EventLog`. Batching mirrors `EventToken` (~30ms) to bound the WASM crossing rate. `append_file` exists because `write_file` truncates — a log sink needs append semantics; it is a generic, reusable capability rather than a logging-specific sink call.
 
 **Consequence:** Event type count rises to 17. `LogAttr.Value` is a pre-stringified string (the host calls `slog.Value.String()`), so structured numeric/bool attrs arrive as text — acceptable for a text-log sink and keeps the wire format trivial. `append_file` requires `file_write`. `wllrsdk.go` gains `OnLog`, `AppendFile`, and the `LogRecord`/`LogAttr` types. The reentrancy guard (logs emitted while dispatching `EventLog` are dropped) lives in the host-side handler, not the ABI, but is documented so extension authors don't log from `OnLog`. ABIVersion unchanged (additive).
+
+---
+
+## 19. EventModelChanged — provider/model status updates
+
+*Added: 2026-07-01*
+
+**Decision:** Add `EventModelChanged` (`"model_changed"`) and `ModelChangedPayload{Provider, Model}`.
+
+**Rationale:** Display extensions need an immediate signal when provider/model state changes. Polling `get_status_info` on `tick` can miss startup ordering and delays visible updates after `/model` or the first-run provider wizard.
+
+**Consequence:** Event type count rises to 18. Extensions can subscribe to `model_changed` and update status UI without polling. The harness dispatches the event after its live provider/model state is updated.

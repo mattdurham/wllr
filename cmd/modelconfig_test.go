@@ -51,6 +51,28 @@ func TestSaveProvider_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestSavedWllrField_MixedValueTypes(t *testing.T) {
+	path := withConfigPath(t)
+	seed := map[string]any{
+		"wllr": map[string]any{
+			"provider":             "local",
+			"model":                "deepseek-v4-flash",
+			"local_context_window": 300000,
+		},
+	}
+	data, _ := json.MarshalIndent(seed, "", "  ")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("seed write: %v", err)
+	}
+
+	if got := savedProvider(); got != "local" {
+		t.Fatalf("savedProvider = %q, want local", got)
+	}
+	if got := savedModel(); got != "deepseek-v4-flash" {
+		t.Fatalf("savedModel = %q, want deepseek-v4-flash", got)
+	}
+}
+
 func TestSaveModel_PreservesOtherGroups(t *testing.T) {
 	path := withConfigPath(t)
 
@@ -94,7 +116,7 @@ func TestSaveModel_PreservesOtherGroups(t *testing.T) {
 }
 
 func TestModelCatalog_KnownProviders(t *testing.T) {
-	for _, p := range []string{"anthropic", "openai", "gemini", "local"} {
+	for _, p := range []string{"anthropic", "openai", "gemini"} {
 		models := modelsForProvider(p)
 		if len(models) == 0 {
 			t.Errorf("provider %q has no models in catalog", p)
@@ -114,7 +136,6 @@ func TestDefaultModelForProvider(t *testing.T) {
 	tests := map[string]string{
 		"anthropic": "claude-sonnet-4-6",
 		"openai":    "gpt-5.5",
-		"local":     "llama3.2",
 	}
 	for provider, want := range tests {
 		if got := defaultModelForProvider(provider); got != want {

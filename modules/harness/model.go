@@ -214,6 +214,11 @@ type Model struct {
 	modalScroll    int
 	streaming      bool
 	consoleVisible bool
+
+	chatAppendDirty            bool
+	chatAppendRefreshScheduled bool
+	chatAppendID               string
+	chatAppendText             string
 }
 
 // wasmChatAreaID is the scene area ID the WASM extension uses to own the main
@@ -233,8 +238,12 @@ const streamStatusError = "error"
 // for correct status bar display.
 func New(pool *agent.AgentPool, mainAgentID string, h *extension.Host) Model {
 	provName := ""
+	modelName := ""
 	if pool != nil {
 		provName = pool.ProviderName()
+		if main := pool.Get(mainAgentID); main != nil {
+			modelName = main.ModelName()
+		}
 	}
 
 	m := Model{
@@ -245,9 +254,10 @@ func New(pool *agent.AgentPool, mainAgentID string, h *extension.Host) Model {
 		mainAgentID:    mainAgentID,
 		extHost:        h,
 		console:        NewConsoleView(),
-		live:           &liveState{provider: provName, statuses: make(map[string]string)},
+		live:           &liveState{provider: provName, model: modelName, statuses: make(map[string]string)},
 		scene:          NewSceneRenderer(),
 		activeProvider: provName,
+		activeModel:    modelName,
 	}
 	// Pre-create the statusline area so the placement slot is reserved before
 	// session_start fires and the bundled statusline extension sets its root.
@@ -299,6 +309,9 @@ func (m *Model) SetProgram(p *tea.Program) {
 			return tools.BuildFantasyTools(extHostRef, agentID, logFnRef)
 		}, func(text string) {
 			p.Send(NotifyMsg{Text: "⚠ " + text})
+		})
+		spawner.SetToolCallObserver(func(agentID, id, toolName, input string) {
+			p.Send(ToolCallStartMsg{AgentID: agentID, ID: id, ToolName: toolName, Input: input})
 		})
 
 		m.extHost.SetAgentBridge(&harnessAgentBridge{
@@ -377,7 +390,8 @@ func interceptProviderRequest(extHost *extension.Host, agentID string, messages 
 	return fp.Messages, outModel, false, ""
 }
 
-const tokenBatchInterval = 30 * time.Millisecond
+const tokenBatchInterval = 75 * time.Millisecond
+const chatAppendRefreshInterval = 75 * time.Millisecond
 
 func (b *tokenBatcher) onToken(token string) {
 	b.mu.Lock()
@@ -411,8 +425,8 @@ func (b *tokenBatcher) flush() {
 }
 
 // makeBatchedOnToken returns an onToken callback and a flush function.
-// Tokens are coalesced into batches sent at most every 30ms, capping
-// render cycles to ~33/sec regardless of LLM speed (prevents O(n²) work).
+// Tokens are coalesced into batches sent at most every 75ms, capping
+// render cycles to ~13/sec regardless of LLM speed (prevents O(n²) work).
 // flush() must be called from onDone to deliver any buffered tail tokens.
 // dispatch, when non-nil, receives each flushed batch for forwarding to WASM
 // (EventToken).
@@ -454,7 +468,7 @@ func (m *Model) wireMainAgentCallbacks(p *tea.Program) {
 		return tools.BuildFantasyTools(extHost, agent.MainAgentID, logFn)
 	})
 	a.SetOnToolCall(func(id, toolName, input string) {
-		p.Send(ToolCallStartMsg{ID: id, ToolName: toolName, Input: input})
+		p.Send(ToolCallStartMsg{AgentID: mainID, ID: id, ToolName: toolName, Input: input})
 	})
 }
 
@@ -495,11 +509,39 @@ func (m *Model) SetActiveThinking(level string) {
 	}
 }
 
+func (m *Model) setActiveProviderModel(provider, model string) tea.Cmd {
+	if provider != "" {
+		m.activeProvider = provider
+		m.live.setProvider(provider)
+	}
+	if model != "" {
+		m.activeModel = model
+		m.live.setModel(model)
+	}
+	return m.dispatchModelChanged()
+}
+
+func (m Model) dispatchModelChanged() tea.Cmd {
+	if m.extHost == nil {
+		return nil
+	}
+	provider := m.activeProvider
+	modelName := m.activeModel
+	extHost := m.extHost
+	return func() tea.Msg {
+		payload, _ := json.Marshal(sdk.ModelChangedPayload{Provider: provider, Model: modelName})
+		evt := sdk.Event{Type: sdk.EventModelChanged, Payload: payload}
+		results, err := extHost.DispatchEvent(context.Background(), evt)
+		return ExtensionEventResultMsg{Results: results, Err: err}
+	}
+}
+
 // Init returns the initial command.
 func (m Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{
 		m.input.ta.Focus(),
 		m.cmdDispatchSessionStart(),
+		m.dispatchModelChanged(),
 	}
 	// First-run auth prompt: if a provider was set as needing an auth choice and
 	// no choice is recorded yet, open the prompt once at startup.
@@ -613,6 +655,11 @@ func (m Model) updateKeyPress(msg tea.Msg) (Model, tea.Cmd, bool) {
 		return m, nil, false
 	}
 
+	if kp.String() == "esc" && m.hasActiveTurn() {
+		m.cancelActiveTurn()
+		return m, nil, true
+	}
+
 	if m.picker.IsActive() {
 		return m.updateKeyPressPicker(kp)
 	}
@@ -627,14 +674,8 @@ func (m Model) updateKeyPress(msg tea.Msg) (Model, tea.Cmd, bool) {
 
 	switch kp.String() {
 	case "ctrl+c":
-		if m.streaming {
-			if m.agentPool != nil {
-				m.agentPool.CancelAll()
-			}
-			m.live.setStatus("stream", "cancelling…")
-			return m, nil, true
-		}
 		return m, tea.Quit, true
+	case "esc":
 	case "ctrl+q":
 		return m, tea.Quit, true
 	case "ctrl+t":
@@ -652,6 +693,28 @@ func (m Model) updateKeyPress(msg tea.Msg) (Model, tea.Cmd, bool) {
 	}
 
 	return m, nil, false
+}
+
+func (m Model) hasActiveTurn() bool {
+	if m.streaming {
+		return true
+	}
+	if m.agentPool == nil {
+		return false
+	}
+	for _, id := range m.agentPool.ListAgents() {
+		if a := m.agentPool.Get(id); a != nil && a.IsRunning() {
+			return true
+		}
+	}
+	return false
+}
+
+func (m Model) cancelActiveTurn() {
+	if m.agentPool != nil {
+		m.agentPool.CancelAll()
+	}
+	m.live.setStatus("stream", "cancelling…")
 }
 
 // updateKeyPressPicker handles key events when the picker overlay is active.
@@ -783,6 +846,9 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 		// Accumulate for session persistence/logging; the visible transcript is
 		// rendered by the WASM extension via EventToken.
 		m.streamContent += msg.Token
+		if m.agentPool != nil {
+			m.live.setTokens(int(m.agentPool.TokenCount()))
+		}
 		return m, nil, true
 
 	case streamTickMsg:
@@ -859,12 +925,12 @@ func (m Model) updateTools(msg tea.Msg) (Model, tea.Cmd, bool) {
 		if r := []rune(preview); len(r) > 120 {
 			preview = string(r[:120]) + "…"
 		}
-		slog.Info("tool call start", "tool", msg.ToolName, "id", msg.ID, "input", preview)
-		m.chat.AddToolCall(msg.ID, msg.ToolName, msg.Input)
+		slog.Info("tool call start", "agent", msg.AgentID, "tool", msg.ToolName, "id", msg.ID, "input", preview)
+		m.chat.AddToolCall(msg.ID, msg.AgentID, msg.ToolName, msg.Input)
 		return m, nil, true
 	case ToolCallDoneMsg:
-		slog.Info("tool call done", "id", msg.ID, "error", msg.IsError)
-		m.chat.UpdateToolCall(msg.ID, msg.IsError, msg.Output)
+		slog.Info("tool call done", "agent", msg.AgentID, "tool", msg.ToolName, "id", msg.ID, "error", msg.IsError)
+		m.chat.UpdateToolCall(msg.ID, msg.AgentID, msg.ToolName, msg.IsError, msg.Output)
 		return m, nil, true
 	case ConsoleMsg:
 		if msg.Clear {
@@ -913,8 +979,7 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 		return m, nil, true
 
 	case setModelMsg:
-		m.applyModelSelection(msg.Model)
-		return m, nil, true
+		return m, m.applyModelSelection(msg.Model), true
 
 	case setThinkingMsg:
 		m.applyThinkingSelection(msg.Level)
@@ -1043,15 +1108,52 @@ func (m Model) updateExtension(msg tea.Msg) (Model, tea.Cmd, bool) {
 	case StatusUpdateMsg:
 		m.live.setStatus(msg.Key, msg.Value)
 		if m.program != nil {
-			m.program.Send(sceneDirtyMsg{})
+			m.program.Send(sceneDirtyMsg{Area: statuslineAreaID})
 		}
 		return m, nil, true
 
 	case sceneDirtyMsg:
-		// The scene was mutated off-loop by the UI bridge. When the WASM-driven
-		// chat is active, refresh the transcript viewport from the scene area;
-		// otherwise this just forces a re-render.
-		m.refreshWASMChat()
+		// The scene was mutated off-loop by the UI bridge. Only chat-area
+		// mutations need to rebuild the transcript viewport; other scene areas
+		// (notably statusline) only need this message to trigger View().
+		if msg.Area == wasmChatAreaID && msg.AppendOnly {
+			m.chatAppendDirty = true
+			if msg.AppendID != "" {
+				if m.chatAppendID == "" || m.chatAppendID == msg.AppendID {
+					m.chatAppendID = msg.AppendID
+					m.chatAppendText += msg.AppendText
+				} else {
+					m.chatAppendID = ""
+					m.chatAppendText = ""
+				}
+			}
+			if !m.chatAppendRefreshScheduled {
+				m.chatAppendRefreshScheduled = true
+				return m, tea.Tick(chatAppendRefreshInterval, func(time.Time) tea.Msg {
+					return chatAppendRefreshMsg{}
+				}), true
+			}
+			return m, nil, true
+		}
+		if msg.Area == "" || msg.Area == wasmChatAreaID {
+			m.chatAppendDirty = false
+			m.chatAppendRefreshScheduled = false
+			m.chatAppendID = ""
+			m.chatAppendText = ""
+			m.refreshWASMChat()
+		}
+		return m, nil, true
+
+	case chatAppendRefreshMsg:
+		m.chatAppendRefreshScheduled = false
+		if m.chatAppendDirty {
+			m.chatAppendDirty = false
+			if !m.refreshWASMChatAppend() {
+				m.refreshWASMChat()
+			}
+			m.chatAppendID = ""
+			m.chatAppendText = ""
+		}
 		return m, nil, true
 	}
 	return m, nil, false
@@ -1080,6 +1182,19 @@ func (m *Model) refreshWASMChat() {
 		return
 	}
 	m.chat.SetExternalContent(m.scene.Render(wasmChatAreaID, m.chatWidth()))
+}
+
+func (m *Model) refreshWASMChatAppend() bool {
+	if m.scene == nil || m.chatAppendID == "" || m.chatAppendText == "" {
+		return false
+	}
+	previous, current, ok := m.scene.RenderAppendTextNode(wasmChatAreaID, m.chatAppendID, m.chatWidth(), m.chatAppendText)
+	if !ok || !strings.HasSuffix(m.chat.externalContent, previous) {
+		return false
+	}
+	next := strings.TrimSuffix(m.chat.externalContent, previous) + current
+	m.chat.SetExternalContent(next)
+	return true
 }
 
 // resetChatArea clears the WASM transcript scene area back to an empty root,
@@ -1241,11 +1356,18 @@ func (m Model) cmdReloadExtensions() tea.Cmd {
 // chatHeight returns the number of lines available for the chat viewport,
 // accounting for the input box and any visible suggestion dropdown.
 func (m Model) chatHeight() int {
-	h := m.height - m.inputBoxHeight() - m.statusLineHeight() - m.dropdownHeight() - m.consoleHeight()
-	if h < 1 {
-		h = 1
+	h := m.height - m.inputBoxHeight() - m.statusLineHeight() - m.dropdownHeight() - m.consoleHeight() - m.toolActivityHeight() - m.bottomGutterHeight()
+	if h < 0 {
+		h = 0
 	}
 	return h
+}
+
+func (m Model) bottomGutterHeight() int {
+	if m.height <= 1 {
+		return 0
+	}
+	return 1
 }
 
 func (m Model) inputBoxHeight() int {
@@ -1463,9 +1585,15 @@ func (m Model) View() tea.View {
 			sb.WriteString(blank + "\n")
 		}
 	} else {
-		sb.WriteString(strings.TrimRight(m.chat.View(), "\n") + "\n")
+		if m.chat.height > 0 {
+			sb.WriteString(strings.TrimRight(m.chat.View(), "\n") + "\n")
+		}
 		if scenes := m.renderScenes(); scenes != "" {
 			sb.WriteString(scenes)
+			sb.WriteString("\n")
+		}
+		if tools := m.renderToolActivity(); tools != "" {
+			sb.WriteString(tools)
 			sb.WriteString("\n")
 		}
 		if dropdown := m.renderDropdown(); dropdown != "" {
@@ -1485,9 +1613,9 @@ func (m Model) View() tea.View {
 	if m.height > 0 {
 		// Pad to exactly m.height lines so no old content bleeds through when
 		// the viewport shrinks (e.g. dropdown appears/disappears).
-		lineCount := strings.Count(out, "\n")
-		if lineCount < m.height-1 {
-			out += strings.Repeat("\n", m.height-1-lineCount)
+		lineCount := renderedLineCount(out)
+		if lineCount < m.height {
+			out += strings.Repeat("\n", m.height-lineCount)
 		}
 	}
 
@@ -1648,6 +1776,44 @@ func (m Model) renderInputBox() string {
 }
 
 const consolePaneLines = 10
+const toolActivityContentLines = 3
+const toolActivityPaneLines = toolActivityContentLines + 2
+
+func (m Model) toolActivityHeight() int {
+	return toolActivityPaneLines
+}
+
+func (m Model) renderToolActivity() string {
+	width := m.width
+	if width < 20 {
+		width = 20
+	}
+	innerWidth := width - 2
+	contentWidth := innerWidth - 2
+	b := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+	dimText := lipgloss.NewStyle().Foreground(lipgloss.Color("#CCCCCC"))
+	label := "─ tools "
+	fillWidth := innerWidth - lipgloss.Width(label)
+	if fillWidth < 0 {
+		fillWidth = 0
+	}
+	header := b.Render("╭" + label + strings.Repeat("─", fillWidth) + "╮")
+	lines := m.chat.ToolActivityLines(contentWidth, toolActivityContentLines)
+	for len(lines) < toolActivityContentLines {
+		lines = append(lines, "")
+	}
+	body := strings.Builder{}
+	for _, line := range lines {
+		visible := lipgloss.Width(line)
+		pad := contentWidth - visible
+		if pad < 0 {
+			pad = 0
+		}
+		body.WriteString(b.Render("│") + " " + dimText.Render(line) + strings.Repeat(" ", pad) + " " + b.Render("│") + "\n")
+	}
+	footer := b.Render("╰" + strings.Repeat("─", innerWidth) + "╯")
+	return header + "\n" + body.String() + footer
+}
 
 func (m Model) consoleHeight() int {
 	if !m.consoleVisible {

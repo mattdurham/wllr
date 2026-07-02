@@ -25,11 +25,11 @@
 #   make precommit        — run build and all quality checks (REQUIRED before commit)
 #
 # Built-in extensions (embedded in the binary):
-#   agents, history
+#   agents, history, logging, statusline
 #   (read_file, write_file, exec, get_env are native Go — no WASM build needed)
 #
 # Installed extensions (loaded from ~/.wllr/extensions/ at runtime):
-#   context, skills, tasks, lsp, memory
+#   context, skills, tasks, lsp, memory, permissions, mcp-bridge, otel-traces
 
 DIST_DIR    := dist
 BINARY      := $(DIST_DIR)/wllr
@@ -57,7 +57,7 @@ extensions: $(DIST_DIR) $(BUILTINS)
 	cd extensions/logging   && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(BUILTINS)/logging.wasm .
 	cd extensions/statusline && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(DIST_DIR)/statusline.wasm .
 	cp $(DIST_DIR)/statusline.wasm $(BUILTINS)/statusline.wasm
-	mkdir -p $(EXT_DIR)/context $(EXT_DIR)/skills $(EXT_DIR)/tasks $(EXT_DIR)/lsp
+	mkdir -p $(EXT_DIR)/context $(EXT_DIR)/skills $(EXT_DIR)/tasks $(EXT_DIR)/lsp $(EXT_DIR)/memory $(EXT_DIR)/permissions $(EXT_DIR)/mcp-bridge $(EXT_DIR)/otel-traces
 	cd extensions/context   && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(EXT_DIR)/context/context.wasm .
 	cp extensions/context/context.json $(EXT_DIR)/context/
 	cd extensions/skills    && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(EXT_DIR)/skills/skills.wasm .
@@ -66,9 +66,14 @@ extensions: $(DIST_DIR) $(BUILTINS)
 	cp extensions/tasks/tasks.json $(EXT_DIR)/tasks/
 	cd extensions/lsp       && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(EXT_DIR)/lsp/lsp.wasm .
 	cp extensions/lsp/extension.yaml $(EXT_DIR)/lsp/
-	mkdir -p $(EXT_DIR)/memory
-	cd extensions/memory  && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(EXT_DIR)/memory/memory.wasm .
+	cd extensions/memory    && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(EXT_DIR)/memory/memory.wasm .
 	cp extensions/memory/extension.yaml $(EXT_DIR)/memory/
+	cd extensions/permissions && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(EXT_DIR)/permissions/permissions.wasm .
+	cd extensions/mcp-bridge && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(EXT_DIR)/mcp-bridge/mcp-bridge.wasm .
+	cp extensions/mcp-bridge/mcp-bridge.json $(EXT_DIR)/mcp-bridge/
+	cd extensions/otel-traces && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(EXT_DIR)/otel-traces/otel-traces.wasm .
+	cp extensions/otel-traces/extension.yaml $(EXT_DIR)/otel-traces/
+	cp extensions/otel-traces/otel-traces.json $(EXT_DIR)/otel-traces/
 	@echo "Built all extensions"
 
 $(DIST_DIR):
@@ -299,4 +304,4 @@ generate-models:
 clean:
 	rm -rf $(DIST_DIR)
 	rm -f $(BUILTINS)/*.wasm
-	rm -rf $(EXT_DIR)/memory
+	rm -rf $(EXT_DIR)/memory $(EXT_DIR)/permissions $(EXT_DIR)/mcp-bridge $(EXT_DIR)/otel-traces

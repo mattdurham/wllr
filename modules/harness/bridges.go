@@ -59,7 +59,7 @@ func (e *earlyUIBridge) SetSystemPrompt(_ string)                  {}
 func (e *earlyUIBridge) AppendSystemPrompt(_ string)               {}
 func (e *earlyUIBridge) ResetHistory(_ []sdk.Message) error        { return nil }
 func (e *earlyUIBridge) ToolResult(_, _ string, _ bool)            {}
-func (e *earlyUIBridge) AfterToolCall(_, _, _ string, _ bool)      {}
+func (e *earlyUIBridge) AfterToolCall(_, _, _, _ string, _ bool)   {}
 func (e *earlyUIBridge) ConsoleOutput(_ string)                    {}
 func (e *earlyUIBridge) ConsoleClear()                             {}
 func (e *earlyUIBridge) CreateArea(_ sdk.UIArea) error             { return nil }
@@ -396,11 +396,11 @@ func (b *harnessUIBridge) ToolResult(toolCallID, result string, isError bool) {
 	_ = isError
 }
 
-func (b *harnessUIBridge) AfterToolCall(id, _, result string, isError bool) {
+func (b *harnessUIBridge) AfterToolCall(agentID, id, toolName, result string, isError bool) {
 	if b.prog == nil {
 		return
 	}
-	b.prog.Send(ToolCallDoneMsg{ID: id, IsError: isError, Output: result})
+	b.prog.Send(ToolCallDoneMsg{AgentID: agentID, ID: id, ToolName: toolName, IsError: isError, Output: result})
 }
 
 func (b *harnessUIBridge) ConsoleOutput(line string) {
@@ -428,7 +428,7 @@ func (b *harnessUIBridge) CreateArea(area sdk.UIArea) error {
 		return err
 	}
 	if b.prog != nil {
-		b.prog.Send(sceneDirtyMsg{})
+		b.prog.Send(sceneDirtyMsg{Area: area.ID})
 	}
 	return nil
 }
@@ -441,9 +441,25 @@ func (b *harnessUIBridge) PatchUI(params sdk.UIPatchParams) error {
 		return err
 	}
 	if b.prog != nil {
-		b.prog.Send(sceneDirtyMsg{})
+		appendID, appendText, appendOnly := appendPatchDetails(params)
+		b.prog.Send(sceneDirtyMsg{Area: params.Area, AppendOnly: appendOnly, AppendID: appendID, AppendText: appendText})
 	}
 	return nil
+}
+
+func appendPatchDetails(params sdk.UIPatchParams) (string, string, bool) {
+	if len(params.Ops) == 0 {
+		return "", "", false
+	}
+	id := params.Ops[0].ID
+	var text strings.Builder
+	for _, op := range params.Ops {
+		if op.Op != sdk.UIOpAppendText || op.ID == "" || op.ID != id {
+			return "", "", false
+		}
+		text.WriteString(op.Text)
+	}
+	return id, text.String(), true
 }
 
 func (b *harnessUIBridge) RemoveArea(id string) {
@@ -452,7 +468,7 @@ func (b *harnessUIBridge) RemoveArea(id string) {
 	}
 	b.scene.RemoveArea(id)
 	if b.prog != nil {
-		b.prog.Send(sceneDirtyMsg{})
+		b.prog.Send(sceneDirtyMsg{Area: id})
 	}
 }
 
@@ -464,7 +480,7 @@ func (b *harnessUIBridge) UpdateArea(params sdk.UIUpdateAreaParams) error {
 		return err
 	}
 	if b.prog != nil {
-		b.prog.Send(sceneDirtyMsg{})
+		b.prog.Send(sceneDirtyMsg{Area: params.ID})
 	}
 	return nil
 }

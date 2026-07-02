@@ -96,12 +96,12 @@
 
 ### TestEventTypeConstants
 
-**Scenario:** All 9 event type constants are non-empty strings.
+**Scenario:** All event type constants are non-empty strings.
 
 **Setup:** Collect all event type constants into a slice.
 
 **Assertions:**
-- `len(types) == 9`
+- The list includes every current event type, including `EventModelChanged`.
 - Every element is non-empty string.
 
 ---

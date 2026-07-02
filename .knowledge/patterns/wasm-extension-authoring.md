@@ -14,14 +14,20 @@ events with `On*` hooks, and call host helpers.
 
 The host↔extension ABI is defined in [docs/extensions.md](../../docs/extensions.md):
 
-- **Events** (17): session_start, before_agent_start, before_provider_request,
+- **Events** (18): session_start, before_agent_start, before_provider_request,
   after_provider_response, on_tool_call, on_tool_result, message_start,
   message_end, before_tool_call, after_tool_call, on_command, context_usage,
-  token, notify, log, tick, shutdown.
-- **host_call methods**: subscribe, register_tool, register_command,
+  token, notify, log, tick, model_changed, shutdown.
+- **host_call methods** (77+): see [docs/extensions.md](../../docs/extensions.md) for the
+  full reference. Key ones: subscribe, register_tool, register_command,
   send_message, set_status, notify, tool_result, get_os, store_set, store_get,
-  abort, exec, read_file, write_file, append_file, get_env, ui_create_area,
-  ui_update_area, ui_patch, ui_remove_area.
+  abort, exec, read_file, write_file, append_file, get_env, config_read, modal,
+  set_system_prompt, append_system_prompt, http_post, agent_spawn, agent_close,
+  agent_send_message, agent_deliver, agent_run, agent_list, agent_token_count,
+  team_create, team_close, team_add_member, team_remove_member, team_get_info,
+  team_list, mcp_spawn, mcp_close, mcp_send, mcp_read, show_picker,
+  agent_reset_history, get_status_info, get_context_usage, set_status_line,
+  ui_create_area, ui_update_area, ui_patch, ui_remove_area.
 - **Permissions**: exec, file_open, file_read, file_write, network_read,
   network_write, ui.
 

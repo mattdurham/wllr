@@ -743,7 +743,7 @@ Fired when a message has finished streaming.
 ### `token`
 
 Fired with a batch of streamed assistant text as the agent produces it. Batches
-are coalesced (~30ms) so the per-token boundary-crossing rate stays bounded. Use
+are coalesced (~75ms) so the per-token boundary-crossing rate stays bounded. Use
 this to drive a scene-graph area with live streaming text (see `ui_patch`).
 
 ```json
@@ -786,6 +786,25 @@ The `OnNotify(func(text string))` SDK helper subscribes to this event.
 
 > **Do not call `notify` from inside an `OnNotify` handler** — it would
 > re-trigger this event and loop indefinitely.
+
+---
+
+### `model_changed`
+
+Fired after the active provider/model status changes, including the initial
+startup state after the TUI initializes.
+
+```json
+{"provider": "openai", "model": "gpt-5.5"}
+```
+
+| Field      | Type   | Description                         |
+|------------|--------|-------------------------------------|
+| `provider` | string | Active provider identifier.         |
+| `model`    | string | Active model identifier, if known.  |
+
+The `OnModelChanged(func(provider, model string))` SDK helper subscribes to this
+event.
 
 ---
 
