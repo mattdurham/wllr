@@ -5,7 +5,6 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
-	yaml "gopkg.in/yaml.v3"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -13,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	yaml "gopkg.in/yaml.v3"
 
 	tea "charm.land/bubbletea/v2"
 	fantasy "charm.land/fantasy"
@@ -498,3 +499,20 @@ func loadConfigGroup(group string) (json.RawMessage, error) {
 // Extracted from main() to keep cyclomatic complexity within the project limit.
 func httpPost(url string, headers map[string]string, body []byte) (int, []byte, error) {
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return 0, nil, err
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req) //nolint:gosec // URL is from user config; SSRF is intentional
+	if err != nil {
+		return 0, nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var buf bytes.Buffer
+	if _, err = buf.ReadFrom(resp.Body); err != nil {
+		return resp.StatusCode, nil, err
+	}
+	return resp.StatusCode, buf.Bytes(), nil
+}

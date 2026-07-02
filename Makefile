@@ -39,7 +39,7 @@ EXT_DIR     := $(HOME)/.wllr/extensions
 # Package list - lazy evaluation
 PACKAGES = $(shell go list -e -f '{{if .GoFiles}}{{.ImportPath}}{{end}}' ./...)
 
-.PHONY: all build extensions clean lint test format precommit ci install-tools nilaway betteralign betteralign-fix gofumpt-check gofumpt golines-check golines format-all deadcode staticcheck generate-models
+.PHONY: all build extensions clean lint test format precommit ci install-tools nilaway betteralign betteralign-fix gofumpt-check gofumpt golines-check golines format-all deadcode staticcheck docs-check generate-models
 
 all: extensions build
 
@@ -134,6 +134,13 @@ staticcheck:
 	@echo "==> Running staticcheck..."
 	@staticcheck -f stylish ./...
 	@echo "==> Staticcheck passed!"
+
+# Check that statically registered native and bundled extension tools have
+# discoverable input/output contract docs.
+docs-check:
+	@echo "==> Checking tool contract docs..."
+	@go run scripts/check-tool-contracts.go
+	@echo "==> Tool contract docs complete!"
 
 # Check formatting with gofumpt (CI mode)
 gofumpt-check:
@@ -257,39 +264,43 @@ ci:
 precommit:
 	@echo "==> Running pre-commit quality checks..."
 	@echo ""
-	@echo "[1/9] Auto-formatting code (gofumpt)..."
+	@echo "[1/10] Auto-formatting code (gofumpt)..."
 	@$(MAKE) gofumpt
 	@echo "✅ gofumpt: formatted"
 	@echo ""
-	@echo "[2/9] Auto-fixing line length (golines)..."
+	@echo "[2/10] Auto-fixing line length (golines)..."
 	@$(MAKE) golines
 	@echo "✅ golines: fixed"
 	@echo ""
-	@echo "[3/9] Running golangci-lint (40+ linters)..."
+	@echo "[3/10] Running golangci-lint (40+ linters)..."
 	@$(MAKE) lint
 	@echo "✅ golangci-lint: clean"
 	@echo ""
-	@echo "[4/9] Checking struct alignment (betteralign)..."
+	@echo "[4/10] Checking struct alignment (betteralign)..."
 	@$(MAKE) betteralign
 	@echo "✅ betteralign: clean"
 	@echo ""
-	@echo "[5/9] Running nil safety checks (nilaway)..."
+	@echo "[5/10] Running nil safety checks (nilaway)..."
 	@$(MAKE) nilaway
 	@echo "✅ nilaway: clean"
 	@echo ""
-	@echo "[6/9] Building project..."
+	@echo "[6/10] Building project..."
 	@go build $(PACKAGES)
 	@echo "✅ build: successful"
 	@echo ""
-	@echo "[7/9] Running tests..."
+	@echo "[7/10] Running tests..."
 	@$(MAKE) test
 	@echo "✅ tests: all passing"
 	@echo ""
-	@echo "[8/9] Running deadcode check..."
+	@echo "[8/10] Running tool contract docs check..."
+	@$(MAKE) docs-check
+	@echo "✅ docs-check: tool contracts complete"
+	@echo ""
+	@echo "[9/10] Running deadcode check..."
 	@$(MAKE) deadcode
 	@echo "✅ deadcode: no unreachable code"
 	@echo ""
-	@echo "[9/9] Running staticcheck..."
+	@echo "[10/10] Running staticcheck..."
 	@$(MAKE) staticcheck
 	@echo "✅ staticcheck: clean"
 	@echo ""

@@ -4,7 +4,7 @@ Go-based WASM extension providing task management tools for wllr.
 
 ## Overview
 
-The tasks extension adds task list and task management capabilities to wllr through 6 MCP tools:
+The tasks extension adds task list and task management capabilities to wllr through 6 tools:
 
 - `tasklist_create` - Create a new task list
 - `tasks_create` - Create a task in a list
@@ -58,12 +58,18 @@ Prefer this over `tasks_list` + `tasks_update` for multi-worker coordination.
 
 ## Usage
 
+All tools accept JSON object inputs and return JSON strings on success. Validation
+or missing-state failures mark the tool call as failed with plain-text error
+messages such as `tasks_get: task not found`. The central contract reference is
+[`docs/tool-contracts.md`](../../docs/tool-contracts.md#tasks-extension).
+
 ### Create a task list
 
 ```json
 {
   "name": "My Tasks",
-  "description": "Tasks for project X"
+  "description": "Tasks for project X",
+  "owner_agent_id": "main"
 }
 ```
 
@@ -147,6 +153,36 @@ Returns:
 ```
 
 Returns the full task object.
+
+### Claim a task atomically
+
+```json
+{
+  "list_id": "list-1",
+  "agent_id": "main/worker-1"
+}
+```
+
+Returns:
+
+```json
+{
+  "task": {
+    "id": "task-1",
+    "title": "Implement feature",
+    "status": "in_progress",
+    "assignee": "main/worker-1"
+  }
+}
+```
+
+If no pending dependency-satisfied task exists, returns:
+
+```json
+{
+  "task": null
+}
+```
 
 ## Testing
 

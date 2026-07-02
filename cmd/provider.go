@@ -226,8 +226,8 @@ func registerNativeTools(h *extension.Host) {
 }
 
 type lockedBuffer struct {
-	mu sync.Mutex
 	bytes.Buffer
+	mu sync.Mutex
 }
 
 func (b *lockedBuffer) Write(p []byte) (int, error) {
