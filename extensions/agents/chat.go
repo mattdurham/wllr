@@ -60,7 +60,8 @@ func onChatUserPrompt(prompt string) {
 		Text:  "",
 		Props: &UIProps{Border: "rounded", Fg: "accent", Padding: []int{0, 1}, Width: "fill", Wrap: true},
 	}
-	UIPatch(chatArea,
+	UIPatch(
+		chatArea,
 		OpInsert("chat-root", userBox),
 		OpInsert("chat-root", asstBox),
 	)

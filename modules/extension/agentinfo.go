@@ -4,6 +4,8 @@ package extension
 
 // AgentInfo describes a running agent. Returned by AgentBridge.List.
 type AgentInfo struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	IsRunning       bool   `json:"is_running"`
+	PendingMessages int    `json:"pending_messages"`
 }

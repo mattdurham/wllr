@@ -252,6 +252,12 @@ with how `get_status_info` behaves when the `UIBridge` is unavailable.
 It must return a zero-valued `sdk.ContextUsage` before the first turn completes or when no
 context window has been configured — it must never panic or block.
 
+`AgentBridge.List()` returns `AgentInfo` snapshots for `agent_list`. Each entry includes
+`id`, `name`, `is_running`, and `pending_messages`. `is_running` reports whether the
+agent is currently mid-turn; `pending_messages` reports queued inbox messages that will
+be processed by the next turn. These fields are read-only liveness/status signals and
+must not enqueue work.
+
 ---
 
 ## 8. Memory Protocol

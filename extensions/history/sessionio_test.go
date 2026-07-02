@@ -24,7 +24,8 @@ func writeJSONL(t *testing.T, lines ...string) string {
 const hdr = `{"type":"session","id":"abc","timestamp":"2026-06-30T00:00:00Z","cwd":"/x"}`
 
 func TestLoadMessages_BasicOrder(t *testing.T) {
-	path := writeJSONL(t,
+	path := writeJSONL(
+		t,
 		hdr,
 		`{"type":"message","role":"user","content":"hello"}`,
 		`{"type":"message","role":"assistant","content":"hi there"}`,
@@ -46,7 +47,8 @@ func TestLoadMessages_BasicOrder(t *testing.T) {
 }
 
 func TestLoadMessages_SkipsToolCallsAndEmpty(t *testing.T) {
-	path := writeJSONL(t,
+	path := writeJSONL(
+		t,
 		hdr,
 		`{"type":"message","role":"user","content":"q"}`,
 		`{"type":"tool_call","tool_name":"read_file"}`,
@@ -67,7 +69,8 @@ func TestLoadMessages_SkipsToolCallsAndEmpty(t *testing.T) {
 }
 
 func TestLoadMessages_CollapsesConsecutiveSameRole(t *testing.T) {
-	path := writeJSONL(t,
+	path := writeJSONL(
+		t,
 		hdr,
 		`{"type":"message","role":"user","content":"first"}`,
 		`{"type":"message","role":"user","content":"second"}`,
@@ -84,7 +87,8 @@ func TestLoadMessages_CollapsesConsecutiveSameRole(t *testing.T) {
 }
 
 func TestLoadMessages_DropsLeadingAssistant(t *testing.T) {
-	path := writeJSONL(t,
+	path := writeJSONL(
+		t,
 		hdr,
 		`{"type":"message","role":"assistant","content":"leading"}`,
 		`{"type":"message","role":"user","content":"q"}`,
