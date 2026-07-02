@@ -18,21 +18,21 @@ type modelInfo struct {
 // modelCatalog maps a provider name (cfg.Provider) to its selectable models,
 // most-capable first. Keys match the provider names accepted by buildProvider.
 var modelCatalog = map[string][]modelInfo{
-	"anthropic": {
+	providerAnthropic: {
 		{ID: "claude-opus-4-8", Name: "Claude Opus 4.8", ContextWindow: 1000000},
 		{ID: "claude-opus-4-7", Name: "Claude Opus 4.7", ContextWindow: 1000000},
 		{ID: "claude-opus-4-6", Name: "Claude Opus 4.6", ContextWindow: 200000},
 		{ID: "claude-opus-4-5-20251101", Name: "Claude Opus 4.5", ContextWindow: 200000},
 		{ID: "claude-sonnet-5", Name: "Claude Sonnet 5", ContextWindow: 1000000},
-		{ID: "claude-sonnet-4-6", Name: "Claude Sonnet 4.6", ContextWindow: 200000},
+		{ID: defaultAnthropicModel, Name: "Claude Sonnet 4.6", ContextWindow: 200000},
 		{ID: "claude-sonnet-4-5-20250929", Name: "Claude Sonnet 4.5", ContextWindow: 200000},
 		{ID: "claude-haiku-4-5-20251001", Name: "Claude Haiku 4.5", ContextWindow: 200000},
 		{ID: "claude-opus-4-1-20250805", Name: "Claude Opus 4.1", ContextWindow: 200000},
 		{ID: "claude-opus-4-20250514", Name: "Claude Opus 4", ContextWindow: 200000},
 		{ID: "claude-sonnet-4-20250514", Name: "Claude Sonnet 4", ContextWindow: 200000},
 	},
-	"openai": {
-		{ID: "gpt-5.5", Name: "GPT-5.5", ContextWindow: 1050000},
+	providerOpenAI: {
+		{ID: defaultOpenAIModel, Name: "GPT-5.5", ContextWindow: 1050000},
 		{ID: "gpt-5.5-pro", Name: "GPT-5.5 Pro", ContextWindow: 1050000},
 		{ID: "gpt-5.4", Name: "GPT-5.4", ContextWindow: 1050000},
 		{ID: "gpt-5.4-pro", Name: "GPT-5.4 Pro", ContextWindow: 1050000},
@@ -58,7 +58,7 @@ var modelCatalog = map[string][]modelInfo{
 		{ID: "gpt-4o", Name: "GPT-4o", ContextWindow: 128000},
 		{ID: "gpt-4o-mini", Name: "GPT-4o-mini", ContextWindow: 128000},
 	},
-	"gemini": {
+	providerGemini: {
 		{ID: "gemini-3.5-flash", Name: "Gemini 3.5 Flash", ContextWindow: 1048576},
 		{ID: "gemini-3.1-pro-preview-customtools", Name: "Gemini 3.1 Pro", ContextWindow: 1048576},
 		{ID: "gemini-3-pro-preview", Name: "Gemini 3 Pro", ContextWindow: 1048576},
@@ -69,15 +69,15 @@ var modelCatalog = map[string][]modelInfo{
 }
 
 var chatGPTOAuthModels = []modelInfo{
-	{ID: "gpt-5.5", Name: "GPT-5.5", ContextWindow: 1050000},
+	{ID: defaultOpenAIModel, Name: "GPT-5.5", ContextWindow: 1050000},
 	{ID: "gpt-5.4", Name: "GPT-5.4", ContextWindow: 1050000},
 	{ID: "gpt-5.4-mini", Name: "GPT-5.4 Mini", ContextWindow: 400000},
 }
 
 var defaultModelsByProvider = map[string]string{
-	"anthropic": "claude-sonnet-4-6",
-	"openai":    "gpt-5.5",
-	"gemini":    "gemini-3-pro-preview",
+	providerAnthropic: defaultAnthropicModel,
+	providerOpenAI:    defaultOpenAIModel,
+	providerGemini:    "gemini-3-pro-preview",
 }
 
 // modelsForProvider returns the catalog for a provider, or nil if unknown.
@@ -97,17 +97,17 @@ func defaultModelForProvider(provider string) string {
 }
 
 func modelsForOpenAIAuth() []modelInfo {
-	if cred, ok := loadAuthCredential("openai"); ok && cred.Type == authTypeOAuth {
+	if cred, ok := loadAuthCredential(providerOpenAI); ok && cred.Type == authTypeOAuth {
 		return chatGPTOAuthModels
 	}
-	return modelsForProvider("openai")
+	return modelsForProvider(providerOpenAI)
 }
 
 func normalizeModelForProvider(provider, model string) string {
-	if provider != "openai" {
+	if provider != providerOpenAI {
 		return model
 	}
-	if cred, ok := loadAuthCredential("openai"); !ok || cred.Type != authTypeOAuth {
+	if cred, ok := loadAuthCredential(providerOpenAI); !ok || cred.Type != authTypeOAuth {
 		return model
 	}
 	for _, m := range chatGPTOAuthModels {

@@ -116,17 +116,17 @@ func providerOptionsForThinking(provider string, level thinkingLevel) fantasy.Pr
 				},
 			},
 		}
-	case "openai":
+	case providerOpenAI:
 		if level == thinkingOff {
 			return nil
 		}
 		effort := openAIReasoningEffort[level]
 		return fantasy.ProviderOptions{
 			fantasyopenapiprovider.Name: &fantasyopenapiprovider.ProviderOptions{
-				ReasoningEffort: fantasyopenapiprovider.ReasoningEffortOption(effort),
+				ReasoningEffort: &effort,
 			},
 		}
-	case "gemini":
+	case providerGemini:
 		budget := geminiThinkingBudget[level]
 		if budget <= 0 {
 			return nil

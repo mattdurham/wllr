@@ -66,11 +66,11 @@ func fetchLocalModels(ctx context.Context, cfg *Config) ([]modelInfo, error) {
 		req.Header.Set("Authorization", "Bearer "+cfg.LocalAPIKey)
 	}
 	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //nolint:gosec // Local provider endpoint is explicit user configuration.
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("GET %s: %s", endpoint, resp.Status)
 	}

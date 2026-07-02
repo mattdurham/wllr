@@ -279,7 +279,7 @@ func TestIdleNotification_WakesCreator(t *testing.T) {
 	creator.SetOnDone(func(e error) { creatorDone <- e })
 
 	// The worker must have a creatorID for the idle notification to fire. This is
-	// normally set by Spawner.Spawn; we assert the behaviour via SetCreatorID.
+	// normally set by Spawner.Spawn; we assert the behavior via SetCreatorID.
 	worker.SetCreatorID("main")
 
 	workerDone := make(chan error, 1)
@@ -381,10 +381,7 @@ func TestIdleNotification_SuppressedDuringShutdown(t *testing.T) {
 	// Allow the AGENT_SHUTDOWN delivery (and any erroneous idle delivery) to land.
 	// The worker self-closes, so poll the creator inbox briefly.
 	deadline := time.After(2 * time.Second)
-	for {
-		if creator.InboxLen() >= 1 {
-			break
-		}
+	for creator.InboxLen() < 1 {
 		select {
 		case <-deadline:
 			t.Fatal("timeout waiting for AGENT_SHUTDOWN to reach creator")

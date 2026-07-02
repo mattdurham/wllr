@@ -51,13 +51,13 @@ type dispatchLogHandler struct {
 type logDispatcher struct {
 	host       *extension.Host
 	queue      chan sdk.LogRecord
+	stop       chan struct{}
 	ring       []sdk.LogRecord
+	wg         sync.WaitGroup
 	ringMu     sync.Mutex
 	flushed    atomic.Bool // true once the ring has been flushed to the queue
 	inDispatch atomic.Bool // reentrancy guard: true while dispatching EventLog
 	started    atomic.Bool
-	stop       chan struct{}
-	wg         sync.WaitGroup
 }
 
 // newDispatchLogHandler creates the handler and starts its drain goroutine.

@@ -43,6 +43,20 @@ func TestChatView_SetExternalContent_PreservesScrollback(t *testing.T) {
 	}
 }
 
+func TestChatView_SetSize_FollowsWhenAtBottom(t *testing.T) {
+	c := NewChatView(80, 5)
+	c.SetExternalContent(numberedLines(30))
+	if !c.vp.AtBottom() {
+		t.Fatal("test setup expected viewport at bottom")
+	}
+
+	c.SetSize(80, 3)
+
+	if !c.vp.AtBottom() {
+		t.Fatalf("resize should keep a tail-following viewport at bottom; offset=%d lines=%d", c.vp.YOffset(), c.vp.TotalLineCount())
+	}
+}
+
 func TestChatView_ToolActivityLines_ShowsLastThreeAndMatchesDoneByID(t *testing.T) {
 	c := NewChatView(80, 5)
 	c.AddToolCall("call-1", "main", "read_file", `{"path":"a.go"}`)

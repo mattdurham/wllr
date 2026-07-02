@@ -855,7 +855,7 @@ func (h *Host) handleHTTPPost(ext *Extension, req sdk.HostCallRequest) sdk.HostC
 	if err != nil {
 		return sdk.HostCallResponse{Error: err.Error()}
 	}
-	result, _ := json.Marshal(map[string]any{"status": statusCode, "body": string(respBody)})
+	result, _ := json.Marshal(map[string]any{hostResultStatus: statusCode, "body": string(respBody)})
 	return sdk.HostCallResponse{Result: result}
 }
 
@@ -1676,8 +1676,6 @@ func (h *Host) RegisteredTools() []RegisteredToolInfo {
 	return infos
 }
 
-// DispatchEvent dispatches evt to all subscribed extensions and returns their responses.
-// A WASM trap (error from _on_event) is logged and does not stop dispatch to other extensions.
 // HasSubscribers reports whether any loaded extension is subscribed to evt.
 // Used to avoid building/dispatching event payloads when nothing will consume
 // them (e.g. the log dispatcher batches only once a log sink exists).
