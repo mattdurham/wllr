@@ -5,6 +5,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	yaml "gopkg.in/yaml.v3"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -21,7 +22,6 @@ import (
 	"github.com/mattdurham/wllr/modules/mcp"
 	"github.com/mattdurham/wllr/modules/sdk"
 	"github.com/mattdurham/wllr/modules/tools"
-	yaml "gopkg.in/yaml.v3"
 )
 
 // builtinFS embeds generated built-in WASM modules when they are present.
@@ -465,7 +465,7 @@ func configPath() string {
 	return filepath.Join(home, ".config", "wllr", "config.yaml")
 }
 
-// loadConfigGroup reads the config file and returns the YAML blob for the given group.
+// loadConfigGroup reads the config file and returns the JSON blob for the given group.
 // Returns {} if the group does not exist. The config file is a flat YAML object
 // keyed by group name (extension name or "wllr" for the main app).
 func loadConfigGroup(group string) (json.RawMessage, error) {
@@ -482,7 +482,6 @@ func loadConfigGroup(group string) (json.RawMessage, error) {
 	if err := yaml.Unmarshal(data, &all); err != nil {
 		return nil, fmt.Errorf("config: parse error: %w", err)
 	}
-
 	if v, ok := all[group]; ok {
 		// Marshal the node back to JSON bytes
 		out, err := yaml.Marshal(v)
@@ -499,20 +498,3 @@ func loadConfigGroup(group string) (json.RawMessage, error) {
 // Extracted from main() to keep cyclomatic complexity within the project limit.
 func httpPost(url string, headers map[string]string, body []byte) (int, []byte, error) {
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return 0, nil, err
-	}
-	for k, v := range headers {
-		req.Header.Set(k, v)
-	}
-	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req) //nolint:gosec // URL is from user config; SSRF is intentional
-	if err != nil {
-		return 0, nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	var buf bytes.Buffer
-	if _, err = buf.ReadFrom(resp.Body); err != nil {
-		return resp.StatusCode, nil, err
-	}
-	return resp.StatusCode, buf.Bytes(), nil
-}
