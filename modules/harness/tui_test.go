@@ -189,6 +189,20 @@ func TestModel_Esc_CancelsRunningAgentWhenStreamingStateIsStale(t *testing.T) {
 	}
 }
 
+func TestModel_Esc_IdlePreservesNormalInputBehavior(t *testing.T) {
+	m := newTestModel()
+	m.input.SetValue("draft")
+
+	m, _ = callUpdate(m, keyMsg(tea.KeyEsc, 0))
+
+	if got := m.input.Value(); got != "" {
+		t.Fatalf("esc while idle should clear input, got %q", got)
+	}
+	if v := m.live.getStatus("stream"); v == "cancelling…" {
+		t.Fatalf("esc while idle should not show cancelling status")
+	}
+}
+
 func TestModel_CtrlC_DuringStream_Quits(t *testing.T) {
 	m := newTestModel()
 	m.streaming = true
