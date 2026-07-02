@@ -108,6 +108,7 @@ log, and reset behavior are covered by `wasmchat_test.go`, `tui_test.go`, and
 | `TestModel_Esc_DuringStream_CancelsTurn` | Esc while streaming is handled globally | no follow-up command; stream status is `cancelling…` |
 | `TestModel_Esc_DuringStream_CancelsBeforeModalClose` | Esc cancellation has priority over modal close handling | stream status is `cancelling…`; modal remains open |
 | `TestModel_Esc_CancelsRunningAgentWhenStreamingStateIsStale` | Esc cancels a running agent even if `m.streaming` is stale false | stream status is `cancelling…`; blocking agent stops |
+| `TestModel_Esc_IdlePreservesNormalInputBehavior` | Esc still behaves normally when no turn is active | input clears; stream status is not `cancelling…` |
 | `TestWrapModalLines_WrapsLongLine` | 50 runes at width 20 | wraps to 3 lines, none over width, content preserved |
 | `TestWrapModalLines_PreservesShortAndBlank` | short + blank + short | unchanged |
 | `TestWrapModalLines_WrapsOAuthURL` | long authorize URL | reconstructs exactly; wraps to ≥2 lines |
