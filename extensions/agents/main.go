@@ -95,45 +95,53 @@ func removeAgent(id string) {
 // ─── Init ─────────────────────────────────────────────────────────────────────
 
 func init() {
-	RegisterTool(
+	RegisterToolWithOutput(
 		"create_agent",
 		`Create a new agent. The agent ID is {your_agent_id}/{name} (e.g. main creating "researcher" → id="main/researcher"). The returned agent_id is what you pass to send_message and shutdown_agent.`,
 		json.RawMessage(`{"type":"object","properties":{"name":{"type":"string","description":"Agent name"},"system_prompt":{"type":"string","description":"System prompt for the agent"},"prompt":{"type":"string","description":"Initial prompt to send"},"model":{"type":"string","description":"Model name (optional)"},"thinking_budget":{"type":"integer","description":"Extended thinking token budget (optional, Anthropic only). Enables deeper reasoning before responding."}},"required":["name","system_prompt","prompt"]}`),
+		json.RawMessage(`{"type":"object","description":"Host agent creation result including the new agent_id on success"}`),
 	)
-	RegisterTool(
+	RegisterToolWithOutput(
 		"shutdown_agent",
 		"Shut down and remove a running agent",
 		json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string","description":"ID of the agent to shut down"}},"required":["agent_id"]}`),
+		json.RawMessage(`{"type":"object","description":"Host shutdown result"}`),
 	)
-	RegisterTool(
+	RegisterToolWithOutput(
 		"list_agents",
 		"List live agents with is_running and pending_messages. Use this to check whether a child is busy; do not ping a running child.",
 		json.RawMessage(`{"type":"object","properties":{}}`),
+		json.RawMessage(`{"type":"object","properties":{"agents":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"},"is_running":{"type":"boolean"},"pending_messages":{"type":"integer"}}}}}}`),
 	)
-	RegisterTool(
+	RegisterToolWithOutput(
 		"create_team",
 		"Create a new team",
 		json.RawMessage(`{"type":"object","properties":{"name":{"type":"string","description":"Team name"}},"required":["name"]}`),
+		json.RawMessage(`{"type":"object","description":"Host team creation result including team_id on success"}`),
 	)
-	RegisterTool(
+	RegisterToolWithOutput(
 		"add_to_team",
 		"Add an agent to a team",
 		json.RawMessage(`{"type":"object","properties":{"team_id":{"type":"string","description":"Team ID"},"agent_id":{"type":"string","description":"Agent ID"}},"required":["team_id","agent_id"]}`),
+		json.RawMessage(`{"type":"object","description":"Host team membership update result"}`),
 	)
-	RegisterTool(
+	RegisterToolWithOutput(
 		"get_team",
 		"Get information about a team",
 		json.RawMessage(`{"type":"object","properties":{"team_id":{"type":"string","description":"Team ID"}},"required":["team_id"]}`),
+		json.RawMessage(`{"type":"object","description":"Team details returned by the host"}`),
 	)
-	RegisterTool(
+	RegisterToolWithOutput(
 		"shutdown_team",
 		"Shut down a team and all its members",
 		json.RawMessage(`{"type":"object","properties":{"team_id":{"type":"string","description":"Team ID"}},"required":["team_id"]}`),
+		json.RawMessage(`{"type":"object","description":"Host team shutdown result"}`),
 	)
-	RegisterTool(
+	RegisterToolWithOutput(
 		"send_message",
 		"Send a message to an agent and wake it. If the agent is already running, the message is queued for its next turn; do not use as a ping.",
 		json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string","description":"Agent ID"},"message":{"type":"string","description":"Message text"}},"required":["agent_id","message"]}`),
+		json.RawMessage(`{"type":"object","description":"Host message delivery result"}`),
 	)
 	RegisterCommandInstant("agents", "Show running sub-agents and their status")
 
