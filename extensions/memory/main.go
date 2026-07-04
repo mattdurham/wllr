@@ -178,10 +178,11 @@ of each session.
 
 func init() {
 	// Register the manual install/upgrade tool.
-	RegisterTool(
+	RegisterToolWithOutput(
 		"memory_install",
 		"Install or upgrade the Engram memory binary. Run this if Engram is missing or outdated.",
 		json.RawMessage(`{"type":"object","properties":{}}`),
+		json.RawMessage(`{"type":"object","properties":{"installed":{"type":"boolean"},"version":{"type":"string"},"path":{"type":"string"},"error":{"type":"string"}}}`),
 	)
 
 	// Register a /memory slash command for convenience.
