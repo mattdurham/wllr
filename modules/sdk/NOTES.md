@@ -88,6 +88,18 @@ Append-only design decision log. Never delete entries; add an `*Addendum (date):
 
 ---
 
+## 7a. Tool.OutputSchema documents tool results
+
+*Added: 2026-07-04*
+
+**Decision:** `sdk.Tool` gains an `OutputSchema json.RawMessage` field with `json:"output_schema,omitempty"`.
+
+**Rationale:** `input_schema` documents what the model must pass into a tool. The returned value also needs a machine-readable contract for `/tools`, docs, and extension authors, especially for bundled WASM tools that return JSON strings. Current provider tool APIs only accept input schemas, so the adapter continues to forward only `InputSchema` to the LLM provider.
+
+**Consequence:** `register_tool` may include `output_schema`. The SDK preserves it verbatim like `input_schema`; it is documentation/UI metadata and is not parsed by the SDK.
+
+---
+
 ## 8. AgentID Added to BeforeToolCallPayload and AfterToolCallPayload
 
 *Added: 2026-05-08*

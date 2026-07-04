@@ -286,9 +286,10 @@ Note: Percent is 0–100. CompactConfig.ThresholdPct is a fraction 0.0–1.0.
 | `name`         | string          | Tool identifier                                                          |
 | `description`  | string          | Human-readable description                                               |
 | `input_schema` | json.RawMessage | JSON Schema object describing the tool's input; forwarded verbatim to the LLM provider |
+| `output_schema` | json.RawMessage (omitempty) | JSON Schema object describing the tool's text/JSON output; preserved for docs/UI |
 | `override`     | bool (omitempty) | When true, allows this registration to replace an existing tool with the same name |
 
-**Invariant:** `InputSchema` is preserved as raw bytes through marshal/unmarshal; the sdk never parses it.
+**Invariant:** `InputSchema` and `OutputSchema` are preserved as raw bytes through marshal/unmarshal; the sdk never parses them.
 
 ---
 
@@ -543,7 +544,7 @@ Returned as `int32` from the `host_call` WASM import (not the JSON layer).
 
 1. `EventType` values are stable string constants across ABI versions; numeric iota is never used.
 2. `Event.Payload` is always valid JSON or explicitly `null`; it is never an empty byte slice on the wire.
-3. `Tool.InputSchema` is stored and forwarded as `json.RawMessage`; the sdk never unmarshals it.
+3. `Tool.InputSchema` and `Tool.OutputSchema` are stored as `json.RawMessage`; the sdk never unmarshals them. `InputSchema` is forwarded to the LLM provider; `OutputSchema` documents the returned tool result for UI/docs.
 4. `HostCallRequest.Params` and `HostCallResponse.Result` are `json.RawMessage` so the sdk can forward them to/from WASM memory without any intermediate allocation.
 5. `Role` string values (`"user"`, `"assistant"`) are stable and may be compared with `==`.
 6. All `omitempty` fields in `EventResponse` and `HostCallRequest`/`HostCallResponse` are intentional; the wire format stays minimal.

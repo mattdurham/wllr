@@ -47,17 +47,19 @@
 
 ---
 
-### TestToolInputSchemaPreservesRawJSON
+### TestToolSchemasPreserveRawJSON
 
-**Scenario:** `Tool.InputSchema` is stored as `json.RawMessage` and survives a marshal/unmarshal cycle byte-for-byte.
+**Scenario:** `Tool.InputSchema` and `Tool.OutputSchema` are stored as `json.RawMessage` and survive a marshal/unmarshal cycle byte-for-byte.
 
 **Setup:**
-- Raw JSON Schema string: `{"type":"object","properties":{"q":{"type":"string"}}}`
-- Create `sdk.Tool{Name: "search", Description: "search the web", InputSchema: json.RawMessage(raw)}`
+- Raw input JSON Schema string: `{"type":"object","properties":{"q":{"type":"string"}}}`
+- Raw output JSON Schema string: `{"type":"object","properties":{"result":{"type":"string"}}}`
+- Create `sdk.Tool{Name: "search", Description: "search the web", InputSchema: json.RawMessage(inputRaw), OutputSchema: json.RawMessage(outputRaw)}`
 - Marshal then unmarshal.
 
 **Assertions:**
-- `string(got.InputSchema) == raw` (no key sorting, no whitespace change).
+- `string(got.InputSchema) == inputRaw` (no key sorting, no whitespace change).
+- `string(got.OutputSchema) == outputRaw` (no key sorting, no whitespace change).
 
 ---
 
