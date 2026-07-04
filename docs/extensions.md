@@ -163,18 +163,115 @@ extension as `on_tool_call` events.
         "query": {"type": "string", "description": "The search query"}
       },
       "required": ["query"]
+    },
+    "output_schema": {
+      "type": "object",
+      "properties": {
+        "answer": {"type": "string", "description": "Tool result text"}
+      }
     }
   }
 }
 ```
 
-| Field          | Type   | Description                                     |
-|----------------|--------|-------------------------------------------------|
-| `name`         | string | Unique tool name. Duplicate registration fails. |
-| `description`  | string | Shown to the LLM to explain tool purpose.       |
-| `input_schema` | object | JSON Schema object for the tool's input.        |
+| Field           | Type   | Description                                                  |
+|-----------------|--------|--------------------------------------------------------------|
+| `name`          | string | Unique tool name. Duplicate registration fails.              |
+| `description`   | string | Shown to the LLM to explain tool purpose.                    |
+| `input_schema`  | object | JSON Schema object for the tool's input.                     |
+| `output_schema` | object | JSON Schema object documenting the returned tool result text. |
 
 No response result. Returns an error if the tool name is already registered.
+
+---
+
+## Built-in LLM tools
+
+The LLM-visible tool surface is the set of native tools registered by the host
+plus bundled or installed extensions. Tool inputs are JSON objects matching the
+registered `input_schema`. Tool outputs are returned to the model as text; many
+tools encode structured output as a JSON string. On tool failure, the output is
+the error text and the result is marked as an error.
+
+MCP tools are dynamic: `mcp-bridge` registers whatever each configured MCP server
+advertises via `tools/list`, so their inputs and outputs are defined by that MCP
+server's schema rather than by this document.
+
+### Native tools
+
+| Tool | Inputs | Output |
+|------|--------|--------|
+| `read_file` | `path` string, required: absolute or relative file path. | File contents as text. |
+| `write_file` | `path` string, required; `content` string, required. | Text: `written <n> bytes to <path>`. |
+| `exec` | `command` string, required; `dir` string, optional working directory; `timeout_ms` integer, optional, default 30000. | Combined stdout/stderr as text. Errors return text such as `exec cancelled`, `exec timed out after <duration>`, or command output followed by `error: <message>`. |
+| `get_env` | `name` string, optional. | If `name` is set, the variable value as text. If omitted, a JSON array of `"KEY=VALUE"` strings. |
+| `get_agent_status` | `agent_id` string, required; `history_limit` integer, optional, default 10. | JSON object with `agent_id`, `is_running`, `pending_messages`, `turn_count`, `last_summary`, and `recent` message previews. |
+
+### Agent and team tools
+
+Registered by the bundled `agents` extension.
+
+| Tool | Inputs | Output |
+|------|--------|--------|
+| `create_agent` | `name` string, required; `system_prompt` string, required; `prompt` string, required; `model` string, optional; `thinking_budget` integer, optional. | JSON result from host agent spawn/delivery. Includes the new agent ID on success. |
+| `shutdown_agent` | `agent_id` string, required. | JSON result from host agent shutdown. |
+| `list_agents` | No fields. | JSON object containing live agents with IDs, names, running state, and pending message counts. |
+| `send_message` | `agent_id` string, required; `message` string, required. | JSON result from host agent delivery. |
+| `create_team` | `name` string, required. | JSON result from host team creation, including team ID on success. |
+| `add_to_team` | `team_id` string, required; `agent_id` string, required. | JSON result from host team membership update. |
+| `get_team` | `team_id` string, required. | JSON object describing the requested team. |
+| `shutdown_team` | `team_id` string, required. | JSON result from host team shutdown. |
+
+### Task tools
+
+Registered by the installed `tasks` extension.
+
+Task fields use these string enums:
+
+- `status`: `pending`, `in_progress`, `completed`, `blocked`
+- `priority`: `low`, `medium`, `high`, `critical`
+
+| Tool | Inputs | Output |
+|------|--------|--------|
+| `tasklist_create` | `name` string, required; `description` string, optional; `owner_agent_id` string, optional. | JSON object: `{"list_id":"..."}`. |
+| `tasks_create` | `list_id` string, required; `title` string, required; `description` string, optional; `priority` string, optional; `tags` string array, optional; `dependencies` string array, optional. | JSON object: `{"task_id":"..."}`. |
+| `tasks_update` | `list_id` string, required; `task_id` string, required; optional updates: `title`, `description`, `status`, `priority`, `tags`, `dependencies`. | JSON object: `{"success":true}`. |
+| `tasks_list` | `list_id` string, required; `status` string, optional filter. | JSON object: `{"tasks":[...]}` where each task includes `id`, `title`, `description`, `status`, `priority`, `tags`, `dependencies`, and assignment fields when present. |
+| `tasks_get` | `list_id` string, required; `task_id` string, required. | JSON task object. |
+| `tasks_claim` | `list_id` string, required; `agent_id` string, required. | JSON object: `{"task":{...}}` for a claimed task, or `{"task":null}` if none are available. |
+
+### Skill tools
+
+Registered by the installed `skills` extension.
+
+| Tool | Inputs | Output |
+|------|--------|--------|
+| `list_skills` | No fields. | JSON array of skill metadata objects with `name`, `description`, and `category` when set. |
+| `get_skill` | `name` string, required. | Skill body text with frontmatter stripped. |
+
+### Memory tool
+
+Registered by the installed `memory` extension.
+
+| Tool | Inputs | Output |
+|------|--------|--------|
+| `memory_install` | No fields. | JSON object on success: `{"installed":true,"version":"...","path":"..."}`. On failure, JSON object: `{"error":"..."}` marked as an error result. |
+
+### LSP tools
+
+Registered by the installed `lsp` extension. These are best-effort code
+intelligence tools. Apply edits separately with normal file tools after reviewing
+the returned locations.
+
+| Tool | Inputs | Output |
+|------|--------|--------|
+| `lsp_capabilities` | No fields. | JSON object with `tools`, `backends`, and a `note`. |
+| `lsp_diagnostics` | `file` string, required. | JSON diagnostic object with `kind`, `target`, `language`, `command`, `ok`, `output`, and optional `error`. |
+| `lsp_lint` | `path` string, optional; `file` string, optional. Defaults to `.`. | JSON lint/diagnostic object. For Go projects it runs `go test ./...`. |
+| `lsp_symbols` | `file` string, required. | JSON search object with `kind`, `target`, `pattern`, `ok`, `matches`, and optional `error`. |
+| `lsp_definition` | `symbol` string, required; `path` string, optional, default `.`. | JSON search object containing likely definition matches. |
+| `lsp_references` | `symbol` string, required; `path` string, optional, default `.`. | JSON search object containing likely reference matches. |
+| `lsp_refactor_preview` | `symbol` string, required; `new_name` string, required; `path` string, optional, default `.`. | JSON object with `kind`, `path`, `symbol`, `new_name`, `pattern`, `matches`, `ok`, `note`, and optional `error`. |
 
 ---
 

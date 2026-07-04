@@ -232,14 +232,16 @@ func discoverTools(state *mcpServerState) error {
 
 func registerTool(serverName string, tool mcpTool) error {
 	type toolParams struct {
-		Name        string          `json:"name"`
-		Description string          `json:"description"`
-		InputSchema json.RawMessage `json:"input_schema"`
+		Name         string          `json:"name"`
+		Description  string          `json:"description"`
+		InputSchema  json.RawMessage `json:"input_schema"`
+		OutputSchema json.RawMessage `json:"output_schema,omitempty"`
 	}
 	result := hostCallWithResponse("register_tool", toolParams{
-		Name:        tool.Name,
-		Description: tool.Description + " (via MCP server: " + serverName + ")",
-		InputSchema: tool.InputSchema,
+		Name:         tool.Name,
+		Description:  tool.Description + " (via MCP server: " + serverName + ")",
+		InputSchema:  tool.InputSchema,
+		OutputSchema: tool.OutputSchema,
 	})
 
 	var envelope struct {

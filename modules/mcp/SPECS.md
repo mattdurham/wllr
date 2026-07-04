@@ -26,3 +26,14 @@ Manages MCP server subprocess lifecycle: spawn, I/O, and teardown.
 4. Each MCP server has a unique string ID within a Bridge instance.
 5. Spawning a server with a duplicate ID returns an error.
 6. Bridge sends tool results back through the host via the MCPBridge interface.
+
+### Tool
+
+Represents a tool advertised by an MCP server.
+
+| Field          | JSON           | Type            | Description                                  |
+|----------------|----------------|-----------------|----------------------------------------------|
+| `Name`         | `name`         | string          | MCP tool name                                |
+| `Description`  | `description`  | string          | Human-readable tool description              |
+| `InputSchema`  | `inputSchema`  | json.RawMessage | MCP input JSON Schema, preserved verbatim    |
+| `OutputSchema` | `outputSchema` | json.RawMessage | Optional MCP output JSON Schema, preserved verbatim |

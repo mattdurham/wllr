@@ -1,8 +1,9 @@
 # Makefile — build the wllr binary and WASM extensions.
 #
 # Build targets:
-#   make             — build the wllr binary (requires extensions to be built first)
-#   make extensions  — build WASM extensions → cmd/builtins/*.wasm + install optional extensions
+#   make             — build built-in WASM extensions, then the wllr binary
+#   make builtins    — build embedded WASM extensions → cmd/builtins/*.wasm
+#   make extensions  — build built-ins + install optional extensions
 #   make all         — build extensions then the binary
 #   make clean       — remove dist/ and cmd/builtins/*.wasm
 #
@@ -35,28 +36,41 @@ DIST_DIR    := dist
 BINARY      := $(DIST_DIR)/wllr
 BUILTINS    := cmd/builtins
 EXT_DIR     := $(HOME)/.wllr/extensions
+GOCACHE     ?= $(CURDIR)/.cache/go-build
+GOLANGCI_LINT_CACHE ?= $(CURDIR)/.cache/golangci-lint
+export GOCACHE
+export GOLANGCI_LINT_CACHE
 
 # Package list - lazy evaluation
 PACKAGES = $(shell go list -e -f '{{if .GoFiles}}{{.ImportPath}}{{end}}' ./...)
 
-.PHONY: all build extensions clean lint test format precommit ci install-tools nilaway betteralign betteralign-fix gofumpt-check gofumpt golines-check golines format-all deadcode staticcheck docs-check generate-models
+.DEFAULT_GOAL := build
+
+.PHONY: all build builtins extensions optional-extensions clean clean-extensions lint test format precommit ci install-tools nilaway betteralign betteralign-fix gofumpt-check gofumpt golines-check golines format-all deadcode staticcheck docs-check generate-models
 
 all: extensions build
 
-# build depends on extensions so the embedded WASM files are present.
-build: extensions $(DIST_DIR)
+# build depends on builtins so the embedded WASM files are present.
+build: builtins $(DIST_DIR)
 	go build -o $(BINARY) ./cmd/
 	@echo "Built $(BINARY)"
 
-# extensions builds all WASM extensions.
-# Built-ins go to cmd/builtins/ (embedded in the binary).
-# Optional extensions are installed to ~/.wllr/extensions/<name>/.
-extensions: $(DIST_DIR) $(BUILTINS)
+# builtins builds embedded WASM extensions.
+builtins: $(DIST_DIR) $(BUILTINS)
 	cd extensions/agents    && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(BUILTINS)/agents.wasm .
 	cd extensions/history   && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(BUILTINS)/history.wasm .
 	cd extensions/logging   && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(BUILTINS)/logging.wasm .
 	cd extensions/statusline && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(DIST_DIR)/statusline.wasm .
 	cp $(DIST_DIR)/statusline.wasm $(BUILTINS)/statusline.wasm
+	@echo "Built built-in extensions"
+
+# extensions builds all WASM extensions.
+# Built-ins go to cmd/builtins/ (embedded in the binary).
+# Optional extensions are installed to ~/.wllr/extensions/<name>/.
+extensions: builtins optional-extensions
+	@echo "Built all extensions"
+
+optional-extensions:
 	mkdir -p $(EXT_DIR)/context $(EXT_DIR)/skills $(EXT_DIR)/tasks $(EXT_DIR)/lsp $(EXT_DIR)/memory $(EXT_DIR)/permissions $(EXT_DIR)/mcp-bridge $(EXT_DIR)/otel-traces
 	cd extensions/context   && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(EXT_DIR)/context/context.wasm .
 	cp extensions/context/context.json $(EXT_DIR)/context/
@@ -75,7 +89,7 @@ extensions: $(DIST_DIR) $(BUILTINS)
 	cd extensions/otel-traces && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(EXT_DIR)/otel-traces/otel-traces.wasm .
 	cp extensions/otel-traces/extension.yaml $(EXT_DIR)/otel-traces/
 	cp extensions/otel-traces/otel-traces.json $(EXT_DIR)/otel-traces/
-	@echo "Built all extensions"
+	@echo "Installed optional extensions to $(EXT_DIR)"
 
 $(DIST_DIR):
 	mkdir -p $(DIST_DIR)
@@ -316,4 +330,6 @@ generate-models:
 clean:
 	rm -rf $(DIST_DIR)
 	rm -f $(BUILTINS)/*.wasm
+
+clean-extensions:
 	rm -rf $(EXT_DIR)/memory $(EXT_DIR)/permissions $(EXT_DIR)/mcp-bridge $(EXT_DIR)/otel-traces
