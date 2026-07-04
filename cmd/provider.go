@@ -136,9 +136,10 @@ func buildProvider(ctx context.Context, cfg *Config) (fantasy.Provider, fantasy.
 // write_file, exec, get_env) on h, bypassing WASM entirely.
 func registerNativeTools(h *extension.Host) {
 	h.RegisterNativeTool(sdk.Tool{
-		Name:        "read_file",
-		Description: "Read the contents of a file from the filesystem",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Absolute or relative path of the file to read"}},"required":["path"]}`),
+		Name:         "read_file",
+		Description:  "Read the contents of a file from the filesystem",
+		InputSchema:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Absolute or relative path of the file to read"}},"required":["path"]}`),
+		OutputSchema: json.RawMessage(`{"type":"string","description":"File contents as text"}`),
 	}, func(_ context.Context, input json.RawMessage) (string, bool) {
 		var in struct {
 			Path string `json:"path"`
@@ -154,9 +155,10 @@ func registerNativeTools(h *extension.Host) {
 	})
 
 	h.RegisterNativeTool(sdk.Tool{
-		Name:        "write_file",
-		Description: "Write content to a file on the filesystem",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Path of the file to write"},"content":{"type":"string","description":"Content to write to the file"}},"required":["path","content"]}`),
+		Name:         "write_file",
+		Description:  "Write content to a file on the filesystem",
+		InputSchema:  json.RawMessage(`{"type":"object","properties":{"path":{"type":"string","description":"Path of the file to write"},"content":{"type":"string","description":"Content to write to the file"}},"required":["path","content"]}`),
+		OutputSchema: json.RawMessage(`{"type":"string","description":"Confirmation text: written <n> bytes to <path>"}`),
 	}, func(_ context.Context, input json.RawMessage) (string, bool) {
 		var in struct {
 			Path    string `json:"path"`
@@ -175,9 +177,10 @@ func registerNativeTools(h *extension.Host) {
 	})
 
 	h.RegisterNativeTool(sdk.Tool{
-		Name:        "exec",
-		Description: "Execute a shell command on the host system",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute"},"dir":{"type":"string","description":"Working directory (optional, defaults to current)"},"timeout_ms":{"type":"integer","description":"Optional timeout in milliseconds (defaults to 30000)"}},"required":["command"]}`),
+		Name:         "exec",
+		Description:  "Execute a shell command on the host system",
+		InputSchema:  json.RawMessage(`{"type":"object","properties":{"command":{"type":"string","description":"Shell command to execute"},"dir":{"type":"string","description":"Working directory (optional, defaults to current)"},"timeout_ms":{"type":"integer","description":"Optional timeout in milliseconds (defaults to 30000)"}},"required":["command"]}`),
+		OutputSchema: json.RawMessage(`{"type":"string","description":"Combined stdout/stderr text, or error text when execution fails"}`),
 	}, func(ctx context.Context, input json.RawMessage) (string, bool) {
 		var in struct {
 			Command   string `json:"command"`
@@ -208,9 +211,10 @@ func registerNativeTools(h *extension.Host) {
 	})
 
 	h.RegisterNativeTool(sdk.Tool{
-		Name:        "get_env",
-		Description: "Read environment variables from the host system",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"name":{"type":"string","description":"Specific env var name to look up (optional — omit to get all)"}}}`),
+		Name:         "get_env",
+		Description:  "Read environment variables from the host system",
+		InputSchema:  json.RawMessage(`{"type":"object","properties":{"name":{"type":"string","description":"Specific env var name to look up (optional — omit to get all)"}}}`),
+		OutputSchema: json.RawMessage(`{"type":["string","array"],"description":"Environment variable value as text, or a JSON array of KEY=VALUE strings when name is omitted"}`),
 	}, func(_ context.Context, input json.RawMessage) (string, bool) {
 		var in struct {
 			Name string `json:"name"`

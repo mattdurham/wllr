@@ -242,12 +242,14 @@ func containsAt(s, substr string) bool {
 	return false
 }
 
-func TestToolInputSchemaPreservesRawJSON(t *testing.T) {
-	raw := `{"type":"object","properties":{"q":{"type":"string"}}}`
+func TestToolSchemasPreserveRawJSON(t *testing.T) {
+	inputRaw := `{"type":"object","properties":{"q":{"type":"string"}}}`
+	outputRaw := `{"type":"object","properties":{"result":{"type":"string"}}}`
 	tool := sdk.Tool{
-		Name:        "search",
-		Description: "search the web",
-		InputSchema: json.RawMessage(raw),
+		Name:         "search",
+		Description:  "search the web",
+		InputSchema:  json.RawMessage(inputRaw),
+		OutputSchema: json.RawMessage(outputRaw),
 	}
 	data, err := json.Marshal(tool)
 	if err != nil {
@@ -257,8 +259,11 @@ func TestToolInputSchemaPreservesRawJSON(t *testing.T) {
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if string(got.InputSchema) != raw {
-		t.Errorf("input_schema: got %s, want %s", got.InputSchema, raw)
+	if string(got.InputSchema) != inputRaw {
+		t.Errorf("input_schema: got %s, want %s", got.InputSchema, inputRaw)
+	}
+	if string(got.OutputSchema) != outputRaw {
+		t.Errorf("output_schema: got %s, want %s", got.OutputSchema, outputRaw)
 	}
 }
 
