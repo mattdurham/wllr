@@ -151,12 +151,22 @@ func _sdkOnIntercept(event string, fn func(json.RawMessage) *_sdkEventResponse) 
 // RegisterTool registers a tool the LLM can call.
 // inputSchema is a JSON Schema object describing the tool's parameters.
 func RegisterTool(name, description string, inputSchema json.RawMessage) {
+	RegisterToolWithOutput(name, description, inputSchema, nil)
+}
+
+// RegisterToolWithOutput registers a tool with input and output JSON schemas.
+// outputSchema documents the tool result returned via tool_result.
+func RegisterToolWithOutput(name, description string, inputSchema, outputSchema json.RawMessage) {
 	_sdkInitHooks = append(_sdkInitHooks, func() {
-		_sdkCall("register_tool", map[string]any{
+		params := map[string]any{
 			"name":         name,
 			"description":  description,
 			"input_schema": inputSchema,
-		})
+		}
+		if len(outputSchema) > 0 {
+			params["output_schema"] = outputSchema
+		}
+		_sdkCall("register_tool", params)
 	})
 }
 

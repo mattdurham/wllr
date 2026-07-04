@@ -61,15 +61,17 @@ var skills map[string]skillEntry
 // ─── Init ─────────────────────────────────────────────────────────────────────
 
 func init() {
-	RegisterTool(
+	RegisterToolWithOutput(
 		"list_skills",
 		"List all loaded skills with their metadata",
 		json.RawMessage(`{"type":"object","properties":{}}`),
+		json.RawMessage(`{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"description":{"type":"string"},"category":{"type":"string"}}}}`),
 	)
-	RegisterTool(
+	RegisterToolWithOutput(
 		"get_skill",
 		"Get the body content of a named skill (frontmatter stripped)",
 		json.RawMessage(`{"type":"object","properties":{"name":{"type":"string","description":"Skill name (directory name)"}},"required":["name"]}`),
+		json.RawMessage(`{"type":"string","description":"Skill body text with frontmatter stripped"}`),
 	)
 
 	OnToolCall(func(callID, toolName string, input json.RawMessage) (string, bool) {

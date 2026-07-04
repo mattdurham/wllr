@@ -13,10 +13,10 @@ import (
 	"path/filepath"
 	"time"
 
-	yaml "gopkg.in/yaml.v3"
-
 	tea "charm.land/bubbletea/v2"
 	fantasy "charm.land/fantasy"
+	yaml "gopkg.in/yaml.v3"
+
 	"github.com/mattdurham/wllr/modules/agent"
 	"github.com/mattdurham/wllr/modules/extension"
 	"github.com/mattdurham/wllr/modules/harness"
@@ -344,9 +344,10 @@ func setupLogging(h *extension.Host, tuiMode bool) func() {
 // The tool returns turn count and recent conversation history for a running agent.
 func registerAgentStatusTool(h *extension.Host, pool *agent.AgentPool) {
 	h.RegisterNativeTool(sdk.Tool{
-		Name:        "get_agent_status",
-		Description: "No-side-effect status check for an agent. Returns is_running, pending_messages, turn_count, and recent history. If is_running=true, the child is working; do not ping it.",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string","description":"Agent ID to inspect"},"history_limit":{"type":"integer","description":"Number of recent messages to include (default 10)"}},"required":["agent_id"]}`),
+		Name:         "get_agent_status",
+		Description:  "No-side-effect status check for an agent. Returns is_running, pending_messages, turn_count, and recent history. If is_running=true, the child is working; do not ping it.",
+		InputSchema:  json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string","description":"Agent ID to inspect"},"history_limit":{"type":"integer","description":"Number of recent messages to include (default 10)"}},"required":["agent_id"]}`),
+		OutputSchema: json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string"},"is_running":{"type":"boolean"},"pending_messages":{"type":"integer"},"turn_count":{"type":"integer"},"last_summary":{"type":"string"},"recent":{"type":"array","items":{"type":"object","properties":{"role":{"type":"string"},"preview":{"type":"string"}}}}}}`),
 	}, func(_ context.Context, input json.RawMessage) (string, bool) {
 		var in struct {
 			AgentID      string `json:"agent_id"`
@@ -505,6 +506,7 @@ func httpPost(url string, headers map[string]string, body []byte) (int, []byte, 
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
+
 	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req) //nolint:gosec // URL is from user config; SSRF is intentional
 	if err != nil {
 		return 0, nil, err
