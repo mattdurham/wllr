@@ -282,7 +282,10 @@ func TestGracefulAgentShutdown_ShutdownRequestFlow(t *testing.T) {
 					Event string `json:"event"`
 				}
 				if json.Unmarshal([]byte(tp.Text), &evt) == nil && evt.Event == "AGENT_SHUTDOWN" {
-					t.Errorf("AGENT_SHUTDOWN found in LLM context — sdkToFantasyMessages must filter system messages; msg: %q", tp.Text)
+					t.Errorf(
+						"AGENT_SHUTDOWN found in LLM context — sdkToFantasyMessages must filter system messages; msg: %q",
+						tp.Text,
+					)
 				}
 			}
 		}

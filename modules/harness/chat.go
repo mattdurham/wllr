@@ -40,7 +40,10 @@ func (c *ChatView) ClearToolLog() { c.toolLog = nil }
 
 // AddToolCall records a tool call in the per-turn log (shown via /tools).
 func (c *ChatView) AddToolCall(id, agentID, toolName, input string) {
-	c.toolLog = append(c.toolLog, ToolLogEntry{ID: id, AgentID: agentID, Name: toolName, Preview: toolInputPreview(input)})
+	c.toolLog = append(
+		c.toolLog,
+		ToolLogEntry{ID: id, AgentID: agentID, Name: toolName, Preview: toolInputPreview(input)},
+	)
 }
 
 // UpdateToolCall marks the matching pending tool log entry as done.
@@ -62,7 +65,10 @@ func (c *ChatView) UpdateToolCall(id, agentID, toolName string, isError bool, _ 
 			}
 		}
 		if toolName != "" {
-			c.toolLog = append(c.toolLog, ToolLogEntry{ID: id, AgentID: agentID, Name: toolName, Done: true, IsError: isError})
+			c.toolLog = append(
+				c.toolLog,
+				ToolLogEntry{ID: id, AgentID: agentID, Name: toolName, Done: true, IsError: isError},
+			)
 			return
 		}
 	}

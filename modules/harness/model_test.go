@@ -675,7 +675,12 @@ func TestModel_View_WithStatusLineFitsHeight(t *testing.T) {
 		t.Fatalf("view rendered too few lines:\n%s", view)
 	}
 	if !strings.Contains(lines[len(lines)-2], "╰") {
-		t.Fatalf("input bottom border should render above final gutter line; got penultimate=%q final=%q\n%s", lines[len(lines)-2], lines[len(lines)-1], view)
+		t.Fatalf(
+			"input bottom border should render above final gutter line; got penultimate=%q final=%q\n%s",
+			lines[len(lines)-2],
+			lines[len(lines)-1],
+			view,
+		)
 	}
 }
 

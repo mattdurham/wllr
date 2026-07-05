@@ -203,7 +203,10 @@ func TestLoadConfig_MissingAPIKeyError(t *testing.T) {
 	if !missing || envVar != "ANTHROPIC_API_KEY" {
 		t.Fatalf("missingProviderAuth = (%q,%v), want (ANTHROPIC_API_KEY,true)", envVar, missing)
 	}
-	if msg := missingAuthError(cfg.Provider, envVar).Error(); !strings.Contains(msg, "wllr login --provider anthropic") {
+	if msg := missingAuthError(cfg.Provider, envVar).Error(); !strings.Contains(
+		msg,
+		"wllr login --provider anthropic",
+	) {
 		t.Fatalf("missing key error = %q, want standalone login guidance", msg)
 	}
 }

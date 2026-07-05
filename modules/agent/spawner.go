@@ -26,7 +26,11 @@ type Spawner struct {
 // NewSpawner creates a Spawner bound to the given pool.
 // toolsFn is called on each sub-agent turn to get its tool list (may be nil).
 // notifyFn is called when a sub-agent errors (may be nil).
-func NewSpawner(pool *AgentPool, toolsFn func(agentID string) []fantasy.AgentTool, notifyFn func(text string)) *Spawner {
+func NewSpawner(
+	pool *AgentPool,
+	toolsFn func(agentID string) []fantasy.AgentTool,
+	notifyFn func(text string),
+) *Spawner {
 	return &Spawner{
 		pool:     pool,
 		toolsFn:  toolsFn,
@@ -98,7 +102,11 @@ func (s *Spawner) Spawn(ctx context.Context, req extension.SpawnRequest) error {
 		}
 		// Surface the error to the main agent so the orchestrator can react.
 		if main := pool.Get(MainAgentID); main != nil {
-			msg := fmt.Sprintf("[sub-agent '%s' failed: %v — you should handle this or try a different approach]", subID, e)
+			msg := fmt.Sprintf(
+				"[sub-agent '%s' failed: %v — you should handle this or try a different approach]",
+				subID,
+				e,
+			)
 			if err := pool.Send(MainAgentID, msg); err != nil && !errors.Is(err, ErrAgentNotFound) {
 				slog.Error("sub-agent: failed to notify main of error", "agent", subID, "sendErr", err)
 			}

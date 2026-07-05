@@ -431,3 +431,15 @@ The user chose the simple "always notify" design over per-turn suppression or an
 **Rationale:** Sub-agent tokens should remain silent in the main transcript, but hiding their tool starts made the tool activity pane and logs hard to reconcile with the subagents window. The host already reports completions through `AfterToolCall`; starts needed equivalent attribution.
 
 **Consequence:** The observer is optional and nil-safe. Existing spawner behavior is preserved unless the harness installs an observer.
+
+---
+
+## 30. Intra-turn activity snapshots for sub-agent liveness
+
+*Added: 2026-07-04*
+
+**Decision:** Add `Agent.Activity()` and track turn start, last activity, last tool call, active/last tool name, and graceful shutdown request state on each agent.
+
+**Rationale:** Orchestrators were treating unchanged completed-turn history as evidence that a sub-agent was stuck, even while the sub-agent was actively executing tools inside a long turn. Completed history is too coarse for supervising agentic work; liveness must include intra-turn signals such as text deltas, tool dispatches, and queued shutdown requests.
+
+**Consequence:** `Agent` gains activity state guarded by `activityMu` plus an atomic shutdown-request flag. Activity updates are observational and do not affect turn execution, inbox ordering, or history. Status surfaces can now distinguish "running and recently active" from "running but quiet for a long time" without pinging the child.

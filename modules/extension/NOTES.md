@@ -350,3 +350,15 @@ implementations.
 **Rationale:** Parent agents were treating a busy child that had not replied yet as "not responding" and sometimes sent a ping via `send_message`. Because inbox delivery is sequential, a ping sent during an active child turn cannot be handled until that turn finishes. Exposing running and pending state gives extensions and LLM-visible tools a system-level status check that does not enqueue work or perturb the child.
 
 **Consequence:** Existing consumers that only read `id` and `name` remain compatible. New consumers should prefer `is_running=true` as the signal that the child is alive and busy, and only nudge an idle child after inspecting recent history.
+
+---
+
+## 30. Agent List Includes Intra-Turn Liveness
+
+*Added: 2026-07-04*
+
+**Decision:** Extend `AgentInfo` with additive JSON fields for liveness: `last_activity_age_ms`, `turn_duration_ms`, `last_tool_age_ms`, `active_tool`, `last_tool`, and `shutdown_requested`.
+
+**Rationale:** `is_running` alone proved insufficient for orchestration. A long-running agent with frequent tool calls could look stalled if its completed-turn count and recent history did not change. Exposing age/tool metadata lets orchestrators treat recent intra-turn activity as progress without adding a separate polling or ping mechanism.
+
+**Consequence:** `agent_list` remains backward compatible for consumers that only read the original fields. New consumers should use `is_running && recent last_activity_age_ms` as the "working" signal and treat `shutdown_requested` as "graceful stop pending," not "agent already stopped."

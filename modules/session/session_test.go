@@ -17,10 +17,15 @@ type fakeRenderer struct {
 	tokens        []string
 }
 
-func (f *fakeRenderer) AppendToken(t string)                                  { f.tokens = append(f.tokens, t) }
-func (f *fakeRenderer) FinalizeMessage()                                      {}
-func (f *fakeRenderer) AddUserMessage(_, _ string)                            {}
-func (f *fakeRenderer) AddNotification(t string)                              { f.notifications = append(f.notifications, t) }
+func (f *fakeRenderer) AppendToken(t string)       { f.tokens = append(f.tokens, t) }
+func (f *fakeRenderer) FinalizeMessage()           {}
+func (f *fakeRenderer) AddUserMessage(_, _ string) {}
+
+func (f *fakeRenderer) AddNotification(
+	t string,
+) {
+	f.notifications = append(f.notifications, t)
+}
 func (f *fakeRenderer) SetStreaming(_ bool, _ error)                          {}
 func (f *fakeRenderer) ShowModal(_ string)                                    {}
 func (f *fakeRenderer) ShowPicker(_ string, _ []sdk.ShowPickerItem, _ string) {}

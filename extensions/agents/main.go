@@ -63,6 +63,23 @@ func truncate(s string, n int) string {
 	return s
 }
 
+func formatDurationMS(ms int64) string {
+	if ms < 1000 {
+		return fmt.Sprintf("%dms", ms)
+	}
+	sec := ms / 1000
+	if sec < 60 {
+		return fmt.Sprintf("%ds", sec)
+	}
+	min := sec / 60
+	rem := sec % 60
+	if min < 60 {
+		return fmt.Sprintf("%dm%02ds", min, rem)
+	}
+	hour := min / 60
+	return fmt.Sprintf("%dh%02dm", hour, min%60)
+}
+
 func upsertAgent(id, name, task, lastUpdate string) {
 	for i := range agentRecords {
 		if agentRecords[i].id == id {
@@ -98,49 +115,67 @@ func init() {
 	RegisterToolWithOutput(
 		"create_agent",
 		`Create a new agent. The agent ID is {your_agent_id}/{name} (e.g. main creating "researcher" → id="main/researcher"). The returned agent_id is what you pass to send_message and shutdown_agent.`,
-		json.RawMessage(`{"type":"object","properties":{"name":{"type":"string","description":"Agent name"},"system_prompt":{"type":"string","description":"System prompt for the agent"},"prompt":{"type":"string","description":"Initial prompt to send"},"model":{"type":"string","description":"Model name (optional)"},"thinking_budget":{"type":"integer","description":"Extended thinking token budget (optional, Anthropic only). Enables deeper reasoning before responding."}},"required":["name","system_prompt","prompt"]}`),
-		json.RawMessage(`{"type":"object","description":"Host agent creation result including the new agent_id on success"}`),
+		json.RawMessage(
+			`{"type":"object","properties":{"name":{"type":"string","description":"Agent name"},"system_prompt":{"type":"string","description":"System prompt for the agent"},"prompt":{"type":"string","description":"Initial prompt to send"},"model":{"type":"string","description":"Model name (optional)"},"thinking_budget":{"type":"integer","description":"Extended thinking token budget (optional, Anthropic only). Enables deeper reasoning before responding."}},"required":["name","system_prompt","prompt"]}`,
+		),
+		json.RawMessage(
+			`{"type":"object","description":"Host agent creation result including the new agent_id on success"}`,
+		),
 	)
 	RegisterToolWithOutput(
 		"shutdown_agent",
-		"Shut down and remove a running agent",
-		json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string","description":"ID of the agent to shut down"}},"required":["agent_id"]}`),
+		"Request graceful shutdown for an agent. A running agent may continue until its current turn finishes; confirm with list_agents before taking over its work.",
+		json.RawMessage(
+			`{"type":"object","properties":{"agent_id":{"type":"string","description":"ID of the agent to shut down"}},"required":["agent_id"]}`,
+		),
 		json.RawMessage(`{"type":"object","description":"Host shutdown result"}`),
 	)
 	RegisterToolWithOutput(
 		"list_agents",
-		"List live agents with is_running and pending_messages. Use this to check whether a child is busy; do not ping a running child.",
+		"List live agents with running state, queued messages, recent activity age, active/last tool, and shutdown request state. Recent activity means the child is working.",
 		json.RawMessage(`{"type":"object","properties":{}}`),
-		json.RawMessage(`{"type":"object","properties":{"agents":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"},"is_running":{"type":"boolean"},"pending_messages":{"type":"integer"}}}}}}`),
+		json.RawMessage(
+			`{"type":"object","properties":{"agents":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"},"is_running":{"type":"boolean"},"pending_messages":{"type":"integer"}}}}}}`,
+		),
 	)
 	RegisterToolWithOutput(
 		"create_team",
 		"Create a new team",
-		json.RawMessage(`{"type":"object","properties":{"name":{"type":"string","description":"Team name"}},"required":["name"]}`),
+		json.RawMessage(
+			`{"type":"object","properties":{"name":{"type":"string","description":"Team name"}},"required":["name"]}`,
+		),
 		json.RawMessage(`{"type":"object","description":"Host team creation result including team_id on success"}`),
 	)
 	RegisterToolWithOutput(
 		"add_to_team",
 		"Add an agent to a team",
-		json.RawMessage(`{"type":"object","properties":{"team_id":{"type":"string","description":"Team ID"},"agent_id":{"type":"string","description":"Agent ID"}},"required":["team_id","agent_id"]}`),
+		json.RawMessage(
+			`{"type":"object","properties":{"team_id":{"type":"string","description":"Team ID"},"agent_id":{"type":"string","description":"Agent ID"}},"required":["team_id","agent_id"]}`,
+		),
 		json.RawMessage(`{"type":"object","description":"Host team membership update result"}`),
 	)
 	RegisterToolWithOutput(
 		"get_team",
 		"Get information about a team",
-		json.RawMessage(`{"type":"object","properties":{"team_id":{"type":"string","description":"Team ID"}},"required":["team_id"]}`),
+		json.RawMessage(
+			`{"type":"object","properties":{"team_id":{"type":"string","description":"Team ID"}},"required":["team_id"]}`,
+		),
 		json.RawMessage(`{"type":"object","description":"Team details returned by the host"}`),
 	)
 	RegisterToolWithOutput(
 		"shutdown_team",
 		"Shut down a team and all its members",
-		json.RawMessage(`{"type":"object","properties":{"team_id":{"type":"string","description":"Team ID"}},"required":["team_id"]}`),
+		json.RawMessage(
+			`{"type":"object","properties":{"team_id":{"type":"string","description":"Team ID"}},"required":["team_id"]}`,
+		),
 		json.RawMessage(`{"type":"object","description":"Host team shutdown result"}`),
 	)
 	RegisterToolWithOutput(
 		"send_message",
 		"Send a message to an agent and wake it. If the agent is already running, the message is queued for its next turn; do not use as a ping.",
-		json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string","description":"Agent ID"},"message":{"type":"string","description":"Message text"}},"required":["agent_id","message"]}`),
+		json.RawMessage(
+			`{"type":"object","properties":{"agent_id":{"type":"string","description":"Agent ID"},"message":{"type":"string","description":"Message text"}},"required":["agent_id","message"]}`,
+		),
 		json.RawMessage(`{"type":"object","description":"Host message delivery result"}`),
 	)
 	RegisterCommandInstant("agents", "Show running sub-agents and their status")
@@ -192,22 +227,34 @@ Send a message to an agent and trigger its next turn immediately.
   will appear in the caller's conversation but is not needed for wakeup.
 
 **shutdown_agent(agent_id)**
-Stop an agent and free its resources. Always shut down agents when their
-task is complete. Leaked agents continue consuming memory.
+Request graceful shutdown. If the agent is running, it may continue its current
+turn and tool calls before stopping. Do not take over its files until list_agents
+no longer shows it, or until it is idle with shutdown_requested=false.
+Always shut down agents when their task is complete. Leaked agents continue
+consuming memory.
 
 **list_agents()**
-Returns all live agents with IDs, names, is_running, and pending_messages.
-Use is_running to tell "working" from "idle"; do not ping a running child.
+Returns all live agents with IDs, names, is_running, pending_messages, and
+liveness fields: last_activity_age_ms, turn_duration_ms, active_tool,
+last_tool, last_tool_age_ms, shutdown_requested.
+Use is_running plus last_activity_age_ms to tell "working" from "possibly stuck";
+do not ping or interrupt a running child that has recent activity.
 
 **get_agent_status(agent_id, history_limit?)**
-Diagnostic tool — returns is_running (true if mid-turn), turn_count, and
-recent conversation history. Use ONCE to diagnose a stuck agent; do not poll.
-- is_running=true: agent is currently working; do not interrupt, end your turn
-- is_running=false: agent is idle; read "recent" field to see what it did last
+Diagnostic tool — returns live state for one agent: is_running, pending_messages,
+last_activity_age_ms, turn_duration_ms, active_tool, last_tool, and
+shutdown_requested. Use ONCE to diagnose a stuck agent; do not poll.
+- is_running=true and last_activity_age_ms is recent: agent is currently working;
+  do not interrupt, end your turn
+- is_running=true but last_activity_age_ms is old: possibly stuck; inspect once,
+  then nudge or request graceful shutdown
+- is_running=false: agent is idle; review its final message or task output
 - pending_messages>0: messages are queued for the next turn; the child may not
   have read your latest message yet
-- Always use history_limit=20 to see enough context to understand what happened
-history_limit defaults to 10 messages.
+- shutdown_requested=true: graceful shutdown has been requested but the agent may
+  still be finishing its current turn; do not assume it has stopped
+history_limit is accepted for compatibility, but live state is the reliable
+liveness signal.
 
 **create_team(name)** / **add_to_team(team_id, agent_id)** / **shutdown_team(team_id)**
 Group agents for coordinated work. shutdown_team stops all members at once.
@@ -284,8 +331,9 @@ process the results, then shutdown_agent for each completed agent.
 
 If an agent seems stuck (you have been woken multiple times but it has not
 finished):
-  get_agent_status("main/coder", 20)  ← diagnose ONCE with high history_limit
-  If is_running=true: still working — end your turn again.
+  get_agent_status("main/coder", 20)  ← diagnose ONCE
+  If is_running=true and last_activity_age_ms is recent: still working — end your turn again.
+  If is_running=true but last_activity_age_ms is old: nudge once or request graceful shutdown.
   If is_running=false with no useful output: nudge it.
     → send_message("main/coder", "Please report your current status.")
 
@@ -310,8 +358,8 @@ RIGHT — spawn agents and end your turn; the host notifies you when done:
   (on next turn: read results, then shutdown_agent)
 
 RIGHT — if agent seems genuinely stuck:
-  get_agent_status("main/coder-1", 20)  ← check ONCE with high history_limit
-  (read "recent" history to understand the situation)
+  get_agent_status("main/coder-1", 20)  ← check ONCE
+  (read liveness fields to understand the situation)
   send_message("main/coder-1", "Please report your status.")  ← nudge it
 
 ---
@@ -355,10 +403,15 @@ func onAgentsCommand(_ []string) {
 	result := agentCall("agent_list", map[string]string{})
 	var poolResp struct {
 		Agents []struct {
-			ID              string `json:"id"`
-			Name            string `json:"name"`
-			IsRunning       bool   `json:"is_running"`
-			PendingMessages int    `json:"pending_messages"`
+			ID                string `json:"id"`
+			Name              string `json:"name"`
+			IsRunning         bool   `json:"is_running"`
+			PendingMessages   int    `json:"pending_messages"`
+			LastActivityAgeMS int64  `json:"last_activity_age_ms"`
+			TurnDurationMS    int64  `json:"turn_duration_ms"`
+			ActiveTool        string `json:"active_tool"`
+			LastTool          string `json:"last_tool"`
+			ShutdownRequested bool   `json:"shutdown_requested"`
 		} `json:"agents"`
 	}
 	if result != "" {
@@ -395,8 +448,22 @@ func onAgentsCommand(_ []string) {
 		sb.WriteString("\n")
 		if a.IsRunning {
 			sb.WriteString("  Status: running\n")
+			if a.TurnDurationMS > 0 {
+				sb.WriteString(fmt.Sprintf("  Turn running: %s\n", formatDurationMS(a.TurnDurationMS)))
+			}
 		} else {
 			sb.WriteString("  Status: idle\n")
+		}
+		if a.LastActivityAgeMS > 0 {
+			sb.WriteString(fmt.Sprintf("  Last activity: %s ago\n", formatDurationMS(a.LastActivityAgeMS)))
+		}
+		if a.ActiveTool != "" {
+			sb.WriteString("  Active tool: " + a.ActiveTool + "\n")
+		} else if a.LastTool != "" {
+			sb.WriteString("  Last tool: " + a.LastTool + "\n")
+		}
+		if a.ShutdownRequested {
+			sb.WriteString("  Shutdown: requested\n")
 		}
 		if a.PendingMessages > 0 {
 			sb.WriteString(fmt.Sprintf("  Pending messages: %d\n", a.PendingMessages))
@@ -556,7 +623,19 @@ func handleShutdownAgent(p beforeToolCallPayload) {
 
 	// Do NOT call removeAgent or agent_close here — the agent will self-close when
 	// finishTurn processes the shutdown_request and sends AGENT_SHUTDOWN back.
-	ToolResult(p.ToolCallID, `{"status":"shutdown_requested"}`, false)
+	out := map[string]any{
+		"status":   "shutdown_requested",
+		"agent_id": input.AgentID,
+		"stopped":  false,
+	}
+	if state, ok := lookupAgentInfo(input.AgentID); ok {
+		out["is_running"] = state.IsRunning
+		out["pending_messages"] = state.PendingMessages
+		out["last_activity_age_ms"] = state.LastActivityAgeMS
+		out["shutdown_requested"] = state.ShutdownRequested
+	}
+	encoded, _ := json.Marshal(out)
+	ToolResult(p.ToolCallID, string(encoded), false)
 }
 
 func handleListAgents(p beforeToolCallPayload) {
@@ -566,6 +645,34 @@ func handleListAgents(p beforeToolCallPayload) {
 		return
 	}
 	ToolResult(p.ToolCallID, result, false)
+}
+
+type agentInfoView struct {
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	IsRunning         bool   `json:"is_running"`
+	PendingMessages   int    `json:"pending_messages"`
+	LastActivityAgeMS int64  `json:"last_activity_age_ms"`
+	TurnDurationMS    int64  `json:"turn_duration_ms"`
+	ActiveTool        string `json:"active_tool"`
+	LastTool          string `json:"last_tool"`
+	ShutdownRequested bool   `json:"shutdown_requested"`
+}
+
+func lookupAgentInfo(id string) (agentInfoView, bool) {
+	result := agentCall("agent_list", map[string]string{})
+	var poolResp struct {
+		Agents []agentInfoView `json:"agents"`
+	}
+	if result == "" || json.Unmarshal([]byte(result), &poolResp) != nil {
+		return agentInfoView{}, false
+	}
+	for _, a := range poolResp.Agents {
+		if a.ID == id {
+			return a, true
+		}
+	}
+	return agentInfoView{}, false
 }
 
 func handleCreateTeam(p beforeToolCallPayload) {

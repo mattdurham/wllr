@@ -57,7 +57,8 @@ func runLint(input map[string]any) (string, bool) {
 		path = "."
 	}
 
-	if strings.HasSuffix(path, ".go") || fileExists(filepath.Join(path, "go.mod")) || fileExists(filepath.Join(dirForPath(path), "go.mod")) {
+	if strings.HasSuffix(path, ".go") || fileExists(filepath.Join(path, "go.mod")) ||
+		fileExists(filepath.Join(dirForPath(path), "go.mod")) {
 		out, err := runCommand("go test ./...", dirForPath(path))
 		return commandJSON("lint", path, "go test ./...", out, err), false
 	}

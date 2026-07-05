@@ -32,22 +32,52 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
-	documented := map[string]bool{}
-	for _, match := range contractHeadingRe.FindAllStringSubmatch(string(data), -1) {
-		documented[match[1]] = true
-	}
+	sections := contractSections(string(data))
 
 	var missing []string
+	var incomplete []string
 	for name, file := range registered {
-		if !documented[name] {
+		section, ok := sections[name]
+		if !ok {
 			missing = append(missing, fmt.Sprintf("%s (%s)", name, file))
+			continue
+		}
+		if !hasLabel(section, "Input:") {
+			incomplete = append(incomplete, fmt.Sprintf("%s missing Input (%s)", name, file))
+		}
+		if !hasLabel(section, "Output:") {
+			incomplete = append(incomplete, fmt.Sprintf("%s missing Output (%s)", name, file))
 		}
 	}
 	sort.Strings(missing)
+	sort.Strings(incomplete)
 	if len(missing) > 0 {
 		fmt.Fprintf(os.Stderr, "missing tool contract docs:\n  %s\n", strings.Join(missing, "\n  "))
 		os.Exit(1)
 	}
+	if len(incomplete) > 0 {
+		fmt.Fprintf(os.Stderr, "incomplete tool contract docs:\n  %s\n", strings.Join(incomplete, "\n  "))
+		os.Exit(1)
+	}
+}
+
+func contractSections(text string) map[string]string {
+	sections := map[string]string{}
+	matches := contractHeadingRe.FindAllStringSubmatchIndex(text, -1)
+	for i, match := range matches {
+		name := text[match[2]:match[3]]
+		start := match[1]
+		end := len(text)
+		if i+1 < len(matches) {
+			end = matches[i+1][0]
+		}
+		sections[name] = text[start:end]
+	}
+	return sections
+}
+
+func hasLabel(section, label string) bool {
+	return strings.HasPrefix(section, label) || strings.Contains(section, "\n"+label)
 }
 
 func registeredTools(root string) (map[string]string, error) {

@@ -135,7 +135,11 @@ func (p *AgentPool) SetProviderRequestInterceptor(fn ProviderRequestInterceptor)
 // any. Returns the (possibly transformed) messages and model, whether the
 // request is blocked, and the reason. With no interceptor it returns the inputs
 // unchanged.
-func (p *AgentPool) interceptProviderRequest(agentID string, messages []sdk.Message, model string) ([]sdk.Message, string, bool, string) {
+func (p *AgentPool) interceptProviderRequest(
+	agentID string,
+	messages []sdk.Message,
+	model string,
+) ([]sdk.Message, string, bool, string) {
 	p.dispatchMu.RLock()
 	fn := p.providerRequestInterceptor
 	p.dispatchMu.RUnlock()

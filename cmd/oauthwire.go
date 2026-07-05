@@ -136,7 +136,13 @@ func (s *oauthLoginState) beginAnthropic() (string, string, error) {
 func (s *oauthLoginState) startServerLocked() {
 	ln, err := net.Listen("tcp", oauthCallbackAddr)
 	if err != nil {
-		slog.Warn("wllr: oauth callback server could not bind; login will time out until the port is free", "addr", oauthCallbackAddr, "error", err)
+		slog.Warn(
+			"wllr: oauth callback server could not bind; login will time out until the port is free",
+			"addr",
+			oauthCallbackAddr,
+			"error",
+			err,
+		)
 		return
 	}
 	s.boundAddr = ln.Addr().String()
@@ -146,7 +152,10 @@ func (s *oauthLoginState) startServerLocked() {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if r.URL.Query().Get(oauthParamCode) == "" {
 			w.WriteHeader(http.StatusBadRequest)
-			_, _ = io.WriteString(w, oauthCallbackHTML("Sign-in did not complete. You can close this window and try /login again."))
+			_, _ = io.WriteString(
+				w,
+				oauthCallbackHTML("Sign-in did not complete. You can close this window and try /login again."),
+			)
 			return
 		}
 		_, _ = io.WriteString(w, oauthCallbackHTML("Signed in. You can close this window and return to wllr."))

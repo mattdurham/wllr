@@ -592,6 +592,18 @@ a separate `m.history` copy.
 
 ---
 
+## 30. Agent List Liveness Fields
+
+*Added: 2026-07-04*
+
+**Decision:** Populate the new `AgentInfo` liveness fields from `Agent.Activity()` in `harnessAgentBridge.List`.
+
+**Rationale:** The harness bridge is the boundary between the runtime agent pool and extension-visible agent tools. Keeping age calculations here avoids leaking wall-clock formatting into the agent package while ensuring `list_agents` reports fresh state every time it is called.
+
+**Consequence:** `/agents` and the agents extension receive recent-activity age, turn duration, active/last tool, and graceful shutdown-request state. The data is read-only and does not wake, cancel, or message agents.
+
+---
+
 ## LSP guidance in default action prompt
 
 *Added: 2026-07-02*

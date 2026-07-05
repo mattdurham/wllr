@@ -361,7 +361,7 @@ Note: Percent is 0–100. CompactConfig.ThresholdPct is a fraction 0.0–1.0.
 | `MethodAgentSendMessage`  | `"agent_send_message"`  | Send a message to a named agent               |
 | `MethodAgentDeliver`      | `"agent_deliver"`       | Append message to inbox and trigger execution |
 | `MethodAgentRun`          | `"agent_run"`           | Trigger an immediate agent turn               |
-| `MethodAgentList`         | `"agent_list"`          | Return all live agent IDs and names           |
+| `MethodAgentList`         | `"agent_list"`          | Return live agent identity, queue, and liveness state |
 | `MethodAgentTokenCount`   | `"agent_token_count"`   | Return total token count across all agents    |
 | `MethodAgentResetHistory` | `"agent_reset_history"` | Replace agent's conversation history          |
 

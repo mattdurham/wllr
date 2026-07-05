@@ -77,7 +77,11 @@ func startCodexDeviceAuth(ctx context.Context, client *http.Client) (codexDevice
 		return codexDeviceAuth{}, fmt.Errorf("codex device-code login is not enabled for this account")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return codexDeviceAuth{}, fmt.Errorf("codex device-code request failed: status=%d body=%s", resp.StatusCode, string(data))
+		return codexDeviceAuth{}, fmt.Errorf(
+			"codex device-code request failed: status=%d body=%s",
+			resp.StatusCode,
+			string(data),
+		)
 	}
 	var parsed struct {
 		DeviceAuthID string          `json:"device_auth_id"`
@@ -100,7 +104,11 @@ func startCodexDeviceAuth(ctx context.Context, client *http.Client) (codexDevice
 
 // pollCodexDeviceAuth polls the device-token endpoint until the user approves,
 // returning the authorization code and server-supplied PKCE verifier.
-func pollCodexDeviceAuth(ctx context.Context, client *http.Client, device codexDeviceAuth) (code, verifier string, err error) {
+func pollCodexDeviceAuth(
+	ctx context.Context,
+	client *http.Client,
+	device codexDeviceAuth,
+) (code, verifier string, err error) {
 	type pair struct{ code, verifier string }
 	res, err := pollDeviceCode(ctx, devicePollOptions[pair]{
 		IntervalSeconds:  device.IntervalSeconds,
@@ -128,9 +136,15 @@ func pollCodexDeviceAuth(ctx context.Context, client *http.Client, device codexD
 					CodeVerifier      string `json:"code_verifier"`
 				}
 				if json.Unmarshal(data, &ok) != nil || ok.AuthorizationCode == "" || ok.CodeVerifier == "" {
-					return devicePollResult[pair]{Status: deviceFailed, Err: fmt.Errorf("invalid device-token response: %s", string(data))}
+					return devicePollResult[pair]{
+						Status: deviceFailed,
+						Err:    fmt.Errorf("invalid device-token response: %s", string(data)),
+					}
 				}
-				return devicePollResult[pair]{Status: deviceComplete, Value: pair{ok.AuthorizationCode, ok.CodeVerifier}}
+				return devicePollResult[pair]{
+					Status: deviceComplete,
+					Value:  pair{ok.AuthorizationCode, ok.CodeVerifier},
+				}
 			}
 			// 403/404 mean not-yet-approved.
 			if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusNotFound {
@@ -142,7 +156,10 @@ func pollCodexDeviceAuth(ctx context.Context, client *http.Client, device codexD
 			case "slow_down":
 				return devicePollResult[pair]{Status: deviceSlowDown}
 			}
-			return devicePollResult[pair]{Status: deviceFailed, Err: fmt.Errorf("codex device-token failed: status=%d body=%s", resp.StatusCode, string(data))}
+			return devicePollResult[pair]{
+				Status: deviceFailed,
+				Err:    fmt.Errorf("codex device-token failed: status=%d body=%s", resp.StatusCode, string(data)),
+			}
 		},
 	})
 	if err != nil {
