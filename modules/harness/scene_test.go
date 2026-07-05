@@ -64,7 +64,10 @@ func TestSceneRenderNodeWithTextOverride(t *testing.T) {
 	s := NewSceneRenderer()
 	_ = s.CreateArea(sdk.UIArea{ID: "a"})
 	_ = s.ApplyPatch(sdk.UIPatchParams{Area: "a", Ops: []sdk.UIPatchOp{
-		{Op: sdk.UIOpSetRoot, Node: &sdk.UINode{ID: "txt", Type: sdk.UINodeText, Text: "current", Props: &sdk.UIProps{Border: "rounded"}}},
+		{
+			Op:   sdk.UIOpSetRoot,
+			Node: &sdk.UINode{ID: "txt", Type: sdk.UINodeText, Text: "current", Props: &sdk.UIProps{Border: "rounded"}},
+		},
 	}})
 
 	override := "previous"
@@ -84,7 +87,15 @@ func TestSceneRenderAppendTextNode(t *testing.T) {
 	s := NewSceneRenderer()
 	_ = s.CreateArea(sdk.UIArea{ID: "a"})
 	_ = s.ApplyPatch(sdk.UIPatchParams{Area: "a", Ops: []sdk.UIPatchOp{
-		{Op: sdk.UIOpSetRoot, Node: &sdk.UINode{ID: "txt", Type: sdk.UINodeText, Text: "hello world", Props: &sdk.UIProps{Border: "rounded"}}},
+		{
+			Op: sdk.UIOpSetRoot,
+			Node: &sdk.UINode{
+				ID:    "txt",
+				Type:  sdk.UINodeText,
+				Text:  "hello world",
+				Props: &sdk.UIProps{Border: "rounded"},
+			},
+		},
 	}})
 
 	previous, current, ok := s.RenderAppendTextNode("a", "txt", 40, " world")
@@ -111,7 +122,12 @@ func TestSceneInsertAndRemove(t *testing.T) {
 	// Insert two children, second at index 0 so it appears first.
 	_ = s.ApplyPatch(sdk.UIPatchParams{Area: "a", Ops: []sdk.UIPatchOp{
 		{Op: sdk.UIOpInsert, Parent: "root", Node: &sdk.UINode{ID: "b", Type: sdk.UINodeText, Text: "B"}},
-		{Op: sdk.UIOpInsert, Parent: "root", Index: intp(0), Node: &sdk.UINode{ID: "a1", Type: sdk.UINodeText, Text: "A"}},
+		{
+			Op:     sdk.UIOpInsert,
+			Parent: "root",
+			Index:  intp(0),
+			Node:   &sdk.UINode{ID: "a1", Type: sdk.UINodeText, Text: "A"},
+		},
 	}})
 	out := s.Render("a", 40)
 	if strings.Index(out, "A") > strings.Index(out, "B") {

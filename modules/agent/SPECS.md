@@ -102,11 +102,19 @@ them for liveness/status reporting. Sending a "ping" message to a running agent 
 queues that message for a later turn; it cannot be observed by the child until the active
 turn finishes and the inbox is drained.
 
+`Agent.Activity()` is a non-mutating runtime status snapshot for intra-turn liveness. It
+reports turn start time, last activity time, last tool call time/name, currently active
+tool name (best-effort; cleared when the turn finishes), and whether graceful shutdown has
+been requested. Activity is updated when a turn starts, text streams, a tool call is
+dispatched, a shutdown request is queued, and the turn finishes.
+
 **Invariant:** `Send` and `Deliver` always return immediately. The agent goroutine may be running concurrently with the caller.
 
 **Invariant:** `Deliver(id, msg, wake=true)` guarantees the message is *processed*, not merely queued. A delivered message can never be silently stranded in the inbox by a missing follow-up trigger — this is the failure mode the two-call pattern allowed (e.g. the tasks extension queued a `TASK_DONE` notification but never triggered a turn).
 
 **Invariant:** `Deliver` Submits with empty content. The just-appended inbox message becomes the turn content via the drain path; no synthetic placeholder string (such as the former `"[process pending inbox messages]"`) is ever injected into history.
+
+**Invariant:** `Activity()` is observational only. Reading activity must not enqueue messages, wake the agent, cancel the turn, or mutate history/inbox state.
 
 ### Wake Notifier
 

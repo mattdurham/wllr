@@ -205,7 +205,7 @@ server's schema rather than by this document.
 | `write_file` | `path` string, required; `content` string, required. | Text: `written <n> bytes to <path>`. |
 | `exec` | `command` string, required; `dir` string, optional working directory; `timeout_ms` integer, optional, default 30000. | Combined stdout/stderr as text. Errors return text such as `exec cancelled`, `exec timed out after <duration>`, or command output followed by `error: <message>`. |
 | `get_env` | `name` string, optional. | If `name` is set, the variable value as text. If omitted, a JSON array of `"KEY=VALUE"` strings. |
-| `get_agent_status` | `agent_id` string, required; `history_limit` integer, optional, default 10. | JSON object with `agent_id`, `is_running`, `pending_messages`, `turn_count`, `last_summary`, and `recent` message previews. |
+| `get_agent_status` | `agent_id` string, required; `history_limit` integer, optional, default 10. | JSON object with `agent_id`, `is_running`, `pending_messages`, liveness fields (`last_activity_age_ms`, `turn_duration_ms`, `last_tool_age_ms`, `active_tool`, `last_tool`, `shutdown_requested`), `turn_count`, `last_summary`, and `recent` message previews. |
 
 ### Agent and team tools
 
@@ -214,8 +214,8 @@ Registered by the bundled `agents` extension.
 | Tool | Inputs | Output |
 |------|--------|--------|
 | `create_agent` | `name` string, required; `system_prompt` string, required; `prompt` string, required; `model` string, optional; `thinking_budget` integer, optional. | JSON result from host agent spawn/delivery. Includes the new agent ID on success. |
-| `shutdown_agent` | `agent_id` string, required. | JSON result from host agent shutdown. |
-| `list_agents` | No fields. | JSON object containing live agents with IDs, names, running state, and pending message counts. |
+| `shutdown_agent` | `agent_id` string, required. | JSON object with `status: "shutdown_requested"`, `agent_id`, `stopped: false`, and, when available, current running, queue, activity, and shutdown-request state. |
+| `list_agents` | No fields. | JSON object containing live agents with IDs, names, running state, pending message counts, recent activity age, turn duration, last/active tool names, and shutdown-request state. |
 | `send_message` | `agent_id` string, required; `message` string, required. | JSON result from host agent delivery. |
 | `create_team` | `name` string, required. | JSON result from host team creation, including team ID on success. |
 | `add_to_team` | `team_id` string, required; `agent_id` string, required. | JSON result from host team membership update. |

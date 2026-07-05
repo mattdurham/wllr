@@ -12,9 +12,11 @@ import (
 
 var (
 	pickerBorderStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#89CFF0"))
-	pickerSelectedStyle = lipgloss.NewStyle().Background(lipgloss.Color("#1A4A8A")).Foreground(lipgloss.Color("#FFFFFF"))
-	pickerLabelStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
-	pickerTitleStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#89CFF0"))
+	pickerSelectedStyle = lipgloss.NewStyle().
+				Background(lipgloss.Color("#1A4A8A")).
+				Foreground(lipgloss.Color("#FFFFFF"))
+	pickerLabelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
+	pickerTitleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#89CFF0"))
 )
 
 // PickerView is a fullscreen overlay list picker shown instead of the chat.
@@ -108,7 +110,15 @@ func (p *PickerView) View() string {
 		fillLen = 0
 	}
 	topFill := strings.Repeat("─", fillLen)
-	sb.WriteString(pickerBorderStyle.Render("╭") + pickerTitleStyle.Render(titleStr) + pickerBorderStyle.Render(topFill+"╮") + "\n")
+	sb.WriteString(
+		pickerBorderStyle.Render(
+			"╭",
+		) + pickerTitleStyle.Render(
+			titleStr,
+		) + pickerBorderStyle.Render(
+			topFill+"╮",
+		) + "\n",
+	)
 
 	visible := p.visibleRows()
 	end := p.scrollOffset + visible
@@ -160,7 +170,15 @@ func (p *PickerView) View() string {
 		}
 
 		if selected {
-			sb.WriteString(pickerBorderStyle.Render("│") + " " + pickerSelectedStyle.Render(line) + " " + pickerBorderStyle.Render("│") + "\n")
+			sb.WriteString(
+				pickerBorderStyle.Render(
+					"│",
+				) + " " + pickerSelectedStyle.Render(
+					line,
+				) + " " + pickerBorderStyle.Render(
+					"│",
+				) + "\n",
+			)
 		} else {
 			sb.WriteString(pickerBorderStyle.Render("│") + " " + pickerLabelStyle.Render(line) + " " + pickerBorderStyle.Render("│") + "\n")
 		}

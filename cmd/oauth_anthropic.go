@@ -106,7 +106,12 @@ func parseAuthorizationInput(input string) (code, state string) {
 }
 
 // postOAuthJSON POSTs a JSON body to url and returns the parsed token fields.
-func postOAuthJSON(ctx context.Context, client *http.Client, endpoint string, body map[string]string) (oauthToken, error) {
+func postOAuthJSON(
+	ctx context.Context,
+	client *http.Client,
+	endpoint string,
+	body map[string]string,
+) (oauthToken, error) {
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return oauthToken{}, err

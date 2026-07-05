@@ -41,9 +41,11 @@ func (p *recordingProvider) lastModel() string {
 
 func TestProviderIntercept_BlockFailsTurn(t *testing.T) {
 	pool := agent.NewPool()
-	pool.SetProviderRequestInterceptor(func(_ string, msgs []sdk.Message, model string) ([]sdk.Message, string, bool, string) {
-		return msgs, model, true, "contains api key"
-	})
+	pool.SetProviderRequestInterceptor(
+		func(_ string, msgs []sdk.Message, model string) ([]sdk.Message, string, bool, string) {
+			return msgs, model, true, "contains api key"
+		},
+	)
 	a, err := pool.Spawn("main", &tokenStreamLM{tokens: []string{"resp"}}, agent.SpawnOpts{})
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
@@ -80,13 +82,15 @@ func TestProviderIntercept_NoInterceptorTurnSucceeds(t *testing.T) {
 func TestProviderIntercept_RedactPreservesHistoryOriginal(t *testing.T) {
 	pool := agent.NewPool()
 	// Redact: replace any message content with "[redacted]" on the way out.
-	pool.SetProviderRequestInterceptor(func(_ string, msgs []sdk.Message, model string) ([]sdk.Message, string, bool, string) {
-		out := make([]sdk.Message, len(msgs))
-		for i, m := range msgs {
-			out[i] = sdk.Message{Role: m.Role, Content: "[redacted]"}
-		}
-		return out, model, false, ""
-	})
+	pool.SetProviderRequestInterceptor(
+		func(_ string, msgs []sdk.Message, model string) ([]sdk.Message, string, bool, string) {
+			out := make([]sdk.Message, len(msgs))
+			for i, m := range msgs {
+				out[i] = sdk.Message{Role: m.Role, Content: "[redacted]"}
+			}
+			return out, model, false, ""
+		},
+	)
 	a, err := pool.Spawn("main", &tokenStreamLM{tokens: []string{"ack"}}, agent.SpawnOpts{})
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
@@ -118,9 +122,11 @@ func TestProviderIntercept_RerouteRequestsNewModel(t *testing.T) {
 	pool := agent.NewPool()
 	pool.SetProvider(prov)
 	pool.SetDefaultModelName("frontier")
-	pool.SetProviderRequestInterceptor(func(_ string, msgs []sdk.Message, _ string) ([]sdk.Message, string, bool, string) {
-		return msgs, "local-cheap", false, "" // reroute
-	})
+	pool.SetProviderRequestInterceptor(
+		func(_ string, msgs []sdk.Message, _ string) ([]sdk.Message, string, bool, string) {
+			return msgs, "local-cheap", false, "" // reroute
+		},
+	)
 	a, err := pool.Spawn("main", &tokenStreamLM{tokens: []string{"ok"}}, agent.SpawnOpts{ModelName: "frontier"})
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)

@@ -87,8 +87,12 @@ Input:
 
 Output:
 
-- JSON object with `agent_id`, `is_running`, `pending_messages`, `turn_count`,
+- JSON object with `agent_id`, `is_running`, `pending_messages`,
+  `last_activity_age_ms`, `turn_duration_ms`, `last_tool_age_ms`,
+  `active_tool`, `last_tool`, `shutdown_requested`, `turn_count`,
   `last_summary`, and `recent`.
+- Age and duration fields are milliseconds. A zero age means the event has not
+  happened yet or no timestamp is available.
 - `recent` is an array of `{ "role": string, "preview": string }`.
 - Fatal errors: missing `agent_id`, unknown agent. Error text is plain text.
 
@@ -106,16 +110,21 @@ errors include missing `name` or host spawn failure.
 
 Input: `agent_id` string, required.
 
-Output: JSON object `{ "status": "shutdown_requested" }`. Fatal errors include
-missing `agent_id` or host delivery failure.
+Output: JSON object with `status: "shutdown_requested"`, `agent_id`, and
+`stopped: false`. When the agent can still be found after the request, the
+object also includes `is_running`, `pending_messages`, `last_activity_age_ms`,
+and `shutdown_requested`. Fatal errors include missing `agent_id` or host
+delivery failure.
 
 ### `list_agents`
 
 Input: no fields.
 
 Output: JSON object from the host agent pool, usually `{ "agents": [...] }`.
-Each agent entry includes at least `id`, `name`, `is_running`, and
-`pending_messages`. If the host returns no data, returns `{ "agents": [] }`.
+Each agent entry includes `id`, `name`, `is_running`, `pending_messages`,
+`last_activity_age_ms`, `turn_duration_ms`, `last_tool_age_ms`, `active_tool`,
+`last_tool`, and `shutdown_requested`. If the host returns no data, returns
+`{ "agents": [] }`.
 
 ### `create_team`
 

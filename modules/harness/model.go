@@ -352,9 +352,11 @@ func (m *Model) SetProgram(p *tea.Program) {
 			// redact messages (PII), reroute the model, or block the request just
 			// before each turn streams to the provider. Routes through the extension
 			// host's DispatchEventChain to avoid an agent→extension circular import.
-			pool.SetProviderRequestInterceptor(func(agentID string, messages []sdk.Message, model string) ([]sdk.Message, string, bool, string) {
-				return interceptProviderRequest(extHostRef, agentID, messages, model)
-			})
+			pool.SetProviderRequestInterceptor(
+				func(agentID string, messages []sdk.Message, model string) ([]sdk.Message, string, bool, string) {
+					return interceptProviderRequest(extHostRef, agentID, messages, model)
+				},
+			)
 		}
 	}
 
@@ -365,7 +367,12 @@ func (m *Model) SetProgram(p *tea.Program) {
 // the extension host and returns the (possibly transformed) messages and model,
 // whether the request is blocked, and the block reason. A malformed transformed
 // payload is tolerated: the original messages/model are kept.
-func interceptProviderRequest(extHost *extension.Host, agentID string, messages []sdk.Message, model string) ([]sdk.Message, string, bool, string) {
+func interceptProviderRequest(
+	extHost *extension.Host,
+	agentID string,
+	messages []sdk.Message,
+	model string,
+) ([]sdk.Message, string, bool, string) {
 	if extHost == nil {
 		return messages, model, false, ""
 	}
@@ -458,7 +465,10 @@ func (m *Model) wireMainAgentCallbacks(p *tea.Program) {
 				return
 			}
 			payload, _ := json.Marshal(sdk.TokenPayload{AgentID: mainID, Text: text})
-			_, _ = extHostForToken.DispatchEvent(context.Background(), sdk.Event{Type: sdk.EventToken, Payload: payload})
+			_, _ = extHostForToken.DispatchEvent(
+				context.Background(),
+				sdk.Event{Type: sdk.EventToken, Payload: payload},
+			)
 		}
 	}
 	onToken, stopBatch := makeBatchedOnToken(p, dispatchToken)
@@ -1198,7 +1208,12 @@ func (m *Model) refreshWASMChatAppend() bool {
 	if m.scene == nil || m.chatAppendID == "" || m.chatAppendText == "" {
 		return false
 	}
-	previous, current, ok := m.scene.RenderAppendTextNode(wasmChatAreaID, m.chatAppendID, m.chatWidth(), m.chatAppendText)
+	previous, current, ok := m.scene.RenderAppendTextNode(
+		wasmChatAreaID,
+		m.chatAppendID,
+		m.chatWidth(),
+		m.chatAppendText,
+	)
 	if !ok || !strings.HasSuffix(m.chat.externalContent, previous) {
 		return false
 	}
@@ -1829,7 +1844,9 @@ func (m Model) renderToolActivity() string {
 		if pad < 0 {
 			pad = 0
 		}
-		body.WriteString(b.Render("│") + " " + dimText.Render(line) + strings.Repeat(" ", pad) + " " + b.Render("│") + "\n")
+		body.WriteString(
+			b.Render("│") + " " + dimText.Render(line) + strings.Repeat(" ", pad) + " " + b.Render("│") + "\n",
+		)
 	}
 	footer := b.Render("╰" + strings.Repeat("─", innerWidth) + "╯")
 	return header + "\n" + body.String() + footer
@@ -1866,7 +1883,9 @@ func (m Model) renderConsole() string {
 		if pad < 0 {
 			pad = 0
 		}
-		body.WriteString(b.Render("│") + " " + dimText.Render(line) + strings.Repeat(" ", pad) + " " + (b.Render("│") + "\n"))
+		body.WriteString(
+			b.Render("│") + " " + dimText.Render(line) + strings.Repeat(" ", pad) + " " + (b.Render("│") + "\n"),
+		)
 	}
 	footer := b.Render("╰" + strings.Repeat("─", innerWidth) + "╯")
 	return header + "\n" + body.String() + footer + "\n"

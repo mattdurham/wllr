@@ -1221,7 +1221,11 @@ func TestHost_HandleAgentSendMessage_CallbackInvoked(t *testing.T) {
 	select {
 	case args := <-got:
 		if args.id != "a1" || args.msg.Content != "hello agent" {
-			t.Errorf("AgentBridge.SendMessage got id=%q msg.Content=%q, want id=a1 message='hello agent'", args.id, args.msg.Content)
+			t.Errorf(
+				"AgentBridge.SendMessage got id=%q msg.Content=%q, want id=a1 message='hello agent'",
+				args.id,
+				args.msg.Content,
+			)
 		}
 	default:
 		t.Fatal("AgentBridge.SendMessage was not called")
@@ -1815,10 +1819,14 @@ func TestHost_CapabilityProvider_Exec_AcceptsContext(t *testing.T) {
 	ext := h.extensions[0]
 	ext.trusted = true // bypass permission check
 
-	h.SetCapabilities(&testCapabilityProvider{onExec: func(_ctx context.Context, _command, _dir string, _onLine func(string)) (string, error) {
-		called = true
-		return "ok", nil
-	}})
+	h.SetCapabilities(
+		&testCapabilityProvider{
+			onExec: func(_ctx context.Context, _command, _dir string, _onLine func(string)) (string, error) {
+				called = true
+				return "ok", nil
+			},
+		},
+	)
 
 	resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
 		Method: sdk.MethodExec,
@@ -1845,12 +1853,16 @@ func TestHost_HandleExec_PassesContext(t *testing.T) {
 	ext := h.extensions[0]
 	ext.trusted = true // bypass permission check
 
-	h.SetCapabilities(&testCapabilityProvider{onExec: func(c context.Context, _cmd, _dir string, _onLine func(string)) (string, error) {
-		if c != nil {
-			ctxCalled = true
-		}
-		return "", nil
-	}})
+	h.SetCapabilities(
+		&testCapabilityProvider{
+			onExec: func(c context.Context, _cmd, _dir string, _onLine func(string)) (string, error) {
+				if c != nil {
+					ctxCalled = true
+				}
+				return "", nil
+			},
+		},
+	)
 
 	resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
 		Method: sdk.MethodExec,

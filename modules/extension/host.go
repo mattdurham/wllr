@@ -356,7 +356,12 @@ func (h *Host) hostCallImpl(ctx context.Context, m api.Module, reqPtr, reqLen, r
 }
 
 // routeHostCall dispatches req to the appropriate handler via the dispatch map.
-func (h *Host) routeHostCall(ctx context.Context, _ api.Module, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+func (h *Host) routeHostCall(
+	ctx context.Context,
+	_ api.Module,
+	ext *Extension,
+	req sdk.HostCallRequest,
+) sdk.HostCallResponse {
 	if fn, ok := h.dispatch[req.Method]; ok {
 		return fn(ctx, ext, req)
 	}
@@ -1528,7 +1533,14 @@ func (h *Host) ExecuteTool(
 	case result := <-ch:
 		// Run the after_tool_call transform chain so interceptors can rewrite or
 		// redact the tool's output before it reaches the model.
-		result.Result, result.IsError = h.runAfterToolCall(ctx, agentID, toolCallID, toolName, result.Result, result.IsError)
+		result.Result, result.IsError = h.runAfterToolCall(
+			ctx,
+			agentID,
+			toolCallID,
+			toolName,
+			result.Result,
+			result.IsError,
+		)
 
 		// Notify the UI bridge so the TUI can update the tool call display.
 		if ui := h.uiBridge(); ui != nil {

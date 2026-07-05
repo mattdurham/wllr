@@ -175,6 +175,7 @@ The following scenarios are not currently covered and should be added:
 | `TestModel_ToolActivityPane_AlwaysRendersAndShowsRecentTools` | Tool pane is permanent and displays recent tool state | no tools, then running and completed tool | view always contains tools pane; row changes from running to done |
 | `TestModel_ToolActivityPane_RemainsOnStreamDone` | Stream completion does not remove the tool pane | streaming model; pending tool; `StreamDoneMsg` | pane height remains `toolActivityPaneLines` and view contains tools pane |
 | `TestModel_View_WithStatusLineFitsHeight` | Statusline plus input stays within terminal height | one-line status scene; small terminal height | rendered view line count equals terminal height; input bottom border present above final gutter row |
+| `TestHarnessAgentBridgeListIncludesRuntimeState` | Agent bridge exposes runtime liveness in list results | running blocking agent | `AgentInfo` includes running state and non-negative liveness age/duration fields |
 
 ### SceneRenderer constraint tests (scene_test.go)
 

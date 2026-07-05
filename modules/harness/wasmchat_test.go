@@ -91,7 +91,11 @@ func TestSceneDirty_AppendOnlyChatCoalescesRefresh(t *testing.T) {
 		t.Fatalf("append-only chat dirty should not refresh immediately, got %q", got)
 	}
 	if !m.chatAppendDirty || !m.chatAppendRefreshScheduled {
-		t.Fatalf("append-only chat dirty should mark pending refresh: dirty=%v scheduled=%v", m.chatAppendDirty, m.chatAppendRefreshScheduled)
+		t.Fatalf(
+			"append-only chat dirty should mark pending refresh: dirty=%v scheduled=%v",
+			m.chatAppendDirty,
+			m.chatAppendRefreshScheduled,
+		)
 	}
 
 	next, _ = m.Update(chatAppendRefreshMsg{})
@@ -101,7 +105,11 @@ func TestSceneDirty_AppendOnlyChatCoalescesRefresh(t *testing.T) {
 		t.Fatalf("delayed append refresh should refresh chat viewport, got %q", m.chat.externalContent)
 	}
 	if m.chatAppendDirty || m.chatAppendRefreshScheduled {
-		t.Fatalf("delayed append refresh should clear pending flags: dirty=%v scheduled=%v", m.chatAppendDirty, m.chatAppendRefreshScheduled)
+		t.Fatalf(
+			"delayed append refresh should clear pending flags: dirty=%v scheduled=%v",
+			m.chatAppendDirty,
+			m.chatAppendRefreshScheduled,
+		)
 	}
 }
 

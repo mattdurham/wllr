@@ -17,7 +17,11 @@ func TestChatView_SetExternalContent_FollowsWhenAtBottom(t *testing.T) {
 	c.SetExternalContent(numberedLines(30))
 
 	if !c.vp.AtBottom() {
-		t.Fatalf("content update should follow bottom when already at bottom; offset=%d lines=%d", c.vp.YOffset(), c.vp.TotalLineCount())
+		t.Fatalf(
+			"content update should follow bottom when already at bottom; offset=%d lines=%d",
+			c.vp.YOffset(),
+			c.vp.TotalLineCount(),
+		)
 	}
 	if c.vp.YOffset() <= initialOffset {
 		t.Fatalf("expected offset to advance after more content, before=%d after=%d", initialOffset, c.vp.YOffset())
@@ -53,7 +57,11 @@ func TestChatView_SetSize_FollowsWhenAtBottom(t *testing.T) {
 	c.SetSize(80, 3)
 
 	if !c.vp.AtBottom() {
-		t.Fatalf("resize should keep a tail-following viewport at bottom; offset=%d lines=%d", c.vp.YOffset(), c.vp.TotalLineCount())
+		t.Fatalf(
+			"resize should keep a tail-following viewport at bottom; offset=%d lines=%d",
+			c.vp.YOffset(),
+			c.vp.TotalLineCount(),
+		)
 	}
 }
 

@@ -45,7 +45,10 @@ func (s *providerOptsSpyLM) GenerateObject(_ context.Context, _ fantasy.ObjectCa
 	return nil, nil
 }
 
-func (s *providerOptsSpyLM) StreamObject(_ context.Context, _ fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
+func (s *providerOptsSpyLM) StreamObject(
+	_ context.Context,
+	_ fantasy.ObjectCall,
+) (fantasy.ObjectStreamResponse, error) {
 	return nil, nil
 }
 
@@ -121,7 +124,11 @@ func TestSpawnOpts_ModelName_Empty_UsesPoolDefault(t *testing.T) {
 // model name and the LM used by the next turn (the /model picker path).
 func TestSetModel_SwapsModelForNextTurn(t *testing.T) {
 	pool := agent.NewPool()
-	a, err := pool.Spawn("main", &tokenStreamLM{tokens: []string{"from-original"}}, agent.SpawnOpts{ModelName: "claude-sonnet-4-6"})
+	a, err := pool.Spawn(
+		"main",
+		&tokenStreamLM{tokens: []string{"from-original"}},
+		agent.SpawnOpts{ModelName: "claude-sonnet-4-6"},
+	)
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}

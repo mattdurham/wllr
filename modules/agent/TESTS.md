@@ -82,6 +82,13 @@
 | `TestIdleNotification_SuppressedDuringShutdown` | Shutdown path suppresses idle notice | Deliver shutdown_request, run worker | Creator gets exactly 1 AGENT_SHUTDOWN, 0 idle notices |
 | `TestIdleNotification_MultipleWorkersCoalesce` | N workers idle-notify shared creator | 5 workers each run + go idle | Each worker's idle notice in creator history exactly once (no loss/dup) |
 
+### activity_test.go
+
+| Test | Scenario | Setup | Assertions |
+|------|----------|-------|------------|
+| `TestAgentActivity_TracksRunningTurnAndToolCall` | Activity snapshot records intra-turn work | Fake LM emits text and a tool call | turn/activity/tool timestamps are set; last tool name recorded; active tool clears after turn |
+| `TestAgentActivity_ShutdownRequestedWhileRunning` | Graceful shutdown request is visible before stop | Gated running agent receives shutdown_request | `Activity().ShutdownRequested` is true while request is queued |
+
 ## Missing / Recommended Tests
 
 | Priority | Test | Scenario | Assertions |

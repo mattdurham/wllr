@@ -40,7 +40,11 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 	}
 
 	execPrompt := flag.String("exec", "", "run a single prompt non-interactively and print the response to stdout")
-	pprofAddr := flag.String("pprof", defaultPprofAddr(), "listen address for net/http/pprof debug server (use empty string to disable)")
+	pprofAddr := flag.String(
+		"pprof",
+		defaultPprofAddr(),
+		"listen address for net/http/pprof debug server (use empty string to disable)",
+	)
 	flag.Parse()
 
 	cfg, err := LoadConfig()
@@ -341,13 +345,18 @@ func setupLogging(h *extension.Host, tuiMode bool) func() {
 }
 
 // registerAgentStatusTool registers the get_agent_status native tool on h.
-// The tool returns turn count and recent conversation history for a running agent.
+// The tool returns turn count, recent conversation history, and liveness state
+// for a running agent.
 func registerAgentStatusTool(h *extension.Host, pool *agent.AgentPool) {
 	h.RegisterNativeTool(sdk.Tool{
-		Name:         "get_agent_status",
-		Description:  "No-side-effect status check for an agent. Returns is_running, pending_messages, turn_count, and recent history. If is_running=true, the child is working; do not ping it.",
-		InputSchema:  json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string","description":"Agent ID to inspect"},"history_limit":{"type":"integer","description":"Number of recent messages to include (default 10)"}},"required":["agent_id"]}`),
-		OutputSchema: json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string"},"is_running":{"type":"boolean"},"pending_messages":{"type":"integer"},"turn_count":{"type":"integer"},"last_summary":{"type":"string"},"recent":{"type":"array","items":{"type":"object","properties":{"role":{"type":"string"},"preview":{"type":"string"}}}}}}`),
+		Name:        "get_agent_status",
+		Description: "No-side-effect status check for an agent. Returns is_running, pending_messages, recent activity age, active/last tool, shutdown request state, turn_count, and recent history.",
+		InputSchema: json.RawMessage(
+			`{"type":"object","properties":{"agent_id":{"type":"string","description":"Agent ID to inspect"},"history_limit":{"type":"integer","description":"Number of recent messages to include (default 10)"}},"required":["agent_id"]}`,
+		),
+		OutputSchema: json.RawMessage(
+			`{"type":"object","properties":{"agent_id":{"type":"string"},"is_running":{"type":"boolean"},"pending_messages":{"type":"integer"},"last_activity_age_ms":{"type":"integer"},"turn_duration_ms":{"type":"integer"},"last_tool_age_ms":{"type":"integer"},"active_tool":{"type":"string"},"last_tool":{"type":"string"},"shutdown_requested":{"type":"boolean"},"turn_count":{"type":"integer"},"last_summary":{"type":"string"},"recent":{"type":"array","items":{"type":"object","properties":{"role":{"type":"string"},"preview":{"type":"string"}}}}}}`,
+		),
 	}, func(_ context.Context, input json.RawMessage) (string, bool) {
 		var in struct {
 			AgentID      string `json:"agent_id"`
@@ -362,6 +371,20 @@ func registerAgentStatusTool(h *extension.Host, pool *agent.AgentPool) {
 		a := pool.Get(in.AgentID)
 		if a == nil {
 			return fmt.Sprintf("agent %q not found", in.AgentID), true
+		}
+		activity := a.Activity()
+		now := time.Now()
+		var lastActivityAgeMS int64
+		var turnDurationMS int64
+		var lastToolAgeMS int64
+		if !activity.LastActivityAt.IsZero() {
+			lastActivityAgeMS = now.Sub(activity.LastActivityAt).Milliseconds()
+		}
+		if a.IsRunning() && !activity.TurnStartedAt.IsZero() {
+			turnDurationMS = now.Sub(activity.TurnStartedAt).Milliseconds()
+		}
+		if !activity.LastToolCallAt.IsZero() {
+			lastToolAgeMS = now.Sub(activity.LastToolCallAt).Milliseconds()
 		}
 		history := a.History()
 		start := len(history) - in.HistoryLimit
@@ -382,12 +405,18 @@ func registerAgentStatusTool(h *extension.Host, pool *agent.AgentPool) {
 			msgs = append(msgs, msgOut{Role: string(m.Role), Preview: preview})
 		}
 		out, _ := json.Marshal(map[string]any{
-			"agent_id":         in.AgentID,
-			"is_running":       a.IsRunning(),
-			"pending_messages": a.InboxLen(),
-			"turn_count":       len(history) / 2,
-			"last_summary":     a.LastSummary(),
-			"recent":           msgs,
+			"agent_id":             in.AgentID,
+			"is_running":           a.IsRunning(),
+			"pending_messages":     a.InboxLen(),
+			"last_activity_age_ms": lastActivityAgeMS,
+			"turn_duration_ms":     turnDurationMS,
+			"last_tool_age_ms":     lastToolAgeMS,
+			"active_tool":          activity.ActiveToolName,
+			"last_tool":            activity.LastToolName,
+			"shutdown_requested":   activity.ShutdownRequested,
+			"turn_count":           len(history) / 2,
+			"last_summary":         a.LastSummary(),
+			"recent":               msgs,
 		})
 		return string(out), false
 	})
@@ -399,7 +428,13 @@ func loadBuiltinExtensions(ctx context.Context, h *extension.Host) {
 		filename := name + ".wasm"
 		data, err := builtinFS.ReadFile("builtins/" + filename)
 		if err != nil {
-			slog.Warn("wllr: built-in extension missing; run `make extensions` before building", "extension", name, "error", err)
+			slog.Warn(
+				"wllr: built-in extension missing; run `make extensions` before building",
+				"extension",
+				name,
+				"error",
+				err,
+			)
 			continue
 		}
 		if loadErr := h.LoadBytes(ctx, filename, data, true); loadErr != nil {
@@ -507,7 +542,9 @@ func httpPost(url string, headers map[string]string, body []byte) (int, []byte, 
 		req.Header.Set(k, v)
 	}
 
-	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req) //nolint:gosec // URL is from user config; SSRF is intentional
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(
+		req,
+	) //nolint:gosec // URL is from user config; SSRF is intentional
 	if err != nil {
 		return 0, nil, err
 	}

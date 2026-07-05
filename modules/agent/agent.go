@@ -20,8 +20,11 @@ import (
 // Agent wraps a fantasy.LanguageModel with a message inbox and lifecycle management.
 // Each agent maintains its own conversation history and can run one turn at a time.
 type Agent struct {
-	lm   fantasy.LanguageModel
-	pool *AgentPool
+	turnStartedAt  time.Time
+	lastActivityAt time.Time
+	lastToolCallAt time.Time
+	lm             fantasy.LanguageModel
+	pool           *AgentPool
 
 	cancel context.CancelFunc
 
@@ -56,6 +59,10 @@ type Agent struct {
 	// finishTurn, which runs after isRunning transitions — no separate lock needed.
 	pendingShutdownFrom string
 
+	activeToolCallID string
+	activeToolName   string
+	lastToolName     string
+
 	history []sdk.Message
 
 	opts SpawnOpts
@@ -69,6 +76,10 @@ type Agent struct {
 	// Protected by lastUsageMu.
 	lastUsage   fantasy.Usage
 	lastUsageMu sync.RWMutex
+
+	// activity tracks intra-turn liveness for status tools. Completed-turn
+	// history alone is too coarse for orchestrators supervising sub-agents.
+	activityMu sync.RWMutex
 
 	// onToken is called per text delta. Set via SetOnToken before calling Submit.
 	onTokenMu sync.RWMutex
@@ -99,6 +110,8 @@ type Agent struct {
 
 	// history is the conversation history for this agent (all completed turns).
 	historyMu sync.Mutex
+
+	shutdownRequested atomic.Bool
 
 	// isRunning is set to true while Submit's goroutine is active. A second
 	// Submit call that arrives while a turn is running appends content to the
@@ -166,6 +179,10 @@ func (a *Agent) SetToolsFn(fn func() []fantasy.AgentTool) {
 // causes Anthropic API rejection ("text content blocks must be non-empty").
 func (a *Agent) AppendInbox(msg sdk.Message) {
 	a.inbox.append(a.id, msg)
+	if isShutdownRequest(msg) {
+		a.shutdownRequested.Store(true)
+		a.markActivity()
+	}
 }
 
 // DrainInbox atomically returns all pending inbox messages and clears the inbox.
@@ -272,6 +289,56 @@ func (a *Agent) Name() string { return a.name }
 // IsRunning reports whether the agent is currently mid-turn.
 func (a *Agent) IsRunning() bool { return a.isRunning.Load() }
 
+// Activity returns a snapshot of the agent's intra-turn liveness state.
+func (a *Agent) Activity() ActivitySnapshot {
+	a.activityMu.RLock()
+	defer a.activityMu.RUnlock()
+	return ActivitySnapshot{
+		TurnStartedAt:     a.turnStartedAt,
+		LastActivityAt:    a.lastActivityAt,
+		LastToolCallAt:    a.lastToolCallAt,
+		ActiveToolCallID:  a.activeToolCallID,
+		ActiveToolName:    a.activeToolName,
+		LastToolName:      a.lastToolName,
+		ShutdownRequested: a.shutdownRequested.Load(),
+	}
+}
+
+func (a *Agent) markTurnStart() {
+	now := time.Now()
+	a.activityMu.Lock()
+	a.turnStartedAt = now
+	a.lastActivityAt = now
+	a.activeToolCallID = ""
+	a.activeToolName = ""
+	a.activityMu.Unlock()
+}
+
+func (a *Agent) markActivity() {
+	a.activityMu.Lock()
+	a.lastActivityAt = time.Now()
+	a.activityMu.Unlock()
+}
+
+func (a *Agent) markToolCall(id, name string) {
+	now := time.Now()
+	a.activityMu.Lock()
+	a.lastActivityAt = now
+	a.lastToolCallAt = now
+	a.activeToolCallID = id
+	a.activeToolName = name
+	a.lastToolName = name
+	a.activityMu.Unlock()
+}
+
+func (a *Agent) markTurnDone() {
+	a.activityMu.Lock()
+	a.lastActivityAt = time.Now()
+	a.activeToolCallID = ""
+	a.activeToolName = ""
+	a.activityMu.Unlock()
+}
+
 // CreatorID returns the ID of the agent that spawned this agent.
 // Returns an empty string for top-level agents that were not spawned by another agent.
 func (a *Agent) CreatorID() string { return a.creatorID }
@@ -319,6 +386,7 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 		}
 		return
 	}
+	a.markTurnStart()
 
 	// Snapshot current history under lock.
 	a.historyMu.Lock()
@@ -395,7 +463,21 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 				}
 			}
 		}()
-		a.executeTurn(ctx, childCtx, content, inboxMsgs, priorHistory, priorSummary, lm, opts, pool, toolsFn, onToken, onToolCall, onDone)
+		a.executeTurn(
+			ctx,
+			childCtx,
+			content,
+			inboxMsgs,
+			priorHistory,
+			priorSummary,
+			lm,
+			opts,
+			pool,
+			toolsFn,
+			onToken,
+			onToolCall,
+			onDone,
+		)
 	}()
 }
 
@@ -550,7 +632,7 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 		return
 	}
 
-	collectedText, usage, err := streamTurn(childCtx, fa, streamMsgs, streamPrompt, pool, onToken, onToolCall)
+	collectedText, usage, err := a.streamTurn(childCtx, fa, streamMsgs, streamPrompt, pool, onToken, onToolCall)
 
 	// Reactive fallback: if we still hit a context error, trim and retry once.
 	if err != nil && isContextTooLong(err) {
@@ -568,7 +650,7 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 			a.finishTurn(ctx, &ProviderRequestBlockedError{Reason: blockReason}, nil, onDone, inboxMsgs)
 			return
 		}
-		collectedText, usage, err = streamTurn(childCtx, fa, streamMsgs, streamPrompt, pool, onToken, onToolCall)
+		collectedText, usage, err = a.streamTurn(childCtx, fa, streamMsgs, streamPrompt, pool, onToken, onToolCall)
 	}
 
 	// Record token usage for the turn. On error or cancellation, store a
@@ -627,6 +709,7 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 // that harness shutdown can cancel in-flight drain turns rather than running them to
 // their 30-minute timeout.
 func (a *Agent) finishTurn(ctx context.Context, err error, ctxErr error, onDone func(error), consumed []sdk.Message) {
+	a.markTurnDone()
 	a.isRunning.Store(false)
 
 	// Only drain on successful turns — errors and cancellations terminate the chain.
@@ -716,7 +799,15 @@ func (a *Agent) finishTurn(ctx context.Context, err error, ctxErr error, onDone 
 				Role:    sdk.RoleUser,
 				Content: idleMsg,
 			}, true); derr != nil && !errors.Is(derr, ErrAgentNotFound) {
-				slog.Warn("finishTurn: failed to notify creator of idle", "agent", a.id, "creator", a.creatorID, "err", derr)
+				slog.Warn(
+					"finishTurn: failed to notify creator of idle",
+					"agent",
+					a.id,
+					"creator",
+					a.creatorID,
+					"err",
+					derr,
+				)
 			}
 		}
 
@@ -726,6 +817,7 @@ func (a *Agent) finishTurn(ctx context.Context, err error, ctxErr error, onDone 
 			// which runs after isRunning transitions to false. Submit must never access
 			// this field.
 			a.pendingShutdownFrom = "" // clear deferred state
+			a.shutdownRequested.Store(false)
 
 			// Send AGENT_SHUTDOWN back to the creator, remove self from pool, and
 			// fire onDone exactly once before returning.
@@ -755,6 +847,16 @@ func (a *Agent) finishTurn(ctx context.Context, err error, ctxErr error, onDone 
 	if onDone != nil {
 		onDone(err)
 	}
+}
+
+func isShutdownRequest(msg sdk.Message) bool {
+	if msg.Type != sdk.MessageTypeSystem {
+		return false
+	}
+	var evt struct {
+		Event string `json:"event"`
+	}
+	return json.Unmarshal([]byte(msg.Content), &evt) == nil && evt.Event == "shutdown_request"
 }
 
 // Placeholder assistant-message text used when a turn produces no streamed text.
@@ -799,7 +901,7 @@ func allControlMessages(msgs []sdk.Message) bool {
 
 // streamTurn sends history+content to fa and collects the full text response.
 // Extracted from Submit to keep its cyclomatic complexity below threshold.
-func streamTurn(
+func (a *Agent) streamTurn(
 	ctx context.Context,
 	fa fantasy.Agent,
 	history []sdk.Message,
@@ -822,6 +924,7 @@ func streamTurn(
 			default:
 			}
 			collected += text
+			a.markActivity()
 			if pool != nil {
 				pool.addTokens(1)
 			}
@@ -831,6 +934,9 @@ func streamTurn(
 			return nil
 		},
 		OnToolCall: func(toolCall fantasy.ToolCallContent) error {
+			if !toolCall.ProviderExecuted {
+				a.markToolCall(toolCall.ToolCallID, toolCall.ToolName)
+			}
 			if onToolCall != nil && !toolCall.ProviderExecuted {
 				onToolCall(toolCall.ToolCallID, toolCall.ToolName, toolCall.Input)
 			}
