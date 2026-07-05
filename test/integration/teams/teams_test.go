@@ -62,7 +62,9 @@ func newEnv(t *testing.T) *testEnv {
 	host.RegisterNativeTool(sdk.Tool{
 		Name:        "write_file",
 		Description: "Write content to a file",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}`),
+		InputSchema: json.RawMessage(
+			`{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}`,
+		),
 	}, func(_ context.Context, input json.RawMessage) (string, bool) {
 		var in struct {
 			Path    string `json:"path"`
@@ -162,7 +164,11 @@ func TestTeam_AgentWritesFile(t *testing.T) {
 	dir := t.TempDir()
 	outPath := filepath.Join(dir, "result.txt")
 
-	env.spawn(t, "writer", "You are a file writer. When given a task, use write_file immediately to complete it. Do not explain — just write the file.")
+	env.spawn(
+		t,
+		"writer",
+		"You are a file writer. When given a task, use write_file immediately to complete it. Do not explain — just write the file.",
+	)
 
 	team, err := env.pool.CreateTeam("write-test")
 	if err != nil {

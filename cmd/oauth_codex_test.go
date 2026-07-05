@@ -60,7 +60,9 @@ func TestParseFlexibleInt(t *testing.T) {
 
 func TestExchangeCodexCode_ExtractsAccountID(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"access_token":"` + jwtWithAccountID("acct-7") + `","refresh_token":"r","expires_in":3600}`))
+		_, _ = w.Write(
+			[]byte(`{"access_token":"` + jwtWithAccountID("acct-7") + `","refresh_token":"r","expires_in":3600}`),
+		)
 	}))
 	defer srv.Close()
 	restore := swapCodexURLs("", "", srv.URL)

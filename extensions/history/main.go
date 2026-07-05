@@ -191,7 +191,11 @@ func handleSessionSelected(path string) {
 			Sublabel: preview,
 		})
 	}
-	ShowPicker("Resume from which point?  (loads context up to the selected message)", items, "history:message_selected")
+	ShowPicker(
+		"Resume from which point?  (loads context up to the selected message)",
+		items,
+		"history:message_selected",
+	)
 }
 
 // ─── Message selected → replay context up to that point ────────────────────

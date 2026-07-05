@@ -204,7 +204,12 @@ func missingAuthError(provider, envVar string) error {
 	msg := fmt.Sprintf("%s is required when WLLR_PROVIDER=%s", envVar, provider)
 	switch provider {
 	case providerAnthropic, providerOpenAI:
-		return fmt.Errorf("%s. Set %s, or run `wllr login --provider %s` to authenticate with OAuth before starting the TUI", msg, envVar, provider)
+		return fmt.Errorf(
+			"%s. Set %s, or run `wllr login --provider %s` to authenticate with OAuth before starting the TUI",
+			msg,
+			envVar,
+			provider,
+		)
 	default:
 		return fmt.Errorf("%s. Set %s before starting wllr", msg, envVar)
 	}

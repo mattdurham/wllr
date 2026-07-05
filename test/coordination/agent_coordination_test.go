@@ -202,7 +202,9 @@ func registerTaskTools(_ *testing.T, host *extension.Host, store *taskStore, poo
 	host.RegisterNativeTool(sdk.Tool{
 		Name:        "tasklist_create",
 		Description: "Create a task list",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"},"owner_agent_id":{"type":"string"}},"required":["name"]}`),
+		InputSchema: json.RawMessage(
+			`{"type":"object","properties":{"name":{"type":"string"},"owner_agent_id":{"type":"string"}},"required":["name"]}`,
+		),
 	}, func(_ context.Context, input json.RawMessage) (string, bool) {
 		var in struct {
 			Name         string `json:"name"`
@@ -219,7 +221,9 @@ func registerTaskTools(_ *testing.T, host *extension.Host, store *taskStore, poo
 	host.RegisterNativeTool(sdk.Tool{
 		Name:        "tasks_create",
 		Description: "Create a task",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"list_id":{"type":"string"},"title":{"type":"string"}},"required":["list_id","title"]}`),
+		InputSchema: json.RawMessage(
+			`{"type":"object","properties":{"list_id":{"type":"string"},"title":{"type":"string"}},"required":["list_id","title"]}`,
+		),
 	}, func(_ context.Context, input json.RawMessage) (string, bool) {
 		var in struct {
 			ListID string `json:"list_id"`
@@ -239,7 +243,9 @@ func registerTaskTools(_ *testing.T, host *extension.Host, store *taskStore, poo
 	host.RegisterNativeTool(sdk.Tool{
 		Name:        "tasks_update",
 		Description: "Update task status",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"list_id":{"type":"string"},"task_id":{"type":"string"},"status":{"type":"string"}},"required":["list_id","task_id","status"]}`),
+		InputSchema: json.RawMessage(
+			`{"type":"object","properties":{"list_id":{"type":"string"},"task_id":{"type":"string"},"status":{"type":"string"}},"required":["list_id","task_id","status"]}`,
+		),
 	}, func(_ context.Context, input json.RawMessage) (string, bool) {
 		var in struct {
 			ListID string `json:"list_id"`
@@ -265,7 +271,9 @@ func registerTaskTools(_ *testing.T, host *extension.Host, store *taskStore, poo
 	host.RegisterNativeTool(sdk.Tool{
 		Name:        "tasks_list",
 		Description: "List tasks, optionally filtered by status",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"list_id":{"type":"string"},"status":{"type":"string"}},"required":["list_id"]}`),
+		InputSchema: json.RawMessage(
+			`{"type":"object","properties":{"list_id":{"type":"string"},"status":{"type":"string"}},"required":["list_id"]}`,
+		),
 	}, func(_ context.Context, input json.RawMessage) (string, bool) {
 		var in struct {
 			ListID string `json:"list_id"`
@@ -296,7 +304,9 @@ func registerClaimTool(_ *testing.T, host *extension.Host, store *taskStore) {
 	host.RegisterNativeTool(sdk.Tool{
 		Name:        "tasks_claim",
 		Description: "Atomically claim the next available task",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"list_id":{"type":"string"},"agent_id":{"type":"string"}},"required":["list_id","agent_id"]}`),
+		InputSchema: json.RawMessage(
+			`{"type":"object","properties":{"list_id":{"type":"string"},"agent_id":{"type":"string"}},"required":["list_id","agent_id"]}`,
+		),
 	}, func(_ context.Context, input json.RawMessage) (string, bool) {
 		var in struct {
 			ListID  string `json:"list_id"`
@@ -323,7 +333,9 @@ func registerSendMessageTool(_ *testing.T, host *extension.Host, pool *agent.Age
 	host.RegisterNativeTool(sdk.Tool{
 		Name:        "send_message",
 		Description: "Send a message to another agent",
-		InputSchema: json.RawMessage(`{"type":"object","properties":{"agent_id":{"type":"string"},"message":{"type":"string"}},"required":["agent_id","message"]}`),
+		InputSchema: json.RawMessage(
+			`{"type":"object","properties":{"agent_id":{"type":"string"},"message":{"type":"string"}},"required":["agent_id","message"]}`,
+		),
 	}, func(_ context.Context, input json.RawMessage) (string, bool) {
 		var in struct {
 			AgentID string `json:"agent_id"`

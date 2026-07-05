@@ -165,16 +165,42 @@ func (b *harnessAgentBridge) List() ([]extension.AgentInfo, error) {
 		agentName := id
 		isRunning := false
 		pendingMessages := 0
+		var activityAgeMS int64
+		var turnDurationMS int64
+		var lastToolAgeMS int64
+		var activeTool string
+		var lastTool string
+		var shutdownRequested bool
 		if a := b.pool.Get(id); a != nil {
 			agentName = a.Name()
 			isRunning = a.IsRunning()
 			pendingMessages = a.InboxLen()
+			activity := a.Activity()
+			now := time.Now()
+			if !activity.LastActivityAt.IsZero() {
+				activityAgeMS = now.Sub(activity.LastActivityAt).Milliseconds()
+			}
+			if isRunning && !activity.TurnStartedAt.IsZero() {
+				turnDurationMS = now.Sub(activity.TurnStartedAt).Milliseconds()
+			}
+			if !activity.LastToolCallAt.IsZero() {
+				lastToolAgeMS = now.Sub(activity.LastToolCallAt).Milliseconds()
+			}
+			activeTool = activity.ActiveToolName
+			lastTool = activity.LastToolName
+			shutdownRequested = activity.ShutdownRequested
 		}
 		infos = append(infos, extension.AgentInfo{
-			ID:              id,
-			Name:            agentName,
-			IsRunning:       isRunning,
-			PendingMessages: pendingMessages,
+			ID:                id,
+			Name:              agentName,
+			IsRunning:         isRunning,
+			PendingMessages:   pendingMessages,
+			LastActivityAgeMS: activityAgeMS,
+			TurnDurationMS:    turnDurationMS,
+			LastToolAgeMS:     lastToolAgeMS,
+			ActiveTool:        activeTool,
+			LastTool:          lastTool,
+			ShutdownRequested: shutdownRequested,
 		})
 	}
 	return infos, nil
@@ -453,7 +479,9 @@ func (b *harnessUIBridge) PatchUI(params sdk.UIPatchParams) error {
 	}
 	if b.prog != nil {
 		appendID, appendText, appendOnly := appendPatchDetails(params)
-		b.prog.Send(sceneDirtyMsg{Area: params.Area, AppendOnly: appendOnly, AppendID: appendID, AppendText: appendText})
+		b.prog.Send(
+			sceneDirtyMsg{Area: params.Area, AppendOnly: appendOnly, AppendID: appendID, AppendText: appendText},
+		)
 	}
 	return nil
 }

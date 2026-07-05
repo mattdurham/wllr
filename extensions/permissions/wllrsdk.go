@@ -87,7 +87,12 @@ func hostCallJSON(method string, params any) (json.RawMessage, error) {
 	copy(ptrToBytes(reqPtr, uint32(len(reqJSON))), reqJSON)
 
 	var respPtr, respLen uint32
-	status := hostCall(reqPtr, uint32(len(reqJSON)), uint32(uintptr(unsafe.Pointer(&respPtr))), uint32(uintptr(unsafe.Pointer(&respLen))))
+	status := hostCall(
+		reqPtr,
+		uint32(len(reqJSON)),
+		uint32(uintptr(unsafe.Pointer(&respPtr))),
+		uint32(uintptr(unsafe.Pointer(&respLen))),
+	)
 	if status != 0 {
 		return nil, fmt.Errorf("host_call status %d", status)
 	}

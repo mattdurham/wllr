@@ -267,7 +267,9 @@ func OnBeforeToolCall(fn func(payload json.RawMessage)) {
 //
 // Interceptors run in extension-priority order; each sees the input as
 // transformed by earlier interceptors. The first block wins.
-func OnInterceptToolCall(fn func(agentID, toolName string, input json.RawMessage) (newInput json.RawMessage, block bool, reason string)) {
+func OnInterceptToolCall(
+	fn func(agentID, toolName string, input json.RawMessage) (newInput json.RawMessage, block bool, reason string),
+) {
 	_sdkOnIntercept("before_tool_call", func(payload json.RawMessage) *_sdkEventResponse {
 		var p struct {
 			AgentID    string          `json:"agent_id"`
@@ -327,7 +329,9 @@ func OnAfterToolCall(fn func(callID, toolName, result string, isError bool)) {
 //
 // It is the output-side counterpart of OnInterceptToolCall. Interceptors run in
 // extension priority order; each sees the result as transformed by earlier ones.
-func OnInterceptToolResult(fn func(agentID, toolName, result string, isError bool) (newResult string, newIsError bool, block bool, reason string)) {
+func OnInterceptToolResult(
+	fn func(agentID, toolName, result string, isError bool) (newResult string, newIsError bool, block bool, reason string),
+) {
 	_sdkOnIntercept("after_tool_call", func(payload json.RawMessage) *_sdkEventResponse {
 		var p struct {
 			AgentID    string `json:"agent_id"`
@@ -387,7 +391,9 @@ func ToolResult(callID, result string, isError bool) {
 //
 // newMessages and newModel may both be set. Interceptors run in extension
 // priority order; each sees the request as transformed by earlier interceptors.
-func OnInterceptProviderRequest(fn func(messages []ProviderMessage, model string) (newMessages []ProviderMessage, newModel string, block bool, reason string)) {
+func OnInterceptProviderRequest(
+	fn func(messages []ProviderMessage, model string) (newMessages []ProviderMessage, newModel string, block bool, reason string),
+) {
 	_sdkOnIntercept("before_provider_request", func(payload json.RawMessage) *_sdkEventResponse {
 		var p struct {
 			Messages []ProviderMessage `json:"messages"`

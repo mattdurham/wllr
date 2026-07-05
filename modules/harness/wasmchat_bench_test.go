@@ -78,7 +78,10 @@ func newBenchmarkWASMChatModel(tb testing.TB, lines int) Model {
 		children = append(children, sdk.UINode{
 			ID:   fmt.Sprintf("msg-%04d", i),
 			Type: sdk.UINodeText,
-			Text: fmt.Sprintf("transcript line %04d with enough content to measure wrapping and viewport replacement", i),
+			Text: fmt.Sprintf(
+				"transcript line %04d with enough content to measure wrapping and viewport replacement",
+				i,
+			),
 		})
 	}
 	children = append(children, sdk.UINode{

@@ -178,7 +178,9 @@ func TestOAuthLogin_CodexDeviceFlow(t *testing.T) {
 	defer tokenPollSrv.Close()
 	// Final code→token exchange returns a JWT carrying the account id.
 	exchangeSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"access_token":"` + jwtWithAccountID("acct-9") + `","refresh_token":"r2","expires_in":3600}`))
+		_, _ = w.Write(
+			[]byte(`{"access_token":"` + jwtWithAccountID("acct-9") + `","refresh_token":"r2","expires_in":3600}`),
+		)
 	}))
 	defer exchangeSrv.Close()
 
@@ -217,7 +219,11 @@ func TestOAuthLogin_CodexDeviceFlow(t *testing.T) {
 func TestResolveStartupOAuth_NoCredential(t *testing.T) {
 	withAuthPath(t)
 	pool := agent.NewPool()
-	if resolveStartupOAuth(context.Background(), pool, &Config{Provider: providerAnthropic, Model: "claude-sonnet-4-6"}) {
+	if resolveStartupOAuth(
+		context.Background(),
+		pool,
+		&Config{Provider: providerAnthropic, Model: "claude-sonnet-4-6"},
+	) {
 		t.Error("anthropic: should be false with no credential")
 	}
 	if resolveStartupOAuth(context.Background(), pool, &Config{Provider: "openai", Model: "gpt-5.2-codex"}) {
@@ -239,7 +245,11 @@ func TestResolveStartupOAuth_AppliesStoredAnthropic(t *testing.T) {
 	lm, _ := pool.LanguageModelForModel(context.Background(), "claude-sonnet-4-6")
 	_, _ = pool.Spawn(agent.MainAgentID, lm, agent.SpawnOpts{TurnTimeout: -1})
 
-	if !resolveStartupOAuth(context.Background(), pool, &Config{Provider: providerAnthropic, Model: "claude-sonnet-4-6"}) {
+	if !resolveStartupOAuth(
+		context.Background(),
+		pool,
+		&Config{Provider: providerAnthropic, Model: "claude-sonnet-4-6"},
+	) {
 		t.Error("should apply a stored anthropic oauth token")
 	}
 }

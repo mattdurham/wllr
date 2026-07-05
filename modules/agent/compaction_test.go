@@ -446,7 +446,10 @@ func (c *captureLM) Generate(_ context.Context, _ fantasy.Call) (*fantasy.Respon
 	if resp == "" {
 		resp = "LM summary output"
 	}
-	return &fantasy.Response{Content: fantasy.ResponseContent{fantasy.TextContent{Text: resp}}, FinishReason: fantasy.FinishReasonStop}, nil
+	return &fantasy.Response{
+		Content:      fantasy.ResponseContent{fantasy.TextContent{Text: resp}},
+		FinishReason: fantasy.FinishReasonStop,
+	}, nil
 }
 
 func (c *captureLM) GenerateObject(_ context.Context, _ fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {

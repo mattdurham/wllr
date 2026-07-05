@@ -413,7 +413,11 @@ func (s *SceneRenderer) RenderNode(areaID, nodeID string, width int, textOverrid
 // RenderAppendTextNode renders the current and previous states of an appended
 // text node. The previous state is derived by removing appendedText from the
 // current node text; the live scene is not mutated.
-func (s *SceneRenderer) RenderAppendTextNode(areaID, nodeID string, width int, appendedText string) (previous, current string, ok bool) {
+func (s *SceneRenderer) RenderAppendTextNode(
+	areaID, nodeID string,
+	width int,
+	appendedText string,
+) (previous, current string, ok bool) {
 	if appendedText == "" {
 		return "", "", false
 	}

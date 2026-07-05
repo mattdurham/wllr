@@ -40,38 +40,58 @@ func init() {
 	RegisterToolWithOutput(
 		"tasklist_create",
 		"Create a new task list and return its unique ID",
-		json.RawMessage(`{"type":"object","properties":{"name":{"type":"string","description":"Name of the task list"},"description":{"type":"string","description":"Description of the task list"},"owner_agent_id":{"type":"string","description":"Agent ID to notify on task completion or blocking"}},"required":["name"]}`),
-		json.RawMessage(`{"type":"object","properties":{"list_id":{"type":"string","description":"Created task list ID"}},"required":["list_id"]}`),
+		json.RawMessage(
+			`{"type":"object","properties":{"name":{"type":"string","description":"Name of the task list"},"description":{"type":"string","description":"Description of the task list"},"owner_agent_id":{"type":"string","description":"Agent ID to notify on task completion or blocking"}},"required":["name"]}`,
+		),
+		json.RawMessage(
+			`{"type":"object","properties":{"list_id":{"type":"string","description":"Created task list ID"}},"required":["list_id"]}`,
+		),
 	)
 	RegisterToolWithOutput(
 		"tasks_create",
 		"Create a new task in a task list",
-		json.RawMessage(`{"type":"object","properties":{"list_id":{"type":"string","description":"Task list ID"},"title":{"type":"string","description":"Task title"},"description":{"type":"string","description":"Task description"},"priority":{"type":"string","enum":["low","medium","high","critical"],"description":"Task priority"},"tags":{"type":"array","items":{"type":"string"},"description":"Task tags"},"dependencies":{"type":"array","items":{"type":"string"},"description":"Task IDs this task depends on"}},"required":["list_id","title"]}`),
-		json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string","description":"Created task ID"}},"required":["task_id"]}`),
+		json.RawMessage(
+			`{"type":"object","properties":{"list_id":{"type":"string","description":"Task list ID"},"title":{"type":"string","description":"Task title"},"description":{"type":"string","description":"Task description"},"priority":{"type":"string","enum":["low","medium","high","critical"],"description":"Task priority"},"tags":{"type":"array","items":{"type":"string"},"description":"Task tags"},"dependencies":{"type":"array","items":{"type":"string"},"description":"Task IDs this task depends on"}},"required":["list_id","title"]}`,
+		),
+		json.RawMessage(
+			`{"type":"object","properties":{"task_id":{"type":"string","description":"Created task ID"}},"required":["task_id"]}`,
+		),
 	)
 	RegisterToolWithOutput(
 		"tasks_update",
 		"Update an existing task",
-		json.RawMessage(`{"type":"object","properties":{"list_id":{"type":"string","description":"Task list ID"},"task_id":{"type":"string","description":"Task ID"},"title":{"type":"string","description":"New title"},"description":{"type":"string","description":"New description"},"status":{"type":"string","enum":["pending","in_progress","completed","blocked"],"description":"New status"},"priority":{"type":"string","enum":["low","medium","high","critical"],"description":"New priority"},"tags":{"type":"array","items":{"type":"string"},"description":"New tags"},"dependencies":{"type":"array","items":{"type":"string"},"description":"New dependencies"}},"required":["list_id","task_id"]}`),
+		json.RawMessage(
+			`{"type":"object","properties":{"list_id":{"type":"string","description":"Task list ID"},"task_id":{"type":"string","description":"Task ID"},"title":{"type":"string","description":"New title"},"description":{"type":"string","description":"New description"},"status":{"type":"string","enum":["pending","in_progress","completed","blocked"],"description":"New status"},"priority":{"type":"string","enum":["low","medium","high","critical"],"description":"New priority"},"tags":{"type":"array","items":{"type":"string"},"description":"New tags"},"dependencies":{"type":"array","items":{"type":"string"},"description":"New dependencies"}},"required":["list_id","task_id"]}`,
+		),
 		json.RawMessage(`{"type":"object","properties":{"success":{"type":"boolean"}},"required":["success"]}`),
 	)
 	RegisterToolWithOutput(
 		"tasks_list",
 		"List all tasks in a task list",
-		json.RawMessage(`{"type":"object","properties":{"list_id":{"type":"string","description":"Task list ID"},"status":{"type":"string","enum":["pending","in_progress","completed","blocked"],"description":"Filter by status (optional)"}},"required":["list_id"]}`),
-		json.RawMessage(`{"type":"object","properties":{"tasks":{"type":"array","items":{"type":"object","description":"Task object"}}},"required":["tasks"]}`),
+		json.RawMessage(
+			`{"type":"object","properties":{"list_id":{"type":"string","description":"Task list ID"},"status":{"type":"string","enum":["pending","in_progress","completed","blocked"],"description":"Filter by status (optional)"}},"required":["list_id"]}`,
+		),
+		json.RawMessage(
+			`{"type":"object","properties":{"tasks":{"type":"array","items":{"type":"object","description":"Task object"}}},"required":["tasks"]}`,
+		),
 	)
 	RegisterToolWithOutput(
 		"tasks_get",
 		"Get details of a specific task",
-		json.RawMessage(`{"type":"object","properties":{"list_id":{"type":"string","description":"Task list ID"},"task_id":{"type":"string","description":"Task ID"}},"required":["list_id","task_id"]}`),
+		json.RawMessage(
+			`{"type":"object","properties":{"list_id":{"type":"string","description":"Task list ID"},"task_id":{"type":"string","description":"Task ID"}},"required":["list_id","task_id"]}`,
+		),
 		json.RawMessage(`{"type":"object","description":"Task object"}`),
 	)
 	RegisterToolWithOutput(
 		"tasks_claim",
 		"Atomically claim the next available (pending, dependency-satisfied) task in a list. Sets it to in_progress and records the assignee. Returns the claimed task, or {\"task\":null} when none are available. Prefer this over tasks_list+tasks_update when multiple workers share a list — it cannot double-assign a task.",
-		json.RawMessage(`{"type":"object","properties":{"list_id":{"type":"string","description":"Task list ID"},"agent_id":{"type":"string","description":"Claiming agent's ID (recorded as assignee)"}},"required":["list_id","agent_id"]}`),
-		json.RawMessage(`{"type":"object","properties":{"task":{"description":"Claimed task object, or null when no task is available"}},"required":["task"]}`),
+		json.RawMessage(
+			`{"type":"object","properties":{"list_id":{"type":"string","description":"Task list ID"},"agent_id":{"type":"string","description":"Claiming agent's ID (recorded as assignee)"}},"required":["list_id","agent_id"]}`,
+		),
+		json.RawMessage(
+			`{"type":"object","properties":{"task":{"description":"Claimed task object, or null when no task is available"}},"required":["task"]}`,
+		),
 	)
 
 	OnToolCall(func(callID, toolName string, input json.RawMessage) (string, bool) {
