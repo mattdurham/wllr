@@ -60,12 +60,10 @@ builtins: $(DIST_DIR) $(BUILTINS)
 	cd extensions/agents    && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(BUILTINS)/agents.wasm .
 	cd extensions/history   && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(BUILTINS)/history.wasm .
 	cd extensions/logging   && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(BUILTINS)/logging.wasm .
+	cd extensions/queue     && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(BUILTINS)/queue.wasm .
 	cd extensions/statusline && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(DIST_DIR)/statusline.wasm .
 	cp $(DIST_DIR)/statusline.wasm $(BUILTINS)/statusline.wasm
 	@echo "Built built-in extensions"
-
-# extensions builds all WASM extensions.
-# Built-ins go to cmd/builtins/ (embedded in the binary).
 # Optional extensions are installed to ~/.wllr/extensions/<name>/.
 extensions: builtins optional-extensions
 	@echo "Built all extensions"

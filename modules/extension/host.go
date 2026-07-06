@@ -1114,7 +1114,6 @@ func (h *Host) handleAgentTokenCount() sdk.HostCallResponse {
 	return sdk.HostCallResponse{Result: result}
 }
 
-
 func (h *Host) handleMailboxSnapshot(ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
 	if h.AgentBridge() == nil {
 		return sdk.HostCallResponse{Error: "mailbox_snapshot: not supported by host"}
