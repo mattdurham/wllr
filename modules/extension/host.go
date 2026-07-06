@@ -180,11 +180,11 @@ func (h *Host) SetMCPBridge(m MCPBridge) {
 // AgentBridgeSet reports whether an AgentBridge has been installed.
 // Used in tests to verify wiring.
 func (h *Host) AgentBridgeSet() bool {
-	return h.agentBridge() != nil
+	return h.AgentBridge() != nil
 }
 
-// agentBridge snapshots the current AgentBridge under h.mu.RLock.
-func (h *Host) agentBridge() AgentBridge {
+// AgentBridge returns a snapshot of the current AgentBridge under h.mu.RLock.
+func (h *Host) AgentBridge() AgentBridge {
 	h.mu.RLock()
 	b := h.agents
 	h.mu.RUnlock()
@@ -959,7 +959,7 @@ func (h *Host) handleStoreGet(ext *Extension, req sdk.HostCallRequest) sdk.HostC
 }
 
 func (h *Host) handleAgentSpawn(req sdk.HostCallRequest) sdk.HostCallResponse {
-	if h.agentBridge() == nil {
+	if h.AgentBridge() == nil {
 		return sdk.HostCallResponse{Error: "agent_spawn: not supported by host"}
 	}
 	var params struct {
@@ -974,7 +974,7 @@ func (h *Host) handleAgentSpawn(req sdk.HostCallRequest) sdk.HostCallResponse {
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("agent_spawn: %v", err)}
 	}
-	if err := h.agentBridge().Spawn(context.Background(), SpawnRequest{
+	if err := h.AgentBridge().Spawn(context.Background(), SpawnRequest{
 		ID:             params.ID,
 		Name:           params.Name,
 		SystemPrompt:   params.SystemPrompt,
@@ -990,7 +990,7 @@ func (h *Host) handleAgentSpawn(req sdk.HostCallRequest) sdk.HostCallResponse {
 }
 
 func (h *Host) handleAgentClose(req sdk.HostCallRequest) sdk.HostCallResponse {
-	if h.agentBridge() == nil {
+	if h.AgentBridge() == nil {
 		return sdk.HostCallResponse{Error: "agent_close: not supported by host"}
 	}
 	var params struct {
@@ -999,14 +999,14 @@ func (h *Host) handleAgentClose(req sdk.HostCallRequest) sdk.HostCallResponse {
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("agent_close: %v", err)}
 	}
-	if err := h.agentBridge().Close(params.ID); err != nil {
+	if err := h.AgentBridge().Close(params.ID); err != nil {
 		return sdk.HostCallResponse{Error: err.Error()}
 	}
 	return sdk.HostCallResponse{}
 }
 
 func (h *Host) handleAgentSendMessage(req sdk.HostCallRequest) sdk.HostCallResponse {
-	if h.agentBridge() == nil {
+	if h.AgentBridge() == nil {
 		return sdk.HostCallResponse{Error: "agent_send_message: not supported by host"}
 	}
 	var params struct {
@@ -1028,14 +1028,14 @@ func (h *Host) handleAgentSendMessage(req sdk.HostCallRequest) sdk.HostCallRespo
 		Content: params.Message,
 		Type:    sdk.MessageType(params.Type),
 	}
-	if err := h.agentBridge().SendMessage(params.ID, msg); err != nil {
+	if err := h.AgentBridge().SendMessage(params.ID, msg); err != nil {
 		return sdk.HostCallResponse{Error: err.Error()}
 	}
 	return sdk.HostCallResponse{}
 }
 
 func (h *Host) handleAgentDeliver(req sdk.HostCallRequest) sdk.HostCallResponse {
-	if h.agentBridge() == nil {
+	if h.AgentBridge() == nil {
 		return sdk.HostCallResponse{Error: "agent_deliver: not supported by host"}
 	}
 	var params struct {
@@ -1062,14 +1062,14 @@ func (h *Host) handleAgentDeliver(req sdk.HostCallRequest) sdk.HostCallResponse 
 		Content: params.Message,
 		Type:    sdk.MessageType(params.Type),
 	}
-	if err := h.agentBridge().Deliver(params.ID, msg, wake); err != nil {
+	if err := h.AgentBridge().Deliver(params.ID, msg, wake); err != nil {
 		return sdk.HostCallResponse{Error: err.Error()}
 	}
 	return sdk.HostCallResponse{}
 }
 
 func (h *Host) handleAgentRun(req sdk.HostCallRequest) sdk.HostCallResponse {
-	if h.agentBridge() == nil {
+	if h.AgentBridge() == nil {
 		return sdk.HostCallResponse{Error: "agent_run: not supported by host"}
 	}
 	var params struct {
@@ -1078,17 +1078,17 @@ func (h *Host) handleAgentRun(req sdk.HostCallRequest) sdk.HostCallResponse {
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("agent_run: %v", err)}
 	}
-	if err := h.agentBridge().Run(params.ID); err != nil {
+	if err := h.AgentBridge().Run(params.ID); err != nil {
 		return sdk.HostCallResponse{Error: err.Error()}
 	}
 	return sdk.HostCallResponse{}
 }
 
 func (h *Host) handleAgentList() sdk.HostCallResponse {
-	if h.agentBridge() == nil {
+	if h.AgentBridge() == nil {
 		return sdk.HostCallResponse{Error: "agent_list: not supported by host"}
 	}
-	agents, err := h.agentBridge().List()
+	agents, err := h.AgentBridge().List()
 	if err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("agent_list: %v", err)}
 	}
@@ -1097,10 +1097,10 @@ func (h *Host) handleAgentList() sdk.HostCallResponse {
 }
 
 func (h *Host) handleAgentTokenCount() sdk.HostCallResponse {
-	if h.agentBridge() == nil {
+	if h.AgentBridge() == nil {
 		return sdk.HostCallResponse{Error: "agent_token_count: not supported by host"}
 	}
-	count := h.agentBridge().TokenCount()
+	count := h.AgentBridge().TokenCount()
 	result, _ := json.Marshal(map[string]int64{"count": count})
 	return sdk.HostCallResponse{Result: result}
 }
@@ -2063,8 +2063,8 @@ func (h *Host) handleSetStatusLine(req sdk.HostCallRequest) sdk.HostCallResponse
 // No permission check required — this is read-only observability data.
 func (h *Host) handleGetContextUsage() sdk.HostCallResponse {
 	var cu sdk.ContextUsage
-	if h.agentBridge() != nil {
-		cu = h.agentBridge().MainAgentContextUsage()
+	if h.AgentBridge() != nil {
+		cu = h.AgentBridge().MainAgentContextUsage()
 	}
 	result, _ := json.Marshal(cu)
 	return sdk.HostCallResponse{Result: result}

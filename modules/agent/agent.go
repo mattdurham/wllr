@@ -198,6 +198,72 @@ func (a *Agent) InboxLen() int {
 	return a.inbox.len()
 }
 
+// SnapshotInbox returns a copy of the agent's inbox messages without draining.
+// Thread-safe. Returns empty slice if agent has no queued messages.
+func (a *Agent) SnapshotInbox() []sdk.Message {
+	return a.inbox.snapshot()
+}
+
+// DeleteFromInbox removes messages from the agent's inbox.
+// At least one of byIndex or byMessageID must be provided.
+// Returns count of deleted messages, or error.
+func (a *Agent) DeleteFromInbox(byIndex int, byMessageID string) (int, error) {
+	if byIndex < 0 && byMessageID == "" {
+		return 0, errors.New("at least one of byIndex or byMessageID must be provided")
+	}
+	if a.IsRunning() {
+		return 0, errors.New("cannot modify inbox while agent is running")
+	}
+	if byMessageID != "" {
+		count := 0
+		for {
+			msg := a.inbox.deleteByID(byMessageID)
+			if msg == nil {
+				break
+			}
+			count++
+		}
+		return count, nil
+	}
+	if byIndex >= 0 && byIndex < len(a.inbox.msgs) {
+		a.inbox.deleteByIndex(byIndex)
+		return 1, nil
+	}
+	return 0, errors.New("index out of range")
+}
+
+// EditInboxMessage updates a message's content.
+// Content must be non-empty (Anthropic invariant).
+func (a *Agent) EditInboxMessage(byIndex int, byMessageID string, newContent string) error {
+	if strings.TrimSpace(newContent) == "" {
+		return errors.New("content must be non-empty")
+	}
+	if byIndex < 0 && byMessageID == "" {
+		return errors.New("at least one of byIndex or byMessageID must be provided")
+	}
+	if a.IsRunning() {
+		return errors.New("cannot modify inbox while agent is running")
+	}
+	if byMessageID != "" {
+		old := a.inbox.editByID(byMessageID, sdk.Message{Content: newContent})
+		if old == nil {
+			return errors.New("message not found")
+		}
+		return nil
+	}
+	if byIndex >= 0 && byIndex < len(a.inbox.msgs) {
+		a.inbox.editByIndex(byIndex, sdk.Message{Content: newContent})
+		return nil
+	}
+	return errors.New("index out of range")
+}
+
+// SetInbox sets the inbox to a specific set of messages.
+// Used for testing and agent reset operations.
+func (a *Agent) SetInbox(msgs []sdk.Message) {
+	a.inbox.msgs = msgs
+}
+
 // ModelName returns the model name used for context-window sizing.
 func (a *Agent) ModelName() string {
 	a.lmMu.RLock()

@@ -27,14 +27,18 @@ func writeWASM(t *testing.T, name string, data []byte) string {
 
 // testAgentBridge implements AgentBridge using optional callback fields.
 type testAgentBridge struct {
-	onSpawn       func(ctx context.Context, req SpawnRequest) error
-	onClose       func(id string) error
-	onSendMessage func(id string, msg sdk.Message) error
-	onDeliver     func(id string, msg sdk.Message, wake bool) error
-	onRun         func(id string) error
-	onList        func() ([]AgentInfo, error)
-	onTokenCount  func() int64
-	onSetHistory  func(id string, messages []sdk.Message) error
+	onSpawn                 func(ctx context.Context, req SpawnRequest) error
+	onClose                 func(id string) error
+	onSendMessage           func(id string, msg sdk.Message) error
+	onDeliver               func(id string, msg sdk.Message, wake bool) error
+	onRun                   func(id string) error
+	onList                  func() ([]AgentInfo, error)
+	onTokenCount            func() int64
+	onSetHistory            func(id string, messages []sdk.Message) error
+	onMainAgentContextUsage func() sdk.ContextUsage
+	onSnapshotInbox         func(id string) ([]sdk.Message, error)
+	onDeleteFromInbox       func(id string, byIndex int, byMessageID string) (int, error)
+	onEditInboxMessage      func(id string, byIndex int, byMessageID string, newContent string) error
 }
 
 func (b *testAgentBridge) Spawn(ctx context.Context, req SpawnRequest) error {
@@ -94,7 +98,31 @@ func (b *testAgentBridge) SetHistory(id string, messages []sdk.Message) error {
 }
 
 func (b *testAgentBridge) MainAgentContextUsage() sdk.ContextUsage {
+	if b.onMainAgentContextUsage != nil {
+		return b.onMainAgentContextUsage()
+	}
 	return sdk.ContextUsage{}
+}
+
+func (b *testAgentBridge) SnapshotInbox(id string) ([]sdk.Message, error) {
+	if b.onSnapshotInbox != nil {
+		return b.onSnapshotInbox(id)
+	}
+	return nil, nil
+}
+
+func (b *testAgentBridge) DeleteFromInbox(id string, byIndex int, byMessageID string) (int, error) {
+	if b.onDeleteFromInbox != nil {
+		return b.onDeleteFromInbox(id, byIndex, byMessageID)
+	}
+	return 0, nil
+}
+
+func (b *testAgentBridge) EditInboxMessage(id string, byIndex int, byMessageID string, newContent string) error {
+	if b.onEditInboxMessage != nil {
+		return b.onEditInboxMessage(id, byIndex, byMessageID, newContent)
+	}
+	return nil
 }
 
 // testTeamBridge implements TeamBridge using optional callback fields.
