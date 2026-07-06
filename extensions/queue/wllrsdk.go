@@ -900,19 +900,20 @@ func OnAfterProviderResponse(fn func(inputTokens, outputTokens int)) {
 
 // OnContextUsage registers a handler called after each completed turn with the
 // current context window usage. contextWindow is 0 when no window is configured.
-func OnContextUsage(fn func(inputTokens, outputTokens, contextWindow int64, percent float64, compacted bool)) {
+func OnContextUsage(fn func(inputTokens, outputTokens, contextWindow int64, percent float64, compacted bool, thresholdPct float64)) {
 	_sdkOn("context_usage", func(payload json.RawMessage) {
 		var p struct {
 			Usage struct {
 				InputTokens   int64   `json:"input_tokens"`
 				OutputTokens  int64   `json:"output_tokens"`
 				ContextWindow int64   `json:"context_window"`
+				ThresholdPct  float64 `json:"threshold_pct,omitempty"`
 				Percent       float64 `json:"percent"`
 			} `json:"usage"`
 			Compacted bool `json:"compacted"`
 		}
 		if err := json.Unmarshal(payload, &p); err == nil {
-			fn(p.Usage.InputTokens, p.Usage.OutputTokens, p.Usage.ContextWindow, p.Usage.Percent, p.Compacted)
+			fn(p.Usage.InputTokens, p.Usage.OutputTokens, p.Usage.ContextWindow, p.Usage.Percent, p.Compacted, p.ThresholdPct)
 		}
 	})
 }

@@ -61,9 +61,16 @@ func _sdkFree(ptr int32) {
 
 //go:wasmexport _init
 func _sdkInit() int32 {
-	// Subscribe to every event that has a registered handler.
+	// Subscribe to every event that has a registered handler or interceptor.
+	subscribed := map[string]bool{}
 	for evt := range _sdkHandlers {
 		_sdkCall("subscribe", map[string]string{"event": evt})
+		subscribed[evt] = true
+	}
+	for evt := range _sdkInterceptors {
+		if !subscribed[evt] {
+			_sdkCall("subscribe", map[string]string{"event": evt})
+		}
 	}
 	// Run deferred init hooks (RegisterTool, RegisterCommand calls).
 	for _, fn := range _sdkInitHooks {
@@ -82,21 +89,61 @@ func _sdkOnEvent(ptr, length int32) int32 {
 	if err := json.Unmarshal(data, &evt); err != nil {
 		return 0
 	}
+	// Observe handlers run first (fire-and-forget).
 	for _, fn := range _sdkHandlers[evt.Type] {
 		fn(evt.Payload)
+	}
+	// Interceptors run next; the first non-nil result is returned to the host as
+	// the EventResponse (transform via Payload, or veto via Block).
+	for _, fn := range _sdkInterceptors[evt.Type] {
+		if resp := fn(evt.Payload); resp != nil {
+			return _sdkReturnResponse(resp)
+		}
 	}
 	return 0
 }
 
+// _sdkReturnResponse marshals an EventResponse, copies it into a pinned buffer,
+// and returns the pointer for the host to read and free. Returns 0 on error.
+func _sdkReturnResponse(resp *_sdkEventResponse) int32 {
+	b, err := json.Marshal(resp)
+	if err != nil {
+		return 0
+	}
+	ptr := _sdkAlloc(int32(len(b)))
+	if ptr == 0 {
+		return 0
+	}
+	copy(_sdkPinned[uintptr(ptr)], b)
+	return ptr
+}
+
 // ─── Internal registry ────────────────────────────────────────────────────────
 
+// _sdkEventResponse mirrors sdk.EventResponse on the wire. An interceptor
+// returns one of: nil (observe), {Payload} (transform), or {Block, Error} (veto).
+type _sdkEventResponse struct {
+	Error   string          `json:"error,omitempty"`
+	Payload json.RawMessage `json:"payload,omitempty"`
+	Block   bool            `json:"block,omitempty"`
+}
+
 var (
-	_sdkHandlers  = map[string][]func(json.RawMessage){}
-	_sdkInitHooks []func()
+	_sdkHandlers     = map[string][]func(json.RawMessage){}
+	_sdkInterceptors = map[string][]func(json.RawMessage) *_sdkEventResponse{}
+	_sdkInitHooks    []func()
 )
 
 func _sdkOn(event string, fn func(json.RawMessage)) {
 	_sdkHandlers[event] = append(_sdkHandlers[event], fn)
+}
+
+// _sdkOnIntercept registers a transform/veto interceptor for an event. The
+// handler returns nil to observe-only, or an *_sdkEventResponse to transform the
+// payload or block the interaction. The first non-nil result from any
+// interceptor on the event is returned to the host.
+func _sdkOnIntercept(event string, fn func(json.RawMessage) *_sdkEventResponse) {
+	_sdkInterceptors[event] = append(_sdkInterceptors[event], fn)
 }
 
 // ─── Tool and command registration ───────────────────────────────────────────
@@ -208,6 +255,53 @@ func OnBeforeToolCall(fn func(payload json.RawMessage)) {
 	_sdkOn("before_tool_call", fn)
 }
 
+// OnInterceptToolCall registers a transform/veto interceptor on tool calls.
+// For each tool call the handler receives the agent ID, tool name, and current
+// input, and returns:
+//
+//   - (nil, false, "")          — observe only; the call proceeds unchanged.
+//   - (newInput, false, "")     — rewrite the tool input (e.g. a security layer
+//     sanitising a bash command); the call proceeds with newInput.
+//   - (nil, true, "reason")     — block the call; the tool returns an error
+//     result carrying reason, and the implementing tool never runs.
+//
+// Interceptors run in extension-priority order; each sees the input as
+// transformed by earlier interceptors. The first block wins.
+func OnInterceptToolCall(
+	fn func(agentID, toolName string, input json.RawMessage) (newInput json.RawMessage, block bool, reason string),
+) {
+	_sdkOnIntercept("before_tool_call", func(payload json.RawMessage) *_sdkEventResponse {
+		var p struct {
+			AgentID    string          `json:"agent_id"`
+			ToolCallID string          `json:"tool_call_id"`
+			ToolName   string          `json:"tool_name"`
+			Input      json.RawMessage `json:"input"`
+		}
+		if err := json.Unmarshal(payload, &p); err != nil {
+			return nil
+		}
+		newInput, block, reason := fn(p.AgentID, p.ToolName, p.Input)
+		if block {
+			return &_sdkEventResponse{Block: true, Error: reason}
+		}
+		if len(newInput) == 0 {
+			return nil // observe-only
+		}
+		// Transform: return the full payload with the rewritten input so the host
+		// threads it to the implementing tool.
+		out, err := json.Marshal(map[string]any{
+			"agent_id":     p.AgentID,
+			"tool_call_id": p.ToolCallID,
+			"tool_name":    p.ToolName,
+			"input":        newInput,
+		})
+		if err != nil {
+			return nil
+		}
+		return &_sdkEventResponse{Payload: out}
+	})
+}
+
 // OnAfterToolCall registers a handler called after a tool call completes.
 func OnAfterToolCall(fn func(callID, toolName, result string, isError bool)) {
 	_sdkOn("after_tool_call", func(payload json.RawMessage) {
@@ -223,6 +317,53 @@ func OnAfterToolCall(fn func(callID, toolName, result string, isError bool)) {
 	})
 }
 
+// OnInterceptToolResult registers a transform/veto interceptor on tool call
+// RESULTS, just before the result reaches the model. The handler receives the
+// agent ID, tool name, result text, and error flag, and returns:
+//
+//   - ("", false, false, "")          — observe only; the result is unchanged.
+//   - (newResult, newIsError, false, "") — rewrite/redact the result (e.g. strip
+//     secrets from command output); the model sees newResult.
+//   - ("", false, true, "reason")     — block: the result is replaced with reason
+//     and forced to an error result.
+//
+// It is the output-side counterpart of OnInterceptToolCall. Interceptors run in
+// extension priority order; each sees the result as transformed by earlier ones.
+func OnInterceptToolResult(
+	fn func(agentID, toolName, result string, isError bool) (newResult string, newIsError bool, block bool, reason string),
+) {
+	_sdkOnIntercept("after_tool_call", func(payload json.RawMessage) *_sdkEventResponse {
+		var p struct {
+			AgentID    string `json:"agent_id"`
+			ToolCallID string `json:"tool_call_id"`
+			ToolName   string `json:"tool_name"`
+			Result     string `json:"result"`
+			IsError    bool   `json:"is_error"`
+		}
+		if err := json.Unmarshal(payload, &p); err != nil {
+			return nil
+		}
+		newResult, newIsError, block, reason := fn(p.AgentID, p.ToolName, p.Result, p.IsError)
+		if block {
+			return &_sdkEventResponse{Block: true, Error: reason}
+		}
+		if newResult == "" && newIsError == p.IsError {
+			return nil // observe-only
+		}
+		out, err := json.Marshal(map[string]any{
+			"agent_id":     p.AgentID,
+			"tool_call_id": p.ToolCallID,
+			"tool_name":    p.ToolName,
+			"result":       newResult,
+			"is_error":     newIsError,
+		})
+		if err != nil {
+			return nil
+		}
+		return &_sdkEventResponse{Payload: out}
+	})
+}
+
 // ─── Host API ─────────────────────────────────────────────────────────────────
 
 // ToolResult sends the result of a tool call back to the host.
@@ -235,6 +376,65 @@ func ToolResult(callID, result string, isError bool) {
 	})
 }
 
+// OnInterceptProviderRequest registers a transform/veto interceptor on the
+// outgoing provider request, just before an agent turn streams to the LLM. The
+// handler receives the messages about to be sent and the model that would be
+// used, and returns:
+//
+//   - (nil, "", false, "")            — observe only; the request proceeds unchanged.
+//   - (newMessages, "", false, "")    — redact/edit the outgoing messages
+//     (e.g. strip PII/API keys). History keeps the original; redaction is
+//     send-time only.
+//   - (nil, "model-id", false, "")    — reroute to a different model
+//     (e.g. cheap local vs frontier).
+//   - (nil, "", true, "reason")       — block the request; the turn fails with reason.
+//
+// newMessages and newModel may both be set. Interceptors run in extension
+// priority order; each sees the request as transformed by earlier interceptors.
+func OnInterceptProviderRequest(
+	fn func(messages []ProviderMessage, model string) (newMessages []ProviderMessage, newModel string, block bool, reason string),
+) {
+	_sdkOnIntercept("before_provider_request", func(payload json.RawMessage) *_sdkEventResponse {
+		var p struct {
+			Messages []ProviderMessage `json:"messages"`
+			Model    string            `json:"model"`
+		}
+		if err := json.Unmarshal(payload, &p); err != nil {
+			return nil
+		}
+		newMessages, newModel, block, reason := fn(p.Messages, p.Model)
+		if block {
+			return &_sdkEventResponse{Block: true, Error: reason}
+		}
+		if newMessages == nil && (newModel == "" || newModel == p.Model) {
+			return nil // observe-only
+		}
+		outMessages := p.Messages
+		if newMessages != nil {
+			outMessages = newMessages
+		}
+		outModel := p.Model
+		if newModel != "" {
+			outModel = newModel
+		}
+		out, err := json.Marshal(map[string]any{
+			"messages": outMessages,
+			"model":    outModel,
+		})
+		if err != nil {
+			return nil
+		}
+		return &_sdkEventResponse{Payload: out}
+	})
+}
+
+// ProviderMessage is one message in a before_provider_request payload. Role is
+// "user" or "assistant"; Content is the text.
+type ProviderMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
 // Modal displays text in a fullscreen modal overlay (read-only, scrollable).
 func Modal(text string) {
 	_sdkCall("modal", map[string]string{"text": text})
@@ -245,7 +445,9 @@ func Notify(text string) {
 	_sdkCall("notify", map[string]string{"text": text})
 }
 
-// SetStatus sets a keyed value in the status bar (e.g. "my-ext", "ready").
+// SetStatus sets a keyed value readable via get_status_info. The statusline
+// extension reads these values and can surface them in the scene area.
+// Deprecated: prefer patching the "statusline" scene area directly via UIPatch.
 func SetStatus(key, value string) {
 	_sdkCall("set_status", map[string]string{"key": key, "value": value})
 }
@@ -320,6 +522,17 @@ func ReadFile(path string) (string, error) {
 func WriteFile(path, content string) error {
 	if _sdkCallResult("write_file", map[string]string{"path": path, "content": content}) == nil {
 		return fmt.Errorf("write_file: failed")
+	}
+	return nil
+}
+
+// AppendFile appends content to a file on the host filesystem, creating it (and
+// parent directories) if absent. Use this for log-style accumulation where
+// WriteFile's truncate semantics would lose prior content.
+// Requires the file_write permission in the extension manifest.
+func AppendFile(path, content string) error {
+	if _sdkCallResult("append_file", map[string]string{"path": path, "content": content}) == nil {
+		return fmt.Errorf("append_file: failed")
 	}
 	return nil
 }
@@ -437,9 +650,10 @@ func GetStatusInfo() (StatusInfo, error) {
 	return info, nil
 }
 
-// SetStatusLine replaces the entire status bar text with a custom string.
-// Pass an empty string to revert to the default auto-generated line.
-// No permission required.
+// SetStatusLine replaces the entire status line text with a custom string.
+// Deprecated: the statusline is now fully scene-driven. Patch the
+// "statusline" area via UIPatch/OpSetRoot to achieve the same effect with
+// full layout and styling control.
 func SetStatusLine(text string) {
 	_sdkCall("set_status_line", map[string]string{"text": text})
 }
@@ -534,12 +748,27 @@ type UIPatchOp struct {
 	Text   string   `json:"text,omitempty"`
 }
 
-// UICreateArea registers a UI area owned by this extension. placement is one of
-// "main", "sidebar", "status", "overlay". weight is a relative size hint (0 = default).
-func UICreateArea(id, placement string, weight int) {
-	_sdkCall("ui_create_area", map[string]any{
-		"area": map[string]any{"id": id, "placement": placement, "weight": weight},
-	})
+// UICreateArea registers a UI area owned by this extension.
+// placement is one of: "main", "sidebar", "status", "overlay".
+// weight is a relative size hint (0 = default).
+// minHeight/maxHeight/minWidth/maxWidth are optional sizing constraints;
+// each accepts "" (unconstrained), "N" (absolute cells/lines), or "N%"
+// (percentage of terminal dimension).
+func UICreateArea(id, placement string, weight int, minHeight, maxHeight, minWidth, maxWidth string) {
+	area := map[string]any{"id": id, "placement": placement, "weight": weight}
+	if minHeight != "" {
+		area["min_height"] = minHeight
+	}
+	if maxHeight != "" {
+		area["max_height"] = maxHeight
+	}
+	if minWidth != "" {
+		area["min_width"] = minWidth
+	}
+	if maxWidth != "" {
+		area["max_width"] = maxWidth
+	}
+	_sdkCall("ui_create_area", map[string]any{"area": area})
 }
 
 // UIPatch applies a batch of scene-graph ops to an area, in order, atomically.
@@ -622,6 +851,37 @@ func OnModelChanged(fn func(provider, model string)) {
 	})
 }
 
+// LogAttr is one structured key/value attribute on a log record.
+type LogAttr struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+// LogRecord is a single structured log record forwarded via OnLog. Time is
+// RFC3339Nano UTC; Level is "debug"/"info"/"warn"/"error".
+type LogRecord struct {
+	Time    string    `json:"time"`
+	Level   string    `json:"level"`
+	Message string    `json:"message"`
+	Attrs   []LogAttr `json:"attrs,omitempty"`
+}
+
+// OnLog registers a handler called with batches of structured log records the
+// host emits via slog. Batched (~30ms) to bound the WASM crossing rate. Use it
+// to write a log file (see AppendFile) or ship logs to a backend. Handlers MUST
+// NOT call Log/Logf — logging from within OnLog is suppressed by the host's
+// reentrancy guard but is wasteful.
+func OnLog(fn func(records []LogRecord)) {
+	_sdkOn("log", func(payload json.RawMessage) {
+		var p struct {
+			Records []LogRecord `json:"records"`
+		}
+		if err := json.Unmarshal(payload, &p); err == nil && len(p.Records) > 0 {
+			fn(p.Records)
+		}
+	})
+}
+
 // OnAfterProviderResponse registers a handler called after the LLM provider
 // returns a response. usage contains token counts for the completed turn.
 func OnAfterProviderResponse(fn func(inputTokens, outputTokens int)) {
@@ -640,21 +900,20 @@ func OnAfterProviderResponse(fn func(inputTokens, outputTokens int)) {
 
 // OnContextUsage registers a handler called after each completed turn with the
 // current context window usage. contextWindow is 0 when no window is configured.
-func OnContextUsage(
-	fn func(inputTokens int64, outputTokens int64, contextWindow int64, percent float64, compacted bool),
-) {
+func OnContextUsage(fn func(inputTokens, outputTokens, contextWindow int64, percent float64, compacted bool, thresholdPct float64)) {
 	_sdkOn("context_usage", func(payload json.RawMessage) {
 		var p struct {
 			Usage struct {
 				InputTokens   int64   `json:"input_tokens"`
 				OutputTokens  int64   `json:"output_tokens"`
 				ContextWindow int64   `json:"context_window"`
+				ThresholdPct  float64 `json:"threshold_pct,omitempty"`
 				Percent       float64 `json:"percent"`
 			} `json:"usage"`
 			Compacted bool `json:"compacted"`
 		}
 		if err := json.Unmarshal(payload, &p); err == nil {
-			fn(p.Usage.InputTokens, p.Usage.OutputTokens, p.Usage.ContextWindow, p.Usage.Percent, p.Compacted)
+			fn(p.Usage.InputTokens, p.Usage.OutputTokens, p.Usage.ContextWindow, p.Usage.Percent, p.Compacted, p.ThresholdPct)
 		}
 	})
 }
