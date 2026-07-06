@@ -617,3 +617,5 @@ a separate `m.history` copy.
 **Consequence:** Sessions with the LSP extension loaded include stronger system guidance for the primary LSP tools without adding per-tool descriptions for every registered tool. Covered by `TestBuildDefaultActionPrompt_IncludesLSPGuidance` and `TestBuildDefaultActionPrompt_OmitsLSPGuidanceWithoutDiagnosticsTool`.
 
 *Addendum (2026-07-05):* The Code Intelligence section now says LSP tools are the primary workflow for coding tasks and explicitly places broad shell search, large file sweeps, and raw test commands behind LSP diagnostics/navigation when the question is code-structure related. This addresses sessions where agents saw the LSP tools but kept choosing `exec`, `grep`, and `read_file` first.
+
+*Addendum (2026-07-06):* The guidance now tells agents to call `lsp_capabilities` at the start of repo/code work unless the session has already established available LSP backends and output contracts. This makes code-intelligence discovery an explicit first step instead of relying on the model to infer it from tool names alone.

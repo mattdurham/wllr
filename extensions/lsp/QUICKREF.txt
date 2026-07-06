@@ -2,6 +2,10 @@ LSP EXTENSION QUICK REFERENCE
 
 Primary agent workflows:
   diagnostics, linting, code navigation, references, refactor preview
+  Use lsp_capabilities near the start of repo/code work unless this session
+  already knows available backends and output contracts.
+  Use LSP navigation/reference tools before broad grep/rg/find or large
+  read_file sweeps when the task is about code structure.
 
 Tools and input:
   lsp_capabilities
@@ -41,3 +45,5 @@ Notes:
   lsp_refactor_preview never edits files.
   Apply edits with normal file-editing tools after reviewing matches.
   Use lsp_capabilities to inspect supported languages and backend commands.
+  Use lsp_diagnostics or lsp_lint after source edits before raw shell tests when
+  a backend is available.

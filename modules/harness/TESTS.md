@@ -68,7 +68,7 @@ log, and reset behavior are covered by `wasmchat_test.go`, `tui_test.go`, and
 
 | Test | Scenario | Setup | Assertions |
 |---|---|---|---|
-| `TestBuildDefaultActionPrompt_IncludesLSPGuidance` | LSP code-intelligence tools are available | tools include `lsp_diagnostics`, `lsp_lint`, navigation/reference tools, refactor preview, and `lsp_capabilities` | prompt makes LSP primary for code intelligence, tells agents to use LSP before broad shell search/large reads, and describes shell/manual search as fallback |
+| `TestBuildDefaultActionPrompt_IncludesLSPGuidance` | LSP code-intelligence tools are available | tools include `lsp_diagnostics`, `lsp_lint`, navigation/reference tools, refactor preview, and `lsp_capabilities` | prompt makes LSP primary for code intelligence, tells agents to call `lsp_capabilities` at the start of repo/code work, tells agents to use LSP before broad shell search/large reads, and describes shell/manual search as fallback |
 | `TestBuildDefaultActionPrompt_OmitsLSPGuidanceWithoutDiagnosticsTool` | LSP diagnostics tool is unavailable | tools include only non-LSP tools | prompt does not include Code Intelligence guidance |
 
 ---

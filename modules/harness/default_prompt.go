@@ -52,6 +52,9 @@ func buildDefaultActionPrompt(tools []sdk.Tool, commands []Command) string {
 				"- For coding work, LSP tools are the primary tools for diagnostics, linting, code navigation, finding references, and refactor reconnaissance.\n",
 			)
 			sb.WriteString(
+				"- At the start of repo/code work, call `lsp_capabilities` unless you already know the available LSP backends and output contracts from this session.\n",
+			)
+			sb.WriteString(
 				"- Before broad `grep`, `rg`, `find`, or large `read_file` sweeps, use `lsp_symbols`, `lsp_definition`, or `lsp_references` when the question is about code structure, definitions, call sites, or usages.\n",
 			)
 			sb.WriteString(
