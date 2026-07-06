@@ -20,6 +20,7 @@ const (
 
 // Message is a chat message.
 type Message struct {
+	ID      string      `json:"id,omitempty"`
 	Role    Role        `json:"role"`
 	Content string      `json:"content"`
 	Type    MessageType `json:"type,omitempty"`
