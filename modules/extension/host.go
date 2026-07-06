@@ -518,6 +518,15 @@ func (h *Host) buildDispatch() map[string]func(ctx context.Context, ext *Extensi
 		sdk.MethodUIUpdateArea: func(_ context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleUIUpdateArea(ext, req)
 		},
+		sdk.MethodMailboxSnapshot: func(_ context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleMailboxSnapshot(ext, req)
+		},
+		sdk.MethodMailboxDelete: func(_ context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleMailboxDelete(ext, req)
+		},
+		sdk.MethodMailboxEdit: func(_ context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleMailboxEdit(ext, req)
+		},
 	}
 }
 
@@ -1103,6 +1112,74 @@ func (h *Host) handleAgentTokenCount() sdk.HostCallResponse {
 	count := h.AgentBridge().TokenCount()
 	result, _ := json.Marshal(map[string]int64{"count": count})
 	return sdk.HostCallResponse{Result: result}
+}
+
+
+func (h *Host) handleMailboxSnapshot(ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+	if h.AgentBridge() == nil {
+		return sdk.HostCallResponse{Error: "mailbox_snapshot: not supported by host"}
+	}
+	var params struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return sdk.HostCallResponse{Error: fmt.Sprintf("mailbox_snapshot: %v", err)}
+	}
+	messages, err := h.AgentBridge().SnapshotInbox(params.ID)
+	if err != nil {
+		return sdk.HostCallResponse{Error: err.Error()}
+	}
+	result, _ := json.Marshal(map[string][]sdk.Message{"messages": messages})
+	return sdk.HostCallResponse{Result: result}
+}
+
+func (h *Host) handleMailboxDelete(ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+	if h.AgentBridge() == nil {
+		return sdk.HostCallResponse{Error: "mailbox_delete: not supported by host"}
+	}
+	var params struct {
+		ID          string `json:"id"`
+		ByIndex     *int   `json:"by_index"`
+		ByMessageID string `json:"by_message_id"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return sdk.HostCallResponse{Error: fmt.Sprintf("mailbox_delete: %v", err)}
+	}
+	if params.ByIndex == nil && params.ByMessageID == "" {
+		return sdk.HostCallResponse{Error: "mailbox_delete: at least one of by_index or by_message_id must be provided"}
+	}
+	deleted, err := h.AgentBridge().DeleteFromInbox(params.ID, *params.ByIndex, params.ByMessageID)
+	if err != nil {
+		return sdk.HostCallResponse{Error: err.Error()}
+	}
+	result, _ := json.Marshal(map[string]int{"deleted": deleted})
+	return sdk.HostCallResponse{Result: result}
+}
+
+func (h *Host) handleMailboxEdit(ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+	if h.AgentBridge() == nil {
+		return sdk.HostCallResponse{Error: "mailbox_edit: not supported by host"}
+	}
+	var params struct {
+		ID          string `json:"id"`
+		ByIndex     *int   `json:"by_index"`
+		ByMessageID string `json:"by_message_id"`
+		NewContent  string `json:"new_content"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return sdk.HostCallResponse{Error: fmt.Sprintf("mailbox_edit: %v", err)}
+	}
+	if params.ByIndex == nil && params.ByMessageID == "" {
+		return sdk.HostCallResponse{Error: "mailbox_edit: at least one of by_index or by_message_id must be provided"}
+	}
+	if params.NewContent == "" {
+		return sdk.HostCallResponse{Error: "mailbox_edit: new_content must be non-empty (Anthropic invariant)"}
+	}
+	err := h.AgentBridge().EditInboxMessage(params.ID, *params.ByIndex, params.ByMessageID, params.NewContent)
+	if err != nil {
+		return sdk.HostCallResponse{Error: err.Error()}
+	}
+	return sdk.HostCallResponse{}
 }
 
 func (h *Host) handleTeamCreate(req sdk.HostCallRequest) sdk.HostCallResponse {

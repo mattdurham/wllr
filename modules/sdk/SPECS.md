@@ -363,6 +363,9 @@ Note: Percent is 0–100. CompactConfig.ThresholdPct is a fraction 0.0–1.0.
 | `MethodAgentRun`          | `"agent_run"`           | Trigger an immediate agent turn               |
 | `MethodAgentList`         | `"agent_list"`          | Return live agent identity, queue, and liveness state |
 | `MethodAgentTokenCount`   | `"agent_token_count"`   | Return total token count across all agents    |
+| `MethodMailboxSnapshot`   | `"mailbox_snapshot"`    | Get read-only copy of agent inbox messages    |
+| `MethodMailboxDelete`     | `"mailbox_delete"`      | Remove one or more messages from inbox        |
+| `MethodMailboxEdit`       | `"mailbox_edit"`        | Update message content in inbox               |
 | `MethodAgentResetHistory` | `"agent_reset_history"` | Replace agent's conversation history          |
 
 ### Team management methods
