@@ -193,6 +193,11 @@ const (
 	MethodAgentRun        = "agent_run"
 	MethodAgentList       = "agent_list"
 	MethodAgentTokenCount = "agent_token_count"
+	// Mailbox management host_call methods.
+	MethodMailboxSnapshot  = "mailbox_snapshot"
+	MethodMailboxDelete    = "mailbox_delete"
+	MethodMailboxEdit      = "mailbox_edit"
+
 	// Team management host_call methods.
 	MethodTeamCreate       = "team_create"
 	MethodTeamClose        = "team_close"
