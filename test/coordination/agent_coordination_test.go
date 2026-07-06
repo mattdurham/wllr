@@ -399,6 +399,18 @@ func (b *poolAgentBridge) TokenCount() int64                          { return b
 func (b *poolAgentBridge) SetHistory(_ string, _ []sdk.Message) error { return nil }
 func (b *poolAgentBridge) MainAgentContextUsage() sdk.ContextUsage    { return sdk.ContextUsage{} }
 
+func (b *poolAgentBridge) SnapshotInbox(id string) ([]sdk.Message, error) {
+	return b.pool.SnapshotInbox(id)
+}
+
+func (b *poolAgentBridge) DeleteFromInbox(id string, byIndex int, byMessageID string) (int, error) {
+	return b.pool.DeleteFromInbox(id, byIndex, byMessageID)
+}
+
+func (b *poolAgentBridge) EditInboxMessage(id string, byIndex int, byMessageID string, newContent string) error {
+	return b.pool.EditInboxMessage(id, byIndex, byMessageID, newContent)
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 // TestAgentCoordination_WorkerCompletesTasksAndSignalsIdle verifies the

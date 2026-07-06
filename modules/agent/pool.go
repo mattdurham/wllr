@@ -246,6 +246,42 @@ func (p *AgentPool) MainAgentContextUsage() sdk.ContextUsage {
 	return sdk.ContextUsageFromFantasy(a.LastUsage(), window)
 }
 
+// SnapshotInbox returns a copy of an agent's inbox without draining.
+func (p *AgentPool) SnapshotInbox(id string) ([]sdk.Message, error) {
+	a := p.Get(id)
+	if a == nil {
+		return nil, ErrAgentNotFound
+	}
+	if a.IsRunning() {
+		return nil, errors.New("cannot read inbox while agent is running")
+	}
+	return a.SnapshotInbox(), nil
+}
+
+// DeleteFromInbox removes message(s) from an agent's inbox.
+func (p *AgentPool) DeleteFromInbox(id string, byIndex int, byMessageID string) (int, error) {
+	a := p.Get(id)
+	if a == nil {
+		return 0, ErrAgentNotFound
+	}
+	if a.IsRunning() {
+		return 0, errors.New("cannot modify inbox while agent is running")
+	}
+	return a.DeleteFromInbox(byIndex, byMessageID)
+}
+
+// EditInboxMessage updates a message's content.
+func (p *AgentPool) EditInboxMessage(id string, byIndex int, byMessageID string, newContent string) error {
+	a := p.Get(id)
+	if a == nil {
+		return ErrAgentNotFound
+	}
+	if a.IsRunning() {
+		return errors.New("cannot modify inbox while agent is running")
+	}
+	return a.EditInboxMessage(byIndex, byMessageID, newContent)
+}
+
 // SetBaseSystemPrompt replaces the base system prompt and applies it to all
 // current and future agents. Used by the context extension (AGENTS.md).
 func (p *AgentPool) SetBaseSystemPrompt(prompt string) {

@@ -95,18 +95,6 @@ func (e *earlyAgentBridge) SetHistory(_ string, _ []sdk.Message) error {
 	return fmt.Errorf("not started")
 }
 
-func (e *earlyAgentBridge) SnapshotInbox(_ string) ([]sdk.Message, error) {
-	return nil, fmt.Errorf("not started")
-}
-
-func (e *earlyAgentBridge) DeleteFromInbox(_ string, _ int, _ string) (int, error) {
-	return 0, fmt.Errorf("not started")
-}
-
-func (e *earlyAgentBridge) EditInboxMessage(_ string, _ int, _ string, _ string) error {
-	return fmt.Errorf("not started")
-}
-
 // Verify earlyAgentBridge satisfies the interface at compile time.
 var _ extension.AgentBridge = (*earlyAgentBridge)(nil)
 
@@ -237,27 +225,6 @@ func (b *harnessAgentBridge) MainAgentContextUsage() sdk.ContextUsage {
 		return sdk.ContextUsage{}
 	}
 	return b.pool.MainAgentContextUsage()
-}
-
-func (b *harnessAgentBridge) SnapshotInbox(id string) ([]sdk.Message, error) {
-	if b.pool == nil {
-		return nil, fmt.Errorf("no agent pool")
-	}
-	return b.pool.SnapshotInbox(id)
-}
-
-func (b *harnessAgentBridge) DeleteFromInbox(id string, byIndex int, byMessageID string) (int, error) {
-	if b.pool == nil {
-		return 0, fmt.Errorf("no agent pool")
-	}
-	return b.pool.DeleteFromInbox(id, byIndex, byMessageID)
-}
-
-func (b *harnessAgentBridge) EditInboxMessage(id string, byIndex int, byMessageID string, newContent string) error {
-	if b.pool == nil {
-		return fmt.Errorf("no agent pool")
-	}
-	return b.pool.EditInboxMessage(id, byIndex, byMessageID, newContent)
 }
 
 // harnessTeamBridge implements extension.TeamBridge by delegating to the agent pool.
