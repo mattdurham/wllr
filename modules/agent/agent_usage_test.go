@@ -317,13 +317,13 @@ func TestEventContextUsageDispatched(t *testing.T) {
 	}
 
 	type dispatchEvent struct {
-		cu        sdk.ContextUsage
-		compacted bool
+		cu      sdk.ContextUsage
+		compact bool
 	}
 	dispatched := make(chan dispatchEvent, 1)
-	pool.SetContextUsageDispatcher(func(cu sdk.ContextUsage, compacted bool) {
+	pool.SetContextUsageDispatcher(func(cu sdk.ContextUsage, compact bool, thresholdPct float64) {
 		select {
-		case dispatched <- dispatchEvent{cu, compacted}:
+		case dispatched <- dispatchEvent{cu, compact}:
 		default:
 		}
 	})
@@ -349,7 +349,7 @@ func TestEventContextUsageDispatched(t *testing.T) {
 		if ev.cu.ContextWindow <= 0 {
 			t.Errorf("dispatched ContextWindow = %d, want > 0", ev.cu.ContextWindow)
 		}
-		if ev.compacted {
+		if ev.compact {
 			t.Error("expected Compacted=false for this turn (no compaction threshold crossed)")
 		}
 	case <-time.After(2 * time.Second):

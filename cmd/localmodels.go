@@ -14,15 +14,25 @@ func resolveLocalProviderConfig(ctx context.Context, cfg *Config) {
 	if cfg == nil || cfg.Provider != providerLocal {
 		return
 	}
-	if cfg.ContextWindow == 0 && cfg.LocalContextWindow > 0 {
-		cfg.ContextWindow = cfg.LocalContextWindow
-	}
-	models, err := fetchLocalModels(ctx, cfg)
-	if err != nil {
-		return
-	}
-	if len(models) > 0 && !modelListContains(models, cfg.Model) {
-		cfg.Model = models[0].ID
+	// If no context window is set, try to fetch from local models endpoint.
+	if cfg.ContextWindow == 0 {
+		models, err := fetchLocalModels(ctx, cfg)
+		if err == nil && len(models) > 0 {
+			if !modelListContains(models, cfg.Model) {
+				cfg.Model = models[0].ID
+			}
+			// Copy the selected model's context window from the discovered list into cfg.ContextWindow.
+			for _, m := range models {
+				if m.ID == cfg.Model {
+					cfg.ContextWindow = m.ContextWindow
+					break
+				}
+			}
+		}
+		// If fetch failed, fall back to LocalContextWindow if set.
+		if cfg.ContextWindow == 0 && cfg.LocalContextWindow > 0 {
+			cfg.ContextWindow = cfg.LocalContextWindow
+		}
 	}
 }
 

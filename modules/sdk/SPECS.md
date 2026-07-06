@@ -178,8 +178,9 @@ No payload fields — the event carries no structured data beyond the event type
 |-------------|--------------|---------------------------------------------------------------------------------|
 | `usage`     | ContextUsage | Context window usage for the turn (see ContextUsage type in Supporting Types)  |
 | `compacted` | bool         | `true` when `compactHistory` ran and succeeded during the turn                  |
+| `threshold_pct` | float64     | Compaction trigger threshold as a percentage (0–100, e.g. 80 means 80%)       |
 
-**Note for extension authors:** `ContextUsage.Percent` is expressed as a percentage (0–100, e.g. 75.4 means 75.4% full). This is distinct from the pool's internal `ThresholdPct`, which is a fraction (0.0–1.0). Do not compare `Percent` directly to `ThresholdPct`; convert as needed.
+**Note for extension authors:** `ContextUsage.Percent` is expressed as a percentage (0–100, e.g. 75.4 means 75.4% full). `threshold_pct` is the compaction trigger threshold as a percentage (0–100). To compute remaining-to-threshold, use `threshold_pct - percent`. Do not hard-code the threshold value.
 
 ### ModelChangedPayload (`EventModelChanged`)
 
