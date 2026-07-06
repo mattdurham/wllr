@@ -86,10 +86,10 @@ func init() {
 	})
 
 	// EventContextUsage fires after each completed turn.
-	OnContextUsage(func(_, _ int64, ctxWindow int64, percent float64, _ bool) {
+	OnContextUsage(func(_, _ int64, ctxWindow int64, percent float64, _ bool, thresholdPct float64) {
 		desired := ""
 		if ctxWindow > 0 {
-			remaining := 80.0 - percent
+			remaining := thresholdPct*100 - percent
 			desired = fmt.Sprintf("  ctx:%.0f%%", remaining)
 		}
 		if desired == lastCtx {
@@ -99,7 +99,6 @@ func init() {
 		patchAll()
 	})
 
-	// EventTick (1s) keeps the working timer moving while the provider is silent.
 	OnTick(func() {
 		info, _ := GetStatusInfo()
 		if !syncDynamicStatus(info) {
