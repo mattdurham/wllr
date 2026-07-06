@@ -261,8 +261,10 @@ Append-only design decision log. Never delete entries; add an `*Addendum (date):
 
 *Added: 2026-07-04*
 
-**Decision:** The `agent_list` host_call result includes live state fields for each agent: `is_running`, `pending_messages`, `last_activity_age_ms`, `turn_duration_ms`, `last_tool_age_ms`, `active_tool`, `last_tool`, and `shutdown_requested`, in addition to identity fields.
+**Decision:** The `agent_list` host_call result includes live state fields for each agent: `is_running`, `working`, `liveness`, `pending_messages`, `last_activity_age_ms`, `turn_duration_ms`, `last_tool_age_ms`, `last_tool_done_age_ms`, `active_tool`, `last_tool`, and `shutdown_requested`, in addition to identity fields.
 
 **Rationale:** Orchestrating agents need a reliable no-side-effect snapshot to distinguish active work from a stalled or idle child. Repeated status pings inside the same turn do not create progress; exposing liveness in the list result lets UI and agent tools present one actionable snapshot instead.
+
+*Addendum (2026-07-05):* Runtime liveness consumers should prefer explicit `working`/`liveness` fields when available. A running child is working unless a concrete dead state is reported; orchestrators should wait for child notifications rather than using repeated polling as a waiting mechanism.
 
 **Consequence:** The result shape is additive and backward-compatible for extensions that only read `id` and `name`. Extensions can now surface current activity and graceful-shutdown state without adding a new host_call method.

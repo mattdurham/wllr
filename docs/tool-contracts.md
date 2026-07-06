@@ -88,9 +88,12 @@ Input:
 Output:
 
 - JSON object with `agent_id`, `is_running`, `pending_messages`,
-  `last_activity_age_ms`, `turn_duration_ms`, `last_tool_age_ms`,
-  `active_tool`, `last_tool`, `shutdown_requested`, `turn_count`,
-  `last_summary`, and `recent`.
+  `working`, `liveness`, `last_activity_age_ms`, `turn_duration_ms`,
+  `last_tool_age_ms`, `last_tool_done_age_ms`, `active_tool`, `last_tool`,
+  `shutdown_requested`, `turn_count`, `last_summary`, and `recent`.
+- `working=true` means the child is executing its current turn unless
+  `liveness` is `dead`; orchestrators should wait for a child notification
+  rather than polling or sending progress probes.
 - Age and duration fields are milliseconds. A zero age means the event has not
   happened yet or no timestamp is available.
 - `recent` is an array of `{ "role": string, "preview": string }`.
@@ -121,10 +124,10 @@ delivery failure.
 Input: no fields.
 
 Output: JSON object from the host agent pool, usually `{ "agents": [...] }`.
-Each agent entry includes `id`, `name`, `is_running`, `pending_messages`,
-`last_activity_age_ms`, `turn_duration_ms`, `last_tool_age_ms`, `active_tool`,
-`last_tool`, and `shutdown_requested`. If the host returns no data, returns
-`{ "agents": [] }`.
+Each agent entry includes `id`, `name`, `is_running`, `working`, `liveness`,
+`pending_messages`, `last_activity_age_ms`, `turn_duration_ms`,
+`last_tool_age_ms`, `last_tool_done_age_ms`, `active_tool`, `last_tool`, and
+`shutdown_requested`. If the host returns no data, returns `{ "agents": [] }`.
 
 ### `create_team`
 

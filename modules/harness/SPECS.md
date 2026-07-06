@@ -61,7 +61,7 @@ Must be called after creating the bubbletea program and before calling `prog.Run
 | `harnessTeamBridge`    | `h.SetTeamBridge`        | (none; first install)   |
 | `harnessUIBridge`      | `h.SetUIBridge`          | `earlyUIBridge` stub    |
 
-`harnessAgentBridge` wraps an `agent.Spawner` (which owns sub-agent lifecycle) and the pool (for close/send/list). Its list operation returns each agent's ID, display name, running state, pending inbox message count, and intra-turn liveness fields (recent activity age, turn duration, active/last tool, shutdown-request state). `harnessTeamBridge` delegates directly to the pool. `harnessUIBridge` sends bubbletea messages to `p` for all UI operations.
+`harnessAgentBridge` wraps an `agent.Spawner` (which owns sub-agent lifecycle) and the pool (for close/send/list). Its list operation returns each agent's ID, display name, running state, `working`/`liveness` state, pending inbox message count, and intra-turn liveness fields (recent activity age, turn duration, active/last tool, last tool completion, shutdown-request state). `harnessTeamBridge` delegates directly to the pool. `harnessUIBridge` sends bubbletea messages to `p` for all UI operations.
 
 `CapabilityProvider` and `MCPBridge` are NOT installed by SetProgram — `CapabilityProvider` is installed by `cmd/main.go` via `h.SetCapabilities`, and `MCPBridge` is not currently used.
 
@@ -396,7 +396,7 @@ Available tools: exec, lsp_diagnostics, lsp_lint, read_file, ...
 
 **Invariant:** Tool names are sorted alphabetically before rendering. Tool descriptions are not duplicated in the prompt because schemas/descriptions are already sent through the provider tool API. Commands appear in the order returned by `Registry.List()` (sorted by name). Empty descriptions are replaced with `"(no description)"`.
 
-**Invariant:** If any primary LSP tool is registered (`lsp_diagnostics`, `lsp_lint`, `lsp_definition`, or `lsp_references`), the prompt includes a `Code Intelligence` section that tells agents to prefer LSP tools for diagnostics, linting, code navigation, finding references, and refactor reconnaissance. The guidance names `lsp_symbols`, `lsp_definition`, `lsp_references`, `lsp_refactor_preview`, `lsp_diagnostics`, `lsp_lint`, and `lsp_capabilities`, and instructs agents to apply refactor edits with normal file-editing tools after reviewing preview output.
+**Invariant:** If any primary LSP tool is registered (`lsp_diagnostics`, `lsp_lint`, `lsp_definition`, or `lsp_references`), the prompt includes a `Code Intelligence` section that makes LSP tools the primary path for diagnostics, linting, code navigation, finding references, and refactor reconnaissance. The guidance names `lsp_symbols`, `lsp_definition`, `lsp_references`, `lsp_refactor_preview`, `lsp_diagnostics`, `lsp_lint`, and `lsp_capabilities`; tells agents to use symbol/definition/reference tools before broad shell search or large file sweeps; instructs agents to apply refactor edits with normal file-editing tools after reviewing preview output; and treats `exec`/manual search as fallback when LSP output is unavailable, incomplete, or unrelated to the task.
 
 **Invariant:** If `tools` is empty, the available-tool list is omitted. If `commands` is empty, the Slash commands section is omitted.
 

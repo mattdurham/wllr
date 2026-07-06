@@ -38,6 +38,14 @@ idle ──(Submit called)──▶ running ──(turn complete)──▶ idle
 
 **Invariant:** Only one goroutine runs per agent turn. `Submit` replaces the stored cancel function atomically before launching the goroutine. Concurrent `Submit` calls are safe: if a turn is already running, the new content is queued to the inbox and the running goroutine drains it on completion (drain-until-empty pattern). See NOTES.md §17.
 
+`Agent.Activity()` is a read-only liveness snapshot. During a running turn,
+activity is considered proof of work rather than proof of completion: callers
+must treat the agent as working until the turn ends, cancellation is observed,
+or a future dead-agent detector reports a dead state. Tool starts set
+`ActiveToolName`/`ActiveToolCallID`; matching tool completions clear those
+active fields and update `LastToolDoneAt`, while preserving `LastToolName` as
+the most recent tool identity.
+
 ---
 
 ## 3. Message Queue (Inbox) Ordering

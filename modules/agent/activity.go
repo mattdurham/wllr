@@ -10,6 +10,7 @@ type ActivitySnapshot struct {
 	TurnStartedAt     time.Time
 	LastActivityAt    time.Time
 	LastToolCallAt    time.Time
+	LastToolDoneAt    time.Time
 	ActiveToolCallID  string
 	ActiveToolName    string
 	LastToolName      string
