@@ -254,11 +254,13 @@ context window has been configured — it must never panic or block.
 
 `AgentBridge.List()` returns `AgentInfo` snapshots for `agent_list`. Each entry includes
 `id`, `name`, `is_running`, `pending_messages`, and best-effort liveness metadata:
-`last_activity_age_ms`, `turn_duration_ms`, `last_tool_age_ms`, `active_tool`,
-`last_tool`, and `shutdown_requested`. `is_running` reports whether the agent is currently
-mid-turn; `pending_messages` reports queued inbox messages that will be processed by the
-next turn; the age/tool fields distinguish an active long turn from a genuinely quiet one.
-These fields are read-only liveness/status signals and must not enqueue work.
+`working`, `liveness`, `last_activity_age_ms`, `turn_duration_ms`, `last_tool_age_ms`,
+`last_tool_done_age_ms`, `active_tool`, `last_tool`, and `shutdown_requested`.
+`is_running` reports whether the agent is currently mid-turn; `working=true` is the
+authoritative "the agent is doing its current turn" signal unless `liveness` is `dead`.
+`pending_messages` reports queued inbox messages that will be processed by the next turn;
+the age/tool fields distinguish an active long turn from a genuinely quiet one. These
+fields are read-only liveness/status signals and must not enqueue work.
 
 ---
 

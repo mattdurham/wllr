@@ -49,19 +49,22 @@ func buildDefaultActionPrompt(tools []sdk.Tool, commands []Command) string {
 			toolNames["lsp_references"] {
 			sb.WriteString("\n### Code Intelligence\n\n")
 			sb.WriteString(
-				"- Prefer LSP tools for diagnostics, linting, code navigation, finding references, and refactor reconnaissance before broad manual searching.\n",
+				"- For coding work, LSP tools are the primary tools for diagnostics, linting, code navigation, finding references, and refactor reconnaissance.\n",
 			)
 			sb.WriteString(
-				"- Use `lsp_diagnostics` or `lsp_lint` after editing supported source files to catch compiler/type/language issues before you finish.\n",
+				"- Before broad `grep`, `rg`, `find`, or large `read_file` sweeps, use `lsp_symbols`, `lsp_definition`, or `lsp_references` when the question is about code structure, definitions, call sites, or usages.\n",
 			)
 			sb.WriteString(
-				"- Use `lsp_symbols`, `lsp_definition`, and `lsp_references` to understand code before changing it.\n",
+				"- Before renames or shared API refactors, use `lsp_refactor_preview`; apply reviewed edits with normal file-editing tools afterward.\n",
 			)
 			sb.WriteString(
-				"- Use `lsp_refactor_preview` before renames or refactors, then apply reviewed edits with normal file-editing tools.\n",
+				"- After editing supported source files, use `lsp_diagnostics` or `lsp_lint` before raw `go test`, `npm test`, or other shell validation unless the user explicitly asked for the shell command.\n",
 			)
 			sb.WriteString(
 				"- Use `lsp_capabilities` when you need to know which languages, tools, and output contracts are available.\n",
+			)
+			sb.WriteString(
+				"- Use `exec`/manual search as a fallback when LSP output is unavailable, incomplete, or the task is not code-intelligence related.\n",
 			)
 		}
 	}

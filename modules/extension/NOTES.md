@@ -357,8 +357,10 @@ implementations.
 
 *Added: 2026-07-04*
 
-**Decision:** Extend `AgentInfo` with additive JSON fields for liveness: `last_activity_age_ms`, `turn_duration_ms`, `last_tool_age_ms`, `active_tool`, `last_tool`, and `shutdown_requested`.
+**Decision:** Extend `AgentInfo` with additive JSON fields for liveness: `working`, `liveness`, `last_activity_age_ms`, `turn_duration_ms`, `last_tool_age_ms`, `last_tool_done_age_ms`, `active_tool`, `last_tool`, and `shutdown_requested`.
 
 **Rationale:** `is_running` alone proved insufficient for orchestration. A long-running agent with frequent tool calls could look stalled if its completed-turn count and recent history did not change. Exposing age/tool metadata lets orchestrators treat recent intra-turn activity as progress without adding a separate polling or ping mechanism.
 
-**Consequence:** `agent_list` remains backward compatible for consumers that only read the original fields. New consumers should use `is_running && recent last_activity_age_ms` as the "working" signal and treat `shutdown_requested` as "graceful stop pending," not "agent already stopped."
+**Consequence:** `agent_list` remains backward compatible for consumers that only read the original fields. New consumers should use `working=true` as the "child is working" signal and treat `shutdown_requested` as "graceful stop pending," not "agent already stopped."
+
+*Addendum (2026-07-05):* `AgentInfo` now includes `working`, `liveness`, and `last_tool_done_age_ms`. `working=true` is the preferred orchestration signal for a running child; consumers should wait for an idle/done notification instead of deriving "stuck" from unchanged history or a completed-but-recent tool call.

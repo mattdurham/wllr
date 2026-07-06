@@ -62,6 +62,7 @@ type Agent struct {
 	activeToolCallID string
 	activeToolName   string
 	lastToolName     string
+	lastToolDoneAt   time.Time
 
 	history []sdk.Message
 
@@ -363,6 +364,7 @@ func (a *Agent) Activity() ActivitySnapshot {
 		TurnStartedAt:     a.turnStartedAt,
 		LastActivityAt:    a.lastActivityAt,
 		LastToolCallAt:    a.lastToolCallAt,
+		LastToolDoneAt:    a.lastToolDoneAt,
 		ActiveToolCallID:  a.activeToolCallID,
 		ActiveToolName:    a.activeToolName,
 		LastToolName:      a.lastToolName,
@@ -394,6 +396,22 @@ func (a *Agent) markToolCall(id, name string) {
 	a.activeToolCallID = id
 	a.activeToolName = name
 	a.lastToolName = name
+	a.activityMu.Unlock()
+}
+
+// MarkToolCallDone records tool completion liveness for status surfaces.
+func (a *Agent) MarkToolCallDone(id, name string) {
+	now := time.Now()
+	a.activityMu.Lock()
+	a.lastActivityAt = now
+	a.lastToolDoneAt = now
+	if name != "" {
+		a.lastToolName = name
+	}
+	if a.activeToolCallID == id || a.activeToolName == name {
+		a.activeToolCallID = ""
+		a.activeToolName = ""
+	}
 	a.activityMu.Unlock()
 }
 

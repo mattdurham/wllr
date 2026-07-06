@@ -56,6 +56,12 @@ func TestHarnessAgentBridgeListIncludesRuntimeState(t *testing.T) {
 	if !worker.IsRunning {
 		t.Error("IsRunning = false, want true for running agent")
 	}
+	if !worker.Working {
+		t.Error("Working = false, want true for running agent")
+	}
+	if worker.Liveness != "working" {
+		t.Errorf("Liveness = %q, want working", worker.Liveness)
+	}
 	if worker.TurnDurationMS < 0 {
 		t.Errorf("TurnDurationMS = %d, want non-negative", worker.TurnDurationMS)
 	}

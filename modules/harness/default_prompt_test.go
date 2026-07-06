@@ -21,11 +21,12 @@ func TestBuildDefaultActionPrompt_IncludesLSPGuidance(t *testing.T) {
 
 	for _, want := range []string{
 		"### Code Intelligence",
-		"Prefer LSP tools for diagnostics, linting, code navigation",
-		"Use `lsp_diagnostics` or `lsp_lint` after editing supported source files",
-		"Use `lsp_symbols`, `lsp_definition`, and `lsp_references`",
-		"Use `lsp_refactor_preview` before renames or refactors",
+		"LSP tools are the primary tools for diagnostics, linting, code navigation",
+		"Before broad `grep`, `rg`, `find`, or large `read_file` sweeps",
+		"use `lsp_refactor_preview`",
+		"use `lsp_diagnostics` or `lsp_lint` before raw `go test`",
 		"output contracts are available",
+		"Use `exec`/manual search as a fallback",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q:\n%s", want, prompt)

@@ -600,7 +600,9 @@ a separate `m.history` copy.
 
 **Rationale:** The harness bridge is the boundary between the runtime agent pool and extension-visible agent tools. Keeping age calculations here avoids leaking wall-clock formatting into the agent package while ensuring `list_agents` reports fresh state every time it is called.
 
-**Consequence:** `/agents` and the agents extension receive recent-activity age, turn duration, active/last tool, and graceful shutdown-request state. The data is read-only and does not wake, cancel, or message agents.
+**Consequence:** `/agents` and the agents extension receive working/liveness state, recent-activity age, turn duration, active/last tool, last tool completion age, and graceful shutdown-request state. The data is read-only and does not wake, cancel, or message agents.
+
+*Addendum (2026-07-05):* The bridge now also sets `working`, `liveness`, and `last_tool_done_age_ms`. `AfterToolCall` records completion back onto the owning agent's activity snapshot before notifying the UI, so completed tools no longer remain visible as active liveness state.
 
 ---
 
@@ -613,3 +615,5 @@ a separate `m.history` copy.
 **Rationale:** The model already receives tool schemas, but the default prompt only named available tools. Agents were not reliably choosing code-intelligence tools because nothing explained where they fit into an agentic coding workflow. The new guidance makes diagnostics, linting, navigation, references, and refactor previews first-class tool uses, and points capability checks at backend and output-contract discovery.
 
 **Consequence:** Sessions with the LSP extension loaded include stronger system guidance for the primary LSP tools without adding per-tool descriptions for every registered tool. Covered by `TestBuildDefaultActionPrompt_IncludesLSPGuidance` and `TestBuildDefaultActionPrompt_OmitsLSPGuidanceWithoutDiagnosticsTool`.
+
+*Addendum (2026-07-05):* The Code Intelligence section now says LSP tools are the primary workflow for coding tasks and explicitly places broad shell search, large file sweeps, and raw test commands behind LSP diagnostics/navigation when the question is code-structure related. This addresses sessions where agents saw the LSP tools but kept choosing `exec`, `grep`, and `read_file` first.

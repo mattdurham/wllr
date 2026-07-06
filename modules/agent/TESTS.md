@@ -87,6 +87,7 @@
 | Test | Scenario | Setup | Assertions |
 |------|----------|-------|------------|
 | `TestAgentActivity_TracksRunningTurnAndToolCall` | Activity snapshot records intra-turn work | Fake LM emits text and a tool call | turn/activity/tool timestamps are set; last tool name recorded; active tool clears after turn |
+| `TestAgentActivity_ToolCompletionClearsActiveTool` | Tool completion updates liveness | Internal agent activity state with active tool | completion clears active tool/call and records last-tool-done timestamp |
 | `TestAgentActivity_ShutdownRequestedWhileRunning` | Graceful shutdown request is visible before stop | Gated running agent receives shutdown_request | `Activity().ShutdownRequested` is true while request is queued |
 
 ## Missing / Recommended Tests
