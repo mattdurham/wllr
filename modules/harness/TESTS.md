@@ -68,7 +68,7 @@ log, and reset behavior are covered by `wasmchat_test.go`, `tui_test.go`, and
 
 | Test | Scenario | Setup | Assertions |
 |---|---|---|---|
-| `TestBuildDefaultActionPrompt_IncludesLSPGuidance` | LSP code-intelligence tools are available | tools include `lsp_diagnostics`, `lsp_lint`, navigation/reference tools, refactor preview, and `lsp_capabilities` | prompt includes Code Intelligence guidance for diagnostics, linting, navigation, references, refactor previews, and capability/output-contract discovery |
+| `TestBuildDefaultActionPrompt_IncludesLSPGuidance` | LSP code-intelligence tools are available | tools include `lsp_diagnostics`, `lsp_lint`, navigation/reference tools, refactor preview, and `lsp_capabilities` | prompt makes LSP primary for code intelligence, tells agents to use LSP before broad shell search/large reads, and describes shell/manual search as fallback |
 | `TestBuildDefaultActionPrompt_OmitsLSPGuidanceWithoutDiagnosticsTool` | LSP diagnostics tool is unavailable | tools include only non-LSP tools | prompt does not include Code Intelligence guidance |
 
 ---
@@ -175,7 +175,7 @@ The following scenarios are not currently covered and should be added:
 | `TestModel_ToolActivityPane_AlwaysRendersAndShowsRecentTools` | Tool pane is permanent and displays recent tool state | no tools, then running and completed tool | view always contains tools pane; row changes from running to done |
 | `TestModel_ToolActivityPane_RemainsOnStreamDone` | Stream completion does not remove the tool pane | streaming model; pending tool; `StreamDoneMsg` | pane height remains `toolActivityPaneLines` and view contains tools pane |
 | `TestModel_View_WithStatusLineFitsHeight` | Statusline plus input stays within terminal height | one-line status scene; small terminal height | rendered view line count equals terminal height; input bottom border present above final gutter row |
-| `TestHarnessAgentBridgeListIncludesRuntimeState` | Agent bridge exposes runtime liveness in list results | running blocking agent | `AgentInfo` includes running state and non-negative liveness age/duration fields |
+| `TestHarnessAgentBridgeListIncludesRuntimeState` | Agent bridge exposes runtime liveness in list results | running blocking agent | `AgentInfo` includes running/working state, `liveness=working`, and non-negative liveness age/duration fields |
 
 ### SceneRenderer constraint tests (scene_test.go)
 

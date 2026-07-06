@@ -55,6 +55,14 @@ func agentCall(method string, params any) string {
 
 var agentRecords []agentRecord // ordered by creation
 
+const subAgentCodeIntelligenceGuidance = `## Code Intelligence Tool Use
+If this task involves reading, changing, reviewing, or testing source code:
+- Use lsp_capabilities if you are unsure what code-intelligence backends exist.
+- Use lsp_symbols, lsp_definition, and lsp_references before broad grep/rg/find searches or large read_file sweeps for code structure.
+- Use lsp_refactor_preview before renames or shared API refactors.
+- Use lsp_diagnostics or lsp_lint after source edits before raw shell test commands, unless the user explicitly asked for the shell command.
+- Use exec and manual search as fallbacks when LSP output is unavailable, incomplete, or unrelated to the task.`
+
 func truncate(s string, n int) string {
 	r := []rune(s)
 	if len(r) > n {
@@ -132,10 +140,10 @@ func init() {
 	)
 	RegisterToolWithOutput(
 		"list_agents",
-		"List live agents with running state, queued messages, recent activity age, active/last tool, and shutdown request state. Recent activity means the child is working.",
+		"List live agents with running state, working/liveness status, queued messages, recent activity age, active/last tool, and shutdown request state. working=true means the child is working unless liveness=dead.",
 		json.RawMessage(`{"type":"object","properties":{}}`),
 		json.RawMessage(
-			`{"type":"object","properties":{"agents":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"},"is_running":{"type":"boolean"},"pending_messages":{"type":"integer"}}}}}}`,
+			`{"type":"object","properties":{"agents":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"},"is_running":{"type":"boolean"},"working":{"type":"boolean"},"liveness":{"type":"string","enum":["idle","working","stopping","dead"]},"pending_messages":{"type":"integer"},"last_activity_age_ms":{"type":"integer"},"turn_duration_ms":{"type":"integer"},"last_tool_age_ms":{"type":"integer"},"last_tool_done_age_ms":{"type":"integer"},"active_tool":{"type":"string"},"last_tool":{"type":"string"},"shutdown_requested":{"type":"boolean"}}}}}}`,
 		),
 	)
 	RegisterToolWithOutput(
@@ -235,19 +243,21 @@ consuming memory.
 
 **list_agents()**
 Returns all live agents with IDs, names, is_running, pending_messages, and
-liveness fields: last_activity_age_ms, turn_duration_ms, active_tool,
-last_tool, last_tool_age_ms, shutdown_requested.
-Use is_running plus last_activity_age_ms to tell "working" from "possibly stuck";
-do not ping or interrupt a running child that has recent activity.
+liveness fields: working, liveness, last_activity_age_ms, turn_duration_ms,
+active_tool, last_tool, last_tool_age_ms, last_tool_done_age_ms, and
+shutdown_requested.
+Treat working=true as authoritative: the child is doing its current turn unless
+liveness is dead. Do not ping, poll, interrupt, or take over a working child.
 
 **get_agent_status(agent_id, history_limit?)**
 Diagnostic tool — returns live state for one agent: is_running, pending_messages,
-last_activity_age_ms, turn_duration_ms, active_tool, last_tool, and
-shutdown_requested. Use ONCE to diagnose a stuck agent; do not poll.
-- is_running=true and last_activity_age_ms is recent: agent is currently working;
-  do not interrupt, end your turn
-- is_running=true but last_activity_age_ms is old: possibly stuck; inspect once,
-  then nudge or request graceful shutdown
+working, liveness, last_activity_age_ms, turn_duration_ms, active_tool,
+last_tool, last_tool_done_age_ms, and shutdown_requested. Use ONCE to diagnose
+a child only when the user asks you to inspect it; do not poll.
+- working=true: agent is currently working; do not interrupt, do not send another
+  message, and do not take over. End your turn and wait for its notification.
+- liveness=dead: the child is not making progress; inspect once, then nudge or
+  request graceful shutdown
 - is_running=false: agent is idle; review its final message or task output
 - pending_messages>0: messages are queued for the next turn; the child may not
   have read your latest message yet
@@ -286,6 +296,17 @@ Do not suggest fixes — only identify problems. Be terse."
 "You are a helpful assistant."
 
 Include: role, output format, constraints, what NOT to do.
+
+For coding agents, include code-intelligence tool rules directly in the
+system_prompt. Tell the agent:
+- Use lsp_capabilities if it is unsure what code-intelligence backends exist.
+- Use lsp_symbols, lsp_definition, and lsp_references before broad
+  grep/rg/find searches or large read_file sweeps for code structure.
+- Use lsp_refactor_preview before renames or shared API refactors.
+- Use lsp_diagnostics or lsp_lint after source edits before raw shell test
+  commands, unless the user explicitly asked for the shell command.
+- Use exec and manual search as fallbacks when LSP output is unavailable,
+  incomplete, or unrelated to the task.
 
 ---
 
@@ -326,14 +347,23 @@ notifications when agents finish — you do not need to poll or sleep.
   create_agent("coder", "...", "Implement Y.")
   ← end your turn here; you will be woken when agents complete
 
-When woken, check what finished with list_agents() or get_agent_status(),
-process the results, then shutdown_agent for each completed agent.
+When woken by a child notification, check what finished with list_agents() or
+get_agent_status(), process the results, then shutdown_agent for each completed
+agent.
+
+Only send a message to a child when one of these is true:
+- The user explicitly asked you to talk to that child.
+- The child is idle and needs a follow-up turn.
+- The child reports liveness=dead and you are nudging or shutting it down.
+
+Do not send progress probes to working children. A message sent while the child
+is working only queues behind its current turn and does not make it finish sooner.
 
 If an agent seems stuck (you have been woken multiple times but it has not
 finished):
   get_agent_status("main/coder", 20)  ← diagnose ONCE
-  If is_running=true and last_activity_age_ms is recent: still working — end your turn again.
-  If is_running=true but last_activity_age_ms is old: nudge once or request graceful shutdown.
+  If working=true: still working — end your turn again.
+  If liveness=dead: nudge once or request graceful shutdown.
   If is_running=false with no useful output: nudge it.
     → send_message("main/coder", "Please report your current status.")
 
@@ -360,7 +390,7 @@ RIGHT — spawn agents and end your turn; the host notifies you when done:
 RIGHT — if agent seems genuinely stuck:
   get_agent_status("main/coder-1", 20)  ← check ONCE
   (read liveness fields to understand the situation)
-  send_message("main/coder-1", "Please report your status.")  ← nudge it
+  if liveness=dead: send_message("main/coder-1", "Please report your status.")  ← nudge it
 
 ---
 
@@ -409,8 +439,11 @@ func onAgentsCommand(_ []string) {
 			PendingMessages   int    `json:"pending_messages"`
 			LastActivityAgeMS int64  `json:"last_activity_age_ms"`
 			TurnDurationMS    int64  `json:"turn_duration_ms"`
+			LastToolDoneAgeMS int64  `json:"last_tool_done_age_ms"`
+			Liveness          string `json:"liveness"`
 			ActiveTool        string `json:"active_tool"`
 			LastTool          string `json:"last_tool"`
+			Working           bool   `json:"working"`
 			ShutdownRequested bool   `json:"shutdown_requested"`
 		} `json:"agents"`
 	}
@@ -454,6 +487,12 @@ func onAgentsCommand(_ []string) {
 		} else {
 			sb.WriteString("  Status: idle\n")
 		}
+		if a.Liveness != "" {
+			sb.WriteString("  Liveness: " + a.Liveness + "\n")
+		}
+		if a.Working {
+			sb.WriteString("  Working: true\n")
+		}
 		if a.LastActivityAgeMS > 0 {
 			sb.WriteString(fmt.Sprintf("  Last activity: %s ago\n", formatDurationMS(a.LastActivityAgeMS)))
 		}
@@ -461,6 +500,9 @@ func onAgentsCommand(_ []string) {
 			sb.WriteString("  Active tool: " + a.ActiveTool + "\n")
 		} else if a.LastTool != "" {
 			sb.WriteString("  Last tool: " + a.LastTool + "\n")
+		}
+		if a.LastToolDoneAgeMS > 0 {
+			sb.WriteString(fmt.Sprintf("  Last tool done: %s ago\n", formatDurationMS(a.LastToolDoneAgeMS)))
 		}
 		if a.ShutdownRequested {
 			sb.WriteString("  Shutdown: requested\n")
@@ -537,6 +579,12 @@ func handleCreateAgent(p beforeToolCallPayload) {
 	}
 	agentID := scope + "/" + input.Name
 
+	systemPrompt := strings.TrimSpace(input.SystemPrompt)
+	if systemPrompt != "" {
+		systemPrompt += "\n\n"
+	}
+	systemPrompt += subAgentCodeIntelligenceGuidance
+
 	// Pass the initial prompt directly to agent_spawn as initial_prompt.
 	// The host calls pool.Send after spawning, starting the first turn immediately.
 	// Using agent_send_message here would only queue to the inbox with no turn
@@ -553,7 +601,7 @@ func handleCreateAgent(p beforeToolCallPayload) {
 	result := agentCall("agent_spawn", spawnParams{
 		ID:             agentID,
 		Name:           input.Name,
-		SystemPrompt:   input.SystemPrompt,
+		SystemPrompt:   systemPrompt,
 		ModelName:      input.Model,
 		InitialPrompt:  input.Prompt,
 		ThinkingBudget: input.ThinkingBudget,
@@ -630,6 +678,8 @@ func handleShutdownAgent(p beforeToolCallPayload) {
 	}
 	if state, ok := lookupAgentInfo(input.AgentID); ok {
 		out["is_running"] = state.IsRunning
+		out["working"] = state.Working
+		out["liveness"] = state.Liveness
 		out["pending_messages"] = state.PendingMessages
 		out["last_activity_age_ms"] = state.LastActivityAgeMS
 		out["shutdown_requested"] = state.ShutdownRequested
@@ -654,8 +704,11 @@ type agentInfoView struct {
 	PendingMessages   int    `json:"pending_messages"`
 	LastActivityAgeMS int64  `json:"last_activity_age_ms"`
 	TurnDurationMS    int64  `json:"turn_duration_ms"`
+	LastToolDoneAgeMS int64  `json:"last_tool_done_age_ms"`
+	Liveness          string `json:"liveness"`
 	ActiveTool        string `json:"active_tool"`
 	LastTool          string `json:"last_tool"`
+	Working           bool   `json:"working"`
 	ShutdownRequested bool   `json:"shutdown_requested"`
 }
 

@@ -176,17 +176,20 @@ func (b *harnessAgentBridge) List() ([]extension.AgentInfo, error) {
 	for _, id := range ids {
 		agentName := id
 		isRunning := false
-		pendingMessages := 0
+		pendingMessages := int64(0)
 		var activityAgeMS int64
 		var turnDurationMS int64
 		var lastToolAgeMS int64
+		var lastToolDoneAgeMS int64
 		var activeTool string
 		var lastTool string
+		liveness := "idle"
+		working := false
 		var shutdownRequested bool
 		if a := b.pool.Get(id); a != nil {
 			agentName = a.Name()
 			isRunning = a.IsRunning()
-			pendingMessages = a.InboxLen()
+			pendingMessages = int64(a.InboxLen())
 			activity := a.Activity()
 			now := time.Now()
 			if !activity.LastActivityAt.IsZero() {
@@ -198,9 +201,19 @@ func (b *harnessAgentBridge) List() ([]extension.AgentInfo, error) {
 			if !activity.LastToolCallAt.IsZero() {
 				lastToolAgeMS = now.Sub(activity.LastToolCallAt).Milliseconds()
 			}
+			if !activity.LastToolDoneAt.IsZero() {
+				lastToolDoneAgeMS = now.Sub(activity.LastToolDoneAt).Milliseconds()
+			}
 			activeTool = activity.ActiveToolName
 			lastTool = activity.LastToolName
 			shutdownRequested = activity.ShutdownRequested
+			if isRunning {
+				liveness = "working"
+				working = true
+			}
+			if shutdownRequested {
+				liveness = "stopping"
+			}
 		}
 		infos = append(infos, extension.AgentInfo{
 			ID:                id,
@@ -210,8 +223,11 @@ func (b *harnessAgentBridge) List() ([]extension.AgentInfo, error) {
 			LastActivityAgeMS: activityAgeMS,
 			TurnDurationMS:    turnDurationMS,
 			LastToolAgeMS:     lastToolAgeMS,
+			LastToolDoneAgeMS: lastToolDoneAgeMS,
 			ActiveTool:        activeTool,
 			LastTool:          lastTool,
+			Liveness:          liveness,
+			Working:           working,
 			ShutdownRequested: shutdownRequested,
 		})
 	}
@@ -467,6 +483,11 @@ func (b *harnessUIBridge) ToolResult(toolCallID, result string, isError bool) {
 }
 
 func (b *harnessUIBridge) AfterToolCall(agentID, id, toolName, result string, isError bool) {
+	if b.pool != nil {
+		if a := b.pool.Get(agentID); a != nil {
+			a.MarkToolCallDone(id, toolName)
+		}
+	}
 	if b.prog == nil {
 		return
 	}

@@ -443,3 +443,5 @@ The user chose the simple "always notify" design over per-turn suppression or an
 **Rationale:** Orchestrators were treating unchanged completed-turn history as evidence that a sub-agent was stuck, even while the sub-agent was actively executing tools inside a long turn. Completed history is too coarse for supervising agentic work; liveness must include intra-turn signals such as text deltas, tool dispatches, and queued shutdown requests.
 
 **Consequence:** `Agent` gains activity state guarded by `activityMu` plus an atomic shutdown-request flag. Activity updates are observational and do not affect turn execution, inbox ordering, or history. Status surfaces can now distinguish "running and recently active" from "running but quiet for a long time" without pinging the child.
+
+*Addendum (2026-07-05):* Tool completion is now recorded via `MarkToolCallDone`, which updates `LastToolDoneAt` and clears the active tool fields when the completed tool matches the active call. A running turn remains "working" for status purposes; a completed tool only means the agent moved past that tool, not that the child is idle or stuck.
