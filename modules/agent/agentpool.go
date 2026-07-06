@@ -20,7 +20,7 @@ type AgentPool struct {
 	// agent so the harness can forward EventContextUsage to WASM extensions without
 	// a circular import between the agent and extension packages.
 	// Set via SetContextUsageDispatcher; safe to call before any Submit.
-	contextUsageDispatcher func(cu sdk.ContextUsage, compacted bool)
+	contextUsageDispatcher func(cu sdk.ContextUsage, compacted bool, thresholdPct float64)
 	// wakeNotifier, when set, is called with an agent ID whenever Deliver wakes
 	// that agent (wake=true). The harness uses it to drive the TUI streaming
 	// indicator for the main agent. Set via SetWakeNotifier.
