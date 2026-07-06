@@ -166,6 +166,13 @@ or host delivery failure.
 
 ## LSP Extension
 
+These tools are the primary path for agentic coding workflows that need
+diagnostics, linting, code navigation, reference discovery, or refactor
+reconnaissance. Use `lsp_capabilities` near the start of repo/code work unless
+the session already established the available backends and output contracts.
+Use the navigation/reference tools before broad shell search or large file
+sweeps when the task is about code structure.
+
 ### `lsp_capabilities`
 
 Input: no fields.
@@ -180,6 +187,9 @@ Output: JSON object with `kind`, `target`, `language`, `command`, `ok`, `output`
 and optional `error`. Missing `file` is fatal. Unsupported language or command
 failure returns JSON with `ok: false`.
 
+Use after editing a supported source file before raw shell validation, unless the
+user explicitly asked for the shell command.
+
 ### `lsp_lint`
 
 Input: optional `path` string or `file` string.
@@ -188,12 +198,17 @@ Output: JSON object with `kind`, `target`, `language`, `command`, `ok`, `output`
 and optional `error`. Unavailable validation backend or command failure returns
 JSON with `ok: false`.
 
+Use for broad project/file validation before generic shell test commands when a
+backend is available.
+
 ### `lsp_symbols`
 
 Input: `file` string, required.
 
 Output: JSON object with `kind`, `target`, `pattern`, `ok`, `matches`, and
 optional `error`. Missing `file` is fatal.
+
+Use to inspect file structure before large `read_file` sweeps.
 
 ### `lsp_definition`
 
@@ -202,12 +217,16 @@ Input: `symbol` string, required; `path` string optional and defaults to `.`.
 Output: JSON object with `kind`, `target`, `pattern`, `ok`, `matches`, and
 optional `error`. Missing `symbol` is fatal.
 
+Use before `grep`, `rg`, or `find` when locating likely definition sites.
+
 ### `lsp_references`
 
 Input: `symbol` string, required; `path` string optional and defaults to `.`.
 
 Output: JSON object with `kind`, `target`, `pattern`, `ok`, `matches`, and
 optional `error`. Missing `symbol` is fatal.
+
+Use before `grep`, `rg`, or `find` when locating references or call sites.
 
 ### `lsp_refactor_preview`
 
@@ -217,6 +236,9 @@ defaults to `.`.
 Output: JSON object with `kind`, `path`, `symbol`, `new_name`, `pattern`,
 `matches`, `ok`, `note`, and optional `error`. Missing `symbol` or `new_name` is
 fatal.
+
+Use before renames or shared API edits. This tool previews matches only; apply
+edits with normal file-editing tools afterward.
 
 ## Memory Extension
 

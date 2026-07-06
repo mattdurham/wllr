@@ -22,6 +22,7 @@ func TestBuildDefaultActionPrompt_IncludesLSPGuidance(t *testing.T) {
 	for _, want := range []string{
 		"### Code Intelligence",
 		"LSP tools are the primary tools for diagnostics, linting, code navigation",
+		"At the start of repo/code work, call `lsp_capabilities`",
 		"Before broad `grep`, `rg`, `find`, or large `read_file` sweeps",
 		"use `lsp_refactor_preview`",
 		"use `lsp_diagnostics` or `lsp_lint` before raw `go test`",

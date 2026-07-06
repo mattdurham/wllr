@@ -3,6 +3,11 @@
 This extension exposes agent-facing code intelligence tools. It does not ask the
 agent to manage language-server processes directly; the useful workflows are
 diagnostics, linting, code navigation, finding references, and refactor previews.
+Agents should use these tools as the primary path for coding work: call
+`lsp_capabilities` near the start of repo/code work unless the session already
+knows available backends and output contracts, use navigation/reference tools
+before broad shell search or large file sweeps, and use diagnostics/linting after
+source edits before generic shell validation when a backend is available.
 
 All tool results are JSON strings. Errors that mean "bad tool input" return an
 error-shaped JSON result and mark the tool call as failed. Missing optional

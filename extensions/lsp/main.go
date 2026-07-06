@@ -8,7 +8,7 @@ import "encoding/json"
 func init() {
 	RegisterToolWithOutput(
 		"lsp_capabilities",
-		"Describe the code-intelligence workflows and backends this extension can use",
+		"Use first for coding tasks when unsure which LSP/code-intelligence backends, languages, and output contracts are available",
 		json.RawMessage(`{"type":"object","properties":{}}`),
 		json.RawMessage(
 			`{"type":"object","properties":{"tools":{"type":"array","items":{"type":"string"}},"backends":{"type":"array","items":{"type":"object"}},"note":{"type":"string"}}}`,
@@ -16,7 +16,7 @@ func init() {
 	)
 	RegisterToolWithOutput(
 		"lsp_diagnostics",
-		"Run file-scoped diagnostics for a source file",
+		"Primary validation tool after editing a source file; run file-scoped diagnostics before raw shell tests when supported",
 		json.RawMessage(
 			`{"type":"object","properties":{"file":{"type":"string","description":"Source file to check"}},"required":["file"]}`,
 		),
@@ -26,7 +26,7 @@ func init() {
 	)
 	RegisterToolWithOutput(
 		"lsp_lint",
-		"Run the broadest available lint or validation command for a file or project path",
+		"Primary project/file validation tool; run the broadest available lint/check command before generic shell validation",
 		json.RawMessage(
 			`{"type":"object","properties":{"path":{"type":"string","description":"File or directory to validate"},"file":{"type":"string","description":"Source file to validate"}}}`,
 		),
@@ -36,7 +36,7 @@ func init() {
 	)
 	RegisterToolWithOutput(
 		"lsp_symbols",
-		"List likely symbols in a source file",
+		"Primary code navigation tool for inspecting a source file outline before large read_file sweeps",
 		json.RawMessage(
 			`{"type":"object","properties":{"file":{"type":"string","description":"Source file to inspect"}},"required":["file"]}`,
 		),
@@ -46,7 +46,7 @@ func init() {
 	)
 	RegisterToolWithOutput(
 		"lsp_definition",
-		"Find likely definition sites for a symbol",
+		"Primary code navigation tool for locating symbol definitions before grep/rg/find searches",
 		json.RawMessage(
 			`{"type":"object","properties":{"symbol":{"type":"string","description":"Symbol name to locate"},"path":{"type":"string","description":"Directory or file to search"}},"required":["symbol"]}`,
 		),
@@ -56,7 +56,7 @@ func init() {
 	)
 	RegisterToolWithOutput(
 		"lsp_references",
-		"Find likely references for a symbol",
+		"Primary code navigation tool for finding symbol references/call sites before grep/rg/find searches",
 		json.RawMessage(
 			`{"type":"object","properties":{"symbol":{"type":"string","description":"Symbol name to search for"},"path":{"type":"string","description":"Directory or file to search"}},"required":["symbol"]}`,
 		),
@@ -66,7 +66,7 @@ func init() {
 	)
 	RegisterToolWithOutput(
 		"lsp_refactor_preview",
-		"Preview reference locations before a rename or refactor",
+		"Primary refactor planning tool; preview references before renames or shared API edits, then edit files separately",
 		json.RawMessage(
 			`{"type":"object","properties":{"symbol":{"type":"string","description":"Current symbol name"},"new_name":{"type":"string","description":"Proposed replacement name"},"path":{"type":"string","description":"Directory or file to search"}},"required":["symbol","new_name"]}`,
 		),

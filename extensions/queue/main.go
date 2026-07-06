@@ -83,7 +83,12 @@ func onQueueCommand(args []string) {
 			content := strings.Join(args[3:], " ")
 			editMessage(args[2], args[3], content)
 		default:
-			Modal(fmt.Sprintf("Unknown action: %s\n\nAvailable actions:\n  list - List agents with pending messages\n  delete <agent-id> <index> - Delete message\n  edit <agent-id> <index> <content> - Edit message", action))
+			Modal(
+				fmt.Sprintf(
+					"Unknown action: %s\n\nAvailable actions:\n  list - List agents with pending messages\n  delete <agent-id> <index> - Delete message\n  edit <agent-id> <index> <content> - Edit message",
+					action,
+				),
+			)
 		}
 	}
 }
