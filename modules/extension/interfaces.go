@@ -58,6 +58,15 @@ type AgentBridge interface {
 	// Returns a zero-valued ContextUsage before the first turn completes or when no
 	// main agent is registered.
 	MainAgentContextUsage() sdk.ContextUsage
+	// SnapshotInbox returns a copy of the agent's inbox without draining.
+	SnapshotInbox(id string) ([]sdk.Message, error)
+	// DeleteFromInbox removes messages from the agent's inbox.
+	// At least one of byIndex or byMessageID must be provided.
+	DeleteFromInbox(id string, byIndex int, byMessageID string) (int, error)
+	// EditInboxMessage updates a message in the agent's inbox.
+	// At least one of byIndex or byMessageID must be provided.
+	// Content must be non-empty (Anthropic invariant).
+	EditInboxMessage(id string, byIndex int, byMessageID string, newContent string) error
 }
 
 // TeamBridge is the interface extensions call to manage teams.
