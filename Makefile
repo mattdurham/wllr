@@ -297,7 +297,7 @@ precommit:
 	@echo "✅ nilaway: clean"
 	@echo ""
 	@echo "[6/10] Building project..."
-	@go build $(PACKAGES)
+	@$(MAKE) build
 	@echo "✅ build: successful"
 	@echo ""
 	@echo "[7/10] Running tests..."

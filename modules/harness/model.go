@@ -337,7 +337,9 @@ func (m *Model) SetProgram(p *tea.Program) {
 		// to WASM extensions without a circular import between agent and extension.
 		if pool != nil {
 			pool.SetContextUsageDispatcher(func(cu sdk.ContextUsage, compact bool, thresholdPct float64) {
-				payload, _ := json.Marshal(sdk.ContextUsagePayload{Usage: cu, Compacted: compact, ThresholdPct: thresholdPct})
+				payload, _ := json.Marshal(
+					sdk.ContextUsagePayload{Usage: cu, Compacted: compact, ThresholdPct: thresholdPct},
+				)
 				evt := sdk.Event{Type: sdk.EventContextUsage, Payload: payload}
 				_, _ = extHostRef.DispatchEvent(context.Background(), evt)
 			})
