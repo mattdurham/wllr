@@ -555,6 +555,24 @@ func HTTPPost(url string, headers map[string]string, body []byte) (int, string, 
 	return r.Status, r.Body, nil
 }
 
+// HTTPGet makes an HTTP GET request via the host.
+// headers may be nil. Returns (statusCode, responseBody, error).
+// Requires the network_read permission in the extension manifest.
+func HTTPGet(url string, headers map[string]string) (int, string, error) {
+	raw := _sdkCallResult("http_get", map[string]any{"url": url, "headers": headers})
+	if raw == nil {
+		return 0, "", fmt.Errorf("http_get: no response")
+	}
+	var r struct {
+		Status int    `json:"status"`
+		Body   string `json:"body"`
+	}
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return 0, "", err
+	}
+	return r.Status, r.Body, nil
+}
+
 // GetEnv returns the value of an environment variable.
 // Pass an empty name to get all variables as a JSON array.
 func GetEnv(name string) (string, error) {
