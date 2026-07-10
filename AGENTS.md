@@ -93,6 +93,13 @@ Optional installed extensions are built by `make extensions` into
 Use `PATH="$(go env GOPATH)/bin:$PATH" make precommit` if local Go-installed
 tools are not on `PATH`.
 
+WASM extension builds use `WASM_COMPILER=auto` by default: each extension is
+compiled with its explicitly selected compiler. There is no dynamic fallback.
+Use `WASM_COMPILER=tinygo` to force TinyGo for compatibility work, or
+`WASM_COMPILER=go` to force the previous Go WASI build path. TinyGo builds use
+Docker by default (`TINYGO_MODE=docker`) so a host TinyGo install is not
+required.
+
 ## Spec-Driven Modules
 
 Every non-test `.go` file in `modules/` must include:
@@ -126,10 +133,13 @@ files target:
 //go:build wasip1
 ```
 
-Standard build command:
+The fallback Go build command is:
 
 ```sh
 GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o extension.wasm .
 ```
+
+TinyGo builds use `scripts/build-wasm-extension.sh` with Docker by default and
+`TINYGO_FLAGS` defaulting to `-buildmode=c-shared -target=wasi -opt=z`.
 
 Keep SDK copies synchronized when changing shared extension helper behavior.
