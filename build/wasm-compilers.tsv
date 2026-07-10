@@ -1,0 +1,21 @@
+# Extension directory	compiler	reason
+#
+# compiler is either:
+#   tinygo  verified with the Docker TinyGo builder
+#   go      incompatible with TinyGo or not yet ported/verified
+#
+# Keep this explicit. WASM_COMPILER=auto reads this file and never falls back
+# between compilers.
+extensions/agents	tinygo	verified with Docker TinyGo builder
+extensions/history	tinygo	verified with Docker TinyGo builder
+extensions/logging	tinygo	verified with Docker TinyGo builder
+extensions/queue	tinygo	verified with Docker TinyGo builder
+extensions/statusline	tinygo	verified with Docker TinyGo builder
+extensions/context	tinygo	verified with Docker TinyGo builder
+extensions/skills	tinygo	verified with Docker TinyGo builder
+extensions/tasks	tinygo	verified with Docker TinyGo builder
+extensions/lsp	tinygo	verified with Docker TinyGo builder
+extensions/memory	tinygo	verified with Docker TinyGo builder
+extensions/permissions	tinygo	verified with Docker TinyGo builder
+extensions/mcp-bridge	tinygo	verified with Docker TinyGo builder
+extensions/otel-traces	tinygo	verified with Docker TinyGo builder

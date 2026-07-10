@@ -5,6 +5,8 @@
 #   make builtins    — build embedded WASM extensions → cmd/builtins/*.wasm
 #   make extensions  — build built-ins + install optional extensions
 #   make all         — build extensions then the binary
+#   WASM_COMPILER=go make build      — force standard Go WASM builds
+#   WASM_COMPILER=tinygo make build  — require TinyGo WASM builds
 #   make clean       — remove dist/ and cmd/builtins/*.wasm
 #
 # Development targets:
@@ -38,8 +40,15 @@ BUILTINS    := cmd/builtins
 EXT_DIR     := $(HOME)/.wllr/extensions
 GOCACHE     ?= $(CURDIR)/.cache/go-build
 GOLANGCI_LINT_CACHE ?= $(CURDIR)/.cache/golangci-lint
+WASM_COMPILER ?= auto
+TINYGO ?= tinygo
+TINYGO_MODE ?= docker
+TINYGO_IMAGE ?= tinygo/tinygo:latest
+TINYGO_FLAGS ?= -buildmode=c-shared -target=wasi -opt=z
 export GOCACHE
 export GOLANGCI_LINT_CACHE
+
+WASM_BUILD = WASM_COMPILER=$(WASM_COMPILER) TINYGO_MODE=$(TINYGO_MODE) TINYGO=$(TINYGO) TINYGO_IMAGE=$(TINYGO_IMAGE) TINYGO_FLAGS="$(TINYGO_FLAGS)" scripts/build-wasm-extension.sh
 
 # Package list - lazy evaluation
 PACKAGES = $(shell go list -e -f '{{if .GoFiles}}{{.ImportPath}}{{end}}' ./...)
@@ -57,11 +66,11 @@ build: builtins $(DIST_DIR)
 
 # builtins builds embedded WASM extensions.
 builtins: $(DIST_DIR) $(BUILTINS)
-	cd extensions/agents    && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(BUILTINS)/agents.wasm .
-	cd extensions/history   && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(BUILTINS)/history.wasm .
-	cd extensions/logging   && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(BUILTINS)/logging.wasm .
-	cd extensions/queue     && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(BUILTINS)/queue.wasm .
-	cd extensions/statusline && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(CURDIR)/$(DIST_DIR)/statusline.wasm .
+	$(WASM_BUILD) $(BUILTINS)/agents.wasm extensions/agents
+	$(WASM_BUILD) $(BUILTINS)/history.wasm extensions/history
+	$(WASM_BUILD) $(BUILTINS)/logging.wasm extensions/logging
+	$(WASM_BUILD) $(BUILTINS)/queue.wasm extensions/queue
+	$(WASM_BUILD) $(DIST_DIR)/statusline.wasm extensions/statusline
 	cp $(DIST_DIR)/statusline.wasm $(BUILTINS)/statusline.wasm
 	@echo "Built built-in extensions"
 # Optional extensions are installed to ~/.wllr/extensions/<name>/.
@@ -70,21 +79,21 @@ extensions: builtins optional-extensions
 
 optional-extensions:
 	mkdir -p $(EXT_DIR)/context $(EXT_DIR)/skills $(EXT_DIR)/tasks $(EXT_DIR)/lsp $(EXT_DIR)/memory $(EXT_DIR)/permissions $(EXT_DIR)/mcp-bridge $(EXT_DIR)/otel-traces
-	cd extensions/context   && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(EXT_DIR)/context/context.wasm .
+	$(WASM_BUILD) $(EXT_DIR)/context/context.wasm extensions/context
 	cp extensions/context/context.json $(EXT_DIR)/context/
-	cd extensions/skills    && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(EXT_DIR)/skills/skills.wasm .
+	$(WASM_BUILD) $(EXT_DIR)/skills/skills.wasm extensions/skills
 	cp extensions/skills/skills.json $(EXT_DIR)/skills/
-	cd extensions/tasks     && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(EXT_DIR)/tasks/tasks.wasm .
+	$(WASM_BUILD) $(EXT_DIR)/tasks/tasks.wasm extensions/tasks
 	cp extensions/tasks/tasks.json $(EXT_DIR)/tasks/
-	cd extensions/lsp       && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(EXT_DIR)/lsp/lsp.wasm .
+	$(WASM_BUILD) $(EXT_DIR)/lsp/lsp.wasm extensions/lsp
 	cp extensions/lsp/extension.yaml $(EXT_DIR)/lsp/
-	cd extensions/memory    && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(EXT_DIR)/memory/memory.wasm .
+	$(WASM_BUILD) $(EXT_DIR)/memory/memory.wasm extensions/memory
 	cp extensions/memory/extension.yaml $(EXT_DIR)/memory/
-	cd extensions/permissions && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(EXT_DIR)/permissions/permissions.wasm .
-	cd extensions/mcp-bridge && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(EXT_DIR)/mcp-bridge/mcp-bridge.wasm .
+	$(WASM_BUILD) $(EXT_DIR)/permissions/permissions.wasm extensions/permissions
+	$(WASM_BUILD) $(EXT_DIR)/mcp-bridge/mcp-bridge.wasm extensions/mcp-bridge
 	cp extensions/permissions/extension.yaml $(EXT_DIR)/permissions/
 	cp extensions/mcp-bridge/mcp-bridge.json $(EXT_DIR)/mcp-bridge/
-	cd extensions/otel-traces && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o $(EXT_DIR)/otel-traces/otel-traces.wasm .
+	$(WASM_BUILD) $(EXT_DIR)/otel-traces/otel-traces.wasm extensions/otel-traces
 	cp extensions/otel-traces/extension.yaml $(EXT_DIR)/otel-traces/
 	cp extensions/otel-traces/otel-traces.json $(EXT_DIR)/otel-traces/
 	@echo "Installed optional extensions to $(EXT_DIR)"
