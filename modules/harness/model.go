@@ -896,6 +896,10 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 			if cu.ContextWindow > 0 {
 				cfg := m.agentPool.CompactConfig()
 				rem := cfg.ThresholdPct*100 - cu.Percent
+				// Clamp remaining to non-negative values to avoid confusing negative percentages
+				if rem < 0 {
+					rem = 0
+				}
 				m.live.setStatus("ctx rem", fmt.Sprintf("%.0f%%", rem))
 			} else {
 				m.live.setStatus("ctx rem", "")
