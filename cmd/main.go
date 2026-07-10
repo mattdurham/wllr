@@ -569,3 +569,25 @@ func httpPost(url string, headers map[string]string, body []byte) (int, []byte, 
 	}
 	return resp.StatusCode, buf.Bytes(), nil
 }
+func httpGet(url string, headers map[string]string) (int, []byte, error) {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return 0, nil, err
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(
+		req,
+	) //nolint:gosec // URL is from user config; SSRF is intentional
+	if err != nil {
+		return 0, nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var buf bytes.Buffer
+	if _, err = buf.ReadFrom(resp.Body); err != nil {
+		return resp.StatusCode, nil, err
+	}
+	return resp.StatusCode, buf.Bytes(), nil
+}

@@ -107,6 +107,8 @@ type CapabilityProvider interface {
 	// absent. Used by log-sink extensions.
 	AppendFile(path, content string) error
 	HTTPPost(url string, headers map[string]string, body []byte) (int, []byte, error)
+	// HTTPGet makes an HTTP GET request to the given URL with optional headers.
+	HTTPGet(url string, headers map[string]string) (int, []byte, error)
 	ConfigRead(group string) (json.RawMessage, error)
 }
 

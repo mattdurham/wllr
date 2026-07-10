@@ -69,6 +69,10 @@ func (p *osCapabilityProvider) HTTPPost(url string, headers map[string]string, b
 	return httpPost(url, headers, body)
 }
 
+func (p *osCapabilityProvider) HTTPGet(url string, headers map[string]string) (int, []byte, error) {
+	return httpGet(url, headers)
+}
+
 func (p *osCapabilityProvider) ConfigRead(group string) (json.RawMessage, error) {
 	return loadConfigGroup(group)
 }
