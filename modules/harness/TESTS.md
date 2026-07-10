@@ -53,11 +53,13 @@ log, and reset behavior are covered by `wasmchat_test.go`, `tui_test.go`, and
 | `TestRegistry_Register_And_List` | Register two commands; List returns sorted | Two commands registered | `len == 2`; sorted alphabetically |
 | `TestRegistry_Dispatch_KnownCommand` | Dispatch calls handler | Handler sets `called = true` | `called == true` |
 | `TestRegistry_Dispatch_UnknownCommand` | Dispatch unknown name yields NotifyMsg | Empty registry | `cmd != nil`; msg is `NotifyMsg` with non-empty text |
-| `TestBuiltinHelp` | All four builtins are registered | `registerBuiltins(r)` | help, clear, reload, model all present |
+| `TestBuiltinHelp` | Builtins are registered | `registerBuiltins(r)` | help, clear, reload, model, models all present |
 | `TestBuiltinClear_EmitsMsg` | /clear emits `clearMsg` | `registerBuiltins(r)` | msg is `clearMsg{}` |
 | `TestBuiltinReload_EmitsMsg` | /reload emits `ReloadMsg` | `registerBuiltins(r)` | msg is `ReloadMsg{}` |
 | `TestBuiltinModel_EmitsMsg` | /model sets model name | args `["claude-haiku-3-5"]` | msg is `setModelMsg{Model: "claude-haiku-3-5"}` |
 | `TestBuiltinModel_NoArgs` | /model with no args opens the picker | no args | msg is `showModelPickerMsg` |
+| `TestBuiltinModels_NoArgs` | /models opens the picker | no args | msg is `showModelPickerMsg` |
+| `TestOpenModelPicker_UsesChoiceSublabel` | model picker uses supplied sublabel | `ModelChoice` with local endpoint sublabel | picker item sublabel includes endpoint/context and current marker |
 | `TestBuiltinThinking_EmitsMsg` | /thinking sets level directly | args `["high"]` | msg is `setThinkingMsg{Level: "high"}` |
 | `TestBuiltinThinking_NoArgs` | /thinking with no args opens the picker | no args | msg is `showThinkingPickerMsg` |
 | `TestRegistry_ExtensionCommand_Callable` | Extension-registered command receives args | custom handler captures args | `gotArgs == ["world"]` |

@@ -55,9 +55,9 @@ func TestSavedWllrField_MixedValueTypes(t *testing.T) {
 	path := withConfigPath(t)
 	seed := map[string]any{
 		"wllr": map[string]any{
-			"provider":             "local",
-			"model":                "deepseek-v4-flash",
-			"local_context_window": 300000,
+			"provider":       "local",
+			"model":          "deepseek-v4-flash",
+			"context_window": 300000,
 		},
 	}
 	data, _ := json.MarshalIndent(seed, "", "  ")

@@ -10,8 +10,11 @@ package main
 
 // modelInfo describes one selectable model for the /model picker.
 type modelInfo struct {
-	ID            string
-	Name          string
+	ID           string
+	Name         string
+	LocalBaseURL string
+	LocalAPIKey  string
+
 	ContextWindow int64
 }
 
@@ -130,8 +133,16 @@ func contextWindowFromCatalog(provider, id string) int64 {
 }
 
 func contextWindowForSelection(provider, id string, cfg *Config) int64 {
-	if provider == providerLocal && cfg != nil && cfg.LocalContextWindow > 0 {
-		return cfg.LocalContextWindow
+	if cfg != nil && cfg.ContextWindowConfigured && cfg.ContextWindow > 0 {
+		return cfg.ContextWindow
+	}
+	if provider == providerLocal && cfg != nil {
+		if lm, ok := cfg.localModelByID(id); ok && lm.ContextWindow > 0 {
+			return lm.ContextWindow
+		}
+		if cfg.LocalContextWindow > 0 {
+			return cfg.LocalContextWindow
+		}
 	}
 	return contextWindowFromCatalog(provider, id)
 }

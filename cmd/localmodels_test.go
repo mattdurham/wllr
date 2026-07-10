@@ -2,76 +2,62 @@ package main
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 )
 
-func TestFetchLocalModels(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/models" {
-			t.Fatalf("path = %q, want /v1/models", r.URL.Path)
-		}
-		if got := r.Header.Get("Authorization"); got != "Bearer test-key" {
-			t.Fatalf("Authorization = %q, want bearer key", got)
-		}
-		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"zeta"},{"id":"alpha"},{"id":"alpha"}]}`))
-	}))
-	defer srv.Close()
-
-	models, err := fetchLocalModels(context.Background(), &Config{
-		LocalBaseURL:       srv.URL + "/v1",
-		LocalAPIKey:        "test-key",
-		LocalContextWindow: 100000,
-	})
-	if err != nil {
-		t.Fatalf("fetchLocalModels: %v", err)
-	}
-	if len(models) != 2 {
-		t.Fatalf("len(models) = %d, want 2", len(models))
-	}
-	if models[0].ID != "alpha" || models[1].ID != "zeta" {
-		t.Fatalf("models sorted/deduped = %+v", models)
-	}
-	for _, m := range models {
-		if m.ContextWindow != 100000 {
-			t.Fatalf("model context = %d, want 100000", m.ContextWindow)
-		}
-	}
-}
-
-func TestResolveLocalProviderConfigUsesModelsEndpoint(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"data":[{"id":"local-large"}]}`))
-	}))
-	defer srv.Close()
-
+func TestResolveLocalProviderConfigUsesConfiguredLocalModel(t *testing.T) {
 	cfg := &Config{
-		Provider:           providerLocal,
-		LocalBaseURL:       srv.URL,
-		LocalContextWindow: 100000,
-	}
-	resolveLocalProviderConfig(context.Background(), cfg)
-
-	if cfg.Model != "local-large" {
-		t.Fatalf("Model = %q, want local-large", cfg.Model)
-	}
-	if cfg.ContextWindow != 100000 {
-		t.Fatalf("ContextWindow = %d, want 100000", cfg.ContextWindow)
-	}
-}
-
-func TestResolveLocalProviderConfigAppliesContextWhenModelsEndpointFails(t *testing.T) {
-	cfg := &Config{
-		Provider:           providerLocal,
-		LocalBaseURL:       "http://127.0.0.1:1/v1",
-		LocalContextWindow: 300000,
+		Provider: providerLocal,
+		LocalModels: []localModelConfig{
+			{
+				ID:            "deepseek-v4-flash",
+				Name:          "Dwarfstar 4 Flash",
+				BaseURL:       "http://localhost:8000/v1",
+				ContextWindow: 300000,
+			},
+		},
 	}
 
 	resolveLocalProviderConfig(context.Background(), cfg)
 
+	if cfg.Model != "deepseek-v4-flash" {
+		t.Fatalf("Model = %q, want deepseek-v4-flash", cfg.Model)
+	}
+	if cfg.LocalBaseURL != "http://localhost:8000/v1" {
+		t.Fatalf("LocalBaseURL = %q", cfg.LocalBaseURL)
+	}
 	if cfg.ContextWindow != 300000 {
 		t.Fatalf("ContextWindow = %d, want 300000", cfg.ContextWindow)
+	}
+}
+
+func TestLocalModelsUsesConfiguredModels(t *testing.T) {
+	cfg := &Config{
+		LocalModels: []localModelConfig{
+			{
+				ID:            "deepseek-v4-flash",
+				Name:          "Dwarfstar 4 Flash",
+				BaseURL:       "http://localhost:8000/v1",
+				ContextWindow: 300000,
+			},
+			{
+				ID:            "qwen/qwen3-coder-next",
+				Name:          "Qwen3 Coder Next",
+				BaseURL:       "http://localhost:1234/v1",
+				ContextWindow: 262144,
+			},
+		},
+	}
+
+	models := localModels(context.Background(), cfg)
+	if len(models) != 2 {
+		t.Fatalf("len(models) = %d, want 2: %+v", len(models), models)
+	}
+	if models[0].ID != "deepseek-v4-flash" || models[0].LocalBaseURL != "http://localhost:8000/v1" {
+		t.Fatalf("configured model not preserved: %+v", models[0])
+	}
+	if models[1].ID != "qwen/qwen3-coder-next" || models[1].LocalBaseURL != "http://localhost:1234/v1" {
+		t.Fatalf("second configured model not annotated: %+v", models[1])
 	}
 }
 
@@ -80,5 +66,15 @@ func TestLocalProviderSublabel(t *testing.T) {
 	want := "http://localhost:8000/v1 · 100k ctx"
 	if got != want {
 		t.Fatalf("localProviderSublabel = %q, want %q", got, want)
+	}
+}
+
+func TestFirstAvailableModelKeepsPreferredWhenPresent(t *testing.T) {
+	models := []modelInfo{{ID: "a"}, {ID: "b"}}
+	if got := firstAvailableModel("b", models); got != "b" {
+		t.Fatalf("firstAvailableModel = %q, want b", got)
+	}
+	if got := firstAvailableModel("missing", models); got != "a" {
+		t.Fatalf("firstAvailableModel missing = %q, want a", got)
 	}
 }

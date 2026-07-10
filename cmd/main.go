@@ -167,7 +167,7 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 		if provider == providerLocal {
 			models := localModels(ctx, cfg)
 			if len(models) > 0 {
-				modelID = models[0].ID
+				modelID = firstAvailableModel(cfg.Model, models)
 			}
 		}
 		if modelID == "" {
@@ -217,14 +217,28 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 		}
 		out := make([]harness.ModelChoice, 0, len(catalog))
 		for _, mi := range catalog {
-			out = append(out, harness.ModelChoice{ID: mi.ID, Name: mi.Name})
+			out = append(out, harness.ModelChoice{ID: mi.ID, Name: mi.Name, Sublabel: modelChoiceSublabel(mi)})
 		}
 		return out
 	}
 	m.SelectModelFn = func(modelID string) error {
-		lm, lmErr := pool.LanguageModelForModel(ctx, modelID)
-		if lmErr != nil {
-			return lmErr
+		var lm fantasy.LanguageModel
+		if currentProvider == providerLocal {
+			if !cfg.applyLocalModelSelection(modelID) {
+				return fmt.Errorf("local model %q is not configured in wllr.local_models", modelID)
+			}
+			prov, newLM, err := buildProvider(ctx, cfg)
+			if err != nil {
+				return err
+			}
+			pool.SetProvider(prov)
+			lm = newLM
+		} else {
+			var lmErr error
+			lm, lmErr = pool.LanguageModelForModel(ctx, modelID)
+			if lmErr != nil {
+				return lmErr
+			}
 		}
 		if main := pool.Get(agent.MainAgentID); main != nil {
 			main.SetModel(lm, modelID)

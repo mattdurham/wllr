@@ -106,14 +106,14 @@ func buildProvider(ctx context.Context, cfg *Config) (fantasy.Provider, fantasy.
 			fantasygoogleprovider.WithGeminiAPIKey(cfg.GeminiAPIKey),
 		)
 	case providerLocal:
+		if !cfg.applyLocalModelSelection(cfg.Model) {
+			return nil, nil, fmt.Errorf("local provider requires wllr.local_models with a matching model")
+		}
 		if cfg.LocalBaseURL == "" {
-			return nil, nil, fmt.Errorf("local provider requires wllr.local_base_url or WLLR_LOCAL_BASE_URL")
+			return nil, nil, fmt.Errorf("local provider requires wllr.local_models with a matching model")
 		}
 		if cfg.Model == "" {
-			return nil, nil, fmt.Errorf(
-				"local provider requires wllr.model, WLLR_MODEL, or a model from %s/models",
-				strings.TrimRight(cfg.LocalBaseURL, "/"),
-			)
+			return nil, nil, fmt.Errorf("local provider requires wllr.model, WLLR_MODEL, or a configured local model")
 		}
 		prov, provErr = fantasyopenapiprovider.New(
 			fantasyopenapiprovider.WithAPIKey(cfg.LocalAPIKey),

@@ -434,6 +434,15 @@ a separate `m.history` copy.
 
 **Consequence:** `Model` gains `ModelListFn`/`SelectModelFn` (nil-safe: nil list ⇒ "not available", nil select ⇒ display-only). `updateKeyPressPicker` branches on the `"__wllr:model"` callback. `cmd/main.go` wires the two callbacks: list from `modelsForProvider(cfg.Provider)`, select via `pool.LanguageModelForModel` + `main.SetModel` + `pool.SetDefaultModelName` + `pool.SetContextWindow` + `saveModel`. Model precedence at startup is now env `WLLR_MODEL` > persisted `config.json` `wllr.model` > built-in default. `TestBuiltinModel_NoArgs` updated (now expects `showModelPickerMsg`). Auth/OAuth for providers that need login is deliberately NOT included here — that is the separate Phase B (device-code flow + credentials storage) to be designed next.
 
+*Updated: 2026-07-10*
+
+Local provider entries now come from `wllr.local_models`, where each model has
+its own endpoint and context window. `/models` is a built-in alias for opening
+the same picker, and `ModelChoice.Sublabel` lets core show endpoint/context
+metadata per row. Selecting a local model rebuilds the OpenAI-compatible provider
+from that model's configured `base_url`, updates the active context window, and
+persists only the chosen model ID.
+
 ---
 
 ## Thinking-level picker — /thinking sets the reasoning level, persists, applies at runtime
