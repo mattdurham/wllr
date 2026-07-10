@@ -78,7 +78,8 @@ extensions: builtins optional-extensions
 	@echo "Built all extensions"
 
 optional-extensions:
-	mkdir -p $(EXT_DIR)/context $(EXT_DIR)/skills $(EXT_DIR)/tasks $(EXT_DIR)/lsp $(EXT_DIR)/memory $(EXT_DIR)/permissions $(EXT_DIR)/mcp-bridge $(EXT_DIR)/otel-traces
+	mkdir -p $(EXT_DIR)/websearch
+	mkdir -p $(EXT_DIR)/context $(EXT_DIR)/skills $(EXT_DIR)/tasks $(EXT_DIR)/lsp $(EXT_DIR)/memory $(EXT_DIR)/permissions $(EXT_DIR)/mcp-bridge $(EXT_DIR)/otel-traces $(EXT_DIR)/websearch
 	$(WASM_BUILD) $(EXT_DIR)/context/context.wasm extensions/context
 	cp extensions/context/context.json $(EXT_DIR)/context/
 	$(WASM_BUILD) $(EXT_DIR)/skills/skills.wasm extensions/skills
@@ -95,7 +96,9 @@ optional-extensions:
 	cp extensions/mcp-bridge/mcp-bridge.json $(EXT_DIR)/mcp-bridge/
 	$(WASM_BUILD) $(EXT_DIR)/otel-traces/otel-traces.wasm extensions/otel-traces
 	cp extensions/otel-traces/extension.yaml $(EXT_DIR)/otel-traces/
-	cp extensions/otel-traces/otel-traces.json $(EXT_DIR)/otel-traces/
+	cp extensions/otel-traces/otel-traces.json $(EXT_DIR)/otel-traces
+	$(WASM_BUILD) $(EXT_DIR)/websearch/websearch.wasm extensions/websearch
+	cp extensions/websearch/websearch.json $(EXT_DIR)/websearch/
 	@echo "Installed optional extensions to $(EXT_DIR)"
 
 $(DIST_DIR):
