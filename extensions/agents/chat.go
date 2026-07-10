@@ -5,7 +5,7 @@ package main
 import "fmt"
 
 // This file implements the WASM-driven main chat transcript (UI P4). When the
-// host enables it (WLLR_WASM_CHAT=1), the agents extension owns the "chat"
+// host enables it, the agents extension owns the "chat"
 // scene area and builds the entire transcript — user prompts and streamed
 // assistant text — via scene-graph patches. The harness renders this area's
 // content inside its scrollable chat viewport. This proves a WASM component can
@@ -29,6 +29,7 @@ var (
 func initChat() {
 	OnBeforeAgentStart(onChatUserPrompt)
 	OnToken(onChatToken)
+	OnMessageEnd(onChatMessageEnd)
 	OnNotify(onChatNotify)
 }
 
@@ -90,6 +91,31 @@ func onChatToken(agentID, text string) {
 		return
 	}
 	UIPatch(chatArea, OpAppendText(chatAsstNode, text))
+}
+
+// onChatMessageEnd finalizes the assistant bubble when a response completes
+// without any streamed token batches reaching the transcript first.
+func onChatMessageEnd(role, content string) {
+	if !chatEnabled || role != "assistant" || content == "" {
+		return
+	}
+	if chatAsstNode != "" {
+		return
+	}
+	asstID := chatPendingAsstNode
+	if asstID == "" {
+		chatSeq++
+		asstID = fmt.Sprintf("a%d", chatSeq)
+	}
+	chatPendingAsstNode = ""
+	chatAsstNode = asstID
+	asstBox := UINode{
+		ID:    asstID,
+		Type:  "text",
+		Text:  content,
+		Props: &UIProps{Border: "rounded", Fg: "accent", Padding: []int{0, 1}, Width: "fill", Wrap: true},
+	}
+	UIPatch(chatArea, OpInsert(chatRootID, asstBox))
 }
 
 // onChatNotify renders a system notification as an italic line in the transcript.
