@@ -106,6 +106,15 @@ func registerBuiltins(r *Registry) {
 	})
 
 	r.Register(Command{
+		Name:    "models",
+		Desc:    "Select the active model (alias for /model)",
+		Instant: true,
+		Handler: func(_ []string) tea.Cmd {
+			return func() tea.Msg { return showModelPickerMsg{} }
+		},
+	})
+
+	r.Register(Command{
 		Name:    "thinking",
 		Desc:    "Set the reasoning level (opens a picker; /thinking <level> sets directly)",
 		Instant: true,

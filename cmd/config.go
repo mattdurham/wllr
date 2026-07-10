@@ -19,12 +19,11 @@ type Config struct {
 	// GeminiAPIKey is the Google Gemini API key (GEMINI_API_KEY).
 	GeminiAPIKey string
 
-	// LocalAPIKey is the optional API key sent to an OpenAI-compatible local
-	// endpoint (WLLR_LOCAL_API_KEY or wllr.local_api_key).
+	// LocalAPIKey is the optional API key for the selected configured local model.
 	LocalAPIKey string
 
-	// LocalBaseURL is the OpenAI-compatible local endpoint base URL
-	// (WLLR_LOCAL_BASE_URL or wllr.local_base_url).
+	// LocalBaseURL is the OpenAI-compatible endpoint for the selected configured
+	// local model.
 	LocalBaseURL string
 
 	// ExtensionsDir is the directory scanned for .wasm extension files (BOB_EXTENSIONS_DIR).
@@ -36,14 +35,21 @@ type Config struct {
 	// Provider is the LLM provider name (BOB_PROVIDER, default: anthropic).
 	Provider string
 
-	// LocalContextWindow is the default context window for models discovered
-	// from the configured local endpoint (WLLR_LOCAL_CONTEXT_WINDOW or
-	// wllr.local_context_window).
+	// LocalModels are optional explicit OpenAI-compatible local models. They let
+	// one "local" provider expose multiple endpoint/model pairs in the picker.
+	LocalModels []localModelConfig
+
+	// LocalContextWindow is the context window for the selected configured local
+	// model.
 	LocalContextWindow int64
 
 	// ContextWindow overrides the model's context window in tokens (WLLR_CONTEXT_WINDOW).
 	// When 0, wllr queries the provider at startup to determine the window.
 	ContextWindow int64
+
+	// ContextWindowConfigured reports whether ContextWindow came from explicit
+	// env/config override instead of selected model metadata.
+	ContextWindowConfigured bool
 
 	// ModelConfigured reports whether a model came from env or persisted config,
 	// rather than the built-in default.
@@ -65,20 +71,17 @@ type Config struct {
 // Returns an error if the active provider's API key is empty.
 func LoadConfig() (*Config, error) {
 	fileCfg := loadWllrSettings()
+	contextWindow := firstPositive(parseContextWindow(os.Getenv("WLLR_CONTEXT_WINDOW")), fileCfg.ContextWindow)
 	cfg := &Config{
-		AnthropicAPIKey: os.Getenv("ANTHROPIC_API_KEY"),
-		OpenAIAPIKey:    os.Getenv("OPENAI_API_KEY"),
-		GeminiAPIKey:    os.Getenv("GEMINI_API_KEY"),
-		LocalAPIKey:     firstNonEmpty(os.Getenv("WLLR_LOCAL_API_KEY"), fileCfg.LocalAPIKey),
-		LocalBaseURL:    firstNonEmpty(os.Getenv("WLLR_LOCAL_BASE_URL"), fileCfg.LocalBaseURL),
-		ExtensionsDir:   expandTilde(os.Getenv("WLLR_EXTENSIONS_DIR")),
-		Model:           os.Getenv("WLLR_MODEL"),
-		Provider:        os.Getenv("WLLR_PROVIDER"),
-		ContextWindow:   firstPositive(parseContextWindow(os.Getenv("WLLR_CONTEXT_WINDOW")), fileCfg.ContextWindow),
-		LocalContextWindow: firstPositive(
-			parseContextWindow(os.Getenv("WLLR_LOCAL_CONTEXT_WINDOW")),
-			fileCfg.LocalContextWindow,
-		),
+		AnthropicAPIKey:         os.Getenv("ANTHROPIC_API_KEY"),
+		OpenAIAPIKey:            os.Getenv("OPENAI_API_KEY"),
+		GeminiAPIKey:            os.Getenv("GEMINI_API_KEY"),
+		ExtensionsDir:           expandTilde(os.Getenv("WLLR_EXTENSIONS_DIR")),
+		Model:                   os.Getenv("WLLR_MODEL"),
+		Provider:                os.Getenv("WLLR_PROVIDER"),
+		ContextWindow:           contextWindow,
+		ContextWindowConfigured: contextWindow > 0,
+		LocalModels:             fileCfg.LocalModels,
 	}
 
 	// Provider precedence: env WLLR_PROVIDER > persisted selection
@@ -105,6 +108,9 @@ func LoadConfig() (*Config, error) {
 		}
 	}
 	cfg.Model = normalizeModelForProvider(cfg.Provider, cfg.Model)
+	if cfg.Provider == providerLocal {
+		cfg.applyLocalModelSelection(cfg.Model)
+	}
 	// Auth-file OAuth credentials satisfy the provider key requirement: if no env
 	// key is set but a stored OAuth access token exists, seed the key from it so
 	// the initial provider build works. Refresh-on-expiry happens at startup
@@ -124,14 +130,20 @@ func LoadConfig() (*Config, error) {
 }
 
 type wllrSettings struct {
-	Provider              string          `json:"provider"`
-	Model                 string          `json:"model"`
-	LocalAPIKey           string          `json:"local_api_key"`
-	LocalBaseURL          string          `json:"local_base_url"`
-	RawContextWindow      json.RawMessage `json:"context_window"`
-	RawLocalContextWindow json.RawMessage `json:"local_context_window"`
-	ContextWindow         int64           `json:"-"`
-	LocalContextWindow    int64           `json:"-"`
+	Provider         string             `json:"provider"`
+	Model            string             `json:"model"`
+	LocalModels      []localModelConfig `json:"local_models"`
+	RawContextWindow json.RawMessage    `json:"context_window"`
+	ContextWindow    int64              `json:"-"`
+}
+
+type localModelConfig struct {
+	ID               string          `json:"id"`
+	Name             string          `json:"name"`
+	BaseURL          string          `json:"base_url"`
+	APIKey           string          `json:"api_key"`
+	RawContextWindow json.RawMessage `json:"context_window"`
+	ContextWindow    int64           `json:"-"`
 }
 
 func loadWllrSettings() wllrSettings {
@@ -144,8 +156,39 @@ func loadWllrSettings() wllrSettings {
 		return wllrSettings{}
 	}
 	settings.ContextWindow = parseContextWindowJSON(settings.RawContextWindow)
-	settings.LocalContextWindow = parseContextWindowJSON(settings.RawLocalContextWindow)
+	for i := range settings.LocalModels {
+		settings.LocalModels[i].ContextWindow = parseContextWindowJSON(settings.LocalModels[i].RawContextWindow)
+	}
 	return settings
+}
+
+func (cfg *Config) localModelByID(id string) (localModelConfig, bool) {
+	if cfg == nil || id == "" {
+		return localModelConfig{}, false
+	}
+	for _, lm := range cfg.LocalModels {
+		if lm.ID == id {
+			return lm, true
+		}
+	}
+	return localModelConfig{}, false
+}
+
+func (cfg *Config) applyLocalModelSelection(id string) bool {
+	lm, ok := cfg.localModelByID(id)
+	if !ok {
+		return false
+	}
+	cfg.Model = lm.ID
+	cfg.LocalBaseURL = lm.BaseURL
+	cfg.LocalAPIKey = lm.APIKey
+	if lm.ContextWindow > 0 {
+		cfg.LocalContextWindow = lm.ContextWindow
+		if !cfg.ContextWindowConfigured {
+			cfg.ContextWindow = lm.ContextWindow
+		}
+	}
+	return true
 }
 
 func parseContextWindowJSON(raw json.RawMessage) int64 {
@@ -164,15 +207,6 @@ func parseContextWindowJSON(raw json.RawMessage) int64 {
 		return parseContextWindow(s)
 	}
 	return 0
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 func firstPositive(values ...int64) int64 {

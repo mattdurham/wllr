@@ -122,11 +122,17 @@ func TestLoadConfig_LocalSettingsFromConfig(t *testing.T) {
 	path := withConfigPath(t)
 	seed := map[string]any{
 		"wllr": map[string]any{
-			"provider":             "local",
-			"model":                "deepseek-v4-flash",
-			"local_base_url":       "http://localhost:8000/v1",
-			"local_api_key":        "local-key",
-			"local_context_window": 300000,
+			"provider": "local",
+			"model":    "deepseek-v4-pro",
+			"local_models": []map[string]any{
+				{
+					"id":             "deepseek-v4-pro",
+					"name":           "Dwarfstar 4 Pro",
+					"base_url":       "http://localhost:8000/v1",
+					"api_key":        "local-key",
+					"context_window": "300k",
+				},
+			},
 		},
 	}
 	data, _ := json.MarshalIndent(seed, "", "  ")
@@ -135,9 +141,6 @@ func TestLoadConfig_LocalSettingsFromConfig(t *testing.T) {
 	}
 	t.Setenv("WLLR_PROVIDER", "")
 	t.Setenv("WLLR_MODEL", "")
-	t.Setenv("WLLR_LOCAL_BASE_URL", "")
-	t.Setenv("WLLR_LOCAL_API_KEY", "")
-	t.Setenv("WLLR_LOCAL_CONTEXT_WINDOW", "")
 
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -146,8 +149,8 @@ func TestLoadConfig_LocalSettingsFromConfig(t *testing.T) {
 	if cfg.Provider != providerLocal {
 		t.Fatalf("Provider = %q, want local", cfg.Provider)
 	}
-	if cfg.Model != "deepseek-v4-flash" {
-		t.Errorf("Model = %q, want deepseek-v4-flash", cfg.Model)
+	if cfg.Model != "deepseek-v4-pro" {
+		t.Errorf("Model = %q, want deepseek-v4-pro", cfg.Model)
 	}
 	if !cfg.ProviderConfigured {
 		t.Error("ProviderConfigured should be true for saved provider")
@@ -163,6 +166,54 @@ func TestLoadConfig_LocalSettingsFromConfig(t *testing.T) {
 	}
 	if cfg.LocalContextWindow != 300000 {
 		t.Errorf("LocalContextWindow = %d, want 300000", cfg.LocalContextWindow)
+	}
+	if len(cfg.LocalModels) != 1 {
+		t.Fatalf("LocalModels len = %d, want 1", len(cfg.LocalModels))
+	}
+	if got := cfg.LocalModels[0]; got.ID != "deepseek-v4-pro" || got.BaseURL != "http://localhost:8000/v1" ||
+		got.ContextWindow != 300000 {
+		t.Fatalf("LocalModels[0] = %+v", got)
+	}
+}
+
+func TestLoadConfig_GlobalContextOverrideBeatsLocalModelContext(t *testing.T) {
+	path := withConfigPath(t)
+	seed := map[string]any{
+		"wllr": map[string]any{
+			"provider":       "local",
+			"model":          "deepseek-v4-flash",
+			"context_window": 123456,
+			"local_models": []map[string]any{
+				{
+					"id":             "deepseek-v4-flash",
+					"base_url":       "http://localhost:8000/v1",
+					"context_window": 300000,
+				},
+			},
+		},
+	}
+	data, _ := json.MarshalIndent(seed, "", "  ")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("seed write: %v", err)
+	}
+	t.Setenv("WLLR_PROVIDER", "")
+	t.Setenv("WLLR_MODEL", "")
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig returned error: %v", err)
+	}
+	if !cfg.ContextWindowConfigured {
+		t.Fatal("ContextWindowConfigured should be true")
+	}
+	if cfg.LocalContextWindow != 300000 {
+		t.Fatalf("LocalContextWindow = %d, want 300000", cfg.LocalContextWindow)
+	}
+	if cfg.ContextWindow != 123456 {
+		t.Fatalf("ContextWindow = %d, want explicit override 123456", cfg.ContextWindow)
+	}
+	if got := contextWindowForSelection(providerLocal, "deepseek-v4-flash", cfg); got != 123456 {
+		t.Fatalf("contextWindowForSelection = %d, want explicit override 123456", got)
 	}
 }
 

@@ -67,10 +67,47 @@ func TestBuiltinHelp(t *testing.T) {
 	for _, c := range cmds {
 		names[c.Name] = true
 	}
-	for _, expected := range []string{"help", "clear", "reload", "model"} {
+	for _, expected := range []string{"help", "clear", "reload", "model", "models"} {
 		if !names[expected] {
 			t.Errorf("expected builtin command %q to be registered", expected)
 		}
+	}
+}
+
+func TestBuiltinModels_NoArgs(t *testing.T) {
+	r := NewRegistry()
+	registerBuiltins(r)
+
+	cmd := r.Dispatch("models", nil)
+	if cmd == nil {
+		t.Fatal("expected non-nil Cmd")
+	}
+	msg := cmd()
+	if _, ok := msg.(showModelPickerMsg); !ok {
+		t.Errorf("expected showModelPickerMsg for /models, got %T", msg)
+	}
+}
+
+func TestOpenModelPicker_UsesChoiceSublabel(t *testing.T) {
+	m := newTestModel()
+	m.width = 80
+	m.height = 24
+	m.activeModel = "m1"
+	m.ModelListFn = func() []ModelChoice {
+		return []ModelChoice{{ID: "m1", Name: "Model One", Sublabel: "http://localhost:8000/v1 · 300k ctx"}}
+	}
+
+	m.openModelPicker()
+
+	if !m.picker.IsActive() {
+		t.Fatal("picker should be active")
+	}
+	if len(m.picker.Items) != 1 {
+		t.Fatalf("picker item count = %d, want 1", len(m.picker.Items))
+	}
+	want := "http://localhost:8000/v1 · 300k ctx  (current)"
+	if got := m.picker.Items[0].Sublabel; got != want {
+		t.Fatalf("picker sublabel = %q, want %q", got, want)
 	}
 }
 

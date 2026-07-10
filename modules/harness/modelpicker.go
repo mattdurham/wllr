@@ -12,8 +12,9 @@ import (
 // ModelChoice is one selectable model for the /model picker. ID is the wire
 // model identifier passed to the provider; Name is a human label.
 type ModelChoice struct {
-	ID   string
-	Name string
+	ID       string
+	Name     string
+	Sublabel string
 }
 
 // openModelPicker builds the picker items from ModelListFn and opens the picker
@@ -31,9 +32,12 @@ func (m *Model) openModelPicker() {
 	}
 	items := make([]sdk.ShowPickerItem, 0, len(choices))
 	for _, c := range choices {
-		sub := c.ID
+		sub := c.Sublabel
+		if sub == "" {
+			sub = c.ID
+		}
 		if c.ID == m.activeModel {
-			sub = c.ID + "  (current)"
+			sub += "  (current)"
 		}
 		items = append(items, sdk.ShowPickerItem{ID: c.ID, Label: c.Name, Sublabel: sub})
 	}

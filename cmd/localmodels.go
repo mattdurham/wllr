@@ -2,60 +2,34 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"sort"
 	"strings"
-	"time"
 )
 
 func resolveLocalProviderConfig(ctx context.Context, cfg *Config) {
 	if cfg == nil || cfg.Provider != providerLocal {
 		return
 	}
-	// If no context window is set, try to fetch from local models endpoint.
-	if cfg.ContextWindow == 0 {
-		models, err := fetchLocalModels(ctx, cfg)
-		if err == nil && len(models) > 0 {
-			if !modelListContains(models, cfg.Model) {
-				cfg.Model = models[0].ID
-			}
-			// Copy the selected model's context window from the discovered list into cfg.ContextWindow.
-			for _, m := range models {
-				if m.ID == cfg.Model {
-					cfg.ContextWindow = m.ContextWindow
-					break
-				}
-			}
-		}
-		// If fetch failed, fall back to LocalContextWindow if set.
-		if cfg.ContextWindow == 0 && cfg.LocalContextWindow > 0 {
-			cfg.ContextWindow = cfg.LocalContextWindow
-		}
+	configured := configuredLocalModels(cfg)
+	if cfg.Model == "" && len(configured) > 0 {
+		cfg.Model = configured[0].ID
 	}
-}
-
-func modelListContains(models []modelInfo, id string) bool {
-	for _, m := range models {
-		if m.ID == id {
-			return true
-		}
-	}
-	return false
+	cfg.applyLocalModelSelection(cfg.Model)
 }
 
 func localModels(ctx context.Context, cfg *Config) []modelInfo {
-	models, err := fetchLocalModels(ctx, cfg)
-	if err == nil && len(models) > 0 {
-		return models
+	_ = ctx
+	configured := configuredLocalModels(cfg)
+	if len(configured) > 0 {
+		return configured
 	}
 	return modelsForProvider(providerLocal)
 }
 
 func localProviderSublabel(cfg *Config) string {
 	if cfg == nil || strings.TrimSpace(cfg.LocalBaseURL) == "" {
-		return "configure wllr.local_base_url"
+		return "configure wllr.local_models"
 	}
 	if cfg.LocalContextWindow > 0 {
 		return fmt.Sprintf("%s · %dk ctx", cfg.LocalBaseURL, cfg.LocalContextWindow/1000)
@@ -63,64 +37,54 @@ func localProviderSublabel(cfg *Config) string {
 	return cfg.LocalBaseURL
 }
 
-func fetchLocalModels(ctx context.Context, cfg *Config) ([]modelInfo, error) {
-	if cfg == nil || strings.TrimSpace(cfg.LocalBaseURL) == "" {
-		return nil, fmt.Errorf("local_base_url is not configured")
+func modelChoiceSublabel(mi modelInfo) string {
+	parts := []string{mi.ID}
+	if mi.LocalBaseURL != "" {
+		parts = append(parts, mi.LocalBaseURL)
 	}
-	endpoint := strings.TrimRight(cfg.LocalBaseURL, "/") + "/models"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return nil, err
+	if mi.ContextWindow > 0 {
+		parts = append(parts, fmt.Sprintf("%dk ctx", mi.ContextWindow/1000))
 	}
-	if cfg.LocalAPIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+cfg.LocalAPIKey)
+	return strings.Join(parts, " · ")
+}
+
+func firstAvailableModel(preferred string, models []modelInfo) string {
+	if preferred != "" {
+		for _, m := range models {
+			if m.ID == preferred {
+				return preferred
+			}
+		}
 	}
-	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Do(req) //nolint:gosec // Local provider endpoint is explicit user configuration.
-	if err != nil {
-		return nil, err
+	if len(models) == 0 {
+		return ""
 	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("GET %s: %s", endpoint, resp.Status)
+	return models[0].ID
+}
+
+func configuredLocalModels(cfg *Config) []modelInfo {
+	if cfg == nil || len(cfg.LocalModels) == 0 {
+		return nil
 	}
-	var payload struct {
-		Data []struct {
-			ID            string `json:"id"`
-			Name          string `json:"name"`
-			ContextLength int64  `json:"context_length"`
-			TopProvider   struct {
-				ContextLength int64 `json:"context_length"`
-			} `json:"top_provider"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, err
-	}
-	out := make([]modelInfo, 0, len(payload.Data))
-	seen := make(map[string]struct{}, len(payload.Data))
-	for _, item := range payload.Data {
-		id := strings.TrimSpace(item.ID)
-		if id == "" {
+	out := make([]modelInfo, 0, len(cfg.LocalModels))
+	for _, lm := range cfg.LocalModels {
+		id := strings.TrimSpace(lm.ID)
+		baseURL := strings.TrimSpace(lm.BaseURL)
+		if id == "" || baseURL == "" {
 			continue
 		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		name := strings.TrimSpace(item.Name)
+		name := strings.TrimSpace(lm.Name)
 		if name == "" {
 			name = id
 		}
-		contextWindow := cfg.LocalContextWindow
-		if contextWindow == 0 {
-			contextWindow = item.ContextLength
-		}
-		if contextWindow == 0 {
-			contextWindow = item.TopProvider.ContextLength
-		}
-		out = append(out, modelInfo{ID: id, Name: name, ContextWindow: contextWindow})
+		out = append(out, modelInfo{
+			ID:            id,
+			Name:          name,
+			ContextWindow: lm.ContextWindow,
+			LocalBaseURL:  baseURL,
+			LocalAPIKey:   lm.APIKey,
+		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out, nil
+	return out
 }
