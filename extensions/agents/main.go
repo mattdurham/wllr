@@ -194,15 +194,13 @@ func init() {
 	// Use the raw before_tool_call event so we get the AgentID field too.
 	OnBeforeToolCall(onBeforeToolCall)
 
-	// Register the WASM-driven chat transcript handlers (UI P4). They stay
-	// inert unless the host enables WLLR_WASM_CHAT (checked in onSessionStart).
+	// Register the WASM-driven chat transcript handlers (UI P4).
 	initChat()
 }
 
 // ─── Event handlers ───────────────────────────────────────────────────────────
 
 func onSessionStart() {
-	// Optionally take over the main chat transcript (WLLR_WASM_CHAT=1).
 	onChatSessionStart()
 
 	guidance := `
