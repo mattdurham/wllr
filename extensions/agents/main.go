@@ -246,6 +246,10 @@ active_tool, last_tool, last_tool_age_ms, last_tool_done_age_ms, and
 shutdown_requested.
 Treat working=true as authoritative: the child is doing its current turn unless
 liveness is dead. Do not ping, poll, interrupt, or take over a working child.
+If list_agents shows working=true, stop and end your turn. Do not call
+list_agents again in the same wait cycle.
+If shutdown_requested=true, do not call shutdown_agent again unless the user
+explicitly asked you to retry.
 
 **get_agent_status(agent_id, history_limit?)**
 Diagnostic tool — returns live state for one agent: is_running, pending_messages,
@@ -364,6 +368,8 @@ finished):
   If liveness=dead: nudge once or request graceful shutdown.
   If is_running=false with no useful output: nudge it.
     → send_message("main/coder", "Please report your current status.")
+  Do not loop on list_agents while waiting. One status check, then wait for a
+  notification or a real state change.
 
 ---
 
@@ -629,6 +635,25 @@ func handleShutdownAgent(p beforeToolCallPayload) {
 	}
 	if err := json.Unmarshal(p.Input, &input); err != nil || input.AgentID == "" {
 		ToolResult(p.ToolCallID, "shutdown_agent: agent_id is required", true)
+		return
+	}
+
+	if state, ok := lookupAgentInfo(input.AgentID); ok && state.ShutdownRequested {
+		out := map[string]any{
+			"status":   "already_requested",
+			"agent_id": input.AgentID,
+			"stopped":  false,
+		}
+		if state.IsRunning {
+			out["is_running"] = state.IsRunning
+			out["working"] = state.Working
+			out["liveness"] = state.Liveness
+			out["pending_messages"] = state.PendingMessages
+			out["last_activity_age_ms"] = state.LastActivityAgeMS
+			out["shutdown_requested"] = state.ShutdownRequested
+		}
+		encoded, _ := json.Marshal(out)
+		ToolResult(p.ToolCallID, string(encoded), false)
 		return
 	}
 

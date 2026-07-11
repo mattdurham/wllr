@@ -369,6 +369,10 @@ func (p *testCapabilityProvider) HTTPPost(url string, headers map[string]string,
 	return 200, nil, nil
 }
 
+func (p *testCapabilityProvider) HTTPGet(string, map[string]string) (int, []byte, error) {
+	return 200, nil, nil
+}
+
 func (p *testCapabilityProvider) ConfigRead(group string) (json.RawMessage, error) {
 	if p.onConfigRead != nil {
 		return p.onConfigRead(group)

@@ -27,6 +27,10 @@
 #   make ci               — run full CI pipeline locally
 #   make precommit        — run build and all quality checks (REQUIRED before commit)
 #
+# Installation targets:
+#   make install         — rebuild and install wllr to local bin (default: ~/.local/bin)
+#   make install-fast    — install wllr without rebuilding (uses existing dist/wllr)
+#
 # Built-in extensions (embedded in the binary):
 #   agents, history, logging, statusline
 #   (read_file, write_file, exec, get_env are native Go — no WASM build needed)
@@ -53,9 +57,12 @@ WASM_BUILD = WASM_COMPILER=$(WASM_COMPILER) TINYGO_MODE=$(TINYGO_MODE) TINYGO=$(
 # Package list - lazy evaluation
 PACKAGES = $(shell go list -e -f '{{if .GoFiles}}{{.ImportPath}}{{end}}' ./...)
 
+# Install destination (can be overridden: make install INSTALL_BIN=/custom/path)
+INSTALL_BIN ?= $(HOME)/.local/bin
+
 .DEFAULT_GOAL := build
 
-.PHONY: all build builtins extensions optional-extensions clean clean-extensions lint test format precommit ci install-tools nilaway betteralign betteralign-fix gofumpt-check gofumpt golines-check golines format-all deadcode staticcheck docs-check generate-models
+.PHONY: all build builtins extensions optional-extensions clean clean-extensions lint test format precommit ci install-tools nilaway betteralign betteralign-fix gofumpt-check gofumpt golines-check golines format-all deadcode staticcheck docs-check generate-models install install-fast
 
 all: extensions build
 
@@ -63,6 +70,24 @@ all: extensions build
 build: builtins $(DIST_DIR)
 	go build -o $(BINARY) ./cmd/
 	@echo "Built $(BINARY)"
+
+# install builds the binary and installs it to INSTALL_BIN
+install: build
+	@echo "Installing wllr to $(INSTALL_BIN)..."
+	mkdir -p $(INSTALL_BIN)
+	cp $(BINARY) $(INSTALL_BIN)/wllr
+	chmod +x $(INSTALL_BIN)/wllr
+	@echo "Installed wllr to $(INSTALL_BIN)/wllr"
+	@echo "Run 'which wllr' to verify installation"
+
+# install-fast installs without rebuilding (uses existing dist/wllr)
+install-fast:
+	@echo "Installing wllr to $(INSTALL_BIN)..."
+	mkdir -p $(INSTALL_BIN)
+	cp $(BINARY) $(INSTALL_BIN)/wllr
+	chmod +x $(INSTALL_BIN)/wllr
+	@echo "Installed wllr to $(INSTALL_BIN)/wllr"
+	@echo "Run 'which wllr' to verify installation"
 
 # builtins builds embedded WASM extensions.
 builtins: $(DIST_DIR) $(BUILTINS)
