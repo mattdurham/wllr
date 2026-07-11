@@ -569,6 +569,7 @@ func httpPost(url string, headers map[string]string, body []byte) (int, []byte, 
 	}
 	return resp.StatusCode, buf.Bytes(), nil
 }
+
 func httpGet(url string, headers map[string]string) (int, []byte, error) {
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {

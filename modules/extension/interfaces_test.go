@@ -69,6 +69,10 @@ func (f *fakeCapabilityProvider) AppendFile(_, _ string) error      { return nil
 func (f *fakeCapabilityProvider) HTTPPost(_ string, _ map[string]string, _ []byte) (int, []byte, error) {
 	return 200, nil, nil
 }
+
+func (f *fakeCapabilityProvider) HTTPGet(_ string, _ map[string]string) (int, []byte, error) {
+	return 200, nil, nil
+}
 func (f *fakeCapabilityProvider) ConfigRead(_ string) (json.RawMessage, error) { return nil, nil }
 
 var _ extension.CapabilityProvider = (*fakeCapabilityProvider)(nil)
