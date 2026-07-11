@@ -90,6 +90,10 @@ func init() {
 		desired := ""
 		if ctxWindow > 0 {
 			remaining := thresholdPct*100 - percent
+			// Clamp remaining to non-negative values to avoid confusing negative percentages
+			if remaining < 0 {
+				remaining = 0
+			}
 			desired = fmt.Sprintf("  ctx:%.0f%%", remaining)
 		}
 		if desired == lastCtx {
