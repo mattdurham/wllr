@@ -657,28 +657,43 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 	}
 	history := priorHistory
 	didCompact := false
-	if shouldCompact(history, sysPrompt, content, contextWindow) {
+	compactCfg := CompactConfig{Enabled: true, ThresholdPct: 0.80}
+	if pool != nil {
+		compactCfg = pool.CompactConfig()
+	}
+	// Keep 10% of the model's context window as recent history. This budget is
+	// shared by proactive and reactive compaction.
+	keepRecent := contextWindow / 10
+	if keepRecent <= 0 {
+		keepRecent = defaultKeepRecentTokens
+	}
+	shouldProactivelyCompact := shouldCompactWithTools(history, sysPrompt, content, tools, contextWindow)
+	if compactCfg.Enabled && shouldCompactByUsage(a.LastUsage(), contextWindow, compactCfg.ThresholdPct) {
+		shouldProactivelyCompact = true
+	}
+	if shouldProactivelyCompact {
 		if onToken != nil {
 			onToken("[Compacting context…]\n\n")
 		}
-		// Keep 10% of the model's context window as recent history.
-		// This scales correctly: a 1M-token model keeps 100k, a 200k model keeps 20k.
-		keepRecent := contextWindow / 10
-		if keepRecent <= 0 {
-			keepRecent = defaultKeepRecentTokens
-		}
 		compacted, summaryText, cerr := compactHistory(childCtx, lm, history, priorSummary, keepRecent)
-		if cerr == nil {
-			didCompact = true
-			history = compacted
-			a.historyMu.Lock()
-			a.history = compacted
-			a.historyMu.Unlock()
-			if summaryText != "" {
-				a.lastSummaryMu.Lock()
-				a.lastSummary = summaryText
-				a.lastSummaryMu.Unlock()
+		if cerr != nil {
+			compactionErr := fmt.Errorf("context compaction failed: %w", cerr)
+			slog.Error("agent: context compaction failed", "agent", a.id, "model", modelName, "error", compactionErr)
+			if onToken != nil {
+				onToken("\n\n[Context compaction failed: " + compactionErr.Error() + "]\n\n")
 			}
+			a.finishTurn(ctx, compactionErr, nil, onDone, inboxMsgs)
+			return
+		}
+		didCompact = true
+		history = compacted
+		a.historyMu.Lock()
+		a.history = compacted
+		a.historyMu.Unlock()
+		if summaryText != "" {
+			a.lastSummaryMu.Lock()
+			a.lastSummary = summaryText
+			a.lastSummaryMu.Unlock()
 		}
 	}
 
@@ -718,16 +733,32 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 
 	collectedText, usage, err := a.streamTurn(childCtx, fa, streamMsgs, streamPrompt, pool, onToken, onToolCall)
 
-	// Reactive fallback: if we still hit a context error, trim and retry once.
+	// Reactive fallback: if the provider still rejects the context, compact and
+	// retry the aborted turn once. This preserves a summary instead of silently
+	// discarding older messages.
 	if err != nil && isContextTooLong(err) {
 		if onToken != nil {
-			onToken("\n\n[Still too long — trimming and retrying…]\n\n")
+			onToken("\n\n[Context limit reached — compacting and retrying…]\n\n")
 		}
-		if len(history) > keepMessages {
-			history = history[len(history)-keepMessages:]
-			a.historyMu.Lock()
-			a.history = history
-			a.historyMu.Unlock()
+		compacted, summaryText, cerr := compactHistory(childCtx, lm, history, priorSummary, keepRecent)
+		if cerr != nil {
+			compactionErr := fmt.Errorf("context compaction failed after context limit: %w", cerr)
+			slog.Error("agent: reactive context compaction failed", "agent", a.id, "model", modelName, "error", compactionErr)
+			if onToken != nil {
+				onToken("\n\n[Context compaction failed: " + compactionErr.Error() + "]\n\n")
+			}
+			a.finishTurn(ctx, compactionErr, nil, onDone, inboxMsgs)
+			return
+		}
+		didCompact = true
+		history = compacted
+		a.historyMu.Lock()
+		a.history = history
+		a.historyMu.Unlock()
+		if summaryText != "" {
+			a.lastSummaryMu.Lock()
+			a.lastSummary = summaryText
+			a.lastSummaryMu.Unlock()
 		}
 		streamMsgs, streamPrompt, blocked, blockReason = buildStream(history, content)
 		if blocked {
