@@ -235,15 +235,22 @@ after a successful `compactHistory` call, under `lastSummaryMu.Lock()`.
 
 ### Reactive Fallback
 
-After a turn, if the API returns a context-too-long error (`isContextTooLong`), the agent trims history to the most recent `keepMessages` (20) messages and retries the turn exactly once. This is the fallback path when proactive compaction was not triggered or not sufficient.
+After a turn, if the API returns a context-too-long error (`isContextTooLong`), the agent compacts
+the history and retries the aborted turn exactly once. This is the fallback path when proactive
+compaction was not triggered or not sufficient. The retry uses the same recent-history budget as
+proactive compaction and preserves the generated summary in the agent state.
 
 **Invariant:** The reactive retry happens at most once per turn. If the retry also fails with a context error, the error is reported to `onDone` and the turn ends.
+
+**Invariant:** If reactive compaction fails, no retry is attempted. The compaction error is logged,
+shown to the user, and reported to `onDone`.
 
 ### Percentage-Based Compaction Trigger
 
 In addition to the chars/4 heuristic, `Submit` checks a percentage-based trigger before falling
 back to the heuristic. The trigger uses the real API token counts from the most recently completed
-turn (`a.lastUsage`) rather than an estimate.
+turn (`a.lastUsage`) rather than an estimate. The heuristic also includes serialized tool
+definitions, since provider requests count those definitions against the context window.
 
 `shouldCompactByUsage(lastUsage fantasy.Usage, contextWindow int64, thresholdPct float64) bool`:
 
@@ -261,8 +268,9 @@ The check order in `Submit` is:
 **Invariant:** The first turn always uses the heuristic because `lastUsage` is zero-valued until
 the first `streamTurn` call completes. This is the chicken-and-egg bootstrap case.
 
-**Invariant:** If compaction fails, the original history is used unchanged and the turn
-proceeds normally. (Inherited from §9.)
+**Invariant:** If compaction fails, the turn is aborted before the provider request. The error is
+logged and delivered through the normal turn error path, and the user sees an explicit context
+compaction failure message.
 
 ### AutoCompact Configuration
 

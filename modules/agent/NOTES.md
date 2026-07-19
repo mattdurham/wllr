@@ -130,11 +130,11 @@ Append-only design decision log. Never delete entries; add an `*Addendum (date):
 
 *Added: 2026-05-08*
 
-**Decision:** Compaction uses a two-phase approach: proactive compaction (before the API call) triggers when estimated tokens exceed the window minus the output reserve; reactive trimming (after a 400 context-too-long error) trims to the most recent 20 messages and retries once.
+**Decision:** Compaction uses a two-phase approach: proactive compaction (before the API call) triggers when estimated tokens exceed the window minus the output reserve; reactive compaction (after a context-too-long error) summarizes older history and retries the aborted turn once.
 
-**Rationale:** Proactive compaction avoids the round-trip cost of a failed API call. However, the `chars/4` token estimate is intentionally approximate and may undercount; the reactive path handles cases where the estimate was too optimistic. The two phases together provide safety coverage without over-compacting on every turn. The reactive path is a blunt trim (not summarization) because the API already rejected the request — a second LLM call for summarization might itself hit the limit; trimming is guaranteed to reduce size.
+**Rationale:** Proactive compaction avoids the round-trip cost of a failed API call. However, the `chars/4` token estimate is intentionally approximate and may undercount; the reactive path handles cases where the estimate was too optimistic. The two phases together provide safety coverage without over-compacting on every turn. Reactive compaction uses the same bounded recent-history budget as proactive compaction, then retries the aborted turn once.
 
-**Consequence:** In the worst case, one extra failed API call is made per compaction event on the reactive path. Context from messages older than the most recent 20 is lost permanently on the reactive path (no summary is generated).
+**Consequence:** In the worst case, one extra failed API call is made per compaction event on the reactive path. Older context is retained in the generated summary instead of being permanently discarded.
 
 ---
 
@@ -153,9 +153,8 @@ to be well within any current model's window post-compaction. The snap-to-user-b
 rule (never cut between a user→assistant pair) preserves the invariant that the kept slice
 always begins with a user message, which all LLM APIs require.
 
-**Consequence:** `keepMessages=20` is retained only for the reactive fallback (blunt trim
-after a 400 context-too-long error), where speed and guaranteed size reduction take
-priority over summarization quality.
+**Consequence:** The reactive fallback uses the same token-budget compaction path as proactive
+compaction, so the fixed message count is no longer used for recovery.
 
 ---
 
