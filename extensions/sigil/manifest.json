@@ -1,0 +1,36 @@
+{
+  "name": "sigil",
+  "description": "Grafana Sigil SDK bridge for LLM observability",
+  "version": "0.1.0",
+  "tools": [
+    {
+      "name": "sigil_start_generation",
+      "description": "Start a generation span for LLM observability. Returns a generation ID and context that should be used with other sigil tools."
+    },
+    {
+      "name": "sigil_end_generation",
+      "description": "End a generation span and export it to Grafana Sigil."
+    },
+    {
+      "name": "sigil_set_result",
+      "description": "Set the result for a generation (messages, tool calls)."
+    },
+    {
+      "name": "sigil_start_tool_execution",
+      "description": "Start a tool execution span for observability."
+    },
+    {
+      "name": "sigil_end_tool_execution",
+      "description": "End a tool execution span and export it to Grafana Sigil."
+    }
+  ],
+  "commands": [
+    {
+      "name": "sigil",
+      "description": "Show Sigil instrumentation status"
+    }
+  ],
+  "permissions": {
+    "network_write": true
+  }
+}

@@ -127,7 +127,8 @@ const tokenBatchInterval = 75 * time.Millisecond
 1. Adds `display` (or `content` if display is empty) to `m.chat` as a user message.
 2. Sets `m.streaming = true`, records `m.streamStart`.
 3. Dispatches `EventBeforeAgentStart` and `EventBeforeProviderRequest` to extensions.
-4. Calls `pool.Send(mainAgentID, content)` (non-blocking).
+4. Calls `pool.Send(mainAgentID, content)` (non-blocking). If the primary agent
+   is missing, it attempts one `EnsureMainAgent` recovery and retries the send.
 5. Fires an immediate `streamTickMsg` and a 100ms tick to start the animated "working." indicator.
 
 Note: `m.history` was removed (see NOTES.md §20). The canonical conversation history lives in `pool.Get(mainID).History()`.

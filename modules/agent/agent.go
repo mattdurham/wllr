@@ -23,8 +23,10 @@ type Agent struct {
 	turnStartedAt  time.Time
 	lastActivityAt time.Time
 	lastToolCallAt time.Time
-	lm             fantasy.LanguageModel
-	pool           *AgentPool
+	lastToolDoneAt time.Time
+
+	lm   fantasy.LanguageModel
+	pool *AgentPool
 
 	cancel context.CancelFunc
 
@@ -62,7 +64,6 @@ type Agent struct {
 	activeToolCallID string
 	activeToolName   string
 	lastToolName     string
-	lastToolDoneAt   time.Time
 
 	history []sdk.Message
 
@@ -71,7 +72,6 @@ type Agent struct {
 	// that have gone through drain but haven't been committed to history yet.
 	// Protected by queuedHistoryMu.
 	queuedHistory []sdk.Message
-	queuedHistoryMu sync.Mutex
 
 	opts SpawnOpts
 
@@ -112,6 +112,8 @@ type Agent struct {
 	lmMu sync.RWMutex
 
 	lastSummaryMu sync.RWMutex
+
+	queuedHistoryMu sync.Mutex
 
 	// cancelMu protects the cancel function for the current active turn.
 	cancelMu sync.Mutex
@@ -761,7 +763,15 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 		compacted, summaryText, cerr := compactHistory(childCtx, lm, history, priorSummary, keepRecent)
 		if cerr != nil {
 			compactionErr := fmt.Errorf("context compaction failed after context limit: %w", cerr)
-			slog.Error("agent: reactive context compaction failed", "agent", a.id, "model", modelName, "error", compactionErr)
+			slog.Error(
+				"agent: reactive context compaction failed",
+				"agent",
+				a.id,
+				"model",
+				modelName,
+				"error",
+				compactionErr,
+			)
 			if onToken != nil {
 				onToken("\n\n[Context compaction failed: " + compactionErr.Error() + "]\n\n")
 			}
@@ -805,7 +815,7 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 	// leaving history ending with a lone user message causes "text content
 	// cannot be empty" on the next turn.
 	assistantText := placeholderForEmptyResponse(collectedText, childCtx.Err() != nil)
-	
+
 	// Record this turn to history. When content is empty (drain-until-empty
 	// path), use the inbox messages instead so we never write an empty user
 	// message — Anthropic rejects empty text content blocks.

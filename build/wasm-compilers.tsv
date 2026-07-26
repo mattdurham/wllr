@@ -20,3 +20,4 @@ extensions/permissions	tinygo	verified with Docker TinyGo builder
 extensions/mcp-bridge	tinygo	verified with Docker TinyGo builder
 extensions/otel-traces	tinygo	verified with Docker TinyGo builder
 extensions/websearch	tinygo	verified with Docker TinyGo builder
+extensions/sigil	go	sigil-sdk requires Go standard library features not supported by TinyGo

@@ -1316,8 +1316,19 @@ func (m Model) submitToAgent(content, display string) (tea.Model, tea.Cmd) {
 			prompt = string(r[:120]) + "…"
 		}
 		slog.Info("stream start", "prompt", prompt, "system_prompt_len", len(pool.BaseSystemPrompt()))
-		if err := pool.Send(mainAgentID, content); err != nil {
-			return StreamDoneMsg{Err: fmt.Errorf("submit to agent: %w", err)}
+		sendErr := pool.Send(mainAgentID, content)
+		if errors.Is(sendErr, agent.ErrAgentNotFound) && mainAgentID == agent.MainAgentID {
+			slog.Warn("main agent missing; attempting automatic recovery")
+			if recoverErr := pool.EnsureMainAgent(context.Background()); recoverErr != nil {
+				sendErr = fmt.Errorf("recover main agent: %w", recoverErr)
+			} else {
+				// The first Send failed before enqueueing, so retrying does not
+				// duplicate the user message.
+				sendErr = pool.Send(mainAgentID, content)
+			}
+		}
+		if sendErr != nil {
+			return StreamDoneMsg{Err: fmt.Errorf("submit to agent: %w", sendErr)}
 		}
 
 		// pool.Send is non-blocking; results arrive via callbacks. Return nil.

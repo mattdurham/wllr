@@ -2096,6 +2096,13 @@ func (h *Host) Reload(ctx context.Context, paths []string) error {
 
 // Close shuts down all extensions and the wazero runtime.
 func (h *Host) Close(ctx context.Context) error {
+	if h.runtime == nil {
+		return nil
+	}
+	payload, _ := json.Marshal(sdk.ShutdownPayload{Reason: "host_close"})
+	if _, err := h.DispatchEvent(ctx, sdk.Event{Type: sdk.EventShutdown, Payload: payload}); err != nil {
+		h.logger.Warn("extension: shutdown event failed", "err", err)
+	}
 	return h.runtime.Close(ctx)
 }
 

@@ -2,29 +2,181 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
+	"time"
 )
 
 func resolveLocalProviderConfig(ctx context.Context, cfg *Config) {
 	if cfg == nil || cfg.Provider != providerLocal {
 		return
 	}
-	configured := configuredLocalModels(cfg)
-	if cfg.Model == "" && len(configured) > 0 {
-		cfg.Model = configured[0].ID
+	if cfg.applyLocalModelSelection(cfg.Model) {
+		return
 	}
-	cfg.applyLocalModelSelection(cfg.Model)
+	for _, model := range localModels(ctx, cfg) {
+		if cfg.Model != "" && model.ID != cfg.Model {
+			continue
+		}
+		if rememberLocalModel(cfg, model) {
+			return
+		}
+	}
 }
 
 func localModels(ctx context.Context, cfg *Config) []modelInfo {
-	_ = ctx
 	configured := configuredLocalModels(cfg)
+	if discovered := discoverLocalModels(ctx, cfg); len(discovered) > 0 {
+		return discovered
+	}
 	if len(configured) > 0 {
 		return configured
 	}
 	return modelsForProvider(providerLocal)
+}
+
+type openAIModelsResponse struct {
+	Data []openAIModel `json:"data"`
+}
+
+type openAIModel struct {
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	ContextLength    int64  `json:"context_length"`
+	MaxContextLength int64  `json:"max_context_length"`
+	MaxModelLength   int64  `json:"max_model_len"`
+	NumContext       int64  `json:"num_ctx"`
+}
+
+// discoverLocalModels queries each configured OpenAI-compatible endpoint. The
+// standard endpoint is <base_url>/models, where base_url normally ends in /v1.
+// Context metadata is optional and vendor-specific; explicit local_models
+// context_window values take precedence over anything returned by the endpoint.
+func discoverLocalModels(ctx context.Context, cfg *Config) []modelInfo {
+	if cfg == nil || len(cfg.LocalModels) == 0 {
+		return nil
+	}
+
+	configuredByID := make(map[string]modelInfo)
+	for _, model := range configuredLocalModels(cfg) {
+		configuredByID[model.ID] = model
+	}
+
+	seen := make(map[string]bool)
+	var discovered []modelInfo
+	for _, local := range cfg.LocalModels {
+		baseURL := strings.TrimRight(strings.TrimSpace(local.BaseURL), "/")
+		if baseURL == "" {
+			continue
+		}
+		models, ok := queryLocalModels(ctx, baseURL+"/models", local.APIKey)
+		if !ok {
+			continue
+		}
+		for _, remote := range models {
+			id := strings.TrimSpace(remote.ID)
+			if id == "" || seen[id] {
+				continue
+			}
+			seen[id] = true
+			model := configuredByID[id]
+			model.ID = id
+			if model.Name == "" {
+				model.Name = strings.TrimSpace(remote.Name)
+			}
+			if model.Name == "" {
+				model.Name = id
+			}
+			if model.ContextWindow == 0 {
+				model.ContextWindow = remote.ContextLength
+				if model.ContextWindow == 0 {
+					model.ContextWindow = remote.MaxContextLength
+				}
+				if model.ContextWindow == 0 {
+					model.ContextWindow = remote.MaxModelLength
+				}
+				if model.ContextWindow == 0 {
+					model.ContextWindow = remote.NumContext
+				}
+			}
+			if model.LocalBaseURL == "" {
+				model.LocalBaseURL = baseURL
+				model.LocalAPIKey = local.APIKey
+			}
+			discovered = append(discovered, model)
+		}
+	}
+	sort.Slice(discovered, func(i, j int) bool { return discovered[i].ID < discovered[j].ID })
+	return discovered
+}
+
+func queryLocalModels(parent context.Context, endpoint, apiKey string) ([]openAIModel, bool) {
+	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, false
+	}
+	if strings.TrimSpace(apiKey) != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, false
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, false
+	}
+	var payload openAIModelsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, false
+	}
+	return payload.Data, true
+}
+
+func applyLocalModelChoice(ctx context.Context, cfg *Config, id string) bool {
+	if cfg.applyLocalModelSelection(id) {
+		return true
+	}
+	for _, model := range localModels(ctx, cfg) {
+		if model.ID != id {
+			continue
+		}
+		return rememberLocalModel(cfg, model)
+	}
+	return false
+}
+
+// rememberLocalModel makes a discovered model available to buildProvider for
+// the rest of the session. It is intentionally kept in memory; persistent
+// configuration remains the user's explicit endpoint configuration.
+func rememberLocalModel(cfg *Config, model modelInfo) bool {
+	if cfg == nil || model.ID == "" || model.LocalBaseURL == "" {
+		return false
+	}
+	if _, ok := cfg.localModelByID(model.ID); !ok {
+		cfg.LocalModels = append(cfg.LocalModels, localModelConfig{
+			ID:            model.ID,
+			Name:          model.Name,
+			BaseURL:       model.LocalBaseURL,
+			APIKey:        model.LocalAPIKey,
+			ContextWindow: model.ContextWindow,
+		})
+	}
+	cfg.Model = model.ID
+	cfg.LocalBaseURL = model.LocalBaseURL
+	cfg.LocalAPIKey = model.LocalAPIKey
+	if model.ContextWindow > 0 {
+		cfg.LocalContextWindow = model.ContextWindow
+		if !cfg.ContextWindowConfigured {
+			cfg.ContextWindow = model.ContextWindow
+		}
+	}
+	return true
 }
 
 func localProviderSublabel(cfg *Config) string {

@@ -101,6 +101,10 @@ A `Team` is a lightweight membership set — it does not own goroutines or resou
 
 `AgentPool` provides three message delivery methods:
 
+`EnsureMainAgent(ctx)` recreates the primary `main` agent from the configured
+provider and default model when it is missing after a fatal model failure. It
+is idempotent and does not recreate sub-agents.
+
 - `SendMessage(id, msg sdk.Message)` appends `msg` to the agent's inbox. The agent's next `Submit` call will deliver it as prior context. Non-blocking. Does **not** start a turn.
 - `Send(id, content string)` calls `agent.Submit(context.Background(), content)`, which starts a new turn immediately (non-blocking goroutine). The turn drains the inbox first.
 - `Deliver(id, msg sdk.Message, wake bool)` is the **atomic deliver-and-process primitive**. It appends `msg` to the inbox and, when `wake` is true, calls `Submit(ctx, "")` so the message is processed immediately (or picked up by drain-until-empty if a turn is already running). It replaces the prior two-call `SendMessage` + `Send`/`Run` pattern at every call site. Returns `ErrAgentNotFound` for unknown IDs and an error for empty content.
