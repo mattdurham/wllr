@@ -66,6 +66,13 @@ type Agent struct {
 
 	history []sdk.Message
 
+	// queuedHistory contains messages that are currently queued but have not
+	// been injected into the conversation history yet. This field tracks messages
+	// that have gone through drain but haven't been committed to history yet.
+	// Protected by queuedHistoryMu.
+	queuedHistory []sdk.Message
+	queuedHistoryMu sync.Mutex
+
 	opts SpawnOpts
 
 	// inbox is the agent's pending-message queue (see mailbox). It owns its own
@@ -263,6 +270,17 @@ func (a *Agent) EditInboxMessage(byIndex int, byMessageID string, newContent str
 // Used for testing and agent reset operations.
 func (a *Agent) SetInbox(msgs []sdk.Message) {
 	a.inbox.msgs = msgs
+}
+
+// QueuedHistory returns a snapshot of queued messages that haven't been injected
+// into conversation history yet. These are messages that have gone through drain
+// but haven't been committed to history yet.
+func (a *Agent) QueuedHistory() []sdk.Message {
+	a.queuedHistoryMu.Lock()
+	h := make([]sdk.Message, len(a.queuedHistory))
+	copy(h, a.queuedHistory)
+	a.queuedHistoryMu.Unlock()
+	return h
 }
 
 // ModelName returns the model name used for context-window sizing.
@@ -787,6 +805,7 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 	// leaving history ending with a lone user message causes "text content
 	// cannot be empty" on the next turn.
 	assistantText := placeholderForEmptyResponse(collectedText, childCtx.Err() != nil)
+	
 	// Record this turn to history. When content is empty (drain-until-empty
 	// path), use the inbox messages instead so we never write an empty user
 	// message — Anthropic rejects empty text content blocks.
@@ -804,6 +823,16 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 	}
 	a.history = append(a.history, sdk.Message{Role: sdk.RoleAssistant, Content: assistantText})
 	a.historyMu.Unlock()
+
+	// Move queuedHistory to history (injection has occurred)
+	a.queuedHistoryMu.Lock()
+	if len(a.queuedHistory) > 0 {
+		a.historyMu.Lock()
+		a.history = append(a.history, a.queuedHistory...)
+		a.historyMu.Unlock()
+		a.queuedHistory = nil
+	}
+	a.queuedHistoryMu.Unlock()
 
 	a.finishTurn(ctx, err, childCtx.Err(), onDone, inboxMsgs)
 }
