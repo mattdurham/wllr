@@ -4,7 +4,7 @@ package sdk
 
 import (
 	"log/slog"
-	
+
 	"charm.land/fantasy"
 )
 
@@ -26,19 +26,19 @@ func ContextUsageFromFantasy(u fantasy.Usage, window int64) ContextUsage {
 	if window > 0 {
 		pct = float64(u.InputTokens) / float64(window) * 100.0
 	}
-	
+
 	// Clamp InputTokens to prevent negative percentages due to int64 overflow
 	inputTokens := u.InputTokens
 	if inputTokens < 0 {
-		slog.Warn("negative InputTokens detected, clamping to 0", 
+		slog.Warn("negative InputTokens detected, clamping to 0",
 			"input_tokens", inputTokens,
 			"output_tokens", u.OutputTokens,
 			"context_window", window)
 		inputTokens = 0
 	}
-	
+
 	// Clamp Percent to reasonable range (0-200%) to catch calculation errors
-	var pctClamped float64 = pct
+	pctClamped := pct
 	if pct < 0 {
 		slog.Warn("negative Percent calculated, clamping to 0",
 			"input_tokens", inputTokens,
@@ -52,7 +52,7 @@ func ContextUsageFromFantasy(u fantasy.Usage, window int64) ContextUsage {
 			"calculated_pct", pct)
 		pctClamped = 200
 	}
-	
+
 	return ContextUsage{
 		InputTokens:   inputTokens,
 		OutputTokens:  u.OutputTokens,

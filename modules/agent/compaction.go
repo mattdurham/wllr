@@ -4,6 +4,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
@@ -47,7 +48,8 @@ const (
 	defaultContextWindow int64 = 1_000_000
 	// reserveTokens is kept free for the model's output response.
 	reserveTokens int64 = 16_384
-	// keepMessages is how many recent messages are kept verbatim after compaction.
+	// keepMessages is retained for tests that construct the historical default
+	// message count; production compaction uses a token budget.
 	keepMessages = 20
 	// defaultKeepRecentTokens is the token budget for recent messages kept verbatim
 	// after proactive compaction. Messages beyond this budget (oldest first) are
@@ -96,16 +98,44 @@ func estimateTokens(msgs []sdk.Message) int64 {
 // estimateStr estimates token count for a single string using the chars/4 heuristic.
 func estimateStr(s string) int64 { return int64(len(s)) / 4 }
 
+// estimateToolTokens estimates the tokens occupied by the tool definitions
+// sent with a provider request. Tool schemas can be a substantial part of the
+// context, especially when many extensions are enabled.
+func estimateToolTokens(tools []fantasy.AgentTool) int64 {
+	var chars int64
+	for _, tool := range tools {
+		raw, err := json.Marshal(tool.Info())
+		if err != nil {
+			continue
+		}
+		chars += int64(len(raw))
+	}
+	return chars / 4
+}
+
 // shouldCompact returns true when the estimated total context (history +
 // system prompt + next message) is close enough to the window limit that
 // compaction should run before the next API call.
 func shouldCompact(history []sdk.Message, systemPrompt, nextMessage string, contextWindow int64) bool {
+	return shouldCompactWithTools(history, systemPrompt, nextMessage, nil, contextWindow)
+}
+
+// shouldCompactWithTools is the preflight compaction check used before a
+// provider request. It includes tool definitions because providers count them
+// against the same context window as messages and system instructions.
+func shouldCompactWithTools(
+	history []sdk.Message,
+	systemPrompt, nextMessage string,
+	tools []fantasy.AgentTool,
+	contextWindow int64,
+) bool {
 	if contextWindow <= 0 {
 		contextWindow = defaultContextWindow
 	}
 	used := estimateTokens(history) +
 		estimateStr(systemPrompt) +
-		estimateStr(nextMessage)
+		estimateStr(nextMessage) +
+		estimateToolTokens(tools)
 	return used > contextWindow-reserveTokens
 }
 

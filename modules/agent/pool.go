@@ -358,6 +358,23 @@ func (p *AgentPool) LanguageModelForModel(ctx context.Context, model string) (fa
 	return p.provider.LanguageModel(ctx, model)
 }
 
+// EnsureMainAgent recreates the primary agent when a fatal model failure has
+// removed it from the pool. It is intentionally limited to the primary agent;
+// sub-agent lifecycle is owned by the orchestrator that created it.
+func (p *AgentPool) EnsureMainAgent(ctx context.Context) error {
+	if p.Get(MainAgentID) != nil {
+		return nil
+	}
+	lm, err := p.LanguageModelForModel(ctx, "")
+	if err != nil {
+		return fmt.Errorf("create main agent model: %w", err)
+	}
+	if _, err := p.Spawn(MainAgentID, lm, SpawnOpts{TurnTimeout: -1}); err != nil && !errors.Is(err, ErrAgentExists) {
+		return fmt.Errorf("spawn main agent: %w", err)
+	}
+	return nil
+}
+
 // Spawn creates and registers a new Agent with the given ID.
 // Returns ErrAgentExists if the ID is already in use.
 // The agent is not started; call agent.Submit to run its first turn.

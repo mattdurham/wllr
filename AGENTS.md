@@ -4,6 +4,13 @@ This repository is a terminal AI coding assistant built with Bubble Tea, wazero,
 and Go/WASM extensions. Keep changes scoped and follow existing module
 boundaries.
 
+## Issue Tracking
+
+- Work tracking lives in GitHub issues for `mattdurham/wllr`.
+- When a user references an issue number in this repo, treat it as a GitHub
+  issue unless they say otherwise.
+- Prefer linking new work to an existing issue before starting broader changes.
+
 ## Repository Layout
 
 - `cmd/` — binary entry point, provider/config wiring, OAuth/login, native tools,

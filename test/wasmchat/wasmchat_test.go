@@ -58,6 +58,10 @@ func (c *envCapabilities) AppendFile(string, string) error    { return nil }
 func (c *envCapabilities) HTTPPost(string, map[string]string, []byte) (int, []byte, error) {
 	return 0, nil, nil
 }
+
+func (c *envCapabilities) HTTPGet(string, map[string]string) (int, []byte, error) {
+	return 0, nil, nil
+}
 func (c *envCapabilities) ConfigRead(string) (json.RawMessage, error) { return nil, nil }
 
 func dispatch(t *testing.T, h *extension.Host, typ sdk.EventType, payload any) {

@@ -200,6 +200,8 @@ const (
 	MethodMailboxSnapshot = "mailbox_snapshot"
 	MethodMailboxDelete   = "mailbox_delete"
 	MethodMailboxEdit     = "mailbox_edit"
+	// MethodQueuedMessages returns all pending queued messages for an agent.
+	MethodQueuedMessages = "queued_messages"
 
 	// Team management host_call methods.
 	MethodTeamCreate       = "team_create"

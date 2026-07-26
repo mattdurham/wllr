@@ -441,6 +441,14 @@ func (s *SceneRenderer) RenderAppendTextNode(
 	return previous, current, true
 }
 
+// trimTrailingNewlines removes trailing newlines from text content to prevent
+// blank lines in rendered output. This is called on all text nodes during
+// rendering to normalize text content that may contain trailing newlines from
+// various sources (user input, streaming responses, etc.).
+func trimTrailingNewlines(s string) string {
+	return strings.TrimRight(s, "\n\r")
+}
+
 // renderNode renders a single node and its subtree to a string given the
 // available content width.
 func renderNode(n sdk.UINode, width int) string {
@@ -448,7 +456,7 @@ func renderNode(n sdk.UINode, width int) string {
 	var body string
 	switch n.Type {
 	case sdk.UINodeText:
-		body = n.Text
+		body = trimTrailingNewlines(n.Text)
 		if n.Props != nil && n.Props.Wrap && innerWidth > 0 {
 			body = lipgloss.Wrap(body, innerWidth, "")
 		}
