@@ -110,9 +110,13 @@ func TestShouldCompact_NegativeWindow_UsesDefault(t *testing.T) {
 }
 
 func TestShouldCompactWithTools_IncludesToolDefinitions(t *testing.T) {
-	tool := fantasy.NewAgentTool("large_tool", strings.Repeat("description ", 3000), func(context.Context, map[string]any, fantasy.ToolCall) (fantasy.ToolResponse, error) {
-		return fantasy.NewTextResponse("ok"), nil
-	})
+	tool := fantasy.NewAgentTool(
+		"large_tool",
+		strings.Repeat("description ", 3000),
+		func(context.Context, map[string]any, fantasy.ToolCall) (fantasy.ToolResponse, error) {
+			return fantasy.NewTextResponse("ok"), nil
+		},
+	)
 
 	if !shouldCompactWithTools(nil, "", "", []fantasy.AgentTool{tool}, 20_000) {
 		t.Error("shouldCompactWithTools returned false even though the tool definition fills the context budget")

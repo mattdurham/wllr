@@ -95,7 +95,6 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 	// in core; the rolling log FILE is written by the bundled `logging` WASM
 	// extension, fed by the dispatchLogHandler via EventLog. See cmd/loghandler.go.
 	cleanupLog := setupLogging(h, *execPrompt == "")
-	defer cleanupLog()
 	cleanupPprof := startPprofServer(*pprofAddr)
 	defer cleanupPprof()
 	// Route the host's own diagnostic logs through the configured default handler
@@ -127,6 +126,7 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 	}
 
 	defer func() {
+		cleanupLog()
 		if err := h.Close(ctx); err != nil {
 			fmt.Fprintf(os.Stderr, "wllr: close extension host: %v\n", err)
 		}
@@ -224,7 +224,7 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 	m.SelectModelFn = func(modelID string) error {
 		var lm fantasy.LanguageModel
 		if currentProvider == providerLocal {
-			if !cfg.applyLocalModelSelection(modelID) {
+			if !applyLocalModelChoice(ctx, cfg, modelID) {
 				return fmt.Errorf("local model %q is not configured in wllr.local_models", modelID)
 			}
 			prov, newLM, err := buildProvider(ctx, cfg)

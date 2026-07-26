@@ -4,6 +4,7 @@
 #   make             — build built-in WASM extensions, then the wllr binary
 #   make builtins    — build embedded WASM extensions → cmd/builtins/*.wasm
 #   make extensions  — build built-ins + install optional extensions
+#   make install     — build and install wllr to ~/.local/bin
 #   make all         — build extensions then the binary
 #   WASM_COMPILER=go make build      — force standard Go WASM builds
 #   WASM_COMPILER=tinygo make build  — require TinyGo WASM builds
@@ -27,10 +28,6 @@
 #   make ci               — run full CI pipeline locally
 #   make precommit        — run build and all quality checks (REQUIRED before commit)
 #
-# Installation targets:
-#   make install         — rebuild and install wllr to local bin (default: ~/.local/bin)
-#   make install-fast    — install wllr without rebuilding (uses existing dist/wllr)
-#
 # Built-in extensions (embedded in the binary):
 #   agents, history, logging, statusline
 #   (read_file, write_file, exec, get_env are native Go — no WASM build needed)
@@ -41,6 +38,7 @@
 DIST_DIR    := dist
 BINARY      := $(DIST_DIR)/wllr
 BUILTINS    := cmd/builtins
+INSTALL_BIN ?= $(HOME)/.local/bin
 EXT_DIR     := $(HOME)/.wllr/extensions
 GOCACHE     ?= $(CURDIR)/.cache/go-build
 GOLANGCI_LINT_CACHE ?= $(CURDIR)/.cache/golangci-lint
@@ -57,12 +55,9 @@ WASM_BUILD = WASM_COMPILER=$(WASM_COMPILER) TINYGO_MODE=$(TINYGO_MODE) TINYGO=$(
 # Package list - lazy evaluation
 PACKAGES = $(shell go list -e -f '{{if .GoFiles}}{{.ImportPath}}{{end}}' ./...)
 
-# Install destination (can be overridden: make install INSTALL_BIN=/custom/path)
-INSTALL_BIN ?= $(HOME)/.local/bin
-
 .DEFAULT_GOAL := build
 
-.PHONY: all build builtins extensions optional-extensions clean clean-extensions lint test format precommit ci install-tools nilaway betteralign betteralign-fix gofumpt-check gofumpt golines-check golines format-all deadcode staticcheck docs-check generate-models install install-fast
+.PHONY: all build builtins extensions optional-extensions install clean clean-extensions lint test format precommit ci install-tools nilaway betteralign betteralign-fix gofumpt-check gofumpt golines-check golines format-all deadcode staticcheck docs-check generate-models
 
 all: extensions build
 
@@ -71,23 +66,10 @@ build: builtins $(DIST_DIR)
 	go build -o $(BINARY) ./cmd/
 	@echo "Built $(BINARY)"
 
-# install builds the binary and installs it to INSTALL_BIN
 install: build
-	@echo "Installing wllr to $(INSTALL_BIN)..."
-	mkdir -p $(INSTALL_BIN)
-	cp $(BINARY) $(INSTALL_BIN)/wllr
-	chmod +x $(INSTALL_BIN)/wllr
+	mkdir -p "$(INSTALL_BIN)"
+	install -m 755 $(BINARY) "$(INSTALL_BIN)/wllr"
 	@echo "Installed wllr to $(INSTALL_BIN)/wllr"
-	@echo "Run 'which wllr' to verify installation"
-
-# install-fast installs without rebuilding (uses existing dist/wllr)
-install-fast:
-	@echo "Installing wllr to $(INSTALL_BIN)..."
-	mkdir -p $(INSTALL_BIN)
-	cp $(BINARY) $(INSTALL_BIN)/wllr
-	chmod +x $(INSTALL_BIN)/wllr
-	@echo "Installed wllr to $(INSTALL_BIN)/wllr"
-	@echo "Run 'which wllr' to verify installation"
 
 # builtins builds embedded WASM extensions.
 builtins: $(DIST_DIR) $(BUILTINS)
@@ -95,6 +77,7 @@ builtins: $(DIST_DIR) $(BUILTINS)
 	$(WASM_BUILD) $(BUILTINS)/history.wasm extensions/history
 	$(WASM_BUILD) $(BUILTINS)/logging.wasm extensions/logging
 	$(WASM_BUILD) $(BUILTINS)/queue.wasm extensions/queue
+	$(WASM_BUILD) $(BUILTINS)/sigil.wasm extensions/sigil
 	$(WASM_BUILD) $(DIST_DIR)/statusline.wasm extensions/statusline
 	cp $(DIST_DIR)/statusline.wasm $(BUILTINS)/statusline.wasm
 	@echo "Built built-in extensions"

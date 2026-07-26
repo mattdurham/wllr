@@ -123,7 +123,12 @@ func shouldCompact(history []sdk.Message, systemPrompt, nextMessage string, cont
 // shouldCompactWithTools is the preflight compaction check used before a
 // provider request. It includes tool definitions because providers count them
 // against the same context window as messages and system instructions.
-func shouldCompactWithTools(history []sdk.Message, systemPrompt, nextMessage string, tools []fantasy.AgentTool, contextWindow int64) bool {
+func shouldCompactWithTools(
+	history []sdk.Message,
+	systemPrompt, nextMessage string,
+	tools []fantasy.AgentTool,
+	contextWindow int64,
+) bool {
 	if contextWindow <= 0 {
 		contextWindow = defaultContextWindow
 	}

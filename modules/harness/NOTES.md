@@ -628,3 +628,33 @@ persists only the chosen model ID.
 *Addendum (2026-07-05):* The Code Intelligence section now says LSP tools are the primary workflow for coding tasks and explicitly places broad shell search, large file sweeps, and raw test commands behind LSP diagnostics/navigation when the question is code-structure related. This addresses sessions where agents saw the LSP tools but kept choosing `exec`, `grep`, and `read_file` first.
 
 *Addendum (2026-07-06):* The guidance now tells agents to call `lsp_capabilities` at the start of repo/code work unless the session has already established available LSP backends and output contracts. This makes code-intelligence discovery an explicit first step instead of relying on the model to infer it from tool names alone.
+
+---
+
+## Trailing newlines trimmed before rendering — fix for excessive spacing (UI P4)
+
+*Added: 2026-07-26*
+
+**Decision:** Add `trimTrailingNewlines(s string) string` helper in scene.go that removes trailing newline characters from text content before rendering. This is called on all `UINodeText` nodes during `renderNode`.
+
+**Rationale:** Text content that contains trailing newlines (e.g., `"text\n"`, `"text\n\n"`) produces blank lines when rendered through lipgloss. This is especially problematic for streamed assistant responses, notifications, and user prompts that may have trailing newlines from various sources. The issue manifests as "large blank gaps" in rendered output, making the UI feel sparse and hard to read. Trimming trailing newlines at render time ensures consistent behavior regardless of how text content was produced, without requiring every caller to sanitize input.
+
+**Consequence:**
+- All text nodes rendered through the scene graph no longer produce blank lines from trailing newlines
+- Text with multiple trailing newlines (`"\n\n"`) renders as single newline or no extra space
+- Empty strings that are only newlines render as empty content rather than blank lines
+- The fix is applied transparently and doesn't affect text wrapped by `lipgloss.Wrap` or styled by lipgloss
+- Behavior matches user expectations — blank lines are intentional content, not accidental formatting artifacts
+
+**Testing:** Add comprehensive tests in `spacing_test.go`:
+- `TestExcessiveSpacingInRenderedText`: Reproduces the issue with trailing newlines in simple text, wrapped text, and VStack
+- `TestAppendTextTrailingNewlines`: Verifies appending text doesn't introduce extra blank lines
+- `TestWrapEdgeCases`: Tests specific edge cases with lipgloss.Wrap and newlines
+
+All harness tests pass, confirming no regressions in chat rendering.
+
+*Addendum (2026-07-26):* The fix is applied in `renderNode` after cloning the node but before any rendering logic. This ensures:
+- All text nodes (including cloned ones for overrides) have trailing newlines trimmed
+- The fix applies to both regular rendering and fast-path append rendering (`RenderAppendTextNode`)
+- Node mutations via `applyOp` can still store trailing newlines (which are then trimmed at render time)
+- The fix is consistent across all scene areas, not just the chat area
