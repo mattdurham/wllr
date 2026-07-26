@@ -7,6 +7,7 @@ import (
 	"charm.land/fantasy"
 	"github.com/mattdurham/wllr/modules/agent"
 	"github.com/mattdurham/wllr/modules/sdk"
+	"github.com/mattdurham/wllr/modules/testutil"
 )
 
 // mockLM is a no-op fantasy.LanguageModel for tests that don't need real streaming.
@@ -583,5 +584,21 @@ func TestPool_Spawn_NoCreatorID_EmptyString(t *testing.T) {
 	}
 	if got := a.CreatorID(); got != "" {
 		t.Errorf("CreatorID = %q, want empty string for top-level agent", got)
+	}
+}
+
+func TestPool_EnsureMainAgent_RecoversMissingMain(t *testing.T) {
+	pool := agent.NewPool()
+	pool.SetProvider(testutil.NewFakeProvider())
+	pool.SetDefaultModelName("fake-model")
+
+	if err := pool.EnsureMainAgent(context.Background()); err != nil {
+		t.Fatalf("EnsureMainAgent: %v", err)
+	}
+	if pool.Get(agent.MainAgentID) == nil {
+		t.Fatal("expected main agent to be recreated")
+	}
+	if err := pool.EnsureMainAgent(context.Background()); err != nil {
+		t.Fatalf("EnsureMainAgent second call: %v", err)
 	}
 }

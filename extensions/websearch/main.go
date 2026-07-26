@@ -80,51 +80,51 @@ If the host supports HTTP GET, this will perform real web searches.`,
 func searchDuckDuckGo(query string) ([]SearchResult, error) {
 	// DuckDuckGo IA API endpoint
 	url := "https://api.duckduckgo.com/?q=" + query + "&format=json&no_html=1"
-	
+
 	// Make HTTP GET request
 	statusCode, body, err := HTTPGet(url, nil)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	if statusCode != 200 {
 		return nil, nil
 	}
-	
+
 	var result struct {
-		AbstractText  string `json:"AbstractText"`
-		AbstractURL   string `json:"AbstractURL"`
-		Entity        string `json:"Entity"`
-		Heading       string `json:"Heading"`
-		Image         string `json:"Image"`
-		Definition    string `json:"Definition"`
-		Definitions   []struct {
-			Source  string `json:"Source"`
-			Text    string `json:"Text"`
-			URL     string `json:"URL"`
+		AbstractText string `json:"AbstractText"`
+		AbstractURL  string `json:"AbstractURL"`
+		Entity       string `json:"Entity"`
+		Heading      string `json:"Heading"`
+		Image        string `json:"Image"`
+		Definition   string `json:"Definition"`
+		Definitions  []struct {
+			Source string `json:"Source"`
+			Text   string `json:"Text"`
+			URL    string `json:"URL"`
 		} `json:"Definitions"`
 	}
-	
+
 	if err := json.Unmarshal([]byte(body), &result); err != nil {
 		return nil, err
 	}
-	
+
 	var results []SearchResult
-	
+
 	// Add abstract result if available
 	if result.AbstractText != "" || result.Heading != "" {
 		title := result.Heading
 		if title == "" {
 			title = query
 		}
-		
+
 		results = append(results, SearchResult{
 			Title:   title,
 			Link:    result.AbstractURL,
 			Snippet: result.AbstractText,
 		})
 	}
-	
+
 	// Add definition results if available
 	for _, def := range result.Definitions {
 		results = append(results, SearchResult{
@@ -133,7 +133,7 @@ func searchDuckDuckGo(query string) ([]SearchResult, error) {
 			Snippet: def.Text,
 		})
 	}
-	
+
 	return results, nil
 }
 
@@ -144,29 +144,29 @@ func searchBing(query string) ([]SearchResult, error) {
 	if envVal, err := GetEnv("WLLR_BING_API_KEY"); err == nil && envVal != "" {
 		apiKey = envVal
 	}
-	
+
 	if apiKey == "" {
 		return nil, nil // No API key available
 	}
-	
+
 	// Bing Search endpoint
 	url := "https://api.bing.microsoft.com/v7.0/search?q=" + query
-	
+
 	// Create headers with API key
 	headers := map[string]string{
 		"Ocp-Apim-Subscription-Key": apiKey,
 	}
-	
+
 	// Make HTTP GET request
 	statusCode, body, err := HTTPGet(url, headers)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	if statusCode != 200 {
 		return nil, nil
 	}
-	
+
 	var result struct {
 		WebPages struct {
 			Value []struct {
@@ -176,11 +176,11 @@ func searchBing(query string) ([]SearchResult, error) {
 			} `json:"value"`
 		} `json:"webPages"`
 	}
-	
+
 	if err := json.Unmarshal([]byte(body), &result); err != nil {
 		return nil, err
 	}
-	
+
 	var results []SearchResult
 	for _, page := range result.WebPages.Value {
 		results = append(results, SearchResult{
@@ -189,7 +189,7 @@ func searchBing(query string) ([]SearchResult, error) {
 			Snippet: page.Description,
 		})
 	}
-	
+
 	return results, nil
 }
 

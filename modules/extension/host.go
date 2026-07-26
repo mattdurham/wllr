@@ -527,6 +527,9 @@ func (h *Host) buildDispatch() map[string]func(ctx context.Context, ext *Extensi
 		sdk.MethodMailboxEdit: func(_ context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleMailboxEdit(ext, req)
 		},
+		sdk.MethodQueuedMessages: func(_ context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleQueuedMessages(ext, req)
+		},
 	}
 }
 
@@ -1179,6 +1182,24 @@ func (h *Host) handleMailboxEdit(ext *Extension, req sdk.HostCallRequest) sdk.Ho
 		return sdk.HostCallResponse{Error: err.Error()}
 	}
 	return sdk.HostCallResponse{}
+}
+
+func (h *Host) handleQueuedMessages(ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+	if h.AgentBridge() == nil {
+		return sdk.HostCallResponse{Error: "queued_messages: not supported by host"}
+	}
+	var params struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return sdk.HostCallResponse{Error: fmt.Sprintf("queued_messages: %v", err)}
+	}
+	messages, err := h.AgentBridge().SnapshotInbox(params.ID)
+	if err != nil {
+		return sdk.HostCallResponse{Error: err.Error()}
+	}
+	result, _ := json.Marshal(map[string][]sdk.Message{"queued_messages": messages})
+	return sdk.HostCallResponse{Result: result}
 }
 
 func (h *Host) handleTeamCreate(req sdk.HostCallRequest) sdk.HostCallResponse {
@@ -2075,6 +2096,13 @@ func (h *Host) Reload(ctx context.Context, paths []string) error {
 
 // Close shuts down all extensions and the wazero runtime.
 func (h *Host) Close(ctx context.Context) error {
+	if h.runtime == nil {
+		return nil
+	}
+	payload, _ := json.Marshal(sdk.ShutdownPayload{Reason: "host_close"})
+	if _, err := h.DispatchEvent(ctx, sdk.Event{Type: sdk.EventShutdown, Payload: payload}); err != nil {
+		h.logger.Warn("extension: shutdown event failed", "err", err)
+	}
 	return h.runtime.Close(ctx)
 }
 

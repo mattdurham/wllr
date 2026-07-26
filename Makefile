@@ -4,6 +4,7 @@
 #   make             — build built-in WASM extensions, then the wllr binary
 #   make builtins    — build embedded WASM extensions → cmd/builtins/*.wasm
 #   make extensions  — build built-ins + install optional extensions
+#   make install     — build and install wllr to ~/.local/bin
 #   make all         — build extensions then the binary
 #   WASM_COMPILER=go make build      — force standard Go WASM builds
 #   WASM_COMPILER=tinygo make build  — require TinyGo WASM builds
@@ -37,6 +38,7 @@
 DIST_DIR    := dist
 BINARY      := $(DIST_DIR)/wllr
 BUILTINS    := cmd/builtins
+INSTALL_BIN ?= $(HOME)/.local/bin
 EXT_DIR     := $(HOME)/.wllr/extensions
 GOCACHE     ?= $(CURDIR)/.cache/go-build
 GOLANGCI_LINT_CACHE ?= $(CURDIR)/.cache/golangci-lint
@@ -55,7 +57,7 @@ PACKAGES = $(shell go list -e -f '{{if .GoFiles}}{{.ImportPath}}{{end}}' ./...)
 
 .DEFAULT_GOAL := build
 
-.PHONY: all build builtins extensions optional-extensions clean clean-extensions lint test format precommit ci install-tools nilaway betteralign betteralign-fix gofumpt-check gofumpt golines-check golines format-all deadcode staticcheck docs-check generate-models
+.PHONY: all build builtins extensions optional-extensions install clean clean-extensions lint test format precommit ci install-tools nilaway betteralign betteralign-fix gofumpt-check gofumpt golines-check golines format-all deadcode staticcheck docs-check generate-models
 
 all: extensions build
 
@@ -64,12 +66,18 @@ build: builtins $(DIST_DIR)
 	go build -o $(BINARY) ./cmd/
 	@echo "Built $(BINARY)"
 
+install: build
+	mkdir -p "$(INSTALL_BIN)"
+	install -m 755 $(BINARY) "$(INSTALL_BIN)/wllr"
+	@echo "Installed wllr to $(INSTALL_BIN)/wllr"
+
 # builtins builds embedded WASM extensions.
 builtins: $(DIST_DIR) $(BUILTINS)
 	$(WASM_BUILD) $(BUILTINS)/agents.wasm extensions/agents
 	$(WASM_BUILD) $(BUILTINS)/history.wasm extensions/history
 	$(WASM_BUILD) $(BUILTINS)/logging.wasm extensions/logging
 	$(WASM_BUILD) $(BUILTINS)/queue.wasm extensions/queue
+	$(WASM_BUILD) $(BUILTINS)/sigil.wasm extensions/sigil
 	$(WASM_BUILD) $(DIST_DIR)/statusline.wasm extensions/statusline
 	cp $(DIST_DIR)/statusline.wasm $(BUILTINS)/statusline.wasm
 	@echo "Built built-in extensions"

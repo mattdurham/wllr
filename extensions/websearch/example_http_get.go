@@ -16,8 +16,8 @@ import (
 
 // SearchResult represents a single search result from DuckDuckGo API
 type DDGResult struct {
-	AbstractText string   `json:"AbstractText"`
-	Heading      string   `json:"Heading"`
+	AbstractText  string `json:"AbstractText"`
+	Heading       string `json:"Heading"`
 	RelatedTopics []struct {
 		Text  string `json:"Text"`
 		URL   string `json:"URL"`
@@ -30,19 +30,19 @@ type DDGResult struct {
 func performWebSearchWithHTTP(query string) SearchResponse {
 	// Example 1: DuckDuckGo Instant Answer API (no key required)
 	// url := fmt.Sprintf("https://api.duckduckgo.com/?q=%s&format=json", escapeQuery(query))
-	
+
 	// Example 2: Bing Search API (requires API key)
 	// url := fmt.Sprintf("https://api.bing.microsoft.com/v7.0/search?q=%s", escapeQuery(query))
 	// headers := map[string]string{
 	//     "Ocp-Apim-Subscription-Key": "<your-api-key>",
 	// }
-	
+
 	// Example 3: Google Custom Search JSON API (requires API key + CX)
 	// url := fmt.Sprintf("https://www.googleapis.com/customsearch/v1?key=<api-key>&cx=<cx-id>&q=%s", escapeQuery(query))
-	
+
 	// Example 4: SearXNG instance (self-hosted, no key required)
 	// url := fmt.Sprintf("https://searx.example.com/search?q=%s&format=json", escapeQuery(query))
-	
+
 	// With HTTP GET support, the implementation would be:
 	return SearchResponse{
 		Error: "HTTP GET not yet supported - see example_http_get.go for implementation plan",
@@ -105,12 +105,12 @@ func parseGoogleResponse(data []byte) ([]SearchResult, error) {
 	// Google response structure is different
 	var resp struct {
 		Items []struct {
-			Title       string `json:"title"`
-			Link        string `json:"link"`
-			_snippet_   string `json:"snippet"`
+			Title     string `json:"title"`
+			Link      string `json:"link"`
+			_snippet_ string `json:"snippet"`
 		} `json:"items"`
 	}
-	
+
 	if err := json.Unmarshal(data, &resp); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %v", err)
 	}
@@ -137,18 +137,18 @@ func performWebSearch(query string) SearchResponse {
 
 	// Use DuckDuckGo API for demo purposes
 	url := fmt.Sprintf("https://api.duckduckgo.com/?q=%s&format=json", escapeQuery(query))
-	
+
 	// When host supports http_get:
 	response, err := sdk.HTTPGet(url)
 	if err != nil {
 		return SearchResponse{Error: fmt.Sprintf("request failed: %v", err)}
 	}
-	
+
 	results, err := parseDuckDuckGoResponse(response)
 	if err != nil {
 		return SearchResponse{Error: err.Error()}
 	}
-	
+
 	return SearchResponse{Results: results}
 }
 */

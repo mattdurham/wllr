@@ -222,6 +222,19 @@ func OnSessionStart(fn func()) {
 	_sdkOn("session_start", func(_ json.RawMessage) { fn() })
 }
 
+// OnShutdown registers a handler called before the host closes extensions.
+// Handlers should flush buffered state and release external resources.
+func OnShutdown(fn func(reason string)) {
+	_sdkOn("shutdown", func(payload json.RawMessage) {
+		var p struct {
+			Reason string `json:"reason"`
+		}
+		if err := json.Unmarshal(payload, &p); err == nil {
+			fn(p.Reason)
+		}
+	})
+}
+
 // OnBeforeAgentStart registers a handler called before the agent processes
 // each user message. prompt is the user's message text.
 func OnBeforeAgentStart(fn func(prompt string)) {

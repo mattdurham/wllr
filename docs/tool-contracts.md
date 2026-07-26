@@ -317,6 +317,48 @@ dependency-satisfied task after setting status to `in_progress` and recording
 `assignee`. Returns `{ "task": null }` when no task is available; that is not a
 fatal error. Missing fields or unknown task list is fatal.
 
+## Sigil Extension
+
+### `sigil_start_generation`
+
+Input: `conversation_id`, `model_provider`, and `model_name` strings are
+required. Optional fields are `agent_name`, `agent_version`, and
+`system_prompt`.
+
+Output: JSON object `{ "generation_id": string }`. When Sigil is disabled,
+returns `{ "status": "disabled", "reason": string }` as a non-fatal result.
+
+### `sigil_set_result`
+
+Input: `generation_id` and `output` strings, required. `output` is the generated
+response text.
+
+Output: JSON object `{ "status": "set" }`. Unknown generations and invalid
+input are fatal tool errors.
+
+### `sigil_end_generation`
+
+Input: `generation_id` string, required. Optional `output` contains the final
+response text.
+
+Output: JSON object `{ "status": "ended" }`. The Sigil SDK performs batching,
+retry, and export asynchronously. Unknown generations are fatal tool errors.
+
+### `sigil_start_tool_execution`
+
+Input: `tool_name` string, required; `conversation_id` string optional.
+
+Output: JSON object `{ "tool_id": string }`. A missing active generation is a
+fatal tool error.
+
+### `sigil_end_tool_execution`
+
+Input: `tool_id` string, required. Optional `arguments` and `result` JSON
+values, plus an `error` string.
+
+Output: JSON object `{ "status": "ended" }`. Unknown tool IDs are fatal tool
+errors.
+
 ## Bundled Extensions Without Static LLM Tools
 
 The `context`, `history`, `logging`, `statusline`, `permissions`,
