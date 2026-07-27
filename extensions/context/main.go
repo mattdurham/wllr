@@ -11,6 +11,10 @@
 //	CWD:    ./AGENTS.md        → ./CLAUDE.md
 //
 // Both global and CWD content are combined (CWD appended after global).
+//
+// After loading context files, the extension also injects the current working
+// directory (CWD) into the system prompt to make file lookup and repo-oriented
+// reasoning more robust.
 package main
 
 import (
@@ -34,6 +38,11 @@ func onSessionStart() {
 	// CWD context: ./AGENTS.md or CLAUDE.md
 	if content := readFirst([]string{"AGENTS.md", "CLAUDE.md"}); content != "" {
 		parts = append(parts, content)
+	}
+
+	// Inject current working directory to make file lookup more robust
+	if cwd, err := os.Getwd(); err == nil && cwd != "" {
+		parts = append(parts, cwdNote(cwd))
 	}
 
 	if len(parts) == 0 {
