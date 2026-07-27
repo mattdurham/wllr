@@ -97,11 +97,11 @@ To send instrumentation data to Grafana Cloud:
 
 ```bash
 # Build the extension
-cd ~/source/wllr/extensions/sigil
+cd extensions/sigil
 GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o sigil.wasm .
 
 # Build the main binary with sigil included
-cd ~/source/wllr
+cd ../..
 make build
 
 # Or build everything including optional extensions

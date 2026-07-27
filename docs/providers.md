@@ -115,7 +115,7 @@ The default `MaxTokens` when `Request.MaxTokens` is `0` is `4096`.
 **Instantiation:**
 
 ```go
-import "github.com/mattdurham/bob/bob/provider/anthropic"
+import "github.com/mattdurham/wllr/provider/anthropic"
 
 p := anthropic.New(os.Getenv("ANTHROPIC_API_KEY"))
 ```
@@ -315,8 +315,8 @@ Implement the `Provider` interface and pass the value to `harness.New`:
 
 ```go
 import (
-    "github.com/mattdurham/bob/bob/harness"
-    "github.com/mattdurham/bob/bob/extension"
+    "github.com/mattdurham/wllr/harness"
+    "github.com/mattdurham/wllr/extension"
 )
 
 type MyProvider struct{}
@@ -344,7 +344,7 @@ No registration step is needed. The harness uses whatever provider is passed to
 configured list of tokens and optionally returns a terminal error.
 
 ```go
-import "github.com/mattdurham/bob/bob/provider/mock"
+import "github.com/mattdurham/wllr/provider/mock"
 
 p := &mock.Provider{
     Tokens: []string{"Hello", ", ", "world", "!"},

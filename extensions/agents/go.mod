@@ -1,3 +1,3 @@
-module github.com/mattdurham/bob/extensions/agents
+module github.com/mattdurham/wllr/extensions/agents
 
 go 1.24

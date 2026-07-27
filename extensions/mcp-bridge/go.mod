@@ -1,3 +1,3 @@
-module github.com/mattdurham/bob/extensions/mcp-bridge
+module github.com/mattdurham/wllr/extensions/mcp-bridge
 
 go 1.24
