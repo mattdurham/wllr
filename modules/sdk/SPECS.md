@@ -91,6 +91,7 @@ All fields are `omitempty`.
 |-----------------|--------|----------------------------------|
 | `prompt`        | string | The user-facing agent prompt     |
 | `system_prompt` | string | The system prompt for this agent |
+| `queued`        | bool   | True when the prompt is waiting in the agent inbox rather than starting immediately |
 
 ### BeforeProviderRequestPayload (`EventBeforeProviderRequest`)
 

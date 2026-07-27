@@ -45,8 +45,8 @@ func onChatSessionStart() {
 // onChatUserPrompt appends a user message box and reserves a fresh assistant text
 // node for the upcoming turn. The assistant box is inserted on first token so an
 // empty response box does not appear while the provider is still thinking.
-func onChatUserPrompt(prompt string) {
-	if !chatEnabled {
+func onChatUserPrompt(prompt string, queued bool) {
+	if !chatEnabled || queued {
 		return
 	}
 	chatSeq++

@@ -6,4 +6,5 @@ package sdk
 type BeforeAgentStartPayload struct {
 	Prompt       string `json:"prompt"`
 	SystemPrompt string `json:"system_prompt"`
+	Queued       bool   `json:"queued,omitempty"`
 }

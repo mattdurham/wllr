@@ -47,6 +47,25 @@ func TestModel_View_ReturnsNonEmpty(t *testing.T) {
 	}
 }
 
+func TestRenderQueuedMessages(t *testing.T) {
+	m := newTestModel()
+	m.width = 80
+	if err := m.agentPool.SendMessage("main", sdk.Message{Role: sdk.RoleUser, Content: "queued work"}); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+
+	view := m.renderQueuedMessages()
+	if !strings.Contains(view, "Queued") {
+		t.Fatalf("queued pane missing header:\n%s", view)
+	}
+	if !strings.Contains(view, "queued work") {
+		t.Fatalf("queued pane missing message:\n%s", view)
+	}
+	if !strings.Contains(view, "╭") || !strings.Contains(view, "╰") {
+		t.Fatalf("queued pane missing border:\n%s", view)
+	}
+}
+
 func TestNew_SeedsActiveModelFromMainAgent(t *testing.T) {
 	pool := agent.NewPool()
 	pool.SetProviderName("openai")
