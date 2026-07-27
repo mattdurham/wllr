@@ -3,6 +3,7 @@
 #
 # Binaries for programs and plugins
 /wllr
+/bin/wllr
 *.exe
 *.exe~
 *.dll

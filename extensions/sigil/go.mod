@@ -1,4 +1,4 @@
-module github.com/user/wllr/extensions/sigil
+module github.com/mattdurham/wllr/extensions/sigil
 
 go 1.25.6
 

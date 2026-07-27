@@ -1,3 +1,3 @@
-module github.com/mattdurham/bob/extensions/queue
+module github.com/mattdurham/wllr/extensions/queue
 
 go 1.24

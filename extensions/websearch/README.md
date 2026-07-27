@@ -147,7 +147,7 @@ curl -H "Ocp-Apim-Subscription-Key: YOUR_KEY" \
 The extension is built using TinyGo via Docker:
 
 ```bash
-cd /Users/matt/source/wllr/extensions/websearch
+cd extensions/websearch
 make build
 ```
 

@@ -34,7 +34,7 @@ This document describes how Grafana's released sigil-sdk has been integrated int
 ## Extension Structure
 
 The extension is located at:
-- `/Users/matt/source/wllr/extensions/sigil/`
+- `extensions/sigil/`
 
 Key files:
 
@@ -126,7 +126,7 @@ Key files:
 ### Building the Extension
 
 ```bash
-cd ~/source/wllr/extensions/sigil
+cd extensions/sigil
 GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o sigil.wasm .
 ```
 
@@ -138,7 +138,7 @@ built with standard Go because its SDK is not TinyGo-compatible.
 The extension is embedded in the main binary:
 
 ```bash
-cd ~/source/wllr
+cd ../..
 make build
 ```
 
@@ -148,10 +148,10 @@ This builds the built-in extensions and embeds `sigil.wasm` in the main binary.
 
 ```bash
 # 1. Copy sigil.wasm to builtins
-cp ~/source/wllr/extensions/sigil/sigil.wasm ~/source/wllr/cmd/builtins/
+cp extensions/sigil/sigil.wasm cmd/builtins/
 
 # 2. Build wllr binary
-cd ~/source/wllr
+cd ../..
 go build -o dist/wllr ./cmd/
 ```
 
