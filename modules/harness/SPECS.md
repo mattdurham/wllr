@@ -425,6 +425,7 @@ Returns the current set of registered tools from `extHost.RegisteredTools()` as 
 ```
 ┌──────────────────────────────────────┐
 │  chat viewport (scrollable)          │  area: "chat", height = m.height - statusLineHeight - inputBoxHeight - dropdownHeight - bottomGutterHeight
+│  queued message pane (optional)      │  `Queued` header; pending main-agent inbox messages stay outside history
 │  tool activity pane                  │  3 content lines + border
 │  [optional: suggestion dropdown]     │  dropdownHeight = min(8, len(suggestions)) + 2 borders (0 when hidden)
 │  [or: modal overlay (centered)]      │  height = chatHeight * 8/10, vertically centered

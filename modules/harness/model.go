@@ -1274,6 +1274,7 @@ func (m Model) submitToAgent(content, display string) (tea.Model, tea.Cmd) {
 	// the before_agent_start event (dispatched below). Here we only manage
 	// streaming state and the per-turn tool log.
 	_ = chatText
+	wasStreaming := m.streaming
 	if !m.streaming {
 		m.chat.ClearToolLog()
 		m.streaming = true
@@ -1294,6 +1295,7 @@ func (m Model) submitToAgent(content, display string) (tea.Model, tea.Cmd) {
 		if extHost != nil {
 			payload, _ := json.Marshal(sdk.BeforeAgentStartPayload{
 				Prompt: content,
+				Queued: wasStreaming,
 			})
 			evt := sdk.Event{Type: sdk.EventBeforeAgentStart, Payload: payload}
 			_, _ = extHost.DispatchEvent(context.Background(), evt)
@@ -1398,7 +1400,7 @@ func (m Model) cmdReloadExtensions() tea.Cmd {
 // chatHeight returns the number of lines available for the chat viewport,
 // accounting for the input box and any visible suggestion dropdown.
 func (m Model) chatHeight() int {
-	h := m.height - m.sceneStackHeight() - m.inputBoxHeight() - m.statusLineHeight() - m.dropdownHeight() - m.consoleHeight() - m.toolActivityHeight() - m.bottomGutterHeight()
+	h := m.height - m.sceneStackHeight() - m.inputBoxHeight() - m.statusLineHeight() - m.dropdownHeight() - m.consoleHeight() - m.queuedMessagesHeight() - m.toolActivityHeight() - m.bottomGutterHeight()
 	if h < 0 {
 		h = 0
 	}
@@ -1642,6 +1644,10 @@ func (m Model) View() tea.View {
 		if m.chat.height > 0 {
 			sb.WriteString(strings.TrimRight(m.chat.View(), "\n") + "\n")
 		}
+		if queued := m.renderQueuedMessages(); queued != "" {
+			sb.WriteString(queued)
+			sb.WriteString("\n")
+		}
 		if tools := m.renderToolActivity(); tools != "" {
 			sb.WriteString(tools)
 			sb.WriteString("\n")
@@ -1826,13 +1832,75 @@ func (m Model) renderInputBox() string {
 }
 
 const (
-	consolePaneLines         = 10
-	toolActivityContentLines = 3
-	toolActivityPaneLines    = toolActivityContentLines + 2
+	consolePaneLines          = 10
+	toolActivityContentLines  = 3
+	toolActivityPaneLines     = toolActivityContentLines + 2
+	queuedMessageContentLines = 3
+	queuedMessagePaneLines    = queuedMessageContentLines + 2
 )
 
 func (m Model) toolActivityHeight() int {
 	return toolActivityPaneLines
+}
+
+func (m Model) queuedMessagesHeight() int {
+	if m.agentPool == nil {
+		return 0
+	}
+	queued, err := m.agentPool.SnapshotInbox(m.mainAgentID)
+	if err != nil || len(queued) == 0 {
+		return 0
+	}
+	return queuedMessagePaneLines
+}
+
+func (m Model) renderQueuedMessages() string {
+	if m.agentPool == nil {
+		return ""
+	}
+	queued, err := m.agentPool.SnapshotInbox(m.mainAgentID)
+	if err != nil || len(queued) == 0 {
+		return ""
+	}
+
+	width := m.width
+	if width < 20 {
+		width = 20
+	}
+	innerWidth := width - 2
+	contentWidth := innerWidth - 2
+	border := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+	dimText := lipgloss.NewStyle().Foreground(lipgloss.Color("#CCCCCC"))
+	label := "─ Queued "
+	fillWidth := innerWidth - lipgloss.Width(label)
+	if fillWidth < 0 {
+		fillWidth = 0
+	}
+	header := border.Render("╭" + label + strings.Repeat("─", fillWidth) + "╮")
+
+	lines := make([]string, 0, len(queued))
+	for _, msg := range queued {
+		content := strings.ReplaceAll(strings.TrimSpace(msg.Content), "\n", " ")
+		lines = append(lines, truncateRunes("queued "+content, contentWidth))
+	}
+	if len(lines) > queuedMessageContentLines {
+		lines = lines[len(lines)-queuedMessageContentLines:]
+	}
+	for len(lines) < queuedMessageContentLines {
+		lines = append(lines, "")
+	}
+
+	var body strings.Builder
+	for _, line := range lines {
+		visible := lipgloss.Width(line)
+		pad := contentWidth - visible
+		if pad < 0 {
+			pad = 0
+		}
+		body.WriteString(border.Render("│") + " " + dimText.Render(line) + strings.Repeat(" ", pad) + " " + border.Render("│") + "\n")
+	}
+	footer := border.Render("╰" + strings.Repeat("─", innerWidth) + "╯")
+	return header + "\n" + body.String() + footer
 }
 
 func (m Model) renderToolActivity() string {

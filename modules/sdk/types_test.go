@@ -22,7 +22,7 @@ func TestEventJSONRoundTrip(t *testing.T) {
 		{
 			name:    "before_agent_start",
 			evtType: sdk.EventBeforeAgentStart,
-			payload: sdk.BeforeAgentStartPayload{Prompt: "hello", SystemPrompt: "be helpful"},
+			payload: sdk.BeforeAgentStartPayload{Prompt: "hello", SystemPrompt: "be helpful", Queued: true},
 		},
 		{
 			name:    "before_provider_request",
