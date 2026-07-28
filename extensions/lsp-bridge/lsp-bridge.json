@@ -1,1 +1,49 @@
-{"permissions": ["exec", "read"], "tools": [{"name": "lsp_detect", "description": "Detect installed LSP servers on the system", "inputSchema": {"type": "object", "properties": {}}}]}
+{
+  "permissions": ["read", "exec"],
+  "tools": [
+    {
+      "name": "lsp_server_start",
+      "description": "Start an LSP server process (gopls, pylsp, etc.)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string", "description": "Server name"},
+          "command": {"type": "string", "description": "Command to run"},
+          "args": {"type": "array", "items": {"type": "string"}, "description": "Arguments to pass"}
+        },
+        "required": ["name", "command"]
+      }
+    },
+    {
+      "name": "lsp_server_stop",
+      "description": "Stop a running LSP server",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string", "description": "Server name to stop"}
+        },
+        "required": ["name"]
+      }
+    },
+    {
+      "name": "lsp_server_list",
+      "description": "List all running LSP servers",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "lsp_send_message",
+      "description": "Send a raw LSP message to a server",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string", "description": "Server name"},
+          "message": {"type": "string", "description": "Raw LSP message to send"}
+        },
+        "required": ["name", "message"]
+      }
+    }
+  ]
+}
