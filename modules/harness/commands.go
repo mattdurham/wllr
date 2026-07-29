@@ -155,6 +155,17 @@ func registerBuiltins(r *Registry) {
 			return func() tea.Msg { return showToolsMsg{} }
 		},
 	})
+
+	// The history extension owns the implementation, but reserving its command
+	// here keeps /history usable if a generated WASM artifact is stale or absent.
+	r.Register(Command{
+		Name:    "history",
+		Desc:    "Browse previous conversations and resume from any point",
+		Instant: true,
+		Handler: func(_ []string) tea.Cmd {
+			return func() tea.Msg { return dispatchOnCommandMsg{Name: "history"} }
+		},
+	})
 }
 
 // Internal message types used by built-in command handlers.
