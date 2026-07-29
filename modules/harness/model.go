@@ -1324,6 +1324,11 @@ func (m Model) submitToAgent(content, display string) (tea.Model, tea.Cmd) {
 			if recoverErr := pool.EnsureMainAgent(context.Background()); recoverErr != nil {
 				sendErr = fmt.Errorf("recover main agent: %w", recoverErr)
 			} else {
+				// EnsureMainAgent creates the pool entry, but harness-owned
+				// callbacks and dynamic tool wiring belong here.
+				if m.program != nil {
+					m.wireMainAgentCallbacks(m.program)
+				}
 				// The first Send failed before enqueueing, so retrying does not
 				// duplicate the user message.
 				sendErr = pool.Send(mainAgentID, content)

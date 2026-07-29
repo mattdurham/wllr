@@ -69,12 +69,20 @@ Must be called after creating the bubbletea program and before calling `prog.Run
 
 **Invariant:** `harnessUIBridge.SetSystemPrompt` and `harnessUIBridge.AppendSystemPrompt` both route through the `AgentPool`, which propagates the prompt to all current and future agents. They do NOT set the prompt on the extension host or the harness model itself.
 
+The host reserves `/history` and dispatches `EventOnCommand` with
+`Name: "history"`; the bundled history extension owns the picker behavior.
+This keeps the command invocable when a generated extension artifact is stale
+or unavailable.
+
 ### Main agent callbacks wired in SetProgram
 
 - `SetOnToken`: a batched token callback (see §5).
 - `SetOnDone`: calls flush on the batcher, then `p.Send(StreamDoneMsg{Err})`.
 - `SetToolsFn`: returns `tools.BuildFantasyTools(extHost, "main", logFn)`.
 - `SetOnToolCall`: `p.Send(ToolCallStartMsg{AgentID: mainID, ID, ToolName, Input})`.
+- If the main agent is recovered after an `ErrAgentNotFound`, these callbacks
+  and the dynamic tool function are wired onto the replacement before the user
+  turn is retried.
 
 Sub-agents spawned via `harnessAgentBridge.Spawn` (delegated to `agent.Spawner`) receive similar wiring with the spawned agent's ID. Their token output is not routed to the main chat, but their tool-call starts are routed to the tool activity pane/log with `AgentID` populated.
 

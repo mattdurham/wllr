@@ -174,3 +174,362 @@ func TestContextWindowFromCatalog(t *testing.T) {
 		t.Errorf("gemini-3-pro-preview ctx = %d, want 1048576", got)
 	}
 }
+
+// TestSupportedThinkingModesForModel tests that each model has the correct thinking modes
+func TestSupportedThinkingModesForModel(t *testing.T) {
+	tests := []struct {
+		name         string
+		provider     string
+		model        string
+		wantModes    int // expected number of thinking modes
+		wantHasNone  bool // whether "none" mode is included
+	}{
+		{
+			name:         "claude-opus-4-8",
+			provider:     "anthropic",
+			model:        "claude-opus-4-8",
+			wantModes:    5,
+			wantHasNone:  false,
+		},
+		{
+			name:         "claude-sonnet-4-6",
+			provider:     "anthropic",
+			model:        "claude-sonnet-4-6",
+			wantModes:    5,
+			wantHasNone:  false,
+		},
+		{
+			name:         "claude-haiku-4-5-20251001",
+			provider:     "anthropic",
+			model:        "claude-haiku-4-5-20251001",
+			wantModes:    1,
+			wantHasNone:  true,
+		},
+		{
+			name:         "gpt-5.5",
+			provider:     "openai",
+			model:        "gpt-5.5",
+			wantModes:    6,
+			wantHasNone:  true,
+		},
+		{
+			name:         "gemini-3.5-flash",
+			provider:     "gemini",
+			model:        "gemini-3.5-flash",
+			wantModes:    5,
+			wantHasNone:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			modes := supportedThinkingModesForModel(tt.provider, tt.model)
+			if len(modes) != tt.wantModes {
+				t.Errorf("supportedThinkingModesForModel(%q, %q) = %d modes, want %d", tt.provider, tt.model, len(modes), tt.wantModes)
+			}
+
+			hasNone := false
+			for _, mode := range modes {
+				if mode.ID == "none" || mode.Name == "None" {
+					hasNone = true
+				}
+			}
+			if hasNone != tt.wantHasNone {
+				t.Errorf("has none mode = %v, want %v", hasNone, tt.wantHasNone)
+			}
+		})
+	}
+}
+
+// TestCurrentThinkingModeForModel tests the current thinking mode lookup
+func TestCurrentThinkingModeForModel(t *testing.T) {
+	tests := []struct {
+		name       string
+		provider   string
+		model      string
+		setupLevel thinkingLevel
+		wantMode   string
+	}{
+		{
+			name:       "anthropic default",
+			provider:   "anthropic",
+			model:      "claude-sonnet-4-6",
+			setupLevel: thinkingOff,
+			wantMode:   "none", // default thinking budget when level is "off"
+		},
+		{
+			name:       "openai default",
+			provider:   "openai",
+			model:      "gpt-5.5",
+			setupLevel: thinkingOff,
+			wantMode:   "none", // default reasoning effort
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.setupLevel != "" {
+				if err := saveThinkingLevel(tt.setupLevel); err != nil {
+					t.Fatalf("failed to setup thinking level %q: %v", tt.setupLevel, err)
+				}
+			}
+
+			mode := currentThinkingModeForModel(tt.provider, tt.model)
+			if mode != tt.wantMode {
+				t.Errorf("currentThinkingModeForModel(%q, %q) = %q, want %q", tt.provider, tt.model, mode, tt.wantMode)
+			}
+
+			if err := saveThinkingLevel(thinkingOff); err != nil {
+				t.Logf("failed to cleanup thinking level: %v", err)
+			}
+		})
+	}
+}
+
+// TestThinkingModesForUnknownModel tests behavior for unknown models
+func TestThinkingModesForUnknownModel(t *testing.T) {
+	// Unknown provider should return empty
+	modes := supportedThinkingModesForModel("unknown-provider", "some-model")
+	if len(modes) != 0 {
+		t.Errorf("unsupported provider returned %d modes, want 0", len(modes))
+	}
+
+	// Unknown model with known provider should return empty
+	modes = supportedThinkingModesForModel("anthropic", "unknown-model")
+	if len(modes) != 0 {
+		t.Errorf("unknown model returned %d modes, want 0", len(modes))
+	}
+
+	// Current mode returns "none" for unknown models (safe default)
+	mode := currentThinkingModeForModel("anthropic", "unknown-model")
+	if mode != "none" {
+		t.Errorf("current thinking mode for unknown model = %q, want none (safe default)", mode)
+	}
+}
+
+// TestThinkingModeHasCorrectMetadata tests that thinking modes have proper metadata
+func TestThinkingModeHasCorrectMetadata(t *testing.T) {
+	modes := supportedThinkingModesForModel("anthropic", "claude-opus-4-8")
+	if len(modes) == 0 {
+		t.Fatal("claude-opus should have thinking modes")
+	}
+
+	// Check that each mode has ID and Name
+	for i, mode := range modes {
+		if mode.ID == "" {
+			t.Errorf("mode %d missing ID", i)
+		}
+		if mode.Name == "" {
+			t.Errorf("mode %d missing Name", i)
+		}
+	}
+
+	// Verify specific modes exist
+	modeIDs := make(map[string]bool)
+	for _, mode := range modes {
+		modeIDs[mode.ID] = true
+	}
+
+	// Claude Opus should have thinking budgets
+	expectedBudgets := []string{"2048", "4096", "16384", "32768", "65536"}
+	for _, budget := range expectedBudgets {
+		if !modeIDs[budget] {
+			t.Errorf("missing thinking budget %q from claude-opus modes", budget)
+		}
+	}
+}
+
+// TestThinkingModeDefaultClaudeHaiku tests that Haiku has no extended thinking
+func TestThinkingModeDefaultClaudeHaiku(t *testing.T) {
+	modes := supportedThinkingModesForModel("anthropic", "claude-haiku-4-5-20251001")
+	if len(modes) != 1 {
+		t.Fatalf("claude-haiku should have 1 mode, got %d", len(modes))
+	}
+
+	if modes[0].ID != "none" {
+		t.Errorf("first mode ID = %q, want none", modes[0].ID)
+	}
+
+	if modes[0].Name != "None" {
+		t.Errorf("first mode Name = %q, want None", modes[0].Name)
+	}
+
+	if modes[0].Description != "No extended thinking" {
+		t.Errorf("first mode Description = %q, want No extended thinking", modes[0].Description)
+	}
+}
+
+// TestThinkingModeDefaultGemini tests that Gemini models have thinking budgets
+func TestThinkingModeDefaultGemini(t *testing.T) {
+	modes := supportedThinkingModesForModel("gemini", "gemini-3.5-flash")
+	if len(modes) != 5 {
+		t.Fatalf("gemini should have 5 modes, got %d", len(modes))
+	}
+
+	expectedBudgets := []string{"512", "4096", "16384", "32768", "65536"}
+	actualBudgets := make([]string, 0, len(modes))
+	for _, m := range modes {
+		actualBudgets = append(actualBudgets, m.ID)
+	}
+
+	for _, expected := range expectedBudgets {
+		found := false
+		for _, actual := range actualBudgets {
+			if actual == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("missing budget %q from gemini modes", expected)
+		}
+	}
+}
+
+// TestThinkingModeDefaultOpenAI tests that OpenAI models have reasoning efforts
+func TestThinkingModeDefaultOpenAI(t *testing.T) {
+	modes := supportedThinkingModesForModel("openai", "gpt-5.5")
+	if len(modes) != 6 {
+		t.Fatalf("openai should have 6 modes, got %d", len(modes))
+	}
+
+	expectedEfforts := []string{"none", "minimal", "low", "medium", "high", "xhigh"}
+	actualEfforts := make([]string, 0, len(modes))
+	for _, m := range modes {
+		actualEfforts = append(actualEfforts, m.ID)
+	}
+
+	for _, expected := range expectedEfforts {
+		found := false
+		for _, actual := range actualEfforts {
+			if actual == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("missing effort %q from openai modes", expected)
+		}
+	}
+}
+
+
+// TestCurrentThinkingModeForModel_Better tests the current thinking mode lookup with better coverage
+func TestCurrentThinkingModeForModel_Better(t *testing.T) {
+	tests := []struct {
+		name       string
+		provider   string
+		model      string
+		setupLevel thinkingLevel // thinking level to set before test
+		wantMode   string        // expected mode after setup
+	}{
+		{
+			name:       "anthropic minimal level",
+			provider:   "anthropic",
+			model:      "claude-opus-4-8",
+			setupLevel: thinkingMinimal,
+			wantMode:   "2048", // minimal budget for Anthropic
+		},
+		{
+			name:       "anthropic low level",
+			provider:   "anthropic",
+			model:      "claude-sonnet-4-6",
+			setupLevel: thinkingLow,
+			wantMode:   "4096", // low budget for Anthropic
+		},
+		{
+			name:       "anthropic high level",
+			provider:   "anthropic",
+			model:      "claude-sonnet-4-6",
+			setupLevel: thinkingHigh,
+			wantMode:   "32768", // high budget for Anthropic
+		},
+		{
+			name:       "openai minimal level",
+			provider:   "openai",
+			model:      "gpt-5.5",
+			setupLevel: thinkingMinimal,
+			wantMode:   "minimal", // minimal effort for OpenAI
+		},
+		{
+			name:       "openai low level",
+			provider:   "openai",
+			model:      "gpt-5.5",
+			setupLevel: thinkingLow,
+			wantMode:   "low", // low effort for OpenAI
+		},
+		{
+			name:       "openai high level",
+			provider:   "openai",
+			model:      "gpt-5.5",
+			setupLevel: thinkingHigh,
+			wantMode:   "high", // high effort for OpenAI
+		},
+		{
+			name:       "gemini minimal level",
+			provider:   "gemini",
+			model:      "gemini-3.5-flash",
+			setupLevel: thinkingMinimal,
+			wantMode:   "512", // minimal budget for Gemini
+		},
+		{
+			name:       "gemini low level",
+			provider:   "gemini",
+			model:      "gemini-3.5-flash",
+			setupLevel: thinkingLow,
+			wantMode:   "4096", // low budget for Gemini
+		},
+		{
+			name:       "gemini high level",
+			provider:   "gemini",
+			model:      "gemini-3.5-flash",
+			setupLevel: thinkingHigh,
+			wantMode:   "32768", // high budget for Gemini
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Save the thinking level first
+			if tt.setupLevel != "" {
+				if err := saveThinkingLevel(tt.setupLevel); err != nil {
+					t.Fatalf("failed to setup thinking level %q: %v", tt.setupLevel, err)
+				}
+			}
+
+			mode := currentThinkingModeForModel(tt.provider, tt.model)
+			if mode != tt.wantMode {
+				t.Errorf("currentThinkingModeForModel(%q, %q) = %q, want %q", tt.provider, tt.model, mode, tt.wantMode)
+			}
+
+			// Cleanup: reset to default
+			if err := saveThinkingLevel(thinkingOff); err != nil {
+				t.Logf("failed to cleanup thinking level: %v", err)
+			}
+		})
+	}
+}
+
+// TestCurrentThinkingModeForUnknownModel tests behavior for unknown models
+func TestCurrentThinkingModeForUnknownModel(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider string
+	}{
+		{"unknown provider", "unknown"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Reset thinking level to default
+			if err := saveThinkingLevel(thinkingOff); err != nil {
+				t.Fatalf("failed to reset thinking level: %v", err)
+			}
+
+			mode := currentThinkingModeForModel(tt.provider, "unknown-model")
+			if mode != "none" {
+				t.Errorf("current thinking mode for unknown model = %q, want none (safe default)", mode)
+			}
+		})
+	}
+}

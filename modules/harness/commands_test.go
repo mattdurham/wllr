@@ -67,10 +67,27 @@ func TestBuiltinHelp(t *testing.T) {
 	for _, c := range cmds {
 		names[c.Name] = true
 	}
-	for _, expected := range []string{"help", "clear", "reload", "model", "models"} {
+	for _, expected := range []string{"help", "clear", "reload", "model", "models", "history"} {
 		if !names[expected] {
 			t.Errorf("expected builtin command %q to be registered", expected)
 		}
+	}
+}
+
+func TestBuiltinHistory_DispatchesExtensionEvent(t *testing.T) {
+	r := NewRegistry()
+	registerBuiltins(r)
+
+	cmd := r.Dispatch("history", nil)
+	if cmd == nil {
+		t.Fatal("expected non-nil command")
+	}
+	msg, ok := cmd().(dispatchOnCommandMsg)
+	if !ok {
+		t.Fatalf("expected dispatchOnCommandMsg, got %T", cmd())
+	}
+	if msg.Name != "history" {
+		t.Fatalf("command name = %q, want history", msg.Name)
 	}
 }
 
