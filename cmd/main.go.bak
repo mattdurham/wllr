@@ -253,39 +253,38 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 		return nil
 	}
 
-	// Wire the /thinking picker: list model-specific reasoning modes, and apply + persist on
+	// Wire the /thinking picker: list reasoning levels, and apply + persist on
 	// selection. Applying sets the main agent's provider options (mapped to the
 	// active provider's native mechanism) for subsequent turns.
 	m.ThinkingListFn = func() []harness.ThinkingChoice {
-		modes := supportedThinkingModesForModel(currentProvider, cfg.Model)
-		if len(modes) == 0 {
-			return nil
-		}
-		out := make([]harness.ThinkingChoice, 0, len(modes))
-		for _, m := range modes {
-			out = append(out, harness.ThinkingChoice{ID: m.ID, Label: m.Name})
+		out := make([]harness.ThinkingChoice, 0, len(thinkingLevels))
+		for _, lvl := range thinkingLevels {
+			out = append(out, harness.ThinkingChoice{ID: string(lvl), Label: thinkingLevelLabels[lvl]})
 		}
 		return out
 	}
 	m.SelectThinkingFn = func(levelID string) error {
-		po := providerOptionsForThinkingMode(currentProvider, levelID)
+		if !isValidThinkingLevel(levelID) {
+			return fmt.Errorf("unknown thinking level %q", levelID)
+		}
+		level := thinkingLevel(levelID)
+		po := providerOptionsForThinking(currentProvider, level)
 		if main := pool.Get(agent.MainAgentID); main != nil {
 			main.SetProviderOptions(po)
 		}
-		if saveErr := saveThinkingMode(levelID); saveErr != nil {
-			slog.Warn("wllr: could not persist thinking mode", "mode", levelID, "error", saveErr)
+		if saveErr := saveThinkingLevel(level); saveErr != nil {
+			slog.Warn("wllr: could not persist thinking level", "level", levelID, "error", saveErr)
 		}
 		return nil
 	}
 
-	// Apply the persisted thinking mode (if any) to the main agent at startup so
+	// Apply the persisted thinking level (if any) to the main agent at startup so
 	// the saved reasoning level survives restarts, and reflect it in the status.
-	if lvl := savedThinkingMode(); lvl != "" {
-		po := providerOptionsForThinkingMode(currentProvider, lvl)
+	if lvl := savedThinkingLevel(); lvl != thinkingOff {
 		if main := pool.Get(agent.MainAgentID); main != nil {
-			main.SetProviderOptions(po)
+			main.SetProviderOptions(providerOptionsForThinking(currentProvider, lvl))
 		}
-		m.SetActiveThinking(lvl)
+		m.SetActiveThinking(string(lvl))
 	}
 
 	// Apply a stored, valid OAuth token at startup (refreshing if expired) so a
