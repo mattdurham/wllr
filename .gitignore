@@ -51,3 +51,4 @@ features.md
 .claude/
 extensions/agents/agents
 *.wasm
+cmd/cmd
