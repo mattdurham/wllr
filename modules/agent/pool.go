@@ -247,14 +247,12 @@ func (p *AgentPool) MainAgentContextUsage() sdk.ContextUsage {
 	return sdk.ContextUsageFromFantasy(a.LastUsage(), window)
 }
 
-// SnapshotInbox returns a copy of an agent's inbox without draining.
+// SnapshotInbox returns a copy of an agent's inbox without draining. Snapshots
+// are safe while the agent is running and are intended for status/UI views.
 func (p *AgentPool) SnapshotInbox(id string) ([]sdk.Message, error) {
 	a := p.Get(id)
 	if a == nil {
 		return nil, ErrAgentNotFound
-	}
-	if a.IsRunning() {
-		return nil, errors.New("cannot read inbox while agent is running")
 	}
 	return a.SnapshotInbox(), nil
 }

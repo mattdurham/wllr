@@ -114,6 +114,11 @@ them for liveness/status reporting. Sending a "ping" message to a running agent 
 queues that message for a later turn; it cannot be observed by the child until the active
 turn finishes and the inbox is drained.
 
+`AgentPool.SnapshotInbox` is a read-only status operation and remains available while an
+agent is running. It returns the messages currently waiting in the inbox; it does not
+include messages already drained into the active turn. Mutating inbox operations remain
+blocked while a turn is running.
+
 `Agent.Activity()` is a non-mutating runtime status snapshot for intra-turn liveness. It
 reports turn start time, last activity time, last tool call time/name, currently active
 tool name (best-effort; cleared when the turn finishes), and whether graceful shutdown has

@@ -123,6 +123,16 @@ func TestSubmit_ConcurrentCallQueuesContent(t *testing.T) {
 		t.Fatal("second Submit blocked for too long — isRunning guard not implemented")
 	}
 
+	// Read-only inbox snapshots must remain available while the active turn is
+	// running; the harness uses this to render queued messages in the TUI.
+	queued, err := pool.SnapshotInbox("concurrent-test")
+	if err != nil {
+		t.Fatalf("SnapshotInbox while running: %v", err)
+	}
+	if len(queued) != 1 || queued[0].Content != "second content" {
+		t.Fatalf("queued snapshot = %+v, want one second-content message", queued)
+	}
+
 	// Release the first turn.
 	lm.Release()
 
