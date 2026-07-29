@@ -7,7 +7,7 @@
 | Test | Scenario | Setup | Assertions |
 |------|----------|-------|------------|
 | `TestAgent_AppendInbox_MessagesDeliveredBeforeNextTurn` | Inbox drains into next turn | Spawn agent, AppendInbox, Submit | Inbox messages present in turn context |
-| `TestAgent_Submit_ConcurrentCallQueuesContent` | Concurrent Submit queues safely | Slow LM + concurrent Submit | Second Submit queues; processed after first |
+| `TestAgent_Submit_ConcurrentCallQueuesContent` | Concurrent Submit queues safely | Slow LM + concurrent Submit | Second Submit queues; snapshot exposes it while first runs; processed after first |
 
 ### inbox_ordering_test.go
 
@@ -52,7 +52,7 @@
 
 | Test | Scenario | Setup | Assertions |
 |------|----------|-------|------------|
-| `TestSubmit_ConcurrentCallQueuesContent` | Second Submit queues while first runs | Slow LM holds turn | Second Submit returns immediately; content queued |
+| `TestSubmit_ConcurrentCallQueuesContent` | Second Submit queues while first runs | Slow LM holds turn | Second Submit returns immediately; SnapshotInbox exposes content while running; content is processed |
 | `TestSubmit_ConcurrentCall_HistoryNotCorrupted` | History integrity under concurrency | Two concurrent Submits | Histories non-overlapping; no data race |
 
 ### spawner_test.go
