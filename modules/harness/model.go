@@ -1879,7 +1879,7 @@ func (m Model) renderQueuedMessages() string {
 	// Calculate how many messages we're showing vs total
 	totalQueued := len(queued)
 	showCount := queuedMessageContentLines
-	
+
 	// Build the label with queue count
 	label := fmt.Sprintf("─ Queued (%d)", totalQueued)
 	if totalQueued > showCount {
