@@ -1427,7 +1427,7 @@ func (m Model) chatHeight() int {
 }
 
 func (m Model) chatHeightForQueue(queued []sdk.Message) int {
-	h := m.height - m.sceneStackHeight() - m.inputBoxHeight() - m.statusLineHeight() - m.dropdownHeight() - m.consoleHeight() - queuedHeight(len(queued)) - m.toolActivityHeight() - m.bottomGutterHeight()
+	h := m.height - m.sceneStackHeight() - m.inputBoxHeight() - m.statusLineHeight() - m.dropdownHeight() - m.consoleHeight() - m.queuedHeight(len(queued)) - m.toolActivityHeight() - m.bottomGutterHeight()
 	if h < 0 {
 		h = 0
 	}
@@ -1882,7 +1882,7 @@ const (
 	queuedMessagePaneLines    = queuedMessageContentLines + 2
 )
 
-func queuedHeight(count int) int {
+func (m Model) queuedHeight(count int) int {
 	if count == 0 {
 		return 0
 	}
