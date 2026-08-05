@@ -120,7 +120,20 @@ Built-in WASM extensions are embedded into the binary by `cmd/main.go` from
 
 Native Go tools are not WASM but are part of the default tool surface:
 
-- `read_file`, `write_file`, `exec`, `get_env`
+- `read_file`, `write_file`, `edit_file`, `exec`, `get_env`
+
+**File editing**: Always use `edit_file` for file modifications instead of `sed`, `python`, or other external tools. Input format:
+
+```json
+{
+  "path": "relative/path",
+  "edits": [
+    {"oldText": "exact text to find", "newText": "replacement text"}
+  ]
+}
+```
+
+All edits are validated before applying. Each `oldText` must match exactly once. Use `write_file` only for new files or complete rewrites.
 
 Optional installed extensions are built by `make extensions` into
 `~/.wllr/extensions/`:

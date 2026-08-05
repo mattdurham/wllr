@@ -47,6 +47,54 @@ Output:
 - Fatal errors: missing `path`, parent-directory creation failure, write
   failure. Error text is plain text.
 
+### `edit_file`
+
+**Preferred tool for file modifications.** Use `edit_file` instead of `sed`,
+`python`, or other external tools when making text replacements. It provides
+safe, atomic editing with exact-match validation.
+
+Input:
+
+- `path` string, required. File path to edit.
+- `edits` array, required. Array of `{oldText, newText}` objects:
+  - `oldText` string, required. Exact text to find.
+  - `newText` string, required. Replacement text.
+
+Output:
+
+- JSON object with:
+  - `success` boolean: `true` if all edits were applied.
+  - `message` string: Human-readable result message.
+  - `edits` array (optional): Indices of successfully applied edits.
+  - `errors` array (optional): Error details for failed edits.
+
+Behavior:
+
+- Every `oldText` must match **exactly once** in the file.
+- If any `oldText` is not found, or found more than once, the edit fails
+  without modifying the file.
+- Overlapping edits are rejected.
+- All edits are validated before any changes are applied (atomic behavior).
+- Returns structured errors identifying which edit failed and why.
+
+Example:
+
+```json
+{
+  "path": "modules/harness/model.go",
+  "edits": [
+    {
+      "oldText": "old function name",
+      "newText": "new function name"
+    },
+    {
+      "oldText": "old value",
+      "newText": "new value"
+    }
+  ]
+}
+```
+
 ### `exec`
 
 Input:
@@ -140,29 +188,25 @@ errors include missing `name` or host team creation failure.
 
 Input: `team_id` and `agent_id` strings, required.
 
-Output: JSON object `{ "status": "added" }`. Fatal errors include missing
-fields or host membership failure.
+Output: JSON object `{ "status": "added" }`. Fatal errors include missing fields or host membership failure.
 
 ### `get_team`
 
 Input: `team_id` string, required.
 
-Output: JSON object returned by the host for that team. Fatal errors include
-missing `team_id` or host lookup failure.
+Output: JSON object returned by the host for that team. Fatal errors include missing `team_id` or host lookup failure.
 
 ### `shutdown_team`
 
 Input: `team_id` string, required.
 
-Output: JSON object `{ "status": "closed" }`. Fatal errors include missing
-`team_id` or host shutdown failure.
+Output: JSON object `{ "status": "closed" }`. Fatal errors include missing `team_id` or host shutdown failure.
 
 ### `send_message`
 
 Input: `agent_id` and `message` strings, required.
 
-Output: JSON object `{ "status": "sent" }`. Fatal errors include missing fields
-or host delivery failure.
+Output: JSON object `{ "status": "sent" }`. Fatal errors include missing fields or host delivery failure.
 
 ## LSP Extension
 

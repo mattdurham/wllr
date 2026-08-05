@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -135,8 +136,25 @@ func buildProvider(ctx context.Context, cfg *Config) (fantasy.Provider, fantasy.
 	return prov, lm, nil
 }
 
-// registerNativeTools registers the four stateless native Go tools (read_file,
-// write_file, exec, get_env) on h, bypassing WASM entirely.
+// editFileInput represents the input schema for edit_file.
+type editFileInput struct {
+	Path  string `json:"path"`
+	Edits []struct {
+		OldText string `json:"oldText"`
+		NewText string `json:"newText"`
+	} `json:"edits"`
+}
+
+// editFileResult represents the structured output from edit_file.
+type editFileResult struct {
+	Success  bool     `json:"success"`
+	Message  string   `json:"message"`
+	Edits    []int    `json:"edits,omitempty"`
+	Errors   []string `json:"errors,omitempty"`
+}
+
+// registerNativeTools registers the native Go tools (read_file, write_file,
+// exec, get_env, edit_file) on h, bypassing WASM entirely.
 func registerNativeTools(h *extension.Host) {
 	h.RegisterNativeTool(sdk.Tool{
 		Name:        "read_file",
@@ -183,6 +201,134 @@ func registerNativeTools(h *extension.Host) {
 			return "write_file: " + err.Error(), true
 		}
 		return fmt.Sprintf("written %d bytes to %s", len(in.Content), in.Path), false
+	})
+
+	h.RegisterNativeTool(sdk.Tool{
+		Name:        "edit_file",
+		Description: "Perform exact text replacement edits to a file. Use this tool instead of sed, python, or other external tools for safe, atomic file editing. Every oldText must match exactly once; all edits are validated before any changes are applied.",
+		InputSchema: json.RawMessage(
+			`{"type":"object","properties":{"path":{"type":"string","description":"Path of the file to edit"},"edits":{"type":"array","description":"Array of {oldText, newText} pairs. Every oldText must match exactly once in the file.","items":{"type":"object","properties":{"oldText":{"type":"string","description":"Exact text to find"},"newText":{"type":"string","description":"Replacement text"}},"required":["oldText","newText"]}}},"required":["path","edits"]}`,
+		),
+		OutputSchema: json.RawMessage(
+			`{"type":"object","properties":{"success":{"type":"boolean"},"message":{"type":"string"},"edits":{"type":"array","items":{"type":"integer"}},"errors":{"type":"array","items":{"type":"string"}}}}`,
+		),
+	}, func(_ context.Context, input json.RawMessage) (string, bool) {
+		var in editFileInput
+		if err := json.Unmarshal(input, &in); err != nil {
+			return "edit_file: invalid input JSON", true
+		}
+		if in.Path == "" {
+			return "edit_file: path is required", true
+		}
+		if len(in.Edits) == 0 {
+			return "edit_file: edits array is required", true
+		}
+
+		// Read the file
+		content, err := os.ReadFile(in.Path)
+		if err != nil {
+			return fmt.Sprintf("edit_file: cannot read file: %v", err), true
+		}
+
+		fileContent := string(content)
+
+		// Validate all edits before making any changes
+		type editMatch struct {
+			start int
+			end   int
+			edit  int
+		}
+		var matches []editMatch
+
+		for i, edit := range in.Edits {
+			if edit.OldText == "" {
+				result, _ := json.Marshal(editFileResult{
+					Success: false,
+					Message: "edit_file: oldText cannot be empty",
+					Errors:  []string{fmt.Sprintf("edit[%d]: oldText is required", i)},
+				})
+				return string(result), false
+			}
+
+			// Find all occurrences of oldText
+			occurrences := findOccurrences(fileContent, edit.OldText)
+
+			if len(occurrences) == 0 {
+				result, _ := json.Marshal(editFileResult{
+					Success: false,
+					Message: fmt.Sprintf("edit_file: no match for oldText at edit %d", i),
+					Errors:  []string{fmt.Sprintf("edit[%d]: oldText not found: %q", i, edit.OldText)},
+				})
+				return string(result), false
+			}
+
+			if len(occurrences) > 1 {
+				result, _ := json.Marshal(editFileResult{
+					Success: false,
+					Message: fmt.Sprintf("edit_file: ambiguous match at edit %d (%d occurrences)", i, len(occurrences)),
+					Errors:  []string{fmt.Sprintf("edit[%d]: oldText found %d times, must match exactly once: %q", i, len(occurrences), edit.OldText)},
+				})
+				return string(result), false
+			}
+
+			// Check for overlapping edits
+			matchStart := occurrences[0]
+			matchEnd := matchStart + len(edit.OldText)
+
+			for _, existing := range matches {
+				if overlaps(matchStart, matchEnd, existing.start, existing.end) {
+					result, _ := json.Marshal(editFileResult{
+						Success: false,
+						Message: "edit_file: overlapping edits detected",
+						Errors: []string{
+							fmt.Sprintf("edit[%d] overlaps with edit[%d]", i, existing.edit),
+						},
+					})
+					return string(result), false
+				}
+			}
+
+			matches = append(matches, editMatch{
+				start: matchStart,
+				end:   matchEnd,
+				edit:  i,
+			})
+		}
+
+		// Sort matches by start position in reverse order for replacement
+		sort.Slice(matches, func(i, j int) bool {
+			return matches[i].start > matches[j].start
+		})
+
+		// Apply edits in reverse order to preserve positions
+		newContent := fileContent
+		for _, m := range matches {
+			edit := in.Edits[m.edit]
+			before := newContent[:m.start]
+			after := newContent[m.end:]
+			newContent = before + edit.NewText + after
+		}
+
+		// Write the file
+		if err := os.WriteFile(in.Path, []byte(newContent), 0o600); err != nil {
+			result, _ := json.Marshal(editFileResult{
+				Success: false,
+				Message: fmt.Sprintf("edit_file: failed to write file: %v", err),
+			})
+			return string(result), false
+		}
+
+		// Success
+		editsApplied := make([]int, len(in.Edits))
+		for i := range in.Edits {
+			editsApplied[i] = i
+		}
+		result, _ := json.Marshal(editFileResult{
+			Success: true,
+			Message: fmt.Sprintf("edit_file: applied %d edit(s) to %s", len(in.Edits), in.Path),
+			Edits:   editsApplied,
+		})
+		return string(result), false
 	})
 
 	h.RegisterNativeTool(sdk.Tool{
@@ -244,6 +390,26 @@ func registerNativeTools(h *extension.Host) {
 		data, _ := json.Marshal(vars)
 		return string(data), false
 	})
+}
+
+// findOccurrences returns all start indices of substr in s.
+func findOccurrences(s, substr string) []int {
+	var occurrences []int
+	start := 0
+	for {
+		pos := strings.Index(s[start:], substr)
+		if pos == -1 {
+			break
+		}
+		occurrences = append(occurrences, start+pos)
+		start += pos + 1
+	}
+	return occurrences
+}
+
+// overlaps returns true if [aStart, aEnd) overlaps with [bStart, bEnd).
+func overlaps(aStart, aEnd, bStart, bEnd int) bool {
+	return aStart < bEnd && bStart < aEnd
 }
 
 type lockedBuffer struct {
