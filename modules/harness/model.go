@@ -590,6 +590,11 @@ func (m Model) cmdDispatchSessionStart() tea.Cmd {
 
 // Update handles all incoming messages.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Queue visibility is derived from the agent inbox and can change on an
+	// agent goroutine without a dedicated Bubble Tea message. Synchronize the
+	// viewport before handling every event so the next render uses the current
+	// layout, including queue appearance and drain transitions.
+	m.syncLayout()
 	if n, cmd, ok := m.updateWindow(msg); ok {
 		return n, cmd
 	}
@@ -1250,6 +1255,19 @@ func (m *Model) chatWidth() int {
 	return 80
 }
 
+// syncLayout keeps viewport sizes aligned with the current dynamic layout.
+// The queue and tool panes are rendered outside ChatView, so ChatView must be
+// resized whenever either pane changes even if no window-size event occurred.
+func (m *Model) syncLayout() {
+	m.syncLayoutWithQueue(m.snapshotQueuedMessages())
+}
+
+func (m *Model) syncLayoutWithQueue(queued []sdk.Message) {
+	height := m.chatHeightForQueue(queued)
+	m.chat.SetSize(m.width, height)
+	m.picker.SetSize(m.width, height)
+}
+
 // skillDisplayName extracts a compact display string from a skill XML block.
 // Returns something like "[skill: bob:work]" instead of the raw XML.
 func skillDisplayName(xml string) string {
@@ -1405,11 +1423,26 @@ func (m Model) cmdReloadExtensions() tea.Cmd {
 // chatHeight returns the number of lines available for the chat viewport,
 // accounting for the input box and any visible suggestion dropdown.
 func (m Model) chatHeight() int {
-	h := m.height - m.sceneStackHeight() - m.inputBoxHeight() - m.statusLineHeight() - m.dropdownHeight() - m.consoleHeight() - m.queuedMessagesHeight() - m.toolActivityHeight() - m.bottomGutterHeight()
+	return m.chatHeightForQueue(m.snapshotQueuedMessages())
+}
+
+func (m Model) chatHeightForQueue(queued []sdk.Message) int {
+	h := m.height - m.sceneStackHeight() - m.inputBoxHeight() - m.statusLineHeight() - m.dropdownHeight() - m.consoleHeight() - queuedHeight(len(queued)) - m.toolActivityHeight() - m.bottomGutterHeight()
 	if h < 0 {
 		h = 0
 	}
 	return h
+}
+
+func (m Model) snapshotQueuedMessages() []sdk.Message {
+	if m.agentPool == nil {
+		return nil
+	}
+	queued, err := m.agentPool.SnapshotInbox(m.mainAgentID)
+	if err != nil {
+		return nil
+	}
+	return queued
 }
 
 func (m Model) bottomGutterHeight() int {
@@ -1618,6 +1651,11 @@ func (m Model) renderDropdown() string {
 
 // View renders the full TUI.
 func (m Model) View() tea.View {
+	queued := m.snapshotQueuedMessages()
+	// The inbox may have changed since the last Bubble Tea message. Sync again
+	// immediately before rendering to make the layout invariant hold even when
+	// a worker goroutine queued or drained a message between updates.
+	m.syncLayoutWithQueue(queued)
 	// Render the input box once — it's used for both height calculation and output.
 	inputBox := m.renderInputBox()
 
@@ -1649,8 +1687,8 @@ func (m Model) View() tea.View {
 		if m.chat.height > 0 {
 			sb.WriteString(strings.TrimRight(m.chat.View(), "\n") + "\n")
 		}
-		if queued := m.renderQueuedMessages(); queued != "" {
-			sb.WriteString(queued)
+		if queuedView := m.renderQueuedMessagesFrom(queued); queuedView != "" {
+			sb.WriteString(queuedView)
 			sb.WriteString("\n")
 		}
 		if tools := m.renderToolActivity(); tools != "" {
@@ -1844,16 +1882,8 @@ const (
 	queuedMessagePaneLines    = queuedMessageContentLines + 2
 )
 
-func (m Model) toolActivityHeight() int {
-	return toolActivityPaneLines
-}
-
-func (m Model) queuedMessagesHeight() int {
-	if m.agentPool == nil {
-		return 0
-	}
-	queued, err := m.agentPool.SnapshotInbox(m.mainAgentID)
-	if err != nil || len(queued) == 0 {
+func queuedHeight(count int) int {
+	if count == 0 {
 		return 0
 	}
 	// Only show queued messages if there's enough space for both chat and pane.
@@ -1865,12 +1895,16 @@ func (m Model) queuedMessagesHeight() int {
 	return queuedMessagePaneLines
 }
 
+func (m Model) toolActivityHeight() int {
+	return toolActivityPaneLines
+}
+
 func (m Model) renderQueuedMessages() string {
-	if m.agentPool == nil {
-		return ""
-	}
-	queued, err := m.agentPool.SnapshotInbox(m.mainAgentID)
-	if err != nil || len(queued) == 0 {
+	return m.renderQueuedMessagesFrom(m.snapshotQueuedMessages())
+}
+
+func (m Model) renderQueuedMessagesFrom(queued []sdk.Message) string {
+	if len(queued) == 0 {
 		return ""
 	}
 

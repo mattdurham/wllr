@@ -3,6 +3,7 @@ package harness
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -63,6 +64,64 @@ func TestRenderQueuedMessages(t *testing.T) {
 	}
 	if !strings.Contains(view, "╭") || !strings.Contains(view, "╰") {
 		t.Fatalf("queued pane missing border:\n%s", view)
+	}
+}
+
+func TestModel_QueueLayoutTracksInboxTransitions(t *testing.T) {
+	m := newTestModel()
+	m.width = 80
+	m.height = 30
+	m.syncLayout()
+	withoutQueue := m.chat.height
+
+	if err := m.agentPool.SendMessage("main", sdk.Message{Role: sdk.RoleUser, Content: "queued work"}); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	m, _ = callUpdate(m, streamTickMsg{})
+	if got, want := m.chat.height, withoutQueue-queuedMessagePaneLines; got != want {
+		t.Fatalf("chat height with queue = %d, want %d", got, want)
+	}
+	if got := renderedLineCount(m.View().Content); got != m.height {
+		t.Fatalf("queued view line count = %d, want terminal height %d", got, m.height)
+	}
+
+	if drained := m.agentPool.Get("main").DrainInbox(); len(drained) != 1 {
+		t.Fatalf("DrainInbox returned %d messages, want 1", len(drained))
+	}
+	m, _ = callUpdate(m, streamTickMsg{})
+	if got := m.chat.height; got != withoutQueue {
+		t.Fatalf("chat height after queue drain = %d, want %d", got, withoutQueue)
+	}
+	if view := m.View().Content; strings.Contains(view, "Queued") {
+		t.Fatalf("queue pane remained after drain:\n%s", view)
+	}
+}
+
+func TestModel_QueueDisplayIsBounded(t *testing.T) {
+	m := newTestModel()
+	m.width = 80
+	m.height = 30
+	for i := 0; i < queuedMessageContentLines+3; i++ {
+		if err := m.agentPool.SendMessage("main", sdk.Message{
+			Role:    sdk.RoleUser,
+			Content: fmt.Sprintf("queued-%d", i),
+		}); err != nil {
+			t.Fatalf("SendMessage(%d): %v", i, err)
+		}
+	}
+
+	view := m.View().Content
+	if !strings.Contains(view, "Queued (6 total, showing latest 3)") {
+		t.Fatalf("queue count summary missing:\n%s", view)
+	}
+	if !strings.Contains(view, "queued queued-4") || !strings.Contains(view, "queued queued-5") {
+		t.Fatalf("latest queued entries missing:\n%s", view)
+	}
+	if strings.Contains(view, "queued queued-3") {
+		t.Fatalf("oldest visible row should be replaced by the overflow hint:\n%s", view)
+	}
+	if got := renderedLineCount(view); got != m.height {
+		t.Fatalf("bounded queue view line count = %d, want terminal height %d", got, m.height)
 	}
 }
 
