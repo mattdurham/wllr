@@ -1,3 +1,7 @@
+---
+okf_version: "0.2"
+---
+
 # wllr — Knowledge
 
 wllr is a terminal AI coding assistant (Bubble Tea v2 TUI) for **developers who
