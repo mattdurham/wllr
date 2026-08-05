@@ -1893,10 +1893,6 @@ func (m Model) toolActivityHeight() int {
 	return toolActivityPaneLines
 }
 
-func (m Model) queuedMessagesHeight() int {
-	return queuedHeight(len(m.snapshotQueuedMessages()))
-}
-
 func (m Model) renderQueuedMessages() string {
 	return m.renderQueuedMessagesFrom(m.snapshotQueuedMessages())
 }
