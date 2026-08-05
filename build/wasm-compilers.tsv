@@ -9,6 +9,7 @@
 extensions/agents	tinygo	verified with Docker TinyGo builder
 extensions/history	tinygo	verified with Docker TinyGo builder
 extensions/logging	tinygo	verified with Docker TinyGo builder
+extensions/plan	tinygo	verified with Docker TinyGo builder
 extensions/queue	tinygo	verified with Docker TinyGo builder
 extensions/statusline	tinygo	verified with Docker TinyGo builder
 extensions/context	tinygo	verified with Docker TinyGo builder

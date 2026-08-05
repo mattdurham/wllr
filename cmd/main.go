@@ -439,7 +439,7 @@ func registerAgentStatusTool(h *extension.Host, pool *agent.AgentPool) {
 
 // loadBuiltinExtensions loads the trusted built-in WASM extensions.
 func loadBuiltinExtensions(ctx context.Context, h *extension.Host) {
-	for _, name := range []string{"agents", "history", "logging", "queue", "statusline"} {
+	for _, name := range []string{"agents", "history", "logging", "plan", "queue", "sigil", "statusline"} {
 		filename := name + ".wasm"
 		data, err := builtinFS.ReadFile("builtins/" + filename)
 		if err != nil {
