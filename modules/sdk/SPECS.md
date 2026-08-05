@@ -323,7 +323,7 @@ Note: Percent is 0–100. CompactConfig.ThresholdPct is a fraction 0.0–1.0.
 
 ---
 
-## host_call Method Constants (50 total)
+## host_call Method Constants (55 total)
 
 ### Core methods
 
@@ -351,6 +351,7 @@ Note: Percent is 0–100. CompactConfig.ThresholdPct is a fraction 0.0–1.0.
 | `MethodWriteFile`         | `"write_file"`         | Write content to a file on the host (requires PermFileWrite)  |
 | `MethodAppendFile`        | `"append_file"`        | Append content to a file, creating it if absent (requires PermFileWrite) |
 | `MethodHTTPPost`          | `"http_post"`          | Make an HTTP POST request (requires PermNetworkWrite)         |
+| `MethodHTTPGet`           | `"http_get"`           | Make an HTTP GET request (requires PermNetworkRead)           |
 | `MethodBeforeToolCall`    | `"before_tool_call"`   | Intercept a tool call before execution (observation constant) |
 | `MethodAfterToolCall`     | `"after_tool_call"`    | Observe a tool result after execution (observation constant)  |
 
@@ -368,6 +369,7 @@ Note: Percent is 0–100. CompactConfig.ThresholdPct is a fraction 0.0–1.0.
 | `MethodMailboxSnapshot`   | `"mailbox_snapshot"`    | Get read-only copy of agent inbox messages    |
 | `MethodMailboxDelete`     | `"mailbox_delete"`      | Remove one or more messages from inbox        |
 | `MethodMailboxEdit`       | `"mailbox_edit"`        | Update message content in inbox               |
+| `MethodQueuedMessages`    | `"queued_messages"`     | Return all pending queued messages for an agent |
 | `MethodAgentResetHistory` | `"agent_reset_history"` | Replace agent's conversation history          |
 
 ### Team management methods
@@ -562,4 +564,4 @@ Returned as `int32` from the `host_call` WASM import (not the JSON layer).
 13. `EventContextUsage` (`"context_usage"`) is fired once per completed turn, after the turn's usage is stored, only on success (not on error or cancellation).
 14. `MethodGetContextUsage` (`"get_context_usage"`) requires no permission; it returns a zero-valued `ContextUsage` when the agent bridge is unavailable.
 15. UI scene-graph types (`UINode`, `UIProps`, `UIPatchOp`, `UIPatchParams`, `UIArea`, `UICreateAreaParams`) are pure JSON data definitions; `UIPatchOp.Index` is a `*int` so a valid index of `0` survives the wire while a nil index (append) is omitted.
-16. All 47 `Method*` constants are documented above; missing methods in SPECS.md indicate incomplete documentation rather than missing implementation.
+16. All 55 `Method*` constants are documented above; missing methods in SPECS.md indicate incomplete documentation rather than missing implementation.
