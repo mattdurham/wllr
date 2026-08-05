@@ -2,10 +2,11 @@
   "name": "websearch",
   "version": "1.0.0",
   "description": "Web search capabilities through HTTP GET requests",
+  "permissions": ["network_read"],
   "tools": [
     {
       "name": "web_search",
-      "description": "Search the web using HTTP GET requests. Returns a list of search results with title, link, and snippet.\n\nSupports:\n- DuckDuckGo Instant Answer API (no API key required)\n- Bing Search API\n- Google Custom Search JSON API\n- Any search API accessible via HTTP GET\n\nIf the host supports HTTP GET, this will perform real web searches. If not, it returns helpful instructions about enabling HTTP_GET capability.",
+      "description": "Search DuckDuckGo's HTML web results without an API key. Returns ranked results with title, link, and snippet.",
       "inputSchema": {
         "type": "object",
         "properties": {

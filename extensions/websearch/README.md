@@ -1,39 +1,24 @@
 # WebSearch Extension for wllr
 
-This extension provides web search capabilities through HTTP requests to various search APIs.
+This extension provides web search by fetching and parsing DuckDuckGo's HTML results page.
 
 ## Features
 
-- Search the web using multiple search APIs
-- Support for DuckDuckGo Instant Answer API (no API key required)
-- Support for Bing Search API (requires Azure API key)
+- Search the web without an API key
+- Parse normal ranked DuckDuckGo HTML results
 - Structured search results with title, link, and snippet
-- Environment variable support for API keys
 
 ## Current Status
 
-**HTTP GET Support Required**
-
-The extension is fully implemented but currently cannot make actual HTTP requests because the wllr host doesn't yet support `http_get` host calls.
-
-When HTTP GET is available in the wllr host, this extension will:
-1. Attempt to use DuckDuckGo Instant Answer API (no API key)
-2. Fall back to Bing Search API if API key is set
-3. Return helpful placeholder messages if neither is available
+The extension uses the host's `http_get` capability and requires the `network_read` permission.
+DuckDuckGo may occasionally return an anti-bot challenge instead of search results.
 
 ## Usage
 
-### With DuckDuckGo (No API Key Required)
+### DuckDuckGo HTML
 
-The extension will automatically use the DuckDuckGo Instant Answer API when no API key is set.
-
-### With Bing Search (Requires API Key)
-
-To enable Bing search, set the `WLLR_BING_API_KEY` environment variable:
-
-```bash
-export WLLR_BING_API_KEY=your_bing_api_key_here
-```
+No API key is required. The extension requests `https://html.duckduckgo.com/html/`, then returns
+up to ten results as structured title, link, and snippet fields.
 
 ## API Reference
 
@@ -106,42 +91,6 @@ Makes an HTTP POST request via the host.
 
 **Requires:** `network_write` permission
 
-## Search APIs Supported
-
-### 1. DuckDuckGo Instant Answer API
-
-**Endpoint:** `https://api.duckduckgo.com/?q={query}&format=json&no_html=1`
-
-**Features:**
-- No API key required
-- Returns abstract text and definitions
-- Limited results
-
-**Example Response:**
-```json
-{
-  "AbstractText": "wllr is a command-line interface tool...",
-  "AbstractURL": "https://en.wikipedia.org/wiki/wllr",
-  "Heading": "wllr",
-  "Entity": "software"
-}
-```
-
-### 2. Bing Search API
-
-**Endpoint:** `https://api.bing.microsoft.com/v7.0/search`
-
-**Features:**
-- High quality search results
-- Requires Azure API key
-- Environment variable: `WLLR_BING_API_KEY`
-
-**Example Request:**
-```bash
-curl -H "Ocp-Apim-Subscription-Key: YOUR_KEY" \
-  https://api.bing.microsoft.com/v7.0/search?q=wllr
-```
-
 ## Build Instructions
 
 The extension is built using TinyGo via Docker:
@@ -163,23 +112,22 @@ docker run --rm -v "${PWD}":/workspace -w /workspace tinygo/tinygo:latest \
 ### Files
 
 - `main.go` - Main extension logic and tool handler
+- `parser.go` - DuckDuckGo HTML result parser
+- `parser_test.go` - Parser and URL construction tests
 - `wllrsdk.go` - wllr SDK (host_call wrappers and API)
 - `Makefile` - Build automation
-- `TODO.md` - Future implementation plan
+- `TODO.md` - Follow-up options and operational notes
 - `example_http_get.go` - Example implementations (placeholder)
 
 ### TODO
 
-See [TODO.md](TODO.md) for:
-- When HTTP GET support becomes available
-- Implementation checklist
-- Future enhancements
+See [TODO.md](TODO.md) for follow-up provider and operational ideas.
 
 ## Security Considerations
 
 - The extension requires `network_read` permission for HTTP GET
-- API keys should be stored as environment variables, not in code
-- Rate limiting should be implemented for APIs with usage limits
+- Search responses are external HTML and should be treated as untrusted input.
+- DuckDuckGo may rate-limit or challenge automated requests.
 
 ## License
 
