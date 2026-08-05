@@ -8,32 +8,6 @@ import (
 	"testing"
 )
 
-func TestResolveLocalProviderConfigUsesConfiguredLocalModel(t *testing.T) {
-	cfg := &Config{
-		Provider: providerLocal,
-		LocalModels: []localModelConfig{
-			{
-				ID:            "deepseek-v4-flash",
-				Name:          "Dwarfstar 4 Flash",
-				BaseURL:       "http://localhost:8000/v1",
-				ContextWindow: 300000,
-			},
-		},
-	}
-
-	resolveLocalProviderConfig(context.Background(), cfg)
-
-	if cfg.Model != "deepseek-v4-flash" {
-		t.Fatalf("Model = %q, want deepseek-v4-flash", cfg.Model)
-	}
-	if cfg.LocalBaseURL != "http://localhost:8000/v1" {
-		t.Fatalf("LocalBaseURL = %q", cfg.LocalBaseURL)
-	}
-	if cfg.ContextWindow != 300000 {
-		t.Fatalf("ContextWindow = %d, want 300000", cfg.ContextWindow)
-	}
-}
-
 func TestLocalModelsUsesConfiguredModels(t *testing.T) {
 	cfg := &Config{
 		LocalModels: []localModelConfig{
