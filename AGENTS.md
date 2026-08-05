@@ -17,6 +17,27 @@ boundaries.
 - See [.knowledge/decisions/github-issue-tracking.md](.knowledge/decisions/github-issue-tracking.md)
   for the full workflow and fallback rules.
 
+## Agent Editing Discipline
+
+- Before reading or editing, verify the repository with `pwd`,
+  `git rev-parse --show-toplevel`, and `git status --short --branch`. Use paths
+  relative to the verified repository root; do not invent alternate checkout
+  paths.
+- Read the existing file and its relevant tests/specs before changing it. Make
+  targeted edits that preserve surrounding content; never replace an entire
+  spec or source file from memory or an incomplete excerpt.
+- Preserve unrelated worktree changes. Do not use `git checkout`, `git reset`,
+  `git clean`, or equivalent destructive commands to discard changes unless the
+  user explicitly requests that exact operation.
+- After edits, inspect `git diff`, run the narrowest relevant tests, run
+  `git diff --check`, and verify the final status before claiming completion.
+- Treat failed, empty, or ambiguous tool output as unknown—not as proof that a
+  file, issue, branch, or feature does not exist. Retry with the verified repo
+  and an authoritative source before reporting absence.
+- Report only commits, pushes, merges, and issue updates confirmed by their
+  command or connector result, including the resulting SHA or URL when
+  available.
+
 ## Repository Layout
 
 - `cmd/` — binary entry point, provider/config wiring, OAuth/login, native tools,
@@ -49,6 +70,17 @@ When adding or revising durable repository knowledge, update the relevant
 `.knowledge/` concept and its section index. Every non-reserved Markdown file
 in the bundle must have YAML frontmatter with a non-empty `type`; `index.md`
 and `log.md` use their reserved OKF structures.
+
+## Coding Playbooks
+
+- For code navigation, definitions, references, refactors, and diagnostics,
+  follow [.knowledge/playbooks/lsp-code-navigation.md](.knowledge/playbooks/lsp-code-navigation.md).
+- For implementing and verifying wllr changes, follow
+  [.knowledge/playbooks/wllr-code-changes.md](.knowledge/playbooks/wllr-code-changes.md).
+- Prefer LSP tools when the relevant extension is available; use `rg`, `git`,
+  and `exec` as fallbacks when LSP output is unavailable or incomplete.
+- For module changes, read the module `SPECS.md` before implementation and
+  update the required spec/test/design documents with the code.
 
 ## Runtime Config And State
 

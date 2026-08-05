@@ -2,8 +2,11 @@
 
 ## 2026-08-05
 
+* **Update**: Added OKF playbooks for LSP-first navigation and wllr-specific code implementation and verification.
+
 * **Update**: Declared the bundle as OKF v0.2, added frontmatter to the comparison report, and documented the catalog in `AGENTS.md`.
 * **Update**: Documented GitHub Issues as the source of truth for work tracking, with `gh`-first and web/connector fallback access.
+* **Update**: Added repository-editing and verification guidance based on recurring runtime-agent failures.
 
 ## 2026-07-01
 

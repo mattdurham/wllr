@@ -9,3 +9,4 @@
 * [Capabilities over policy — ship the seam, not opinions](capabilities-over-policy.md) — interceptor chain + hookable events, not baked-in behavior.
 * [Modules are spec-driven — the // NOTE invariant](spec-driven-modules.md) — code changes update SPECS/NOTES/TESTS.
 * [GitHub Issues are the source of truth for work tracking](github-issue-tracking.md) — use `gh` when available, with GitHub web tooling as the fallback.
+* [Agents verify repository state before editing](agent-editing-discipline.md) — targeted changes, preservation of user work, and verified completion.
