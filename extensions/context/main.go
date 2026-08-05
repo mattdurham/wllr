@@ -2,7 +2,7 @@
 
 // Package main is the context built-in extension for the wllr coding harness.
 // On session_start it reads AGENTS.md (falling back to CLAUDE.md) from
-// ~/.wllr/ and the current working directory, then injects the combined
+// ~/.wllr/ and the current working directory (or parent directories), then injects the combined
 // content as the agent system prompt via set_system_prompt.
 //
 // Lookup order (first match wins for each scope):
@@ -35,8 +35,8 @@ func onSessionStart() {
 		parts = append(parts, content)
 	}
 
-	// CWD context: ./AGENTS.md or CLAUDE.md
-	if content := readFirst([]string{"AGENTS.md", "CLAUDE.md"}); content != "" {
+	// CWD context: search for AGENTS.md or CLAUDE.md in current dir or parent directories
+	if content := findAndReadContextFile(); content != "" {
 		parts = append(parts, content)
 	}
 
@@ -73,6 +73,41 @@ func readFirst(paths []string) string {
 			return strings.TrimSpace(string(data))
 		}
 	}
+	return ""
+}
+
+// findAndReadContextFile searches for AGENTS.md or CLAUDE.md starting from
+// the current working directory and walking up the directory tree.
+// Returns the content of the first file found, or empty string if none found.
+func findAndReadContextFile() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+
+	// Start from current directory and walk up
+	dir := cwd
+	for {
+		for _, filename := range []string{"AGENTS.md", "CLAUDE.md"} {
+			path := filepath.Join(dir, filename)
+			data, err := os.ReadFile(path)
+			if err == nil && len(data) > 0 {
+				Log(1, "context: loaded "+path)
+				return strings.TrimSpace(string(data))
+			}
+		}
+
+		// Move to parent directory
+		parent := filepath.Dir(dir)
+		
+		// Stop if we've reached the root
+		if parent == dir {
+			break
+		}
+		
+		dir = parent
+	}
+
 	return ""
 }
 
