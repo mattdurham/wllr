@@ -1876,7 +1876,15 @@ func (m Model) renderQueuedMessages() string {
 	contentWidth := innerWidth - 2
 	border := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
 	dimText := lipgloss.NewStyle().Foreground(lipgloss.Color("#CCCCCC"))
-	label := "─ Queued "
+	// Calculate how many messages we're showing vs total
+	totalQueued := len(queued)
+	showCount := queuedMessageContentLines
+	
+	// Build the label with queue count
+	label := fmt.Sprintf("─ Queued (%d)", totalQueued)
+	if totalQueued > showCount {
+		label = fmt.Sprintf("─ Queued (%d total, showing latest %d)", totalQueued, showCount)
+	}
 	fillWidth := innerWidth - lipgloss.Width(label)
 	if fillWidth < 0 {
 		fillWidth = 0
@@ -1888,10 +1896,19 @@ func (m Model) renderQueuedMessages() string {
 		content := strings.ReplaceAll(strings.TrimSpace(msg.Content), "\n", " ")
 		lines = append(lines, truncateRunes("queued "+content, contentWidth))
 	}
-	if len(lines) > queuedMessageContentLines {
-		lines = lines[len(lines)-queuedMessageContentLines:]
+	// Show the latest messages, but if queue is large, show a hint
+	if len(lines) > showCount {
+		// Show the last showCount messages
+		lines = lines[len(lines)-showCount:]
+		// Add a hint if we're truncating
+		if len(queued) > showCount {
+			// Replace the first shown line with a hint about older messages
+			hint := fmt.Sprintf("... %d older message(s) in queue", len(queued)-showCount)
+			hint = truncateRunes(hint, contentWidth)
+			lines[0] = dimText.Render(hint)
+		}
 	}
-	for len(lines) < queuedMessageContentLines {
+	for len(lines) < showCount {
 		lines = append(lines, "")
 	}
 
