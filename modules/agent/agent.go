@@ -181,11 +181,22 @@ func (a *Agent) SetToolsFn(fn func() []fantasy.AgentTool) {
 // Messages are delivered before the next Submit turn via DrainInbox.
 // Thread-safe. Silently drops messages with empty content — empty content
 // causes Anthropic API rejection ("text content blocks must be non-empty").
+//
+// For control messages (e.g., shutdown_request) delivered to idle agents,
+// this triggers immediate processing so control messages are acted on without
+// requiring an external Submit call. Regular messages with wake=false remain
+// queued until Submit is called.
 func (a *Agent) AppendInbox(msg sdk.Message) {
 	a.inbox.append(a.id, msg)
 	if isShutdownRequest(msg) {
 		a.shutdownRequested.Store(true)
 		a.markActivity()
+		// If the agent is idle, trigger processing so the shutdown request
+		// is acted on without requiring an external Submit call.
+		if !a.isRunning.Load() {
+			// Use a background context for the drain turn.
+			a.Submit(context.Background(), "")
+		}
 	}
 }
 
