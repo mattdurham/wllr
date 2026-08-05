@@ -114,6 +114,8 @@ Built-in WASM extensions are embedded into the binary by `cmd/main.go` from
   JSONL session records under `~/.wllr/sessions/`.
 - `extensions/logging/` — log event sink. Writes rolling log files under
   `~/.wllr/logs/`.
+- `extensions/plan/` — durable plans with ordered steps, checkpoints, evidence,
+  and completion gates.
 - `extensions/queue/` — queued-message visibility and `/queue` command support.
 - `extensions/statusline/` — scene-driven statusline area, provider/model/status
   display, token/context indicators.

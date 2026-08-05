@@ -309,6 +309,74 @@ Input: `name` string, required.
 Output: plain text containing the skill body with frontmatter stripped. Missing
 `name` or unknown skill is fatal.
 
+## Plan Extension
+
+The built-in plan extension stores state in its private extension store, so
+plans survive process restarts without filesystem permissions.
+
+### `plan_create`
+
+Input: `{title, description?, content?, steps?: [{id?, title, description?, acceptance_checks?}]}`.
+
+Output: `{id, title, status, active, message}`.
+
+### `plan_get`
+
+Input: `{id}`.
+
+Output: A complete plan object including ordered steps, statuses, notes, and evidence.
+
+### `plan_list`
+
+Input: `{status?: "active"|"paused"|"completed"|"archived"}`.
+
+Output: `{plans, count}`.
+
+### `plan_update`
+
+Input: `{id, title?, description?, status?, content?}`. Supplied empty strings
+clear optional text fields; title cannot be empty.
+
+Output: `{id, title, status, message}`.
+
+### `plan_step_update`
+
+Input: `{plan_id, step_id, status?, description?, notes?}`.
+
+Output: The updated step.
+
+### `plan_evidence`
+
+Input: `{plan_id, step_id, evidence}`.
+
+Output: The updated step with the appended evidence entry.
+
+### `plan_checkpoint`
+
+Input: `{plan_id?}`. When omitted, checkpoints the active plan.
+
+Output: `{plan_id, active_id, checkpointed}`.
+
+### `plan_complete`
+
+Input: `{plan_id}`.
+
+Output: `{completed, plan_id, status}` when every step is complete; otherwise
+an error result containing `incomplete_steps`.
+
+### `plan_focus`
+
+Input: `{}`.
+
+Output: The active plan and its first incomplete `next_step`, or an inactive
+result when no plan is selected.
+
+### `plan_set_active`
+
+Input: `{id}`.
+
+Output: `{id, active}`.
+
 ## Tasks Extension
 
 Task objects contain `id`, `title`, `description`, `status`, `priority`, `tags`,
