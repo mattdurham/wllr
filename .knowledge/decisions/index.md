@@ -8,3 +8,4 @@
 * [Reserved "__wllr:" prefix for core-owned picker callbacks](reserved-picker-callback-prefix.md) — one picker widget, two routing paths.
 * [Capabilities over policy — ship the seam, not opinions](capabilities-over-policy.md) — interceptor chain + hookable events, not baked-in behavior.
 * [Modules are spec-driven — the // NOTE invariant](spec-driven-modules.md) — code changes update SPECS/NOTES/TESTS.
+* [GitHub Issues are the source of truth for work tracking](github-issue-tracking.md) — use `gh` when available, with GitHub web tooling as the fallback.

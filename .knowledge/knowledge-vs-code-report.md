@@ -1,3 +1,12 @@
+---
+type: Report
+title: Knowledge graph versus codebase comparison
+description: Audit of the wllr knowledge catalog against the codebase.
+tags: [documentation, audit, knowledge-catalog]
+generated: { by: process:knowledge-catalog, at: 2025-07-01T00:00:00Z }
+status: stable
+---
+
 # Knowledge Graph vs Codebase Comparison Report
 
 **Date:** 2025-07-01  

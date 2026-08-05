@@ -10,6 +10,12 @@ boundaries.
 - When a user references an issue number in this repo, treat it as a GitHub
   issue unless they say otherwise.
 - Prefer linking new work to an existing issue before starting broader changes.
+- GitHub Issues are the source of truth for work status. If the `gh` CLI is
+  installed and authenticated, use `gh issue view`, `gh issue list`, and related
+  commands; otherwise use the GitHub web interface or connector. Local plans
+  and knowledge files are supporting context, not replacements for issue state.
+- See [.knowledge/decisions/github-issue-tracking.md](.knowledge/decisions/github-issue-tracking.md)
+  for the full workflow and fallback rules.
 
 ## Repository Layout
 
@@ -33,6 +39,16 @@ boundaries.
 - `extensions/` — Go WASM extension source plus shared `wllrsdk.go` boilerplate.
 - `docs/` — extension API, tool contracts, provider docs, design notes, and
   plans.
+- `.knowledge/` — the repository knowledge catalog, conforming to OKF v0.2.
+  Start with [.knowledge/index.md](.knowledge/index.md) for architecture,
+  package details, decisions, patterns, playbooks, and planned features. Use
+  the [OKF specification](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)
+  for the bundle format and metadata conventions.
+
+When adding or revising durable repository knowledge, update the relevant
+`.knowledge/` concept and its section index. Every non-reserved Markdown file
+in the bundle must have YAML frontmatter with a non-empty `type`; `index.md`
+and `log.md` use their reserved OKF structures.
 
 ## Runtime Config And State
 
