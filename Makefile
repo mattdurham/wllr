@@ -4,7 +4,7 @@
 #   make             — build built-in WASM extensions, then the wllr binary
 #   make builtins    — build embedded WASM extensions → cmd/builtins/*.wasm
 #   make extensions  — build built-ins + install optional extensions
-#   make install     — build and install wllr to ~/.local/bin
+#   make install     — build and install wllr plus extensions
 #   make all         — build extensions then the binary
 #   WASM_COMPILER=go make build      — force standard Go WASM builds
 #   WASM_COMPILER=tinygo make build  — require TinyGo WASM builds
@@ -29,7 +29,7 @@
 #   make precommit        — run build and all quality checks (REQUIRED before commit)
 #
 # Built-in extensions (embedded in the binary):
-#   agents, history, logging, statusline
+#   agents, history, logging, plan, queue, sigil, statusline
 #   (read_file, write_file, exec, get_env are native Go — no WASM build needed)
 #
 # Installed extensions (loaded from ~/.wllr/extensions/ at runtime):
@@ -66,7 +66,7 @@ build: builtins $(DIST_DIR)
 	go build -o $(BINARY) ./cmd/
 	@echo "Built $(BINARY)"
 
-install: build
+install: extensions build
 	mkdir -p "$(INSTALL_BIN)"
 	install -m 755 $(BINARY) "$(INSTALL_BIN)/wllr"
 	@echo "Installed wllr to $(INSTALL_BIN)/wllr"
@@ -76,6 +76,7 @@ builtins: $(DIST_DIR) $(BUILTINS)
 	$(WASM_BUILD) $(BUILTINS)/agents.wasm extensions/agents
 	$(WASM_BUILD) $(BUILTINS)/history.wasm extensions/history
 	$(WASM_BUILD) $(BUILTINS)/logging.wasm extensions/logging
+	$(WASM_BUILD) $(BUILTINS)/plan.wasm extensions/plan
 	$(WASM_BUILD) $(BUILTINS)/queue.wasm extensions/queue
 	$(WASM_BUILD) $(BUILTINS)/sigil.wasm extensions/sigil
 	$(WASM_BUILD) $(DIST_DIR)/statusline.wasm extensions/statusline
@@ -104,7 +105,7 @@ optional-extensions:
 	cp extensions/mcp-bridge/mcp-bridge.json $(EXT_DIR)/mcp-bridge/
 	$(WASM_BUILD) $(EXT_DIR)/otel-traces/otel-traces.wasm extensions/otel-traces
 	cp extensions/otel-traces/extension.yaml $(EXT_DIR)/otel-traces/
-	cp extensions/otel-traces/otel-traces.json $(EXT_DIR)/otel-traces
+	cp extensions/otel-traces/otel-traces.json $(EXT_DIR)/otel-traces/
 	$(WASM_BUILD) $(EXT_DIR)/websearch/websearch.wasm extensions/websearch
 	cp extensions/websearch/websearch.json $(EXT_DIR)/websearch/
 	@echo "Installed optional extensions to $(EXT_DIR)"
