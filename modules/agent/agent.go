@@ -67,11 +67,6 @@ type Agent struct {
 
 	history []sdk.Message
 
-	// queuedHistory contains messages that are currently queued but have not
-	// been injected into the conversation history yet. This field tracks messages
-	// that have gone through drain but haven't been committed to history yet.
-	// Protected by queuedHistoryMu.
-	queuedHistory []sdk.Message
 
 	opts SpawnOpts
 
@@ -113,7 +108,6 @@ type Agent struct {
 
 	lastSummaryMu sync.RWMutex
 
-	queuedHistoryMu sync.Mutex
 
 	// cancelMu protects the cancel function for the current active turn.
 	cancelMu sync.Mutex
@@ -274,16 +268,6 @@ func (a *Agent) SetInbox(msgs []sdk.Message) {
 	a.inbox.msgs = msgs
 }
 
-// QueuedHistory returns a snapshot of queued messages that haven't been injected
-// into conversation history yet. These are messages that have gone through drain
-// but haven't been committed to history yet.
-func (a *Agent) QueuedHistory() []sdk.Message {
-	a.queuedHistoryMu.Lock()
-	h := make([]sdk.Message, len(a.queuedHistory))
-	copy(h, a.queuedHistory)
-	a.queuedHistoryMu.Unlock()
-	return h
-}
 
 // ModelName returns the model name used for context-window sizing.
 func (a *Agent) ModelName() string {
@@ -834,15 +818,6 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 	a.history = append(a.history, sdk.Message{Role: sdk.RoleAssistant, Content: assistantText})
 	a.historyMu.Unlock()
 
-	// Move queuedHistory to history (injection has occurred)
-	a.queuedHistoryMu.Lock()
-	if len(a.queuedHistory) > 0 {
-		a.historyMu.Lock()
-		a.history = append(a.history, a.queuedHistory...)
-		a.historyMu.Unlock()
-		a.queuedHistory = nil
-	}
-	a.queuedHistoryMu.Unlock()
 
 	a.finishTurn(ctx, err, childCtx.Err(), onDone, inboxMsgs)
 }
