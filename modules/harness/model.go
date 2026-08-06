@@ -1891,10 +1891,12 @@ func (m Model) queuedHeight(count int) int {
 	if count == 0 {
 		return 0
 	}
-	// Only show queued messages if there's enough space for both chat and pane.
-	// Reserve at least 5 lines for the chat viewport to remain usable.
+	// Keep the queue visible whenever the fixed lower UI can fit. The chat
+	// viewport is the flexible region and may shrink to zero; hiding the queue
+	// or appending it after a full-height chat viewport makes the input appear
+	// to stop accepting text when messages are queued.
 	others := m.sceneStackHeight() + m.inputBoxHeight() + m.statusLineHeight() + m.dropdownHeight() + m.consoleHeight() + m.toolActivityHeight() + m.bottomGutterHeight()
-	if m.height-others < queuedMessagePaneLines+5 {
+	if m.height-others < queuedMessagePaneLines {
 		return 0
 	}
 	return queuedMessagePaneLines

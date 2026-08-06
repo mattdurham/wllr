@@ -179,7 +179,8 @@ Each agent entry includes `id`, `name`, `is_running`, `working`, `liveness`,
 
 ### `create_team`
 
-Input: `name` string, required.
+Input: `name` string, required. Use the exact skill name from the available
+skills list, including frontmatter namespaces such as `bob:work-simple`.
 
 Output: JSON object `{ "team_id": "team-<name>", "status": "created" }`. Fatal
 errors include missing `name` or host team creation failure.

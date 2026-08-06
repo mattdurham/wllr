@@ -71,9 +71,9 @@ func init() {
 	)
 	RegisterToolWithOutput(
 		"get_skill",
-		"Get the body content of a named skill (frontmatter stripped)",
+		"Get the body content of a named skill (use the exact frontmatter name, such as bob:work-simple; frontmatter is stripped)",
 		json.RawMessage(
-			`{"type":"object","properties":{"name":{"type":"string","description":"Skill name (directory name)"}},"required":["name"]}`,
+			`{"type":"object","properties":{"name":{"type":"string","description":"Exact skill name from the available_skills list, such as bob:work-simple"}},"required":["name"]}`,
 		),
 		json.RawMessage(`{"type":"string","description":"Skill body text with frontmatter stripped"}`),
 	)
@@ -192,15 +192,16 @@ func onSessionStart() {
 	}
 }
 
-// appendSkillsToPrompt adds an <available_skills> XML block to the system
-// prompt, matching pi's format so the LLM knows to use read_file to load
-// a skill when the task matches its description.
+// appendSkillsToPrompt adds an <available_skills> XML block and explicit
+// natural-language routing guidance to the system prompt.
 func appendSkillsToPrompt() {
 	if len(skills) == 0 {
 		return
 	}
 	text := "\n\nThe following skills provide specialized instructions for specific tasks.\n" +
-		"Use the read_file tool to load a skill's file when the task matches its description.\n" +
+		"If the user mentions a skill in natural language, including a reference such as /bob:work-simple, interpret that as a request to use the skill when the surrounding request is asking for it.\n" +
+		"For a natural-language skill reference, call get_skill with the exact name from <available_skills> and follow the returned instructions. Do not pass a skill name or slash command to exec, and do not try to launch a separate Bob CLI.\n" +
+		"If the user enters a slash command by itself, the harness may dispatch it directly; otherwise resolve the mentioned skill with get_skill.\n" +
 		"When a skill file references a relative path, resolve it against the skill directory " +
 		"(parent of SKILL.md) and use that absolute path in tool commands.\n\n" +
 		"<available_skills>"
