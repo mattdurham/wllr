@@ -1687,9 +1687,14 @@ func (m Model) View() tea.View {
 		if m.chat.height > 0 {
 			sb.WriteString(strings.TrimRight(m.chat.View(), "\n") + "\n")
 		}
-		if queuedView := m.renderQueuedMessagesFrom(queued); queuedView != "" {
-			sb.WriteString(queuedView)
-			sb.WriteString("\n")
+		// queuedHeight may intentionally return zero on small terminals so the
+		// queue cannot push the input box below the visible screen. Keep the
+		// render decision in sync with the layout calculation.
+		if m.queuedHeight(len(queued)) > 0 {
+			if queuedView := m.renderQueuedMessagesFrom(queued); queuedView != "" {
+				sb.WriteString(queuedView)
+				sb.WriteString("\n")
+			}
 		}
 		if tools := m.renderToolActivity(); tools != "" {
 			sb.WriteString(tools)
