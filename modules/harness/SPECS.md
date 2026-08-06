@@ -451,7 +451,7 @@ Returns the current set of registered tools from `extHost.RegisteredTools()` as 
 - `inputBoxHeight()` counts the rendered input box lines instead of relying on a fixed constant, so the statusline cannot push the input bottom border off-screen if textarea rendering changes.
 - `toolActivityHeight()` returns 5 rows in the normal layout; those 5 rows are subtracted from `chatHeight()`.
 - Before a normal `View()` render, `ChatView.height` equals the layout computed from the same stable main-agent inbox snapshot used to render the queued-message pane, including its current five-row height when non-empty. Layout synchronization runs before updates and rendering; an inbox transition is reflected on the next render without allowing height/render decisions from one frame to disagree.
-- If the terminal cannot fit the queue pane while preserving the fixed lower UI, the queue pane is omitted from the render as well as from the height calculation; queued messages remain in the inbox and can be shown after the terminal grows.
+- If the terminal cannot fit the queue pane while preserving the fixed lower UI, the queue pane is omitted from the render as well as from the height calculation; otherwise the chat viewport yields space to the queue and may shrink to zero while the input remains visible.
 - `bottomGutterHeight()` reserves one trailing row when the terminal has more than one row, so the input bottom border is not rendered on the final terminal line.
 - `chatHeight()` bottoms out at 0 in very small terminals; when collapsed, `View()` omits the chat viewport row so the fixed lower UI can still fit.
 - `UIAreaStatus` areas are NOT included in `renderScenes()` — they are rendered by `renderStatusLine()` between the console pane and the input box.
