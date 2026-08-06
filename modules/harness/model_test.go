@@ -125,6 +125,23 @@ func TestModel_QueueDisplayIsBounded(t *testing.T) {
 	}
 }
 
+func TestModel_QueuePaneHidesWhenItWouldPushInputOffScreen(t *testing.T) {
+	m := newTestModel()
+	m.width = 80
+	m.height = 15
+	if err := m.agentPool.SendMessage("main", sdk.Message{Role: sdk.RoleUser, Content: "queued work"}); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+
+	view := m.View().Content
+	if strings.Contains(view, "Queued") {
+		t.Fatalf("queue pane should be hidden when terminal is too short:\n%s", view)
+	}
+	if !strings.Contains(view, "╰") {
+		t.Fatalf("input box should remain visible when queue is hidden:\n%s", view)
+	}
+}
+
 func TestNew_SeedsActiveModelFromMainAgent(t *testing.T) {
 	pool := agent.NewPool()
 	pool.SetProviderName("openai")

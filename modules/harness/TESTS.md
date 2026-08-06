@@ -180,6 +180,7 @@ The following scenarios are not currently covered and should be added:
 | `TestRenderQueuedMessages` | Main-agent inbox contains a pending message | queued message snapshot and terminal width | bordered `Queued` pane renders the message separately from chat history |
 | `TestModel_QueueLayoutTracksInboxTransitions` | Main-agent inbox gains and then drains a pending message | fixed terminal size and queue transitions | chat viewport shrinks/restores by the queue pane height; rendered output remains within terminal height |
 | `TestModel_QueueDisplayIsBounded` | More messages are queued than the visible limit | six pending messages | total count and older-message hint render; the three-row queue body remains bounded; output remains within terminal height |
+| `TestModel_QueuePaneHidesWhenItWouldPushInputOffScreen` | Queue exists in a short terminal | 15-row terminal | queue pane is omitted and the input box remains visible |
 | `TestModel_View_WithStatusLineFitsHeight` | Statusline plus input stays within terminal height | one-line status scene; small terminal height | rendered view line count equals terminal height; input bottom border present above final gutter row |
 | `TestHarnessAgentBridgeListIncludesRuntimeState` | Agent bridge exposes runtime liveness in list results | running blocking agent | `AgentInfo` includes running/working state, `liveness=working`, and non-negative liveness age/duration fields |
 
