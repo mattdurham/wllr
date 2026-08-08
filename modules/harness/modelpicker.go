@@ -41,7 +41,12 @@ func (m *Model) openModelPicker() {
 		}
 		items = append(items, sdk.ShowPickerItem{ID: c.ID, Label: c.Name, Sublabel: sub})
 	}
-	m.picker.Open("Select a model  (↑↓ · enter · esc)", items, modelPickerCallback)
+	title := "Select a model  (↑↓ · enter · esc)"
+	if m.pendingModelPicker {
+		title = "Previous model unavailable; select a replacement  (↑↓ · enter · esc)"
+		m.pendingModelPicker = false
+	}
+	m.picker.Open(title, items, modelPickerCallback)
 	m.picker.SetSize(m.width, m.chatHeight())
 }
 

@@ -10,21 +10,34 @@ import (
 	"time"
 )
 
-func resolveLocalProviderConfig(ctx context.Context, cfg *Config) {
+// resolveLocalProviderConfig applies the selected local model when available.
+// It returns true when a non-empty stale selection was replaced so the UI can
+// ask the user to confirm the new model at startup.
+func resolveLocalProviderConfig(ctx context.Context, cfg *Config) bool {
 	if cfg == nil || cfg.Provider != providerLocal {
-		return
+		return false
 	}
-	if cfg.applyLocalModelSelection(cfg.Model) {
-		return
-	}
-	for _, model := range localModels(ctx, cfg) {
+	models := localModels(ctx, cfg)
+	// A persisted model may disappear from a local server after a model
+	// replacement or endpoint change. Prefer the configured model when it is
+	// still available, otherwise fall back to the first discovered/configured
+	// model so startup does not fail with a misleading "matching model" error.
+	for _, model := range models {
 		if cfg.Model != "" && model.ID != cfg.Model {
 			continue
 		}
 		if rememberLocalModel(cfg, model) {
-			return
+			return false
 		}
 	}
+	if cfg.Model != "" {
+		for _, model := range models {
+			if rememberLocalModel(cfg, model) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func localModels(ctx context.Context, cfg *Config) []modelInfo {

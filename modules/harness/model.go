@@ -214,6 +214,7 @@ type Model struct {
 
 	modalScroll        int
 	pendingSetupWizard bool
+	pendingModelPicker bool
 	streaming          bool
 	consoleVisible     bool
 
@@ -516,6 +517,12 @@ func (m *Model) SetPendingSetupWizard() {
 	m.pendingSetupWizard = true
 }
 
+// SetPendingModelPicker marks startup as needing confirmation of a local
+// model replacement after the configured model became unavailable.
+func (m *Model) SetPendingModelPicker() {
+	m.pendingModelPicker = true
+}
+
 // SetActiveThinking sets the displayed active reasoning level and reflects it in
 // the status bar. Used at startup to show the persisted level. Does not itself
 // change the agent's provider options.
@@ -568,6 +575,9 @@ func (m Model) Init() tea.Cmd {
 	}
 	if m.pendingSetupWizard {
 		cmds = append(cmds, func() tea.Msg { return showLoginProviderPickerMsg{} })
+	}
+	if m.pendingModelPicker {
+		cmds = append(cmds, func() tea.Msg { return showModelPickerMsg{} })
 	}
 	return tea.Batch(cmds...)
 }
@@ -1427,7 +1437,9 @@ func (m Model) chatHeight() int {
 }
 
 func (m Model) chatHeightForQueue(queued []sdk.Message) int {
-	h := m.height - m.sceneStackHeight() - m.inputBoxHeight() - m.statusLineHeight() - m.dropdownHeight() - m.consoleHeight() - m.queuedHeight(len(queued)) - m.toolActivityHeight() - m.bottomGutterHeight()
+	h := m.height - m.sceneStackHeight() - m.inputBoxHeight() - m.statusLineHeight() - m.dropdownHeight() - m.consoleHeight() - m.queuedHeight(
+		len(queued),
+	) - m.toolActivityHeight() - m.bottomGutterHeight()
 	if h < 0 {
 		h = 0
 	}
@@ -1966,7 +1978,18 @@ func (m Model) renderQueuedMessagesFrom(queued []sdk.Message) string {
 		if pad < 0 {
 			pad = 0
 		}
-		body.WriteString(border.Render("│") + " " + dimText.Render(line) + strings.Repeat(" ", pad) + " " + border.Render("│") + "\n")
+		body.WriteString(
+			border.Render(
+				"│",
+			) + " " + dimText.Render(
+				line,
+			) + strings.Repeat(
+				" ",
+				pad,
+			) + " " + border.Render(
+				"│",
+			) + "\n",
+		)
 	}
 	footer := border.Render("╰" + strings.Repeat("─", innerWidth) + "╯")
 	return header + "\n" + body.String() + footer
