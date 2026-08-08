@@ -54,7 +54,7 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 	}
 
 	ctx := context.Background()
-	resolveLocalProviderConfig(ctx, cfg)
+	localModelReplaced := resolveLocalProviderConfig(ctx, cfg)
 
 	missingAuthEnv, missingAuth := missingProviderAuth(cfg)
 	if missingAuth && *execPrompt != "" {
@@ -251,6 +251,9 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 			slog.Warn("wllr: could not persist model selection", "model", modelID, "error", saveErr)
 		}
 		return nil
+	}
+	if localModelReplaced {
+		m.SetPendingModelPicker()
 	}
 
 	// Wire the /thinking picker: list model-specific reasoning modes, and apply + persist on

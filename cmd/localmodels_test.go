@@ -108,3 +108,27 @@ func TestApplyLocalModelChoiceUsesDiscoveredModel(t *testing.T) {
 		t.Fatal("discovered model was not registered for provider construction")
 	}
 }
+
+func TestResolveLocalProviderConfigFallsBackFromStaleModel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, `{"data":[{"id":"replacement-model","context_length":131072}]}`)
+	}))
+	defer server.Close()
+
+	cfg := &Config{
+		Provider: providerLocal,
+		Model:    "removed-model",
+		LocalModels: []localModelConfig{{
+			ID:      "removed-model",
+			BaseURL: server.URL + "/v1",
+		}},
+	}
+	resolveLocalProviderConfig(context.Background(), cfg)
+
+	if cfg.Model != "replacement-model" {
+		t.Fatalf("model = %q, want replacement-model", cfg.Model)
+	}
+	if cfg.LocalBaseURL != server.URL+"/v1" {
+		t.Fatalf("local base URL = %q, want %q", cfg.LocalBaseURL, server.URL+"/v1")
+	}
+}

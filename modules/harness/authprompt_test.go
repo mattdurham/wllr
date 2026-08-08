@@ -59,6 +59,17 @@ func TestSetPendingSetupWizard_DrivesInitWizard(t *testing.T) {
 	}
 }
 
+func TestSetPendingModelPicker_DrivesInitPrompt(t *testing.T) {
+	m := newTestModel()
+	m.SetPendingModelPicker()
+	if !m.pendingModelPicker {
+		t.Fatal("pendingModelPicker should be true")
+	}
+	if cmd := m.Init(); cmd == nil {
+		t.Fatal("Init should include the model picker command")
+	}
+}
+
 func TestLoginProviderSelected_CloudRecordsOAuthAndBeginsLogin(t *testing.T) {
 	var gotProvider, gotMethod, beganProvider string
 	m := New(nil, "main", nil)
