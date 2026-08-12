@@ -210,8 +210,8 @@ No payload fields — the event carries no structured data beyond the event type
 
 **Invariants:**
 
-1. Trusted extensions (loaded via `Host.LoadBytes` with `trusted=true`) have all permissions granted implicitly; no manifest is required.
-2. Untrusted extensions (loaded via `Host.Load`) declare permissions in a companion `<basename>.json` manifest as `{"permissions":["file_read",...]}`.
+1. All extensions — trusted built-ins and untrusted user extensions alike — are held to their declared permissions (least privilege). Trusted built-ins loaded via `Host.LoadBytes` declare permissions explicitly; no manifest is required, but the supplied permission slice is the complete grant. `Host.HasPermission` returns true only for explicitly granted permissions. An extension granted `file_read`/`file_write` cannot call `exec`, `http_post`, `http_get`, or `mcp_spawn`.
+2. Untrusted extensions (loaded via `Host.Load`) declare permissions in a companion manifest. The canonical format is `<basename>.json` (`{"permissions":["file_read",...]}`); YAML (`<basename>.yaml`/`.yml`) is accepted for parity with build metadata. Permission names are normalized against the SDK constants — unknown names are dropped and reported at load time.
 3. Undeclared permissions are denied; the `request_permission` host_call returns an error response.
 
 ### ExtensionManifest
@@ -223,6 +223,8 @@ No payload fields — the event carries no structured data beyond the event type
 | Field         | Type           | Description                                |
 |---------------|----------------|--------------------------------------------|
 | `permissions` | []Permission   | List of permissions the extension requires |
+
+**Invariant:** Manifest `tools` declarations (present in some extension JSON files) are documentation-only and are not consumed by the host. Tools are registered at runtime via the `register_tool` host_call, so schema validation against runtime registrations is not required.
 
 ---
 

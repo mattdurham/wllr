@@ -1,3 +1,3 @@
 {
-  "permissions": ["read", "exec"]
+  "permissions": ["file_read", "exec"]
 }

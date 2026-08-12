@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mattdurham/wllr/modules/sdk"
@@ -324,6 +325,7 @@ type testCapabilityProvider struct {
 	onWriteFile  func(path, content string) error
 	onAppendFile func(path, content string) error
 	onHTTPPost   func(url string, headers map[string]string, body []byte) (int, []byte, error)
+	onHTTPGet    func(url string, headers map[string]string) (int, []byte, error)
 	onConfigRead func(group string) (json.RawMessage, error)
 }
 
@@ -369,7 +371,10 @@ func (p *testCapabilityProvider) HTTPPost(url string, headers map[string]string,
 	return 200, nil, nil
 }
 
-func (p *testCapabilityProvider) HTTPGet(string, map[string]string) (int, []byte, error) {
+func (p *testCapabilityProvider) HTTPGet(url string, headers map[string]string) (int, []byte, error) {
+	if p.onHTTPGet != nil {
+		return p.onHTTPGet(url, headers)
+	}
 	return 200, nil, nil
 }
 
@@ -414,6 +419,103 @@ func TestHost_Load_MissingExport(t *testing.T) {
 	err := h.Load(ctx, path)
 	if err == nil {
 		t.Fatal("expected error for missing _free export, got nil")
+	}
+}
+
+// --- Manifest loading tests ---
+
+func TestHost_Load_JSONManifestPermissions(t *testing.T) {
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer func() { _ = h.Close(ctx) }()
+
+	path := writeWASM(t, "minimal.wasm", minimalWASM)
+	if err := os.WriteFile(strings.TrimSuffix(path, ".wasm")+".json", []byte(`{"permissions":["exec","file_read"]}`), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	if err := h.Load(ctx, path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	ext := h.extensions[0]
+	if !ext.HasPermission(sdk.PermExec) || !ext.HasPermission(sdk.PermFileRead) {
+		t.Error("expected exec and file_read permissions from JSON manifest")
+	}
+	if ext.HasPermission(sdk.PermFileWrite) {
+		t.Error("should not have undeclared file_write permission")
+	}
+}
+
+func TestHost_Load_YAMLManifestPermissions(t *testing.T) {
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer func() { _ = h.Close(ctx) }()
+
+	path := writeWASM(t, "minimal.wasm", minimalWASM)
+	if err := os.WriteFile(strings.TrimSuffix(path, ".wasm")+".yaml", []byte("permissions:\n  - network_read\n  - file_write\n"), 0o600); err != nil {
+		t.Fatalf("write yaml manifest: %v", err)
+	}
+	if err := h.Load(ctx, path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	ext := h.extensions[0]
+	if !ext.HasPermission(sdk.PermNetworkRead) || !ext.HasPermission(sdk.PermFileWrite) {
+		t.Error("expected network_read and file_write permissions from YAML manifest")
+	}
+}
+
+func TestHost_Load_MalformedManifest_SilentlyDenied(t *testing.T) {
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer func() { _ = h.Close(ctx) }()
+
+	path := writeWASM(t, "minimal.wasm", minimalWASM)
+	if err := os.WriteFile(strings.TrimSuffix(path, ".wasm")+".json", []byte(`{invalid json`), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	if err := h.Load(ctx, path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	ext := h.extensions[0]
+	// Malformed manifest -> zero permissions.
+	if ext.HasPermission(sdk.PermExec) {
+		t.Error("malformed manifest should yield no permissions")
+	}
+}
+
+func TestHost_Load_UnknownPermission_Ignored(t *testing.T) {
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer func() { _ = h.Close(ctx) }()
+
+	path := writeWASM(t, "minimal.wasm", minimalWASM)
+	if err := os.WriteFile(strings.TrimSuffix(path, ".wasm")+".json", []byte(`{"permissions":["exec","read","network_read"]}`), 0o600); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	if err := h.Load(ctx, path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	ext := h.extensions[0]
+	// "read" is not a canonical permission; it must be ignored, while exec and network_read are kept.
+	if !ext.HasPermission(sdk.PermExec) || !ext.HasPermission(sdk.PermNetworkRead) {
+		t.Error("expected exec and network_read permissions")
+	}
+	if ext.HasPermission("read") {
+		t.Error("unknown permission 'read' should have been dropped")
+	}
+}
+
+func TestHost_Load_NoManifest_ZeroPermissions(t *testing.T) {
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer func() { _ = h.Close(ctx) }()
+
+	path := writeWASM(t, "minimal.wasm", minimalWASM)
+	if err := h.Load(ctx, path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	ext := h.extensions[0]
+	if ext.HasPermission(sdk.PermExec) || ext.HasPermission(sdk.PermFileRead) {
+		t.Error("extension without manifest should have zero permissions")
 	}
 }
 
@@ -682,12 +784,13 @@ func TestHost_EchoWASM_SkipIfMissing(t *testing.T) {
 
 // --- Permission model tests ---
 
-func TestHost_Permission_TrustedGrantedAll(t *testing.T) {
+func TestHost_Permission_TrustedLeastPrivilege(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)
 	defer func() { _ = h.Close(ctx) }()
 
-	// LoadBytes makes the extension trusted — all permissions granted.
+	// A trusted built-in loaded without explicit permissions gets ZERO granted.
+	// Trusted is an ordering/audit flag, not a permission grant.
 	if err := h.LoadBytes(ctx, "trusted.wasm", minimalWASM, true); err != nil {
 		t.Fatalf("LoadBytes trusted: %v", err)
 	}
@@ -697,13 +800,37 @@ func TestHost_Permission_TrustedGrantedAll(t *testing.T) {
 		t.Fatal("expected extension loaded with trusted=true to be trusted")
 	}
 
-	// A trusted extension should pass any permission check.
+	// Least privilege: with no declared permissions, nothing is granted.
 	for _, perm := range []sdk.Permission{
 		sdk.PermExec, sdk.PermFileOpen, sdk.PermFileRead,
 		sdk.PermFileWrite, sdk.PermNetworkRead, sdk.PermNetworkWrite,
 	} {
-		if !ext.HasPermission(perm) {
-			t.Errorf("trusted extension should have permission %s", perm)
+		if ext.HasPermission(perm) {
+			t.Errorf("trusted extension with no declared permissions should NOT have %s", perm)
+		}
+	}
+}
+
+func TestHost_Permission_TrustedScopedDeclared(t *testing.T) {
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer func() { _ = h.Close(ctx) }()
+
+	// A trusted built-in granted only file_write must NOT also get exec or
+	// network access — this is the guardrail for built-ins.
+	if err := h.LoadBytes(ctx, "logging.wasm", minimalWASM, true, sdk.PermFileWrite); err != nil {
+		t.Fatalf("LoadBytes trusted scoped: %v", err)
+	}
+
+	ext := h.extensions[0]
+	if !ext.HasPermission(sdk.PermFileWrite) {
+		t.Error("trusted built-in should have granted file_write")
+	}
+	for _, denied := range []sdk.Permission{
+		sdk.PermExec, sdk.PermFileRead, sdk.PermNetworkRead, sdk.PermNetworkWrite, sdk.PermUI,
+	} {
+		if ext.HasPermission(denied) {
+			t.Errorf("file_write-only built-in must NOT have %s", denied)
 		}
 	}
 }
@@ -1849,7 +1976,7 @@ func TestHost_CapabilityProvider_Exec_AcceptsContext(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	ext := h.extensions[0]
-	ext.trusted = true // bypass permission check
+	ext.permissions[sdk.PermExec] = true // grant exec
 
 	h.SetCapabilities(
 		&testCapabilityProvider{
@@ -1872,10 +1999,9 @@ func TestHost_CapabilityProvider_Exec_AcceptsContext(t *testing.T) {
 	}
 }
 
-func TestHost_HandleExec_PassesContext(t *testing.T) {
-	ctxCalled := false
-	h := NewHost(nil)
+func TestHost_HTTPGet_PermissionDenied(t *testing.T) {
 	ctx := context.Background()
+	h := NewHost(nil)
 	defer func() { _ = h.Close(ctx) }()
 
 	path := writeWASM(t, "minimal.wasm", minimalWASM)
@@ -1883,28 +2009,181 @@ func TestHost_HandleExec_PassesContext(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	ext := h.extensions[0]
-	ext.trusted = true // bypass permission check
+	ext.trusted = false // enforce permission check; no network_read granted
 
+	h.SetCapabilities(&testCapabilityProvider{})
+
+	resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+		Method: sdk.MethodHTTPGet,
+		Params: []byte(`{"url":"http://example.com"}`),
+	})
+	if resp.Error == "" {
+		t.Fatal("expected permission denied for http_get without network_read")
+	}
+}
+
+// TestHost_Guardrail_FileWriteOnlyExtension exercises the least-privilege
+// guardrail for built-ins: an extension granted only file_write (like the
+// logging built-in) must be denied exec, read_file, http_post, and http_get —
+// a file-writing extension must not gain network or exec access.
+func TestHost_Guardrail_FileWriteOnlyExtension(t *testing.T) {
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer func() { _ = h.Close(ctx) }()
+
+	// Loaded as a trusted built-in with only file_write declared (least privilege).
+	if err := h.LoadBytes(ctx, "logging.wasm", minimalWASM, true, sdk.PermFileWrite); err != nil {
+		t.Fatalf("LoadBytes: %v", err)
+	}
+	ext := h.extensions[0]
+	h.SetCapabilities(&testCapabilityProvider{})
+
+	// append_file must succeed (file_write granted).
+	if resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+		Method: sdk.MethodAppendFile,
+		Params: []byte(`{"path":"/tmp/log","content":"x"}`),
+	}); resp.Error != "" {
+		t.Fatalf("append_file should be permitted with file_write: %s", resp.Error)
+	}
+
+	// Exec, read_file, http_post, http_get must all be denied.
+	for _, tc := range []struct {
+		name   string
+		method string
+		params string
+	}{
+		{"exec", sdk.MethodExec, `{"command":"ls"}`},
+		{"read_file", sdk.MethodReadFile, `{"path":"/tmp/secret"}`},
+		{"http_post", sdk.MethodHTTPPost, `{"url":"http://example.com","body":"x"}`},
+		{"http_get", sdk.MethodHTTPGet, `{"url":"http://example.com"}`},
+	} {
+		resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+			Method: tc.method,
+			Params: []byte(tc.params),
+		})
+		if resp.Error == "" {
+			t.Errorf("file_write-only extension must be denied %s", tc.name)
+		}
+	}
+}
+
+// TestHost_Guardrail_FileReadWriteExtension has no network or exec access: an
+// extension granted file_read+file_write must be denied http_post, http_get, exec.
+func TestHost_Guardrail_FileReadWriteExtension(t *testing.T) {
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer func() { _ = h.Close(ctx) }()
+
+	if err := h.LoadBytes(ctx, "file.wasm", minimalWASM, true, sdk.PermFileRead, sdk.PermFileWrite); err != nil {
+		t.Fatalf("LoadBytes: %v", err)
+	}
+	ext := h.extensions[0]
+	h.SetCapabilities(&testCapabilityProvider{})
+
+	// read_file and append_file permitted.
+	for _, tc := range []struct {
+		name   string
+		method string
+		params string
+	}{
+		{"read_file", sdk.MethodReadFile, `{"path":"/tmp/secret"}`},
+		{"append_file", sdk.MethodAppendFile, `{"path":"/tmp/log","content":"x"}`},
+	} {
+		resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+			Method: tc.method,
+			Params: []byte(tc.params),
+		})
+		if resp.Error != "" {
+			t.Errorf("%s should be permitted with file_read+file_write: %s", tc.name, resp.Error)
+		}
+	}
+
+	// exec, http_post, http_get denied.
+	for _, tc := range []struct {
+		name   string
+		method string
+		params string
+	}{
+		{"exec", sdk.MethodExec, `{"command":"ls"}`},
+		{"http_post", sdk.MethodHTTPPost, `{"url":"http://example.com","body":"x"}`},
+		{"http_get", sdk.MethodHTTPGet, `{"url":"http://example.com"}`},
+	} {
+		resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+			Method: tc.method,
+			Params: []byte(tc.params),
+		})
+		if resp.Error == "" {
+			t.Errorf("file extension must be denied %s", tc.name)
+		}
+	}
+}
+
+func TestHost_HTTPGet_DispatchInvoked(t *testing.T) {
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer func() { _ = h.Close(ctx) }()
+
+	path := writeWASM(t, "minimal.wasm", minimalWASM)
+	if err := h.Load(ctx, path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	ext := h.extensions[0]
+	ext.permissions[sdk.PermNetworkRead] = true // grant network_read
+
+	called := false
 	h.SetCapabilities(
 		&testCapabilityProvider{
-			onExec: func(c context.Context, _cmd, _dir string, _onLine func(string)) (string, error) {
-				if c != nil {
-					ctxCalled = true
-				}
-				return "", nil
+			onHTTPGet: func(url string, headers map[string]string) (int, []byte, error) {
+				called = true
+				return 200, []byte("<html>ok</html>"), nil
 			},
 		},
 	)
 
 	resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
-		Method: sdk.MethodExec,
-		Params: []byte(`{"command":"ls","dir":""}`),
+		Method: sdk.MethodHTTPGet,
+		Params: []byte(`{"url":"http://example.com","headers":{"Accept":"text/html"}}`),
 	})
 	if resp.Error != "" {
-		t.Fatalf("exec: %s", resp.Error)
+		t.Fatalf("http_get: %s", resp.Error)
 	}
-	if !ctxCalled {
-		t.Fatal("ctx was nil when Exec was called")
+	if !called {
+		t.Fatal("CapabilityProvider.HTTPGet was not called")
+	}
+}
+
+func TestHost_HTTPGet_NetworkReadGranted(t *testing.T) {
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer func() { _ = h.Close(ctx) }()
+
+	path := writeWASM(t, "minimal.wasm", minimalWASM)
+	if err := h.Load(ctx, path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	ext := h.extensions[0]
+	ext.trusted = false
+	ext.permissions[sdk.PermNetworkRead] = true
+
+	called := false
+	h.SetCapabilities(
+		&testCapabilityProvider{
+			onHTTPGet: func(url string, headers map[string]string) (int, []byte, error) {
+				called = true
+				return 200, []byte("body"), nil
+			},
+		},
+	)
+
+	resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+		Method: sdk.MethodHTTPGet,
+		Params: []byte(`{"url":"http://example.com"}`),
+	})
+	if resp.Error != "" {
+		t.Fatalf("http_get: %s", resp.Error)
+	}
+	if !called {
+		t.Fatal("CapabilityProvider.HTTPGet was not called despite network_read permission")
 	}
 }
 
@@ -1918,7 +2197,7 @@ func TestHost_UIMethods_Dispatch(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	ext := h.extensions[0]
-	ext.trusted = true // bypass permission check
+	ext.permissions[sdk.PermUI] = true // grant ui
 
 	ui := &testUIBridge{}
 	h.SetUIBridge(ui)

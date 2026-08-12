@@ -583,6 +583,65 @@ No permission required (read-only).
 
 ---
 
+### `http_get`
+
+Make an HTTP GET request from the host process. Returns the status code and
+response body. Requires the `network_read` permission.
+
+```json
+{"method": "http_get", "params": {"url": "https://example.com", "headers": {"Accept": "text/html"}}}
+```
+
+| Field     | Type            | Description                                            |
+|-----------|-----------------|--------------------------------------------------------|
+| `url`     | string          | Request URL (required).                                |
+| `headers` | map[string]string | Optional request headers.                            |
+
+Response result:
+
+```json
+{"status": 200, "body": "<html>...</html>"}
+```
+
+| Field    | Type   | Description                             |
+|----------|--------|-----------------------------------------|
+| `status` | int    | HTTP status code returned by the server |
+| `body`   | string | Response body as text                   |
+
+Requires permission: `network_read`
+
+---
+
+### `http_post`
+
+Make an HTTP POST request from the host process. Returns the status code and
+response body. Requires the `network_write` permission.
+
+```json
+{"method": "http_post", "params": {"url": "https://example.com", "headers": {"Content-Type": "application/json"}, "body": "{\"a\":1}"}}
+```
+
+| Field     | Type            | Description                                            |
+|-----------|-----------------|--------------------------------------------------------|
+| `url`     | string          | Request URL (required).                                |
+| `headers` | map[string]string | Optional request headers.                            |
+| `body`    | string          | Optional request body as text.                        |
+
+Response result:
+
+```json
+{"status": 200, "body": "..."}
+```
+
+| Field    | Type   | Description                             |
+|----------|--------|-----------------------------------------|
+| `status` | int    | HTTP status code returned by the server |
+| `body`   | string | Response body as text                   |
+
+Requires permission: `network_write`
+
+---
+
 ### `ui_create_area`
 
 Register a named UI **area** — a region of the screen the extension owns. An

@@ -93,7 +93,8 @@ const (
 
 // Permission identifies a capability that an extension may request.
 // User extensions declare permissions in their manifest; built-in extensions
-// (loaded via Host.LoadBytes) are granted all permissions automatically.
+// (loaded via Host.LoadBytes) declare permissions explicitly and are held to
+// them (least privilege) — trust grants ordering, never permission bypass.
 type Permission string
 
 const (
@@ -144,7 +145,8 @@ const (
 	// MethodRequestPermission checks whether the calling extension holds a
 	// permission.  Returns an error response if the permission is not granted.
 	MethodRequestPermission = "request_permission"
-	// MethodGetEnv reads environment variables from the host. Requires PermFileRead (env is read-only).
+	// MethodGetEnv reads environment variables from the host. Read-only; no
+	// permission required.
 	MethodGetEnv = "get_env"
 	// MethodGetOS returns the host operating system and architecture strings.
 	// Returns {"os": "darwin", "arch": "arm64"} (GOOS/GOARCH values).

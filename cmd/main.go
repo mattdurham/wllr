@@ -440,7 +440,15 @@ func registerAgentStatusTool(h *extension.Host, pool *agent.AgentPool) {
 	})
 }
 
-// loadBuiltinExtensions loads the trusted built-in WASM extensions.
+// loadBuiltinExtensions loads the trusted built-in WASM extensions with
+// least-privilege permissions derived from their actual runtime host-call usage:
+//   - agents, statusline drive the TUI scene graph (ui_patch) -> require ui
+//   - logging appends to a log file (append_file) -> requires file_write
+//   - history, plan, queue, sigil use only unrestricted host calls (store,
+//     modal, notify, register_command, agent_list/mailbox) -> require none
+//
+// Trusted built-ins are still held to these declared permissions: an extension
+// granted file_write cannot call exec, http_post, http_get, or mcp_spawn.
 func loadBuiltinExtensions(ctx context.Context, h *extension.Host) {
 	for _, name := range []string{"agents", "history", "logging", "plan", "queue", "sigil", "statusline"} {
 		filename := name + ".wasm"
@@ -455,9 +463,23 @@ func loadBuiltinExtensions(ctx context.Context, h *extension.Host) {
 			)
 			continue
 		}
-		if loadErr := h.LoadBytes(ctx, filename, data, true); loadErr != nil {
+		perms := builtinPermissions(name)
+		if loadErr := h.LoadBytes(ctx, filename, data, true, perms...); loadErr != nil {
 			fmt.Fprintf(os.Stderr, "wllr: load built-in extension %q: %v\n", name, loadErr)
 		}
+	}
+}
+
+// builtinPermissions returns the least-privilege permission set each trusted
+// built-in actually needs, based on the restricted host calls it makes.
+func builtinPermissions(name string) []sdk.Permission {
+	switch name {
+	case "agents", "statusline":
+		return []sdk.Permission{sdk.PermUI}
+	case "logging":
+		return []sdk.Permission{sdk.PermFileWrite}
+	default: // history, plan, queue, sigil
+		return nil
 	}
 }
 

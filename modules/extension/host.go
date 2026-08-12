@@ -19,6 +19,7 @@ import (
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
+	"gopkg.in/yaml.v3"
 )
 
 // Extension wraps a loaded WASM module.
@@ -31,15 +32,15 @@ import (
 // invocations race on the module's globals (pinned map, handler maps).
 
 // trusted is true for built-in extensions loaded via LoadBytes with trusted=true.
-// Trusted extensions bypass permission checks.
+// Trusted built-ins are still held to their declared permissions (least privilege);
+// the trusted flag only controls dispatch priority and load diagnostics, not
+// permission bypass.
 
 // HasPermission reports whether the extension holds permission p.
-// Trusted extensions always return true. Untrusted extensions must have p
-// explicitly granted in their permissions map.
+// All extensions — trusted built-ins and untrusted user extensions alike — must
+// have p explicitly granted in their permissions map. An extension granted only
+// file_read/file_write can never call exec, http_post, http_get, or mcp_spawn.
 func (e *Extension) HasPermission(p sdk.Permission) bool {
-	if e.trusted {
-		return true
-	}
 	return e.permissions[p]
 }
 
@@ -433,6 +434,9 @@ func (h *Host) buildDispatch() map[string]func(ctx context.Context, ext *Extensi
 		},
 		sdk.MethodHTTPPost: func(_ context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleHTTPPost(ext, req)
+		},
+		sdk.MethodHTTPGet: func(_ context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleHTTPGet(ext, req)
 		},
 		sdk.MethodConfigRead: func(_ context.Context, ext *Extension, _ sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleConfigRead(ext)
@@ -869,6 +873,31 @@ func (h *Host) handleHTTPPost(ext *Extension, req sdk.HostCallRequest) sdk.HostC
 		return sdk.HostCallResponse{Error: "http_post: url is required"}
 	}
 	statusCode, respBody, err := h.capabilityProvider().HTTPPost(params.URL, params.Headers, params.Body)
+	if err != nil {
+		return sdk.HostCallResponse{Error: err.Error()}
+	}
+	result, _ := json.Marshal(map[string]any{hostResultStatus: statusCode, "body": string(respBody)})
+	return sdk.HostCallResponse{Result: result}
+}
+
+func (h *Host) handleHTTPGet(ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+	if ext == nil || !ext.HasPermission(sdk.PermNetworkRead) {
+		return sdk.HostCallResponse{Error: "http_get: permission denied: requires network_read"}
+	}
+	if h.capabilityProvider() == nil {
+		return sdk.HostCallResponse{Error: "http_get: not supported by host"}
+	}
+	var params struct {
+		Headers map[string]string `json:"headers"`
+		URL     string            `json:"url"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return sdk.HostCallResponse{Error: fmt.Sprintf("http_get: %v", err)}
+	}
+	if params.URL == "" {
+		return sdk.HostCallResponse{Error: "http_get: url is required"}
+	}
+	statusCode, respBody, err := h.capabilityProvider().HTTPGet(params.URL, params.Headers)
 	if err != nil {
 		return sdk.HostCallResponse{Error: err.Error()}
 	}
@@ -1438,10 +1467,14 @@ func (h *Host) Load(ctx context.Context, path string) error {
 
 // LoadBytes instantiates a WASM module from in-memory bytes.
 // Use this for embedded built-in extensions.
-// When trusted is true the extension is granted all permissions without a
-// manifest; when trusted is false the caller must supply the permissions slice.
-func (h *Host) LoadBytes(ctx context.Context, name string, data []byte, trusted bool) error {
-	return h.loadExtension(ctx, name, data, trusted, nil)
+//
+// All extensions — trusted built-ins and untrusted user extensions alike — are
+// held to the permissions they declare (least privilege): the perms slice is
+// the complete set of permissions granted. A built-in granted only file_write
+// cannot call exec, http_post, http_get, or mcp_spawn. The trusted flag controls
+// dispatch priority and load diagnostics only, not permission bypass.
+func (h *Host) LoadBytes(ctx context.Context, name string, data []byte, trusted bool, perms ...sdk.Permission) error {
+	return h.loadExtension(ctx, name, data, trusted, perms)
 }
 
 // loadExtension is the common implementation for Load and LoadBytes.
@@ -1488,6 +1521,15 @@ func (h *Host) loadExtension(
 	if len(manifest) > 0 && manifest[0] != nil && manifest[0].Priority != nil {
 		priority = *manifest[0].Priority
 	}
+
+	// Distinguish trusted built-ins from untrusted installed extensions in
+	// diagnostics so permission bypass is explicit and auditable.
+	trust := "untrusted"
+	if trusted {
+		trust = "trusted"
+	}
+	h.logger.Debug("extension: load", "extension", extensionDisplayName(name), "trust", trust, "permissions", len(perms))
+
 	ext := &Extension{
 		name:          extensionDisplayName(name),
 		module:        mod,
@@ -1515,20 +1557,68 @@ func (h *Host) loadExtension(
 	return nil
 }
 
-// loadManifest reads a companion JSON manifest at "<basename>.json" alongside
-// the WASM file. Missing or invalid manifest files are silently ignored.
+// loadManifest reads a companion manifest alongside the WASM file. The manifest
+// may be JSON (<basename>.json) or YAML (<basename>.yaml / <basename>.yml); the
+// JSON form is the canonical format, YAML is accepted for parity with build-time
+// metadata. Missing manifests return nil (zero permissions). Malformed manifests
+// are logged at warn level and return nil. Permission names are normalized
+// against the SDK constants: unknown names are dropped and reported via the
+// logger so failures are diagnosable.
 func loadManifest(wasmPath string, logger *slog.Logger) *sdk.ExtensionManifest {
-	manifestPath := strings.TrimSuffix(wasmPath, ".wasm") + ".json"
+	base := strings.TrimSuffix(wasmPath, ".wasm")
+	manifestPath := base + ".json"
 	data, err := os.ReadFile(manifestPath)
+	format := "json"
 	if err != nil {
-		return nil
+		// Fall back to YAML manifests for parity with build metadata.
+		manifestPath = base + ".yaml"
+		data, err = os.ReadFile(manifestPath)
+		if err != nil {
+			manifestPath = base + ".yml"
+			data, err = os.ReadFile(manifestPath)
+			if err != nil {
+				return nil
+			}
+		}
+		format = "yaml"
 	}
 	var manifest sdk.ExtensionManifest
-	if err := json.Unmarshal(data, &manifest); err != nil {
-		logger.Warn("extension: manifest parse error", "path", manifestPath, "err", err)
+	if format == "yaml" {
+		if yerr := yaml.Unmarshal(data, &manifest); yerr != nil {
+			logger.Warn("extension: manifest parse error", "path", manifestPath, "err", yerr)
+			return nil
+		}
+	} else if jerr := json.Unmarshal(data, &manifest); jerr != nil {
+		logger.Warn("extension: manifest parse error", "path", manifestPath, "err", jerr)
 		return nil
 	}
+	// Normalize and validate permission names against SDK constants.
+	manifest.Permissions = normalizePermissions(manifest.Permissions, logger, manifestPath)
 	return &manifest
+}
+
+// normalizePermissions drops unknown permission names and logs each one so
+// manifest errors are diagnosable at load time. It applies to both untrusted
+// manifests and trusted built-in permission declarations.
+func normalizePermissions(perms []sdk.Permission, logger *slog.Logger, path string) []sdk.Permission {
+	valid := map[sdk.Permission]bool{
+		sdk.PermExec:         true,
+		sdk.PermFileOpen:     true,
+		sdk.PermFileRead:     true,
+		sdk.PermFileWrite:    true,
+		sdk.PermNetworkRead:  true,
+		sdk.PermNetworkWrite: true,
+		sdk.PermUI:           true,
+	}
+	out := make([]sdk.Permission, 0, len(perms))
+	for _, p := range perms {
+		if !valid[p] {
+			logger.Warn("extension: manifest declares unknown permission; ignoring", "path", path, "permission", p)
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 // RegisterNativeTool registers a Go-native tool handler that is invoked directly

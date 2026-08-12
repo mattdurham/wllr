@@ -46,7 +46,7 @@ NewHost
 
 Host.Load(path)
   ├─ os.ReadFile
-  ├─ loadManifestPermissions              (reads <basename>.json for permissions)
+  ├─ loadManifestPermissions              (reads <basename>.json / .yaml / .yml for permissions)
   ├─ runtime.InstantiateWithConfig        (WithStartFunctions() — no auto _start/_main)
   │   ├─ WithFSConfig: WithDirMount("/", "/")   (full filesystem read access)
   │   └─ WithEnv: all host env vars passed through
@@ -56,8 +56,10 @@ Host.Load(path)
        ├─ optional: _initialize()         (native Go WASM bootstrap, if exported)
        └─ _init() -> i32                  (non-zero return removes ext and fails load)
 
-Host.LoadBytes(ctx, name, data, trusted)
-  └─ Same as Load but skips manifest loading; trusted=true grants all permissions
+Host.LoadBytes(ctx, name, data, trusted [, perms...])
+  └─ Same as Load but skips manifest loading; trusted is an ordering/audit flag.
+     The perms slice is the complete least-privilege grant: a built-in granted
+     only file_write cannot call exec, http_post, http_get, or mcp_spawn.
 
 DispatchEvent loop  (called repeatedly by the harness)
   └─ see §4
@@ -192,6 +194,7 @@ The full set of dispatched methods is:
 | `MethodWriteFile`             | `handleWriteFile`                                |
 | `MethodAppendFile`            | `handleAppendFile` (requires `file_write`)       |
 | `MethodHTTPPost`              | `handleHTTPPost`                                 |
+| `MethodHTTPGet`               | `handleHTTPGet` (requires `network_read`)        |
 | `MethodConfigRead`            | `handleConfigRead`                               |
 | `MethodAgentSpawn`            | `handleAgentSpawn`                               |
 | `MethodAgentClose`            | `handleAgentClose`                               |
@@ -232,14 +235,14 @@ The full set of dispatched methods is:
 | `agents`      | `AgentBridge`       | `SetAgentBridge`        | Spawn, close, message, run, list agents and manage history     |
 | `teams`       | `TeamBridge`        | `SetTeamBridge`         | Create, close, add/remove members, list teams                  |
 | `ui`          | `UIBridge`          | `SetUIBridge`           | Notify, modal, picker, status, system prompt, scene-graph areas |
-| `capabilities`| `CapabilityProvider`| `SetCapabilities`       | Exec, GetEnv, ReadFile, WriteFile, AppendFile, HTTPPost, ConfigRead |
+| `capabilities`| `CapabilityProvider`| `SetCapabilities`       | Exec, GetEnv, ReadFile, WriteFile, AppendFile, HTTPPost, HTTPGet, ConfigRead |
 | `mcp`         | `MCPBridge`         | `SetMCPBridge`          | Spawn, close, send, read MCP server subprocesses               |
 
 **Invariant:** All `Set*` methods must be called before loading extensions (before `Load` or `LoadBytes`). The `earlyUIBridge` and `earlyAgentBridge` stubs installed in `harness.New()` satisfy this for command registration and agent calls that arrive during `_init`.
 
 **Invariant:** Dispatch handlers snapshot the bridge field under `h.mu.RLock()` via internal getter methods (`h.agentBridge()`, `h.uiBridge()`, etc.) so that the field transition from early stub to full implementation is race-free.
 
-**Invariant:** `PermExec` is required for `agent_spawn` (via `AgentBridge.Spawn`), `exec`, `read_file`, `write_file`, `http_post`, and `mcp_spawn`. If the extension is nil or lacks the required permission, the call returns a permission-denied error response.
+**Invariant:** `PermExec` is required for `exec` and `mcp_spawn`; `PermFileRead` for `read_file`; `PermFileWrite` for `write_file`/`append_file`; `PermNetworkWrite` for `http_post`; `PermNetworkRead` for `http_get`; `PermUI` for `ui_create_area`/`ui_patch`/`ui_update_area`/`ui_remove_area`. `get_env`, `get_os`, agent/team/mailbox methods, `store_*`, `modal`, `notify`, `set_status`, and `append_system_prompt` require no permission. If the extension is nil or lacks the required permission, the call returns a permission-denied error response.
 
 **Invariant:** `PermUI` is required for `ui_create_area`, `ui_patch`, `ui_remove_area`, and `ui_update_area`. The `UIBridge` exposes four scene-graph methods: `CreateArea(sdk.UIArea) error`, `PatchUI(sdk.UIPatchParams) error`, `RemoveArea(string)`, and `UpdateArea(sdk.UIUpdateAreaParams) error`. `CreateArea`, `PatchUI`, and `UpdateArea` return errors (duplicate area, missing area/node, unknown area) forwarded to the extension as an error response; `RemoveArea` is a no-op for a missing area.
 
@@ -351,19 +354,19 @@ Each `Extension` has its own `*Store`. Stores are not shared between extensions.
 
 Each `Extension` carries:
 
-- `trusted bool` — set to `true` for extensions loaded via `Host.LoadBytes(ctx, name, data, true)`.
-- `permissions map[sdk.Permission]bool` — for untrusted extensions, holds the declared permissions.
+- `trusted bool` — set to `true` for extensions loaded via `Host.LoadBytes(ctx, name, data, true)`; controls dispatch priority (built-ins run first) and load diagnostics only — it does **not** grant permissions.
+- `permissions map[sdk.Permission]bool` — holds the declared permissions for all extensions (trusted and untrusted alike).
 
 `Extension.HasPermission(p Permission) bool`:
 
-- Returns `true` if `ext.trusted`.
-- Returns `ext.permissions[p]` otherwise.
+- Returns `ext.permissions[p]` — true only if `p` was explicitly granted.
+- Trusted built-ins are held to their declared permissions like any untrusted extension (least privilege).
 
-**Invariant:** Trusted extensions always pass `HasPermission` for any permission value.
+**Invariant:** All extensions — trusted built-ins and untrusted user extensions — must have a permission explicitly granted to pass `HasPermission`. An extension granted only `file_read`/`file_write` can never call `exec`, `http_post`, `http_get`, `mcp_spawn`, or drive the UI.
 
-`Host.Load` loads the companion manifest (`<basename>.json`) alongside the WASM file and populates `ext.permissions` from `ExtensionManifest.Permissions`. Missing or malformed manifests are logged at warn level and result in zero permissions.
+`Host.Load` loads the companion manifest (`<basename>.json`, or `.yaml`/`.yml` for parity with build metadata) alongside the WASM file and populates `ext.permissions` from `ExtensionManifest.Permissions`. Missing manifests result in zero permissions; malformed manifests are logged at warn level and result in zero permissions. Permission names are normalized against the SDK constants: unknown names are dropped and reported via the logger so failures are diagnosable.
 
-`Host.LoadBytes(ctx, name, data, trusted)` skips manifest loading entirely.
+`Host.LoadBytes(ctx, name, data, trusted, perms...)` skips manifest loading; the `perms` variadic is the complete least-privilege permission grant for trusted built-ins.
 
 ---
 
