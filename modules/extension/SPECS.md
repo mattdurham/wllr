@@ -366,7 +366,7 @@ Each `Extension` carries:
 
 `Host.Load` loads the companion manifest (`<basename>.json`, or `.yaml`/`.yml` for parity with build metadata) alongside the WASM file and populates `ext.permissions` from `ExtensionManifest.Permissions`. Missing manifests result in zero permissions; malformed manifests are logged at warn level and result in zero permissions. Permission names are normalized against the SDK constants: unknown names are dropped and reported via the logger so failures are diagnosable.
 
-`Host.LoadBytes(ctx, name, data, trusted, perms...)` skips manifest loading; the `perms` variadic is the complete least-privilege permission grant for trusted built-ins.
+`Host.LoadBytes(ctx, name, data, trusted, perms...)` loads embedded built-in WASM from in-memory bytes without an on-disk companion manifest; the `perms` variadic is the complete least-privilege permission grant. The caller (`cmd/main.go`) sources these `perms` from the checked-in built-in permission manifests (`cmd/builtins/<name>.manifest.json`) — the manifest is the source of truth, independent of the compiled WASM bytes. Loading fails closed: a missing, unreadable, malformed, or unknown-permission manifest yields zero permissions (with a warning), never an implicit all-permissions grant. This mirrors the untrusted `Host.Load` path so built-ins and user extensions are held to the same manifest-anchored contract.
 
 ---
 

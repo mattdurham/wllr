@@ -441,14 +441,18 @@ func registerAgentStatusTool(h *extension.Host, pool *agent.AgentPool) {
 }
 
 // loadBuiltinExtensions loads the trusted built-in WASM extensions with
-// least-privilege permissions derived from their actual runtime host-call usage:
+// least-privilege permissions sourced from the checked-in permission manifests
+// in cmd/builtins (<name>.manifest.json). The manifest is the source of truth,
+// independent of the compiled WASM bytes: if the WASM is ever compromised to
+// call exec, http_post, http_get, or mcp_spawn, the host still denies it because
+// the declared manifest grants only what each built-in legitimately needs.
 //   - agents, statusline drive the TUI scene graph (ui_patch) -> require ui
 //   - logging appends to a log file (append_file) -> requires file_write
 //   - history, plan, queue, sigil use only unrestricted host calls (store,
 //     modal, notify, register_command, agent_list/mailbox) -> require none
 //
-// Trusted built-ins are still held to these declared permissions: an extension
-// granted file_write cannot call exec, http_post, http_get, or mcp_spawn.
+// Loading fails closed: a missing, unreadable, or malformed manifest yields
+// zero permissions (and a warning), never an implicit all-permissions grant.
 func loadBuiltinExtensions(ctx context.Context, h *extension.Host) {
 	for _, name := range []string{"agents", "history", "logging", "plan", "queue", "sigil", "statusline"} {
 		filename := name + ".wasm"
@@ -463,24 +467,60 @@ func loadBuiltinExtensions(ctx context.Context, h *extension.Host) {
 			)
 			continue
 		}
-		perms := builtinPermissions(name)
+		perms := builtinManifestPermissions(name)
 		if loadErr := h.LoadBytes(ctx, filename, data, true, perms...); loadErr != nil {
 			fmt.Fprintf(os.Stderr, "wllr: load built-in extension %q: %v\n", name, loadErr)
 		}
 	}
 }
 
-// builtinPermissions returns the least-privilege permission set each trusted
-// built-in actually needs, based on the restricted host calls it makes.
-func builtinPermissions(name string) []sdk.Permission {
-	switch name {
-	case "agents", "statusline":
-		return []sdk.Permission{sdk.PermUI}
-	case "logging":
-		return []sdk.Permission{sdk.PermFileWrite}
-	default: // history, plan, queue, sigil
+// builtinManifestPermissions reads the checked-in permission manifest for a
+// built-in from the embedded FS. It is the source of truth for built-in
+// permissions and is independent of the compiled WASM bytes. Fails closed:
+// a missing or malformed manifest returns nil (zero permissions).
+func builtinManifestPermissions(name string) []sdk.Permission {
+	data, err := builtinFS.ReadFile("builtins/" + name + ".manifest.json")
+	if err != nil {
+		slog.Warn(
+			"wllr: built-in permission manifest missing; granting zero permissions",
+			"extension",
+			name,
+			"error",
+			err,
+		)
 		return nil
 	}
+	var manifest struct {
+		Permissions []sdk.Permission `json:"permissions"`
+	}
+	if jerr := json.Unmarshal(data, &manifest); jerr != nil {
+		slog.Warn(
+			"wllr: built-in permission manifest malformed; granting zero permissions",
+			"extension",
+			name,
+			"error",
+			jerr,
+		)
+		return nil
+	}
+	// Drop unknown permission names so a tampered manifest can never grant a
+	// capability that does not exist in the SDK (fail closed to zero for those).
+	valid := map[sdk.Permission]bool{
+		sdk.PermExec:         true,
+		sdk.PermFileOpen:     true,
+		sdk.PermFileRead:     true,
+		sdk.PermFileWrite:    true,
+		sdk.PermNetworkRead:  true,
+		sdk.PermNetworkWrite: true,
+		sdk.PermUI:           true,
+	}
+	out := make([]sdk.Permission, 0, len(manifest.Permissions))
+	for _, p := range manifest.Permissions {
+		if valid[p] {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // startMCPBridge initializes the MCP server bridge and returns a cleanup function.
