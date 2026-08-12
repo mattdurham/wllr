@@ -96,9 +96,9 @@ optional-extensions:
 	$(WASM_BUILD) $(EXT_DIR)/tasks/tasks.wasm extensions/tasks
 	cp extensions/tasks/tasks.json $(EXT_DIR)/tasks/
 	$(WASM_BUILD) $(EXT_DIR)/lsp/lsp.wasm extensions/lsp
-	cp extensions/lsp/extension.yaml $(EXT_DIR)/lsp/
+	cp extensions/lsp/extension.json $(EXT_DIR)/lsp/lsp.json
 	$(WASM_BUILD) $(EXT_DIR)/memory/memory.wasm extensions/memory
-	cp extensions/memory/extension.yaml $(EXT_DIR)/memory/
+	cp extensions/memory/memory.json $(EXT_DIR)/memory/memory.json
 	$(WASM_BUILD) $(EXT_DIR)/permissions/permissions.wasm extensions/permissions
 	$(WASM_BUILD) $(EXT_DIR)/mcp-bridge/mcp-bridge.wasm extensions/mcp-bridge
 	cp extensions/permissions/extension.yaml $(EXT_DIR)/permissions/
