@@ -90,6 +90,41 @@ func TestAgent_Submit_DeliversDoneCallback(t *testing.T) {
 	}
 }
 
+func TestAgent_Submit_NotifiesTurnStart(t *testing.T) {
+	pool := agent.NewPool()
+	a, err := pool.Spawn("inbox-callback", &tokenStreamLM{tokens: []string{"done"}}, agent.SpawnOpts{})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	started := make(chan struct {
+		content string
+		inbox   []sdk.Message
+	}, 1)
+	done := make(chan error, 1)
+	a.SetOnTurnStart(func(content string, inbox []sdk.Message) {
+		started <- struct {
+			content string
+			inbox   []sdk.Message
+		}{content: content, inbox: inbox}
+	})
+	a.SetOnDone(func(err error) { done <- err })
+	a.AppendInbox(sdkMsg("queued prompt"))
+	a.Submit(context.Background(), "")
+
+	select {
+	case start := <-started:
+		if start.content != "" || len(start.inbox) != 1 || start.inbox[0].Content != "queued prompt" {
+			t.Fatalf("turn start = %+v, want queued prompt in inbox", start)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for inbox consumption callback")
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("onDone error: %v", err)
+	}
+}
+
 func TestAgent_Submit_BrokenLM_CallsDoneWithError(t *testing.T) {
 	pool := agent.NewPool()
 	lm := &errStreamLM{}

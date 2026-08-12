@@ -14,7 +14,7 @@ Package `agent` manages sub-agents and teams for the bob harness. Each `Agent` w
 - The `tokenCount` field is updated atomically via `sync/atomic`.
 - The `providerName` and `defaultModelName` fields are read/written under `p.mu`.
 - The `baseSystemPrompt` field has its own `baseSystemPromptMu sync.RWMutex`, separate from the main `mu`, because it can be updated independently without touching agent/team maps.
-- Individual `Agent` fields (inbox, cancel, history, onToken, onDone, onToolCall, toolsFn, systemPrompt) carry their own per-field mutexes. Callers never need to hold pool-level locks when calling agent methods.
+- Individual `Agent` fields (inbox, cancel, history, onToken, onDone, onToolCall, onTurnStart, toolsFn, systemPrompt) carry their own per-field mutexes. Callers never need to hold pool-level locks when calling agent methods.
 
 **Invariant:** No pool operation blocks on an in-progress agent turn. Pool operations that call `a.Cancel()` release `p.mu` before invoking Cancel to avoid lock ordering issues.
 
@@ -55,6 +55,8 @@ The inbox is the unexported `mailbox` type (`mailbox.go`): it owns the message s
 `AppendInbox` enqueues messages for delivery before the next turn. `DrainInbox` atomically retrieves and clears all queued messages. `Submit` calls `DrainInbox` at the start of each turn and **appends** inbox messages after the conversation history (inbox messages appear after prior history, making them the most-recent messages visible to the LLM). See NOTES.md §16.
 
 **Invariant:** Inbox messages are delivered in FIFO order and always appear as the most recent messages in the prompt. Messages appended before `Submit` is called are guaranteed to be visible within that turn. Messages appended after `Submit` has called `DrainInbox` will appear in the next turn.
+
+`SetOnTurnStart` registers an optional callback for UI or persistence integrations. It receives the explicit turn content and a copy of the inbox messages after `Submit` successfully claims them and before the provider request starts. Concurrent `Submit` calls that re-queue their drained messages do not trigger the callback until a later turn actually claims them.
 
 **Invariant:** `DrainInbox` is atomic — no message is lost between `AppendInbox` and `DrainInbox` regardless of concurrent calls. This is guaranteed by the mailbox's internal mutex.
 

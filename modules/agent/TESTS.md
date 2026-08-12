@@ -7,6 +7,7 @@
 | Test | Scenario | Setup | Assertions |
 |------|----------|-------|------------|
 | `TestAgent_AppendInbox_MessagesDeliveredBeforeNextTurn` | Inbox drains into next turn | Spawn agent, AppendInbox, Submit | Inbox messages present in turn context |
+| `TestAgent_Submit_NotifiesTurnStart` | Turn claims inbox messages | Spawn agent, AppendInbox, SetOnTurnStart, Submit | callback receives the queued message before completion |
 | `TestAgent_Submit_ConcurrentCallQueuesContent` | Concurrent Submit queues safely | Slow LM + concurrent Submit | Second Submit queues; snapshot exposes it while first runs; processed after first |
 
 ### inbox_ordering_test.go

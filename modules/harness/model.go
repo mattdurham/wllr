@@ -476,6 +476,33 @@ func (m *Model) wireMainAgentCallbacks(p *tea.Program) {
 	}
 	onToken, stopBatch := makeBatchedOnToken(p, dispatchToken)
 	a.SetOnToken(onToken)
+	a.SetOnTurnStart(func(content string, messages []sdk.Message) {
+		if extHostForToken == nil {
+			return
+		}
+		for _, message := range messages {
+			if message.Type == sdk.MessageTypeSystem || strings.TrimSpace(message.Content) == "" {
+				continue
+			}
+			payload, _ := json.Marshal(sdk.BeforeAgentStartPayload{
+				Prompt: message.Content,
+				Queued: true,
+			})
+			_, _ = extHostForToken.DispatchEvent(
+				context.Background(),
+				sdk.Event{Type: sdk.EventBeforeAgentStart, Payload: payload},
+			)
+		}
+		if strings.TrimSpace(content) != "" {
+			payload, _ := json.Marshal(sdk.BeforeAgentStartPayload{
+				Prompt: content,
+			})
+			_, _ = extHostForToken.DispatchEvent(
+				context.Background(),
+				sdk.Event{Type: sdk.EventBeforeAgentStart, Payload: payload},
+			)
+		}
+	})
 	a.SetOnDone(func(err error) {
 		stopBatch()
 		p.Send(StreamDoneMsg{Err: err})
@@ -1298,11 +1325,10 @@ func (m Model) submitToAgent(content, display string) (tea.Model, tea.Cmd) {
 	if chatText == "" {
 		chatText = content
 	}
-	// The user prompt is echoed into the transcript by the WASM extension via
-	// the before_agent_start event (dispatched below). Here we only manage
-	// streaming state and the per-turn tool log.
+	// The user prompt is echoed into the transcript by the WASM extension from
+	// the agent turn-start callback. Here we only manage streaming state and the
+	// per-turn tool log.
 	_ = chatText
-	wasStreaming := m.streaming
 	if !m.streaming {
 		m.chat.ClearToolLog()
 		m.streaming = true
@@ -1315,20 +1341,9 @@ func (m Model) submitToAgent(content, display string) (tea.Model, tea.Cmd) {
 
 	pool := m.agentPool
 	mainAgentID := m.mainAgentID
-	extHost := m.extHost
 	activeModel := m.activeModel
 
 	cmd := func() tea.Msg {
-		// Dispatch before_agent_start.
-		if extHost != nil {
-			payload, _ := json.Marshal(sdk.BeforeAgentStartPayload{
-				Prompt: content,
-				Queued: wasStreaming,
-			})
-			evt := sdk.Event{Type: sdk.EventBeforeAgentStart, Payload: payload}
-			_, _ = extHost.DispatchEvent(context.Background(), evt)
-		}
-
 		// before_provider_request is dispatched as a transform chain inside the
 		// agent turn (via pool.SetProviderRequestInterceptor wired in SetProgram),
 		// not here — that is where the messages + model actually exist and where a

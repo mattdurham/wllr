@@ -36,6 +36,8 @@ type Agent struct {
 
 	onToolCallFn func(id, toolName, input string)
 
+	onTurnStart func(content string, inbox []sdk.Message)
+
 	toolsFn func() []fantasy.AgentTool
 
 	// providerOpts holds the current provider-specific request options (e.g.
@@ -67,7 +69,6 @@ type Agent struct {
 
 	history []sdk.Message
 
-
 	opts SpawnOpts
 
 	// inbox is the agent's pending-message queue (see mailbox). It owns its own
@@ -93,6 +94,10 @@ type Agent struct {
 	// onToolCall is called when a tool call is dispatched. Set via SetOnToolCall.
 	onToolCallMu sync.RWMutex
 
+	// onTurnStart is called after Submit successfully claims a turn and drains
+	// inbox messages into that turn. Set via SetOnTurnStart.
+	onTurnStartMu sync.RWMutex
+
 	// toolsFn, if set, is called on each Submit to get the current tool list.
 	// Takes priority over opts.Tools; allows dynamic tool registration.
 	toolsFnMu sync.RWMutex
@@ -107,7 +112,6 @@ type Agent struct {
 	lmMu sync.RWMutex
 
 	lastSummaryMu sync.RWMutex
-
 
 	// cancelMu protects the cancel function for the current active turn.
 	cancelMu sync.Mutex
@@ -138,6 +142,15 @@ func (a *Agent) SetOnDone(fn func(err error)) {
 	a.onDoneMu.Lock()
 	a.onDone = fn
 	a.onDoneMu.Unlock()
+}
+
+// SetOnTurnStart sets the callback invoked after a turn claims its content and
+// pending inbox messages, before the provider request starts. The inbox slice
+// is a copy owned by the callback. Thread-safe.
+func (a *Agent) SetOnTurnStart(fn func(content string, inbox []sdk.Message)) {
+	a.onTurnStartMu.Lock()
+	a.onTurnStart = fn
+	a.onTurnStartMu.Unlock()
 }
 
 // SetSystemPrompt sets the system prompt for all subsequent turns, overriding
@@ -278,7 +291,6 @@ func (a *Agent) EditInboxMessage(byIndex int, byMessageID string, newContent str
 func (a *Agent) SetInbox(msgs []sdk.Message) {
 	a.inbox.msgs = msgs
 }
-
 
 // ModelName returns the model name used for context-window sizing.
 func (a *Agent) ModelName() string {
@@ -538,6 +550,15 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 	a.onToolCallMu.RLock()
 	onToolCall := a.onToolCallFn
 	a.onToolCallMu.RUnlock()
+
+	a.onTurnStartMu.RLock()
+	onTurnStart := a.onTurnStart
+	a.onTurnStartMu.RUnlock()
+	if onTurnStart != nil {
+		messages := make([]sdk.Message, len(inboxMsgs))
+		copy(messages, inboxMsgs)
+		onTurnStart(content, messages)
+	}
 
 	// Capture last summary for iterative compaction (read before goroutine launch
 	// so the goroutine uses a consistent snapshot).
@@ -828,7 +849,6 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 	}
 	a.history = append(a.history, sdk.Message{Role: sdk.RoleAssistant, Content: assistantText})
 	a.historyMu.Unlock()
-
 
 	a.finishTurn(ctx, err, childCtx.Err(), onDone, inboxMsgs)
 }

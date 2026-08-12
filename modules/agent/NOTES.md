@@ -40,6 +40,12 @@ Append-only design decision log. Never delete entries; add an `*Addendum (date):
 
 **Consequence:** Callers must wire callbacks before calling `Submit`. If `SetOnToken` is not called, tokens are silently discarded (the `if onToken != nil` check). This is intentional — not all callers need token streaming (e.g. batch-mode sub-agents).
 
+`SetOnTurnStart` follows the same per-agent callback model. It receives the
+explicit prompt and the inbox batch actually claimed by that turn before the
+provider request starts. The harness uses it to dispatch transcript events for
+queued messages at pickup time; inspecting the UI streaming flag is not
+sufficient because Bubble Tea updates can lag the agent goroutine.
+
 ---
 
 ## 4. AgentPool.Send and AgentPool.Cancel — Pool-Level Convenience Methods
