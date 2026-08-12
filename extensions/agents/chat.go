@@ -46,13 +46,11 @@ func onChatSessionStart() {
 // node for the upcoming turn. The assistant box is inserted on first token so an
 // empty response box does not appear while the provider is still thinking.
 func onChatUserPrompt(prompt string, queued bool) {
-	if !chatEnabled || queued {
+	if !chatEnabled {
 		return
 	}
 	chatSeq++
 	userID := fmt.Sprintf("u%d", chatSeq)
-	chatPendingAsstNode = fmt.Sprintf("a%d", chatSeq)
-	chatAsstNode = ""
 
 	userBox := UINode{
 		ID:    userID,
@@ -61,6 +59,14 @@ func onChatUserPrompt(prompt string, queued bool) {
 		Props: &UIProps{Border: "rounded", Fg: "success", Padding: []int{0, 1}, Width: "fill", Wrap: true},
 	}
 	UIPatch(chatArea, OpInsert(chatRootID, userBox))
+	if queued {
+		// The queued message is already part of the user's conversation. The
+		// internal drain turn does not emit another before_agent_start event,
+		// so render it now, but leave the active assistant node untouched.
+		return
+	}
+	chatPendingAsstNode = fmt.Sprintf("a%d", chatSeq)
+	chatAsstNode = ""
 }
 
 // onChatToken streams main-agent text into the current assistant node.

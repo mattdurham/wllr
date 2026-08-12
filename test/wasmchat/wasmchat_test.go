@@ -103,6 +103,14 @@ func TestAgentsWASMDrivesChatTranscript(t *testing.T) {
 	dispatch(t, h, sdk.EventToken, sdk.TokenPayload{AgentID: "main", Text: "The answer "})
 	dispatch(t, h, sdk.EventToken, sdk.TokenPayload{AgentID: "main", Text: "is 4."})
 
+	// Queued prompts must be visible in the transcript even though they are
+	// processed by the agent's internal drain turn, which emits no second
+	// before_agent_start event.
+	dispatch(t, h, sdk.EventBeforeAgentStart, sdk.BeforeAgentStartPayload{
+		Prompt: "follow-up question", Queued: true,
+	})
+	dispatch(t, h, sdk.EventToken, sdk.TokenPayload{AgentID: "main", Text: "The follow-up answer."})
+
 	// A system notification should also be rendered into the transcript.
 	dispatch(t, h, sdk.EventNotify, sdk.NotifyPayload{Text: "Extensions reloaded."})
 
@@ -115,6 +123,12 @@ func TestAgentsWASMDrivesChatTranscript(t *testing.T) {
 	}
 	if !strings.Contains(out, "The answer is 4.") {
 		t.Fatalf("transcript missing streamed assistant text:\n%s", out)
+	}
+	if !strings.Contains(out, "follow-up question") {
+		t.Fatalf("transcript missing queued user prompt:\n%s", out)
+	}
+	if !strings.Contains(out, "The follow-up answer.") {
+		t.Fatalf("transcript missing response after queued prompt:\n%s", out)
 	}
 	if !strings.Contains(out, "Extensions reloaded.") {
 		t.Fatalf("transcript missing notification line:\n%s", out)
