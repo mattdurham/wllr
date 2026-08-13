@@ -981,6 +981,18 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 		if responseContent != "" {
 			cmds = append(cmds, m.cmdDispatchMessageEnd(string(sdk.RoleAssistant), responseContent))
 		}
+		// Guarantee the visible transcript reflects the complete response at
+		// stream completion. The WASM extension normally emits a structural
+		// scene op (e.g. replace_text) at message-end, but if it emits none
+		// (empty content, malformed extension, or a race with the pending
+		// append-only refresh), the final tail could be omitted even though the
+		// scene and session file are complete. Force a full render and clear
+		// any pending append-only refresh so the tail is never dropped. (#30)
+		m.chatAppendDirty = false
+		m.chatAppendRefreshScheduled = false
+		m.chatAppendID = ""
+		m.chatAppendText = ""
+		m.refreshWASMChat()
 		return m, tea.Batch(cmds...), true
 
 	}

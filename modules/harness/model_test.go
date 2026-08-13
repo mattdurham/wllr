@@ -676,6 +676,60 @@ func TestModel_Update_StreamDoneMsg_HidesConsole(t *testing.T) {
 	}
 }
 
+// TestModel_Update_StreamDoneMsg_ForcesWASMChatRefresh guards issue #30: the
+// visible transcript must contain the complete response (including the final
+// tail) at stream completion, even when an append-only refresh is still
+// pending. The scene tree may be complete while the viewport lags behind it;
+// StreamDoneMsg must force a structural full render so the tail is never
+// dropped.
+func TestModel_Update_StreamDoneMsg_ForcesWASMChatRefresh(t *testing.T) {
+	m := newTestModel()
+	m.width = 80
+	m.height = 40
+	m.streamContent = "All tests pass... and here is the final summary tail."
+	m.chat.SetSize(m.width, m.chatHeight())
+
+	// Create the WASM chat area with an assistant node holding the complete
+	// response. The scene is fully up to date; only the viewport lags.
+	if err := m.scene.CreateArea(sdk.UIArea{ID: wasmChatAreaID, Placement: sdk.UIAreaMain}); err != nil {
+		t.Fatalf("create chat scene area: %v", err)
+	}
+	root := sdk.UINode{
+		ID:   wasmChatRootID,
+		Type: sdk.UINodeVStack,
+		Children: []sdk.UINode{
+			{ID: "a1", Type: sdk.UINodeText, Text: m.streamContent},
+		},
+	}
+	if err := m.scene.ApplyPatch(sdk.UIPatchParams{Area: wasmChatAreaID, Ops: []sdk.UIPatchOp{
+		{Op: sdk.UIOpSetRoot, Node: &root},
+	}}); err != nil {
+		t.Fatalf("patch chat scene area: %v", err)
+	}
+
+	// Simulate a pending append-only refresh: the last token batch was applied
+	// to the scene but the viewport refresh tick has not fired yet. This is the
+	// exact #30 failure mode (final tail omitted from the viewport).
+	m.chatAppendDirty = true
+	m.chatAppendRefreshScheduled = true
+	m.chatAppendID = "a1"
+	m.chatAppendText = "tail"
+
+	m, _ = callUpdate(m, StreamDoneMsg{Err: nil})
+
+	// StreamDoneMsg must force a full structural refresh, so the viewport now
+	// contains the complete response including the final tail.
+	content := m.chat.externalContent
+	if !strings.Contains(content, "final summary tail") {
+		t.Fatalf("chat viewport missing final tail after StreamDoneMsg:\n%s", content)
+	}
+	// The pending append refresh must have been cleared so it cannot later
+	// overwrite the fresh full render.
+	if m.chatAppendRefreshScheduled {
+		t.Error("chatAppendRefreshScheduled should be cleared after StreamDoneMsg")
+	}
+}
+
 func TestModel_chatHeight_AccountsForConsole(t *testing.T) {
 	m := newTestModel()
 	m.width = 120

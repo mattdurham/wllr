@@ -14,6 +14,7 @@
 | `TestModel_Update_StreamDoneMsg_ClearsStreaming` | StreamDoneMsg ends stream | `m.streaming = true`, token appended | `streaming == false` after `StreamDoneMsg{Err: nil}` |
 | `TestModel_Update_StreamDoneMsg_Error_ShowsError` | Non-canceled error adds notification | `m.streaming = true` | `streaming == false`; `chat.messages` is non-empty (error notification added) |
 | `TestModel_Update_StreamDoneMsg_ContextCanceled_NoError` | `context.Canceled` is not shown as error | `m.streaming = true`, partial token | `streaming == false`; no system notification message in chat |
+| `TestModel_Update_StreamDoneMsg_ForcesWASMChatRefresh` | Stream completion guarantees the full transcript (final tail) even with a pending append-only refresh | WASM chat area with complete assistant node; `chatAppendRefreshScheduled=true` | viewport contains final tail; `chatAppendRefreshScheduled` cleared (#30) |
 | `TestModel_Update_ReloadMsg_TriggersExtensionReload` | ReloadMsg returns a Cmd that resolves to NotifyMsg | `newTestModel()` (nil host) | `cmd != nil`; executing cmd yields `NotifyMsg` |
 | `TestModel_Update_ClearMsg_ClearsHistory` | clearMsg empties history and chat | history + chat pre-populated | `len(m.history) == 0`; `len(m.chat.messages) == 0` |
 | `TestModel_Update_SetModelMsg` | setModelMsg updates activeModel and live.model | `newTestModel()` | `m.activeModel` and `m.live.model` equal new model name |
