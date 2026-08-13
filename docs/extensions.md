@@ -240,6 +240,42 @@ Task fields use these string enums:
 | `tasks_get` | `list_id` string, required; `task_id` string, required. | JSON task object. |
 | `tasks_claim` | `list_id` string, required; `agent_id` string, required. | JSON object: `{"task":{...}}` for a claimed task, or `{"task":null}` if none are available. |
 
+### Plan tools
+
+Registered by the bundled `plan` extension. Plans are durable: a JSON snapshot
+is written to `~/.wllr/plans/plan_state.json` on every mutation (via WASI) so
+plans survive compaction and process restart. The `/plan` slash command and a
+compact sidebar widget show the active plan's objective, current step,
+progress, blockers, and completion state.
+
+Plan/step fields use these string enums:
+
+- `status` (plan): `active`, `paused`, `completed`, `archived`
+- `status` (step): `pending`, `in_progress`, `completed`, `blocked`
+
+Plans carry provenance (`created_by`, `updated_by`, `agent_id` on steps),
+an incrementing `version`, and `attempts` on steps. `plan_update` and
+`plan_step_update` accept an optional `expected_version` and fail on mismatch
+so concurrent agents cannot silently overwrite each other's changes.
+
+Steps carry an `assignee` (the agent responsible for completing the step, set
+via `plan_assign`), distinct from the `agent_id` provenance (who last touched
+it). The widget footer and `plan_focus` show the assignee of the next step.
+
+| Tool | Inputs | Output |
+|------|--------|--------|
+| `plan_create` | `title` required; optional `description`, `content`, `agent_id` (provenance), `steps` (each `{title}` required, optional `id`/`description`/`acceptance_checks`). | JSON object: `{"id":"...","title":"...","status":"active","active":true,"message":"plan created"}`. |
+| `plan_get` | `id` string, required. | JSON plan object (title, description, content, status, steps, version, provenance, timestamps). |
+| `plan_list` | optional `status` filter. | JSON object: `{"plans":[...],"count":N}` sorted by recency. |
+| `plan_update` | `id` required; optional `title`, `description`, `status`, `content`, `expected_version`, `agent_id`. | JSON object with `id`, `title`, `status`, `version`, `message`. Version conflict returns an error. |
+| `plan_step_update` | `plan_id` and `step_id` required; optional `status`, `description`, `notes`, `expected_version`, `agent_id`. | JSON step object. Marks `attempts++` on transitions toward completion; records `agent_id`. Version conflict returns an error. |
+| `plan_evidence` | `plan_id`, `step_id`, `evidence` all required. | JSON step object with appended `evidence`. |
+| `plan_assign` | `plan_id`, `step_id`, `assignee` all required; optional `expected_version`. | JSON step object with `assignee` set. Version conflict returns an error. |
+| `plan_checkpoint` | optional `plan_id`. | JSON object: `{"plan_id":"...","active_id":"...","checkpointed":true}`. |
+| `plan_complete` | `plan_id` required; optional `override_reason`. | Refuses completion while steps are incomplete or a completed step lacks evidence unless `override_reason` is supplied (recorded in `completion_override`). On success: `{"completed":true,"plan_id":"...","status":"completed","override":"..."}`. |
+| `plan_focus` | no inputs. | `{"active":true,"plan":...,"next_step":...}` or `{"active":false,"message":"no active plan"}`. |
+| `plan_set_active` | `id` string, required. | JSON object: `{"id":"...","active":true}`. |
+
 ### Skill tools
 
 Registered by the installed `skills` extension.

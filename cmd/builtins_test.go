@@ -31,11 +31,20 @@ func TestBuiltinManifestPermissions_Granted(t *testing.T) {
 }
 
 func TestBuiltinManifestPermissions_None(t *testing.T) {
-	for _, name := range []string{"history", "plan", "queue", "sigil"} {
+	for _, name := range []string{"history", "queue", "sigil"} {
 		perms := builtinManifestPermissions(name)
 		if len(perms) != 0 {
 			t.Errorf("%s built-in should be granted no permissions, got %v", name, perms)
 		}
+	}
+}
+
+func TestBuiltinManifestPermissions_PlanHasUI(t *testing.T) {
+	// The plan extension renders a sidebar widget and /plan command, so it
+	// requires the ui permission (granted via its tracked manifest).
+	perms := builtinManifestPermissions("plan")
+	if len(perms) != 1 || perms[0] != sdk.PermUI {
+		t.Errorf("plan built-in should be granted ui permission, got %v", perms)
 	}
 }
 
