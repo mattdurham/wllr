@@ -113,6 +113,38 @@ func TestSceneRenderAppendTextNode(t *testing.T) {
 	}
 }
 
+func TestSceneReplaceTextNode(t *testing.T) {
+	s := NewSceneRenderer()
+	_ = s.CreateArea(sdk.UIArea{ID: "a"})
+	_ = s.ApplyPatch(sdk.UIPatchParams{Area: "a", Ops: []sdk.UIPatchOp{
+		{
+			Op:   sdk.UIOpSetRoot,
+			Node: &sdk.UINode{ID: "txt", Type: sdk.UINodeText, Text: "raw markdown"},
+		},
+	}})
+	if err := s.ApplyPatch(sdk.UIPatchParams{Area: "a", Ops: []sdk.UIPatchOp{
+		{Op: sdk.UIOpReplaceText, ID: "txt", Text: "rendered text"},
+	}}); err != nil {
+		t.Fatalf("ApplyPatch replace_text: %v", err)
+	}
+	if live := s.Render("a", 40); strings.Contains(live, "raw markdown") || !strings.Contains(live, "rendered text") {
+		t.Fatalf("replace_text should swap node text, got %q", live)
+	}
+}
+
+func TestSceneReplaceText_NonTextNode_Errors(t *testing.T) {
+	s := NewSceneRenderer()
+	_ = s.CreateArea(sdk.UIArea{ID: "a"})
+	_ = s.ApplyPatch(sdk.UIPatchParams{Area: "a", Ops: []sdk.UIPatchOp{
+		{Op: sdk.UIOpSetRoot, Node: &sdk.UINode{ID: "root", Type: sdk.UINodeVStack}},
+	}})
+	if err := s.ApplyPatch(sdk.UIPatchParams{Area: "a", Ops: []sdk.UIPatchOp{
+		{Op: sdk.UIOpReplaceText, ID: "root", Text: "x"},
+	}}); err == nil {
+		t.Fatal("replace_text on non-text node should error")
+	}
+}
+
 func TestSceneInsertAndRemove(t *testing.T) {
 	s := NewSceneRenderer()
 	_ = s.CreateArea(sdk.UIArea{ID: "a"})

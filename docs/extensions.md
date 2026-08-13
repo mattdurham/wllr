@@ -957,6 +957,14 @@ The `OnToken(func(agentID, text string))` SDK helper subscribes to this event.
 > input stay in the harness. There is no built-in fallback renderer: if no
 > extension creates the `chat` area, the chat viewport is empty.
 
+> **Markdown rendering.** Assistant responses are rendered as markdown by default:
+> at message-end the `agents` extension calls the host `format_markdown` method
+> (a native Go renderer in `modules/sdk/md`, no glow dependency) and swaps the
+> streamed node's raw text for the ANSI-styled result via `replace_text`.
+> Headers, bold/italic, lists, links, and fenced code blocks get terminal styling;
+> plain prose without markers is passed through unchanged (cheap path). Set
+> `WLLR_NO_MARKDOWN=1` to disable and keep responses verbatim.
+
 ---
 
 ### `notify`

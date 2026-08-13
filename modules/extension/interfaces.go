@@ -110,6 +110,9 @@ type CapabilityProvider interface {
 	// HTTPGet makes an HTTP GET request to the given URL with optional headers.
 	HTTPGet(url string, headers map[string]string) (int, []byte, error)
 	ConfigRead(group string) (json.RawMessage, error)
+	// FormatMarkdown renders markdown text to ANSI-styled terminal text for
+	// display in the chat transcript. Returns the rendered string.
+	FormatMarkdown(markdown string) string
 }
 
 // UIBridge is the interface extensions call to interact with the UI.

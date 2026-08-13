@@ -438,6 +438,9 @@ func (h *Host) buildDispatch() map[string]func(ctx context.Context, ext *Extensi
 		sdk.MethodHTTPGet: func(_ context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleHTTPGet(ext, req)
 		},
+		sdk.MethodFormatMarkdown: func(_ context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleFormatMarkdown(ext, req)
+		},
 		sdk.MethodConfigRead: func(_ context.Context, ext *Extension, _ sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleConfigRead(ext)
 		},
@@ -902,6 +905,24 @@ func (h *Host) handleHTTPGet(ext *Extension, req sdk.HostCallRequest) sdk.HostCa
 		return sdk.HostCallResponse{Error: err.Error()}
 	}
 	result, _ := json.Marshal(map[string]any{hostResultStatus: statusCode, "body": string(respBody)})
+	return sdk.HostCallResponse{Result: result}
+}
+
+func (h *Host) handleFormatMarkdown(ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+	if ext == nil || !ext.HasPermission(sdk.PermUI) {
+		return sdk.HostCallResponse{Error: "format_markdown: permission denied: requires ui"}
+	}
+	if h.capabilityProvider() == nil {
+		return sdk.HostCallResponse{Error: "format_markdown: not supported by host"}
+	}
+	var params struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return sdk.HostCallResponse{Error: fmt.Sprintf("format_markdown: %v", err)}
+	}
+	rendered := h.capabilityProvider().FormatMarkdown(params.Text)
+	result, _ := json.Marshal(map[string]string{"text": rendered})
 	return sdk.HostCallResponse{Result: result}
 }
 

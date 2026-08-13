@@ -293,6 +293,16 @@ func applyOp(root *sdk.UINode, op sdk.UIPatchOp) (*sdk.UINode, error) {
 		}
 		n.Text += op.Text
 		return root, nil
+	case sdk.UIOpReplaceText:
+		n := findNode(root, op.ID)
+		if n == nil {
+			return nil, fmt.Errorf("replace_text: node not found: %s", op.ID)
+		}
+		if n.Type != sdk.UINodeText {
+			return nil, fmt.Errorf("replace_text: node %s is not a text node", op.ID)
+		}
+		n.Text = op.Text
+		return root, nil
 	default:
 		return nil, fmt.Errorf("unknown op: %s", op.Op)
 	}

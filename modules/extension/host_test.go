@@ -319,14 +319,15 @@ func (b *testUIBridge) UpdateArea(_ sdk.UIUpdateAreaParams) error { return nil }
 
 // testCapabilityProvider implements CapabilityProvider using optional callback fields.
 type testCapabilityProvider struct {
-	onExec       func(ctx context.Context, command, dir string, onLine func(string)) (string, error)
-	onGetEnv     func(name string) (string, error)
-	onReadFile   func(path string) (string, error)
-	onWriteFile  func(path, content string) error
-	onAppendFile func(path, content string) error
-	onHTTPPost   func(url string, headers map[string]string, body []byte) (int, []byte, error)
-	onHTTPGet    func(url string, headers map[string]string) (int, []byte, error)
-	onConfigRead func(group string) (json.RawMessage, error)
+	onExec           func(ctx context.Context, command, dir string, onLine func(string)) (string, error)
+	onGetEnv         func(name string) (string, error)
+	onReadFile       func(path string) (string, error)
+	onWriteFile      func(path, content string) error
+	onAppendFile     func(path, content string) error
+	onHTTPPost       func(url string, headers map[string]string, body []byte) (int, []byte, error)
+	onHTTPGet        func(url string, headers map[string]string) (int, []byte, error)
+	onConfigRead     func(group string) (json.RawMessage, error)
+	onFormatMarkdown func(markdown string) string
 }
 
 func (p *testCapabilityProvider) Exec(ctx context.Context, command, dir string, onLine func(string)) (string, error) {
@@ -383,6 +384,13 @@ func (p *testCapabilityProvider) ConfigRead(group string) (json.RawMessage, erro
 		return p.onConfigRead(group)
 	}
 	return nil, nil
+}
+
+func (p *testCapabilityProvider) FormatMarkdown(markdown string) string {
+	if p.onFormatMarkdown != nil {
+		return p.onFormatMarkdown(markdown)
+	}
+	return markdown
 }
 
 func TestHost_Load_MinimalWASM(t *testing.T) {
@@ -899,6 +907,60 @@ func TestHost_Permission_RequestPermission_Denied(t *testing.T) {
 	})
 	if resp.Error == "" {
 		t.Fatal("expected permission denied error, got none")
+	}
+}
+
+func TestHost_FormatMarkdown_Renders(t *testing.T) {
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer func() { _ = h.Close(ctx) }()
+
+	var got string
+	h.SetCapabilities(&testCapabilityProvider{onFormatMarkdown: func(s string) string {
+		got = s
+		return "RENDERED"
+	}})
+
+	if err := h.LoadBytes(ctx, "chat.wasm", minimalWASM, false, sdk.PermUI); err != nil {
+		t.Fatalf("LoadBytes: %v", err)
+	}
+	ext := h.extensions[0]
+	resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+		Method: sdk.MethodFormatMarkdown,
+		Params: []byte(`{"text":"# hi\n\ncode block\n"}`),
+	})
+	if resp.Error != "" {
+		t.Fatalf("format_markdown: %s", resp.Error)
+	}
+	if got != "# hi\n\ncode block\n" {
+		t.Fatalf("renderer should receive raw markdown, got %q", got)
+	}
+	var out struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(resp.Result, &out); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if out.Text != "RENDERED" {
+		t.Fatalf("expected rendered text, got %q", out.Text)
+	}
+}
+
+func TestHost_FormatMarkdown_PermissionDenied(t *testing.T) {
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer func() { _ = h.Close(ctx) }()
+
+	if err := h.LoadBytes(ctx, "chat.wasm", minimalWASM, false); err != nil {
+		t.Fatalf("LoadBytes: %v", err)
+	}
+	ext := h.extensions[0]
+	resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
+		Method: sdk.MethodFormatMarkdown,
+		Params: []byte(`{"text":"# hi"}`),
+	})
+	if resp.Error == "" || !strings.Contains(resp.Error, "permission denied") {
+		t.Fatalf("expected permission denied error, got %q", resp.Error)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/mattdurham/wllr/modules/agent"
 	"github.com/mattdurham/wllr/modules/extension"
+	"github.com/mattdurham/wllr/modules/sdk/md"
 )
 
 // osCapabilityProvider implements extension.CapabilityProvider using host OS calls.
@@ -75,6 +76,10 @@ func (p *osCapabilityProvider) HTTPGet(url string, headers map[string]string) (i
 
 func (p *osCapabilityProvider) ConfigRead(group string) (json.RawMessage, error) {
 	return loadConfigGroup(group)
+}
+
+func (p *osCapabilityProvider) FormatMarkdown(markdown string) string {
+	return md.Render(markdown)
 }
 
 // compile-time check

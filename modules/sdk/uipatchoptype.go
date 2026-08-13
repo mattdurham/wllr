@@ -22,4 +22,9 @@ const (
 	// identified by ID. This is the cheap streaming op: token deltas append
 	// without re-serializing the surrounding subtree.
 	UIOpAppendText UIPatchOpType = "append_text"
+	// UIOpReplaceText replaces the entire text of the UINodeText node identified
+	// by ID with Text. Used to swap a streamed assistant node's raw markdown for
+	// the rendered (ANSI-styled) result at message-end without breaking the
+	// append-mode streaming fast path.
+	UIOpReplaceText UIPatchOpType = "replace_text"
 )

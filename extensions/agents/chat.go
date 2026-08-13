@@ -2,7 +2,10 @@
 
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // This file implements the WASM-driven main chat transcript (UI P4). When the
 // host enables it, the agents extension owns the "chat"
@@ -22,6 +25,7 @@ var (
 	chatSeq             int    // monotonic counter for unique node IDs
 	chatAsstNode        string // ID of the assistant text node for the in-flight turn
 	chatPendingAsstNode string // reserved assistant node ID, inserted on first token
+	markdownEnabled     bool  // set from WLLR_NO_MARKDOWN on session start
 )
 
 // initChat registers the transcript event handlers. They are inert until
@@ -38,6 +42,11 @@ func initChat() {
 // there is no built-in fallback renderer.
 func onChatSessionStart() {
 	chatEnabled = true
+	// Markdown rendering is on by default; WLLR_NO_MARKDOWN=1 disables it.
+	markdownEnabled = true
+	if v, err := GetEnv("WLLR_NO_MARKDOWN"); err == nil && (v == "1" || strings.EqualFold(v, "true")) {
+		markdownEnabled = false
+	}
 	UICreateArea(chatArea, "main", 0, "", "", "", "")
 	UIPatch(chatArea, OpSetRoot(UIVStack(chatRootID)))
 }
@@ -93,13 +102,24 @@ func onChatToken(agentID, text string) {
 	UIPatch(chatArea, OpAppendText(chatAsstNode, text))
 }
 
-// onChatMessageEnd finalizes the assistant bubble when a response completes
-// without any streamed token batches reaching the transcript first.
+// onChatMessageEnd finalizes the assistant bubble when a response completes.
+// For streamed turns it replaces the in-flight assistant node's raw markdown
+// with the rendered (ANSI-styled) result; for non-streamed turns it inserts a
+// freshly rendered assistant node. When markdown is disabled, content is left
+// verbatim.
 func onChatMessageEnd(role, content string) {
 	if !chatEnabled || role != "assistant" || content == "" {
 		return
 	}
+	display := content
+	if markdownEnabled {
+		display = FormatMarkdown(content)
+	}
 	if chatAsstNode != "" {
+		// Streamed turn: the in-flight node already holds the raw text. Swap it
+		// for the rendered version without breaking append-mode streaming.
+		UIPatch(chatArea, OpReplaceText(chatAsstNode, display))
+		chatAsstNode = ""
 		return
 	}
 	asstID := chatPendingAsstNode
@@ -108,11 +128,11 @@ func onChatMessageEnd(role, content string) {
 		asstID = fmt.Sprintf("a%d", chatSeq)
 	}
 	chatPendingAsstNode = ""
-	chatAsstNode = asstID
+	chatAsstNode = ""
 	asstBox := UINode{
 		ID:    asstID,
 		Type:  "text",
-		Text:  content,
+		Text:  display,
 		Props: &UIProps{Border: "rounded", Fg: "accent", Padding: []int{0, 1}, Width: "fill", Wrap: true},
 	}
 	UIPatch(chatArea, OpInsert(chatRootID, asstBox))

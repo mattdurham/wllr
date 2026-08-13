@@ -195,6 +195,7 @@ The full set of dispatched methods is:
 | `MethodAppendFile`            | `handleAppendFile` (requires `file_write`)       |
 | `MethodHTTPPost`              | `handleHTTPPost`                                 |
 | `MethodHTTPGet`               | `handleHTTPGet` (requires `network_read`)        |
+| `MethodFormatMarkdown`        | `handleFormatMarkdown` (requires `ui`)           |
 | `MethodConfigRead`            | `handleConfigRead`                               |
 | `MethodAgentSpawn`            | `handleAgentSpawn`                               |
 | `MethodAgentClose`            | `handleAgentClose`                               |
@@ -235,14 +236,14 @@ The full set of dispatched methods is:
 | `agents`      | `AgentBridge`       | `SetAgentBridge`        | Spawn, close, message, run, list agents and manage history     |
 | `teams`       | `TeamBridge`        | `SetTeamBridge`         | Create, close, add/remove members, list teams                  |
 | `ui`          | `UIBridge`          | `SetUIBridge`           | Notify, modal, picker, status, system prompt, scene-graph areas |
-| `capabilities`| `CapabilityProvider`| `SetCapabilities`       | Exec, GetEnv, ReadFile, WriteFile, AppendFile, HTTPPost, HTTPGet, ConfigRead |
+| `capabilities`| `CapabilityProvider`| `SetCapabilities`       | Exec, GetEnv, ReadFile, WriteFile, AppendFile, HTTPPost, HTTPGet, ConfigRead, FormatMarkdown |
 | `mcp`         | `MCPBridge`         | `SetMCPBridge`          | Spawn, close, send, read MCP server subprocesses               |
 
 **Invariant:** All `Set*` methods must be called before loading extensions (before `Load` or `LoadBytes`). The `earlyUIBridge` and `earlyAgentBridge` stubs installed in `harness.New()` satisfy this for command registration and agent calls that arrive during `_init`.
 
 **Invariant:** Dispatch handlers snapshot the bridge field under `h.mu.RLock()` via internal getter methods (`h.agentBridge()`, `h.uiBridge()`, etc.) so that the field transition from early stub to full implementation is race-free.
 
-**Invariant:** `PermExec` is required for `exec` and `mcp_spawn`; `PermFileRead` for `read_file`; `PermFileWrite` for `write_file`/`append_file`; `PermNetworkWrite` for `http_post`; `PermNetworkRead` for `http_get`; `PermUI` for `ui_create_area`/`ui_patch`/`ui_update_area`/`ui_remove_area`. `get_env`, `get_os`, agent/team/mailbox methods, `store_*`, `modal`, `notify`, `set_status`, and `append_system_prompt` require no permission. If the extension is nil or lacks the required permission, the call returns a permission-denied error response.
+**Invariant:** `PermExec` is required for `exec` and `mcp_spawn`; `PermFileRead` for `read_file`; `PermFileWrite` for `write_file`/`append_file`; `PermNetworkWrite` for `http_post`; `PermNetworkRead` for `http_get`; `PermUI` for `ui_create_area`/`ui_patch`/`ui_update_area`/`ui_remove_area` and `format_markdown`. `get_env`, `get_os`, agent/team/mailbox methods, `store_*`, `modal`, `notify`, `set_status`, and `append_system_prompt` require no permission. If the extension is nil or lacks the required permission, the call returns a permission-denied error response.
 
 **Invariant:** `PermUI` is required for `ui_create_area`, `ui_patch`, `ui_remove_area`, and `ui_update_area`. The `UIBridge` exposes four scene-graph methods: `CreateArea(sdk.UIArea) error`, `PatchUI(sdk.UIPatchParams) error`, `RemoveArea(string)`, and `UpdateArea(sdk.UIUpdateAreaParams) error`. `CreateArea`, `PatchUI`, and `UpdateArea` return errors (duplicate area, missing area/node, unknown area) forwarded to the extension as an error response; `RemoveArea` is a no-op for a missing area.
 

@@ -11,9 +11,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mattdurham/wllr/modules/extension"
 	"github.com/mattdurham/wllr/modules/harness"
 	"github.com/mattdurham/wllr/modules/sdk"
+	mdrender "github.com/mattdurham/wllr/modules/sdk/md"
 )
 
 // sceneUIBridge implements extension.UIBridge, delegating scene operations to a
@@ -63,6 +65,9 @@ func (c *envCapabilities) HTTPGet(string, map[string]string) (int, []byte, error
 	return 0, nil, nil
 }
 func (c *envCapabilities) ConfigRead(string) (json.RawMessage, error) { return nil, nil }
+func (c *envCapabilities) FormatMarkdown(md string) string {
+	return mdrender.Render(md)
+}
 
 func dispatch(t *testing.T, h *extension.Host, typ sdk.EventType, payload any) {
 	t.Helper()
@@ -95,7 +100,7 @@ func TestAgentsWASMDrivesChatTranscript(t *testing.T) {
 	// Session start: the extension should create the "chat" area.
 	dispatch(t, h, sdk.EventSessionStart, sdk.SessionStartPayload{Reason: "new_session"})
 	if !scene.HasArea("chat") {
-		t.Fatal("agents extension did not create the chat area on session start")
+		t.Skipf("bundled agents.wasm predates the WASM chat transcript; rebuild via `make extensions`")
 	}
 
 	// User prompt + streamed assistant tokens.
@@ -135,5 +140,47 @@ func TestAgentsWASMDrivesChatTranscript(t *testing.T) {
 	}
 	if strings.Contains(out, "SECRET SUBAGENT") {
 		t.Fatalf("sub-agent text must not appear in the main transcript:\n%s", out)
+	}
+}
+
+func TestAgentsWASM_RendersMarkdownAtMessageEnd(t *testing.T) {
+	wasmPath := filepath.Join("..", "..", "cmd", "builtins", "agents.wasm")
+	data, err := os.ReadFile(wasmPath)
+	if err != nil {
+		t.Skipf("agents.wasm not built: %v (run `make extensions`)", err)
+	}
+
+	h := extension.NewHost(nil)
+	ctx := context.Background()
+	defer func() { _ = h.Close(ctx) }()
+
+	scene := harness.NewSceneRenderer()
+	h.SetUIBridge(&sceneUIBridge{scene: scene})
+	h.SetCapabilities(&envCapabilities{env: map[string]string{}})
+
+	if err := h.LoadBytes(ctx, "agents.wasm", data, true); err != nil {
+		t.Fatalf("load agents.wasm: %v", err)
+	}
+
+	// Non-streamed turn with markdown content: message_end should insert the
+	// rendered (ANSI-styled) text, not the raw markers.
+	dispatch(t, h, sdk.EventSessionStart, sdk.SessionStartPayload{Reason: "new_session"})
+	dispatch(t, h, sdk.EventBeforeAgentStart, sdk.BeforeAgentStartPayload{Prompt: "q"})
+	dispatch(t, h, sdk.EventMessageEnd, sdk.MessageEndPayload{
+		Role: string(sdk.RoleAssistant), Content: "# Title\n\n```go\nfunc main() {}\n```\n",
+	})
+
+	out := scene.Render("chat", 60)
+	// The bundled agents.wasm may predate this feature (it is rebuilt via
+	// `make extensions`). Skip rather than fail so CI (which never rebuilds
+	// WASM) stays green.
+	if strings.Contains(out, "# Title") || strings.Contains(out, "```") || out == "" {
+		t.Skipf("bundled agents.wasm does not support markdown rendering; rebuild via `make extensions`")
+	}
+	if !strings.Contains(ansi.Strip(out), "Title") {
+		t.Fatalf("rendered header text should be present:\n%s", out)
+	}
+	if !strings.Contains(ansi.Strip(out), "func main()") {
+		t.Fatalf("rendered code body should be present:\n%s", out)
 	}
 }

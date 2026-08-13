@@ -74,6 +74,7 @@ func (f *fakeCapabilityProvider) HTTPGet(_ string, _ map[string]string) (int, []
 	return 200, nil, nil
 }
 func (f *fakeCapabilityProvider) ConfigRead(_ string) (json.RawMessage, error) { return nil, nil }
+func (f *fakeCapabilityProvider) FormatMarkdown(md string) string              { return md }
 
 var _ extension.CapabilityProvider = (*fakeCapabilityProvider)(nil)
 

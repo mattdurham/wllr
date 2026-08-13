@@ -339,6 +339,23 @@ func GetEnv(name string) (string, error) {
 	return r.Value, nil
 }
 
+// FormatMarkdown renders markdown text to ANSI-styled terminal text via the
+// host's native renderer. Returns the raw text unchanged if the host rejects
+// the call (e.g. permission denied) or returns an empty response.
+func FormatMarkdown(text string) string {
+	raw := _sdkCallResult("format_markdown", map[string]string{"text": text})
+	if raw == nil {
+		return text
+	}
+	var r struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return text
+	}
+	return r.Text
+}
+
 // StoreSet stores a key-value pair in the extension's private store.
 func StoreSet(key, value string) {
 	_sdkCall("store_set", map[string]string{"key": key, "value": value})
@@ -529,6 +546,8 @@ func OpUpdate(id string, props UIProps) UIPatchOp {
 }
 func OpRemove(id string) UIPatchOp           { return UIPatchOp{Op: "remove", ID: id} }
 func OpAppendText(id, text string) UIPatchOp { return UIPatchOp{Op: "append_text", ID: id, Text: text} }
+
+func OpReplaceText(id, text string) UIPatchOp { return UIPatchOp{Op: "replace_text", ID: id, Text: text} }
 
 // OnToken registers a handler called with batches of streamed assistant text as
 // the agent produces it. agentID identifies the producing agent.

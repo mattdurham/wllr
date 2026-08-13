@@ -16,6 +16,6 @@ type UIPatchOp struct {
 	Node *UINode `json:"node,omitempty"`
 	// Props is the payload for UIOpUpdate.
 	Props *UIProps `json:"props,omitempty"`
-	// Text is the payload for UIOpAppendText.
+	// Text is the payload for UIOpAppendText and UIOpReplaceText.
 	Text string `json:"text,omitempty"`
 }

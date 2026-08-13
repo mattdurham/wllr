@@ -179,6 +179,9 @@ const (
 	// MethodHTTPGet makes an HTTP GET request from the host.
 	// Requires PermNetworkRead.
 	MethodHTTPGet = "http_get"
+	// MethodFormatMarkdown renders markdown text to ANSI-styled terminal text
+	// for display in the chat transcript. Requires PermUI.
+	MethodFormatMarkdown = "format_markdown"
 	// MethodBeforeToolCall is sent by extensions that want to intercept tool
 	// calls before execution.
 	MethodBeforeToolCall = "before_tool_call"

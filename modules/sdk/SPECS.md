@@ -354,6 +354,7 @@ Note: Percent is 0–100. CompactConfig.ThresholdPct is a fraction 0.0–1.0.
 | `MethodAppendFile`        | `"append_file"`        | Append content to a file, creating it if absent (requires PermFileWrite) |
 | `MethodHTTPPost`          | `"http_post"`          | Make an HTTP POST request (requires PermNetworkWrite)         |
 | `MethodHTTPGet`           | `"http_get"`           | Make an HTTP GET request (requires PermNetworkRead)           |
+| `MethodFormatMarkdown`    | `"format_markdown"`    | Render markdown text to ANSI-styled terminal text (requires PermUI) |
 | `MethodBeforeToolCall`    | `"before_tool_call"`   | Intercept a tool call before execution (observation constant) |
 | `MethodAfterToolCall`     | `"after_tool_call"`    | Observe a tool result after execution (observation constant)  |
 
@@ -465,6 +466,7 @@ Optional style/layout. Colour fields (`fg`, `bg`) reference **named theme tokens
 | `UIOpUpdate`     | `"update"`      | `id`, `props`                | Replace the props of node `id`                    |
 | `UIOpRemove`     | `"remove"`      | `id`                         | Remove node `id` and its subtree                  |
 | `UIOpAppendText` | `"append_text"` | `id`, `text`                 | Append `text` to text node `id` (streaming op)    |
+| `UIOpReplaceText`| `"replace_text"`| `id`, `text`                 | Replace the text of text node `id` (render swap)  |
 
 - `UIPatchOp.Index` is `*int`: a nil index appends; an index of `0` is preserved on the wire (not dropped by `omitempty`).
 - `UIPatchOp.Parent == ""` for `UIOpInsert` targets the area root container.
