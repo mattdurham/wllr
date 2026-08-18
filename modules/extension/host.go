@@ -486,6 +486,9 @@ func (h *Host) buildDispatch() map[string]func(ctx context.Context, ext *Extensi
 		sdk.MethodShowPicker: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleShowPicker(req)
 		},
+		sdk.MethodShowTextInput: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleShowTextInput(req)
+		},
 		sdk.MethodAgentResetHistory: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleAgentResetHistory(req)
 		},
@@ -1362,6 +1365,18 @@ func (h *Host) handleShowPicker(req sdk.HostCallRequest) sdk.HostCallResponse {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("show_picker: %v", err)}
 	}
 	h.uiBridge().ShowPicker(params.Title, params.Items, params.Callback)
+	return sdk.HostCallResponse{}
+}
+
+func (h *Host) handleShowTextInput(req sdk.HostCallRequest) sdk.HostCallResponse {
+	if h.uiBridge() == nil {
+		return sdk.HostCallResponse{Error: "show_text_input: not supported by host"}
+	}
+	var params sdk.ShowTextInputParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return sdk.HostCallResponse{Error: fmt.Sprintf("show_text_input: %v", err)}
+	}
+	h.uiBridge().ShowTextInput(params.Title, params.Placeholder, params.InitialValue, params.Callback)
 	return sdk.HostCallResponse{}
 }
 

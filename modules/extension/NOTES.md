@@ -364,3 +364,15 @@ implementations.
 **Consequence:** `agent_list` remains backward compatible for consumers that only read the original fields. New consumers should use `working=true` as the "child is working" signal and treat `shutdown_requested` as "graceful stop pending," not "agent already stopped."
 
 *Addendum (2026-07-05):* `AgentInfo` now includes `working`, `liveness`, and `last_tool_done_age_ms`. `working=true` is the preferred orchestration signal for a running child; consumers should wait for an idle/done notification instead of deriving "stuck" from unchanged history or a completed-but-recent tool call.
+
+---
+
+## 31. UIBridge.ShowTextInput and show_text_input host call
+
+*Added: 2026-08-18*
+
+**Decision:** `UIBridge` gains `ShowTextInput(title, placeholder, initialValue, callback string)` and the host gains a `show_text_input` dispatch method (`handleShowTextInput`), unmarshaling `sdk.ShowTextInputParams` and forwarding to the bridge. No permission is required, matching `show_picker`.
+
+**Rationale:** `show_picker` only covers selection from a fixed list; several planned flows (e.g. entering a free-form value such as a local endpoint URL or model name) need arbitrary text input, not a choice among known options. Rather than growing `show_picker`'s params with a "freeform" mode (which would blur its single responsibility and complicate the picker overlay's rendering/key-handling), a second, narrowly-scoped primitive mirrors `show_picker`'s existing plumbing (host_call constant, params struct, `UIBridge` method, harness message, overlay widget) so extensions get a single-string result via the same `EventOnCommand` delivery shape they already handle for pickers.
+
+**Consequence:** All `UIBridge` implementations (test stubs in `host_test.go`, `interfaces_test.go`, `mcp/extension_test.go`, `wasmchat_test.go`, and the `earlyUIBridge`/`harnessUIBridge` pair) must implement `ShowTextInput`. The harness renders the overlay with a new `TextInputView` widget backed by `charm.land/bubbles/v2/textinput`, reusing `PickerView`'s border/title/label styles for visual consistency.

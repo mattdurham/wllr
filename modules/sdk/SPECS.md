@@ -325,7 +325,7 @@ Note: Percent is 0–100. CompactConfig.ThresholdPct is a fraction 0.0–1.0.
 
 ---
 
-## host_call Method Constants (55 total)
+## host_call Method Constants (56 total)
 
 ### Core methods
 
@@ -409,6 +409,7 @@ Note: Percent is 0–100. CompactConfig.ThresholdPct is a fraction 0.0–1.0.
 | Constant               | Wire value           | Purpose                                                      |
 |------------------------|----------------------|--------------------------------------------------------------|
 | `MethodShowPicker`     | `"show_picker"`      | Open an interactive TUI list picker                          |
+| `MethodShowTextInput`  | `"show_text_input"`  | Open an interactive TUI text input overlay                  |
 | `MethodGetStatusInfo`  | `"get_status_info"`  | Get current status bar state (no permission required)       |
 | `MethodGetContextUsage`| `"get_context_usage"`| Get current context window usage (no permission required)   |
 | `MethodSetStatusLine`  | `"set_status_line"`  | Replace entire status bar text (no permission required)     |
@@ -568,4 +569,5 @@ Returned as `int32` from the `host_call` WASM import (not the JSON layer).
 13. `EventContextUsage` (`"context_usage"`) is fired once per completed turn, after the turn's usage is stored, only on success (not on error or cancellation).
 14. `MethodGetContextUsage` (`"get_context_usage"`) requires no permission; it returns a zero-valued `ContextUsage` when the agent bridge is unavailable.
 15. UI scene-graph types (`UINode`, `UIProps`, `UIPatchOp`, `UIPatchParams`, `UIArea`, `UICreateAreaParams`) are pure JSON data definitions; `UIPatchOp.Index` is a `*int` so a valid index of `0` survives the wire while a nil index (append) is omitted.
-16. All 55 `Method*` constants are documented above; missing methods in SPECS.md indicate incomplete documentation rather than missing implementation.
+16. All 56 `Method*` constants are documented above; missing methods in SPECS.md indicate incomplete documentation rather than missing implementation.
+17. `ShowTextInputParams` mirrors `ShowPickerParams`: `Title` and `Callback` are required, `Placeholder` and `InitialValue` are `omitempty` and default to `""`. After submission the harness fires `EventOnCommand{name: callback, args: [value]}`, the same delivery shape as `show_picker`.

@@ -35,6 +35,7 @@ type earlyUIBridge struct {
 func (e *earlyUIBridge) Notify(_ string)                                       {}
 func (e *earlyUIBridge) ShowModal(_ string)                                    {}
 func (e *earlyUIBridge) ShowPicker(_ string, _ []sdk.ShowPickerItem, _ string) {}
+func (e *earlyUIBridge) ShowTextInput(_, _, _, _ string)                       {}
 func (e *earlyUIBridge) Abort()                                                {}
 func (e *earlyUIBridge) SetStatus(_, _ string)                                 {}
 func (e *earlyUIBridge) GetStatusInfo() sdk.StatusInfo {
@@ -365,6 +366,13 @@ func (b *harnessUIBridge) ShowPicker(title string, items []sdk.ShowPickerItem, c
 		return
 	}
 	b.prog.Send(ShowPickerMsg{Title: title, Items: items, Callback: callback})
+}
+
+func (b *harnessUIBridge) ShowTextInput(title, placeholder, initialValue, callback string) {
+	if b.prog == nil {
+		return
+	}
+	b.prog.Send(ShowTextInputMsg{Title: title, Placeholder: placeholder, InitialValue: initialValue, Callback: callback})
 }
 
 func (b *harnessUIBridge) Abort() {

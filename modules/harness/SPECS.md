@@ -541,6 +541,29 @@ Local model replacement flow: when the configured local model is not advertised 
 
 **Invariant:** `"__wllr:auth"` and `"__wllr:login_provider"` join `"__wllr:model"`/`"__wllr:thinking"` as reserved core-owned picker callbacks; they never dispatch `EventOnCommand`.
 
+### show_text_input Overlay
+
+`TextInputView` is a fullscreen overlay text input shown instead of the chat, mirroring `PickerView`'s structure but backed by `charm.land/bubbles/v2/textinput.Model` instead of a list.
+
+| Method | Behavior |
+|--------|----------|
+| `Open(title, placeholder, initialValue, callback string)` | Resets and configures the underlying `textinput.Model` (`Placeholder`, `SetValue(initialValue)`, cursor to end), calls `Focus()`, and activates the overlay. |
+| `Close()` | Deactivates the overlay and clears `Callback`. |
+| `IsActive() bool` | Reports whether the overlay is currently shown. |
+| `SetSize(width, height int)` | Updates overlay dimensions and the inner `textinput.Model` width. |
+| `HandleKey(kp tea.KeyPressMsg) (submitted bool, value string, cancelled bool, cmd tea.Cmd)` | Enter submits with the current value; Esc cancels; every other key is forwarded to `textinput.Model.Update` and its `tea.Cmd` is returned so cursor blink/paste commands keep working. |
+| `View() string` | Bordered box matching `PickerView`'s visual style (`pickerBorderStyle`/`pickerTitleStyle`/`pickerLabelStyle`), rendering the title, the input line, and a footer hint (` enter submit · esc cancel `). |
+
+`ShowTextInputMsg{Title, Placeholder, InitialValue, Callback}` is the bubbletea message `harnessUIBridge.ShowTextInput` sends to open the overlay; the `Model.Update` `ShowTextInputMsg` case opens `m.textInput` and sizes it against `m.chatHeight()`, matching the `ShowPickerMsg` case.
+
+`updateKeyPressTextInput` mirrors `updateKeyPressPicker`: on cancel it closes the overlay and returns; on submit it closes the overlay, then — before falling through to the generic extension dispatch — has the same structural slot for core-owned `"__wllr:"`-prefixed callbacks (e.g. a future local-model setup wizard) that `updateKeyPressPicker` uses for `modelPickerCallback`/`thinkingPickerCallback`/`authPickerCallback`/`loginProviderPickerCallback`. Any callback not recognized as core-owned dispatches `EventOnCommand` with `sdk.OnCommandPayload{Name: callback, Args: []string{value}}` to `m.extHost`, exactly like the picker's extension-owned fallback.
+
+**Invariant:** `m.textInput.IsActive()` is checked before `m.picker.IsActive()` in both key routing (`updateKeyPress`) and rendering (`View`), so the two overlays are mutually exclusive and text input takes priority if both were somehow opened.
+
+**Invariant:** `show_text_input` (`MethodShowTextInput`) requires no permission, matching `show_picker`.
+
+**Invariant:** no core-owned (`"__wllr:"`-prefixed) text-input callbacks exist yet; `updateKeyPressTextInput`'s structure supports adding `if callback == someFutureCallback { ... }` checks before the generic extension-dispatch fallback, exactly as `updateKeyPressPicker` does.
+
 ### OAuth Login Flow
 
 When the user chooses **OAuth** in the auth prompt (or runs `/login`), the harness drives an interactive OAuth login via two callbacks (set by `cmd/main.go`):

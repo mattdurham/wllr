@@ -207,6 +207,8 @@ type Model struct {
 
 	picker PickerView
 
+	textInput TextInputView
+
 	width, height int
 
 	suggestionIdx  int
@@ -682,6 +684,7 @@ func (m Model) updateWindow(msg tea.Msg) (Model, tea.Cmd, bool) {
 		m.input.SetWidth(msg.Width - 4)
 		m.chat.SetSize(msg.Width, m.chatHeight())
 		m.picker.SetSize(msg.Width, m.chatHeight())
+		m.textInput.SetSize(msg.Width, m.chatHeight())
 		// Re-render the WASM transcript at the new width.
 		m.refreshWASMChat()
 		return m, nil, true
@@ -692,6 +695,10 @@ func (m Model) updateWindow(msg tea.Msg) (Model, tea.Cmd, bool) {
 	case ShowPickerMsg:
 		m.picker.Open(msg.Title, msg.Items, msg.Callback)
 		m.picker.SetSize(m.width, m.chatHeight())
+		return m, nil, true
+	case ShowTextInputMsg:
+		m.textInput.Open(msg.Title, msg.Placeholder, msg.InitialValue, msg.Callback)
+		m.textInput.SetSize(m.width, m.chatHeight())
 		return m, nil, true
 	case ResetHistoryMsg:
 		// Agent history is replaced by the UIBridge; the visual transcript is
@@ -723,6 +730,9 @@ func (m Model) updateKeyPress(msg tea.Msg) (Model, tea.Cmd, bool) {
 		}
 	}
 
+	if m.textInput.IsActive() {
+		return m.updateKeyPressTextInput(kp)
+	}
 	if m.picker.IsActive() {
 		return m.updateKeyPressPicker(kp)
 	}
@@ -818,6 +828,31 @@ func (m Model) updateKeyPressPicker(kp tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		}, true
 	}
 	return m, nil, true
+}
+
+// updateKeyPressTextInput handles key events when the text input overlay is active.
+func (m Model) updateKeyPressTextInput(kp tea.KeyPressMsg) (Model, tea.Cmd, bool) {
+	callback := m.textInput.Callback
+	submitted, value, cancelled, cmd := m.textInput.HandleKey(kp)
+	if cancelled {
+		m.textInput.Close()
+		return m, nil, true
+	}
+	if submitted {
+		m.textInput.Close()
+		// Core-owned text inputs (callback prefixed "__wllr:") will route to a
+		// harness handler here, mirroring updateKeyPressPicker's specific-callback
+		// checks (e.g. a future local-model setup wizard), before falling through
+		// to the generic extension dispatch below.
+		extHost := m.extHost
+		return m, func() tea.Msg {
+			payload, _ := json.Marshal(sdk.OnCommandPayload{Name: callback, Args: []string{value}})
+			evt := sdk.Event{Type: sdk.EventOnCommand, Payload: payload}
+			results, err := extHost.DispatchEvent(context.Background(), evt)
+			return ExtensionEventResultMsg{Results: results, Err: err}
+		}, true
+	}
+	return m, cmd, true
 }
 
 // updateKeyPressModal handles key events when the modal overlay is open.
@@ -1699,7 +1734,9 @@ func (m Model) View() tea.View {
 	inputBox := m.renderInputBox()
 
 	var sb strings.Builder
-	if m.picker.IsActive() {
+	if m.textInput.IsActive() {
+		sb.WriteString(strings.TrimRight(m.textInput.View(), "\n") + "\n")
+	} else if m.picker.IsActive() {
 		sb.WriteString(strings.TrimRight(m.picker.View(), "\n") + "\n")
 	} else if m.modalContent != "" {
 		chatH := m.height - renderedLineCount(inputBox)
