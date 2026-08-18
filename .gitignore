@@ -52,3 +52,7 @@ features.md
 extensions/agents/agents
 *.wasm
 cmd/cmd
+
+# Compiled extension binaries
+extensions/lsp/lsp
+extensions/lsp/lsp_enhanced
