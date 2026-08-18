@@ -58,12 +58,30 @@ type showLocalModelSetupMsg struct{}
 // localModelBaseURLEnteredMsg carries the base URL submitted from the setup prompt.
 type localModelBaseURLEnteredMsg struct{ URL string }
 
+// LocalModelProbeStatus classifies the outcome of probing a base URL, so the
+// setup flow can distinguish a wrong/unreachable endpoint (which should be
+// re-prompted, not silently downgraded) from one that responded with nothing
+// usable (which falls back to manual entry).
+type LocalModelProbeStatus int
+
+const (
+	// LocalModelProbeOK means the endpoint returned at least one usable model.
+	LocalModelProbeOK LocalModelProbeStatus = iota
+	// LocalModelProbeUnreachable means the request itself failed to complete
+	// (bad URL, connection refused, timeout, DNS failure) — the endpoint is
+	// likely misconfigured, so the user should be asked to re-enter it.
+	LocalModelProbeUnreachable
+	// LocalModelProbeEmpty means the endpoint was reached but returned no
+	// usable models (empty list, unexpected shape) — falls back to manual entry.
+	LocalModelProbeEmpty
+)
+
 // localModelProbeResultMsg carries the outcome of probing a base URL for an
 // OpenAI-compatible model list.
 type localModelProbeResultMsg struct {
 	BaseURL string
 	Models  []LocalModelChoice
-	OK      bool
+	Status  LocalModelProbeStatus
 }
 
 // localModelPickedMsg carries the model chosen from the discovered-models picker.
@@ -130,10 +148,10 @@ func (m *Model) probeLocalModelsCmd(baseURL string) tea.Cmd {
 	probe := m.ProbeLocalModelsFn
 	return func() tea.Msg {
 		if probe == nil {
-			return localModelProbeResultMsg{BaseURL: baseURL, OK: false}
+			return localModelProbeResultMsg{BaseURL: baseURL, Status: LocalModelProbeUnreachable}
 		}
-		models, ok := probe(baseURL)
-		return localModelProbeResultMsg{BaseURL: baseURL, Models: models, OK: ok}
+		models, status := probe(baseURL)
+		return localModelProbeResultMsg{BaseURL: baseURL, Models: models, Status: status}
 	}
 }
 

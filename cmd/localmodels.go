@@ -85,8 +85,8 @@ func discoverLocalModels(ctx context.Context, cfg *Config) []modelInfo {
 		if baseURL == "" {
 			continue
 		}
-		models, ok := queryLocalModels(ctx, baseURL+"/models", local.APIKey)
-		if !ok {
+		models, result := queryLocalModels(ctx, baseURL+"/models", local.APIKey)
+		if result != queryLocalModelsOK {
 			continue
 		}
 		for _, remote := range models {
@@ -135,29 +135,44 @@ func contextWindowFromOpenAIModel(m openAIModel) int64 {
 	}
 }
 
-func queryLocalModels(parent context.Context, endpoint, apiKey string) ([]openAIModel, bool) {
+// queryLocalModelsResult classifies why a probe did not yield models, so
+// callers can distinguish an unreachable endpoint (bad host/port, refused,
+// timed out) from one that responded but had nothing usable.
+type queryLocalModelsResult int
+
+const (
+	queryLocalModelsOK queryLocalModelsResult = iota
+	// queryLocalModelsUnreachable means the request itself failed to complete
+	// (DNS failure, connection refused, timeout) — the URL is likely wrong.
+	queryLocalModelsUnreachable
+	// queryLocalModelsBadResponse means the endpoint was reached but returned a
+	// non-2xx status or a body that isn't a valid /models listing.
+	queryLocalModelsBadResponse
+)
+
+func queryLocalModels(parent context.Context, endpoint, apiKey string) ([]openAIModel, queryLocalModelsResult) {
 	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return nil, false
+		return nil, queryLocalModelsUnreachable
 	}
 	if strings.TrimSpace(apiKey) != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, false
+		return nil, queryLocalModelsUnreachable
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, false
+		return nil, queryLocalModelsBadResponse
 	}
 	var payload openAIModelsResponse
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, false
+		return nil, queryLocalModelsBadResponse
 	}
-	return payload.Data, true
+	return payload.Data, queryLocalModelsOK
 }
 
 func applyLocalModelChoice(ctx context.Context, cfg *Config, id string) bool {

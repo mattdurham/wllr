@@ -173,9 +173,10 @@ type Model struct {
 	AwaitOAuthFn func() (input string, ok bool)
 
 	// ProbeLocalModelsFn probes {baseURL}/models for an OpenAI-compatible model
-	// list. Returns ok=false on any failure (network, non-2xx, bad JSON, empty).
-	// Set by cmd/main.go.
-	ProbeLocalModelsFn func(baseURL string) (models []LocalModelChoice, ok bool)
+	// list. The returned status distinguishes an unreachable endpoint (bad
+	// URL/refused/timeout — re-prompt the user) from one that responded but had
+	// nothing usable (fall back to manual entry). Set by cmd/main.go.
+	ProbeLocalModelsFn func(baseURL string) (models []LocalModelChoice, status LocalModelProbeStatus)
 
 	// SaveLocalModelFn persists a newly chosen/entered local model to disk and
 	// applies it as the active provider/model. Returns the applied model ID.
@@ -1201,13 +1202,19 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 		return m, m.probeLocalModelsCmd(msg.URL), true
 
 	case localModelProbeResultMsg:
-		if msg.OK && len(msg.Models) > 0 {
+		if msg.Status == LocalModelProbeOK && len(msg.Models) > 0 {
 			m.openModelPickerFromProbe(msg.Models)
+			return m, nil, true
+		}
+		if msg.Status == LocalModelProbeUnreachable {
+			m.localSetupBaseURL = ""
+			m.pushNotification(fmt.Sprintf("⚠ could not reach %s — check the URL and try again.", msg.BaseURL))
+			m.openLocalModelBaseURLPrompt()
 			return m, nil, true
 		}
 		m.localSetupManualStep = 0
 		m.localSetupManualEntry = LocalModelEntry{BaseURL: m.localSetupBaseURL}
-		m.pushNotification("Could not discover models — enter details manually.")
+		m.pushNotification("Endpoint reached but no models were found — enter details manually.")
 		m.openNextManualField()
 		return m, nil, true
 

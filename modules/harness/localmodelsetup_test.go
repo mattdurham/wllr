@@ -35,11 +35,11 @@ func TestSelectProviderFn_LocalSetupNeeded_ShowsSetupFlow(t *testing.T) {
 func TestLocalModelSetup_DiscoverySuccess_FullFlow(t *testing.T) {
 	m := newTestModel()
 	var savedEntry LocalModelEntry
-	m.ProbeLocalModelsFn = func(baseURL string) ([]LocalModelChoice, bool) {
+	m.ProbeLocalModelsFn = func(baseURL string) ([]LocalModelChoice, LocalModelProbeStatus) {
 		if baseURL != "http://localhost:11434/v1" {
 			t.Errorf("probe baseURL = %q", baseURL)
 		}
-		return []LocalModelChoice{{ID: "llama3.2", Name: "Llama 3.2", ContextWindow: 131072}}, true
+		return []LocalModelChoice{{ID: "llama3.2", Name: "Llama 3.2", ContextWindow: 131072}}, LocalModelProbeOK
 	}
 	m.SaveLocalModelFn = func(entry LocalModelEntry) (string, error) {
 		savedEntry = entry
@@ -58,7 +58,7 @@ func TestLocalModelSetup_DiscoverySuccess_FullFlow(t *testing.T) {
 	if !ok {
 		t.Fatalf("probe msg = %T, want localModelProbeResultMsg", probeMsg)
 	}
-	if !result.OK || len(result.Models) != 1 {
+	if result.Status != LocalModelProbeOK || len(result.Models) != 1 {
 		t.Fatalf("probe result = %+v", result)
 	}
 
@@ -97,7 +97,7 @@ func TestLocalModelSetup_ManualFallback_FullFlow(t *testing.T) {
 	}
 
 	m, _ = callUpdate(m, localModelBaseURLEnteredMsg{URL: "http://localhost:8000/v1"})
-	m, _ = callUpdate(m, localModelProbeResultMsg{BaseURL: "http://localhost:8000/v1", OK: false})
+	m, _ = callUpdate(m, localModelProbeResultMsg{BaseURL: "http://localhost:8000/v1", Status: LocalModelProbeEmpty})
 	if !m.textInput.IsActive() || m.textInput.Callback != localModelManualFieldCallback {
 		t.Fatalf("expected manual field prompt open, got active=%v callback=%q", m.textInput.IsActive(), m.textInput.Callback)
 	}
@@ -147,7 +147,7 @@ func TestLocalModelSetup_ManualFallback_DefaultsNameToID(t *testing.T) {
 	}
 
 	m, _ = callUpdate(m, localModelBaseURLEnteredMsg{URL: "http://localhost:8000/v1"})
-	m, _ = callUpdate(m, localModelProbeResultMsg{OK: false})
+	m, _ = callUpdate(m, localModelProbeResultMsg{Status: LocalModelProbeEmpty})
 	m, _ = callUpdate(m, localModelManualFieldEnteredMsg{Value: "id-only"})
 	m, _ = callUpdate(m, localModelManualFieldEnteredMsg{Value: ""}) // blank name -> defaults to ID
 	m, _ = callUpdate(m, localModelManualFieldEnteredMsg{Value: "not-a-number"})
@@ -173,7 +173,7 @@ func TestLocalModelSetup_ManualFallback_EmptyIDReprompts(t *testing.T) {
 	}
 
 	m, _ = callUpdate(m, localModelBaseURLEnteredMsg{URL: "http://localhost:8000/v1"})
-	m, _ = callUpdate(m, localModelProbeResultMsg{OK: false})
+	m, _ = callUpdate(m, localModelProbeResultMsg{Status: LocalModelProbeEmpty})
 	m, _ = callUpdate(m, localModelManualFieldEnteredMsg{Value: "   "})
 
 	if m.localSetupManualStep != 0 {
@@ -211,6 +211,35 @@ func TestLocalModelSetup_EscCancels_NoSave(t *testing.T) {
 	}
 	if saveCalled {
 		t.Error("SaveLocalModelFn should not be called on cancel")
+	}
+}
+
+func TestLocalModelSetup_Unreachable_RepromptsForURL(t *testing.T) {
+	m := newTestModel()
+	saveCalled := false
+	m.SaveLocalModelFn = func(entry LocalModelEntry) (string, error) {
+		saveCalled = true
+		return entry.ID, nil
+	}
+
+	m, _ = callUpdate(m, localModelBaseURLEnteredMsg{URL: "http://192.168.4.20/v1"})
+	if m.localSetupBaseURL != "http://192.168.4.20/v1" {
+		t.Fatalf("localSetupBaseURL = %q", m.localSetupBaseURL)
+	}
+
+	m, _ = callUpdate(m, localModelProbeResultMsg{BaseURL: "http://192.168.4.20/v1", Status: LocalModelProbeUnreachable})
+
+	if !m.textInput.IsActive() || m.textInput.Callback != localModelBaseURLCallback {
+		t.Fatalf("expected re-prompt for base URL, got active=%v callback=%q", m.textInput.IsActive(), m.textInput.Callback)
+	}
+	if m.localSetupBaseURL != "" {
+		t.Errorf("localSetupBaseURL should reset on unreachable, got %q", m.localSetupBaseURL)
+	}
+	if m.localSetupManualStep != 0 || (LocalModelEntry{}) != m.localSetupManualEntry {
+		t.Error("manual-entry fallback should not start on an unreachable endpoint")
+	}
+	if saveCalled {
+		t.Error("SaveLocalModelFn should not be called when the endpoint is unreachable")
 	}
 }
 

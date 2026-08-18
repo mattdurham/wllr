@@ -115,9 +115,9 @@ func TestQueryLocalModels_NonOKStatus(t *testing.T) {
 	}))
 	defer server.Close()
 
-	models, ok := queryLocalModels(context.Background(), server.URL+"/models", "")
-	if ok {
-		t.Fatalf("expected ok=false for non-200 status, got models=%+v", models)
+	models, result := queryLocalModels(context.Background(), server.URL+"/models", "")
+	if result != queryLocalModelsBadResponse {
+		t.Fatalf("expected queryLocalModelsBadResponse for non-200 status, got %v models=%+v", result, models)
 	}
 }
 
@@ -127,8 +127,8 @@ func TestQueryLocalModels_MalformedJSON(t *testing.T) {
 	}))
 	defer server.Close()
 
-	if _, ok := queryLocalModels(context.Background(), server.URL+"/models", ""); ok {
-		t.Fatal("expected ok=false for malformed JSON")
+	if _, result := queryLocalModels(context.Background(), server.URL+"/models", ""); result != queryLocalModelsBadResponse {
+		t.Fatalf("expected queryLocalModelsBadResponse for malformed JSON, got %v", result)
 	}
 }
 
@@ -138,9 +138,9 @@ func TestQueryLocalModels_EmptyDataList(t *testing.T) {
 	}))
 	defer server.Close()
 
-	models, ok := queryLocalModels(context.Background(), server.URL+"/models", "")
-	if !ok {
-		t.Fatal("expected ok=true even with empty data (the endpoint responded successfully)")
+	models, result := queryLocalModels(context.Background(), server.URL+"/models", "")
+	if result != queryLocalModelsOK {
+		t.Fatalf("expected queryLocalModelsOK even with empty data (the endpoint responded successfully), got %v", result)
 	}
 	if len(models) != 0 {
 		t.Fatalf("len(models) = %d, want 0", len(models))
@@ -149,8 +149,8 @@ func TestQueryLocalModels_EmptyDataList(t *testing.T) {
 
 func TestQueryLocalModels_ConnectionRefused(t *testing.T) {
 	// Port 1 is a privileged, normally-unbound port — no server listens there.
-	if _, ok := queryLocalModels(context.Background(), "http://127.0.0.1:1/models", ""); ok {
-		t.Fatal("expected ok=false for connection-refused endpoint")
+	if _, result := queryLocalModels(context.Background(), "http://127.0.0.1:1/models", ""); result != queryLocalModelsUnreachable {
+		t.Fatalf("expected queryLocalModelsUnreachable for connection-refused endpoint, got %v", result)
 	}
 }
 
@@ -184,9 +184,9 @@ func TestQueryLocalModels_SuccessTranslation(t *testing.T) {
 	}))
 	defer server.Close()
 
-	models, ok := queryLocalModels(context.Background(), server.URL+"/models", "")
-	if !ok {
-		t.Fatal("expected ok=true")
+	models, result := queryLocalModels(context.Background(), server.URL+"/models", "")
+	if result != queryLocalModelsOK {
+		t.Fatalf("expected queryLocalModelsOK, got %v", result)
 	}
 	if len(models) != 2 {
 		t.Fatalf("len(models) = %d, want 2", len(models))
