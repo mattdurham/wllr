@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -166,9 +167,10 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 		modelID := defaultModelForProvider(provider)
 		if provider == providerLocal {
 			models := localModels(ctx, cfg)
-			if len(models) > 0 {
-				modelID = firstAvailableModel(cfg.Model, models)
+			if len(models) == 0 {
+				return "", false, harness.ErrLocalModelSetupNeeded
 			}
+			modelID = firstAvailableModel(cfg.Model, models)
 		}
 		if modelID == "" {
 			return "", false, fmt.Errorf("unknown provider %q", provider)
@@ -254,6 +256,87 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 	}
 	if localModelReplaced {
 		m.SetPendingModelPicker()
+	}
+
+	// Wire the interactive local-model setup flow: /login (or the startup
+	// provider picker) redirects here when the local provider has no usable
+	// model, letting the user probe an endpoint or enter details manually.
+	m.HasLocalModelFn = func() bool { return len(localModels(ctx, cfg)) > 0 }
+	m.ProbeLocalModelsFn = func(baseURL string) ([]harness.LocalModelChoice, bool) {
+		trimmed := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+		if trimmed == "" {
+			return nil, false
+		}
+		models, ok := queryLocalModels(ctx, trimmed+"/models", "")
+		if !ok || len(models) == 0 {
+			return nil, false
+		}
+		out := make([]harness.LocalModelChoice, 0, len(models))
+		for _, remote := range models {
+			id := strings.TrimSpace(remote.ID)
+			if id == "" {
+				continue
+			}
+			name := strings.TrimSpace(remote.Name)
+			if name == "" {
+				name = id
+			}
+			out = append(out, harness.LocalModelChoice{
+				ID:            id,
+				Name:          name,
+				ContextWindow: contextWindowFromOpenAIModel(remote),
+			})
+		}
+		if len(out) == 0 {
+			return nil, false
+		}
+		return out, true
+	}
+	m.SaveLocalModelFn = func(entry harness.LocalModelEntry) (string, error) {
+		lm := localModelConfig{
+			ID:            entry.ID,
+			Name:          entry.Name,
+			BaseURL:       entry.BaseURL,
+			APIKey:        entry.APIKey,
+			ContextWindow: entry.ContextWindow,
+		}
+		if _, ok := cfg.localModelByID(lm.ID); !ok {
+			cfg.LocalModels = append(cfg.LocalModels, lm)
+		} else {
+			for i := range cfg.LocalModels {
+				if cfg.LocalModels[i].ID == lm.ID {
+					cfg.LocalModels[i] = lm
+					break
+				}
+			}
+		}
+		if saveErr := saveLocalModels(cfg.LocalModels); saveErr != nil {
+			return "", fmt.Errorf("save local models: %w", saveErr)
+		}
+		rememberLocalModel(cfg, modelInfo{
+			ID:            lm.ID,
+			Name:          lm.Name,
+			LocalBaseURL:  lm.BaseURL,
+			LocalAPIKey:   lm.APIKey,
+			ContextWindow: lm.ContextWindow,
+		})
+		currentProvider = providerLocal
+		cfg.Provider = providerLocal
+		if saveErr := saveProvider(providerLocal); saveErr != nil {
+			slog.Warn("wllr: could not persist provider selection", "provider", providerLocal, "error", saveErr)
+		}
+		if saveErr := saveModel(lm.ID); saveErr != nil {
+			slog.Warn("wllr: could not persist model selection", "model", lm.ID, "error", saveErr)
+		}
+		prov, newLM, buildErr := buildProvider(ctx, cfg)
+		if buildErr != nil {
+			return "", buildErr
+		}
+		pool.SetProvider(prov)
+		if main := pool.Get(agent.MainAgentID); main != nil {
+			main.SetModel(newLM, lm.ID)
+		}
+		return lm.ID, nil
 	}
 
 	// Wire the /thinking picker: list model-specific reasoning modes, and apply + persist on

@@ -49,7 +49,39 @@ func savedWllrField(field string) string {
 // saveWllrField persists a single string field to the "wllr" group of the
 // config file, preserving all other groups and keys. Best-effort: returns an
 // error the caller may surface, but never partially writes (temp-file + rename).
-func saveWllrField(field, value string) error {
+func saveWllrField(field, value string) error { return saveWllrRawField(field, value) }
+
+// localModelConfigWire is the on-disk shape of localModelConfig: ContextWindow
+// is written as a plain JSON number instead of localModelConfig's RawMessage
+// field (which exists only to tolerate string/number values on read).
+type localModelConfigWire struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	BaseURL       string `json:"base_url"`
+	APIKey        string `json:"api_key"`
+	ContextWindow int64  `json:"context_window,omitempty"`
+}
+
+// saveLocalModels persists the full local_models list to the "wllr" group.
+func saveLocalModels(models []localModelConfig) error {
+	wire := make([]localModelConfigWire, 0, len(models))
+	for _, m := range models {
+		wire = append(wire, localModelConfigWire{
+			ID:            m.ID,
+			Name:          m.Name,
+			BaseURL:       m.BaseURL,
+			APIKey:        m.APIKey,
+			ContextWindow: m.ContextWindow,
+		})
+	}
+	return saveWllrRawField("local_models", wire)
+}
+
+// saveWllrRawField persists any JSON-marshalable value to a field in the
+// "wllr" group of the config file, preserving all other groups and keys.
+// Best-effort: returns an error the caller may surface, but never partially
+// writes (temp-file + rename).
+func saveWllrRawField(field string, value any) error {
 	path := configPath()
 
 	// Read the whole config object (or start empty).

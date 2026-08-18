@@ -115,6 +115,72 @@ func TestSaveModel_PreservesOtherGroups(t *testing.T) {
 	}
 }
 
+func TestSaveLocalModels_RoundTrip(t *testing.T) {
+	withConfigPath(t)
+
+	models := []localModelConfig{{
+		ID:            "deepseek-v4-flash",
+		Name:          "Dwarfstar 4 Flash",
+		BaseURL:       "http://localhost:11434/v1",
+		APIKey:        "test-key",
+		ContextWindow: 262144,
+	}}
+	if err := saveLocalModels(models); err != nil {
+		t.Fatalf("saveLocalModels: %v", err)
+	}
+
+	settings := loadWllrSettings()
+	if len(settings.LocalModels) != 1 {
+		t.Fatalf("len(LocalModels) = %d, want 1: %+v", len(settings.LocalModels), settings.LocalModels)
+	}
+	got := settings.LocalModels[0]
+	if got.ID != "deepseek-v4-flash" || got.Name != "Dwarfstar 4 Flash" || got.BaseURL != "http://localhost:11434/v1" ||
+		got.APIKey != "test-key" || got.ContextWindow != 262144 {
+		t.Errorf("round-tripped local model = %+v, want match of input", got)
+	}
+}
+
+func TestSaveLocalModels_PreservesOtherGroups(t *testing.T) {
+	path := withConfigPath(t)
+
+	// Seed the config with another group and an existing wllr.provider field.
+	seed := map[string]any{
+		"permissions": map[string]any{"read": map[string]any{"allow": []string{"*"}}},
+		"wllr":        map[string]any{"provider": "local"},
+	}
+	data, _ := json.MarshalIndent(seed, "", "  ")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("seed write: %v", err)
+	}
+
+	models := []localModelConfig{{ID: "qwen3-coder-next", Name: "Qwen3 Coder Next", BaseURL: "http://127.0.0.1:1/v1"}}
+	if err := saveLocalModels(models); err != nil {
+		t.Fatalf("saveLocalModels: %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &all); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if _, ok := all["permissions"]; !ok {
+		t.Error("permissions group was dropped")
+	}
+	var wllr map[string]json.RawMessage
+	if err := json.Unmarshal(all["wllr"], &wllr); err != nil {
+		t.Fatalf("parse wllr group: %v", err)
+	}
+	if got := string(wllr["provider"]); got != `"local"` {
+		t.Errorf("wllr.provider = %s, want quoted local", got)
+	}
+	if _, ok := wllr["local_models"]; !ok {
+		t.Error("wllr.local_models was not written")
+	}
+}
+
 func TestModelCatalog_KnownProviders(t *testing.T) {
 	for _, p := range []string{"anthropic", "openai", "gemini"} {
 		models := modelsForProvider(p)

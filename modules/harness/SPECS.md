@@ -556,13 +556,29 @@ Local model replacement flow: when the configured local model is not advertised 
 
 `ShowTextInputMsg{Title, Placeholder, InitialValue, Callback}` is the bubbletea message `harnessUIBridge.ShowTextInput` sends to open the overlay; the `Model.Update` `ShowTextInputMsg` case opens `m.textInput` and sizes it against `m.chatHeight()`, matching the `ShowPickerMsg` case.
 
-`updateKeyPressTextInput` mirrors `updateKeyPressPicker`: on cancel it closes the overlay and returns; on submit it closes the overlay, then — before falling through to the generic extension dispatch — has the same structural slot for core-owned `"__wllr:"`-prefixed callbacks (e.g. a future local-model setup wizard) that `updateKeyPressPicker` uses for `modelPickerCallback`/`thinkingPickerCallback`/`authPickerCallback`/`loginProviderPickerCallback`. Any callback not recognized as core-owned dispatches `EventOnCommand` with `sdk.OnCommandPayload{Name: callback, Args: []string{value}}` to `m.extHost`, exactly like the picker's extension-owned fallback.
+`updateKeyPressTextInput` mirrors `updateKeyPressPicker`: on cancel it closes the overlay and returns; on submit it closes the overlay, then — before falling through to the generic extension dispatch — checks core-owned `"__wllr:"`-prefixed callbacks (`localModelBaseURLCallback`, `localModelManualFieldCallback`; see "Local-Model Setup Flow" below), the same structural slot `updateKeyPressPicker` uses for `modelPickerCallback`/`thinkingPickerCallback`/`authPickerCallback`/`loginProviderPickerCallback`. Any callback not recognized as core-owned dispatches `EventOnCommand` with `sdk.OnCommandPayload{Name: callback, Args: []string{value}}` to `m.extHost`, exactly like the picker's extension-owned fallback.
 
 **Invariant:** `m.textInput.IsActive()` is checked before `m.picker.IsActive()` in both key routing (`updateKeyPress`) and rendering (`View`), so the two overlays are mutually exclusive and text input takes priority if both were somehow opened.
 
 **Invariant:** `show_text_input` (`MethodShowTextInput`) requires no permission, matching `show_picker`.
 
-**Invariant:** no core-owned (`"__wllr:"`-prefixed) text-input callbacks exist yet; `updateKeyPressTextInput`'s structure supports adding `if callback == someFutureCallback { ... }` checks before the generic extension-dispatch fallback, exactly as `updateKeyPressPicker` does.
+### Local-Model Setup Flow
+
+When the local provider has no configured/discoverable model, `SelectProviderFn` returns the sentinel `ErrLocalModelSetupNeeded` instead of an error, and `applyLoginProviderSelection` (in `providerpicker.go`) checks `errors.Is(err, ErrLocalModelSetupNeeded)` *before* its generic error-notification path, redirecting into an interactive setup flow (`localmodelsetup.go`) rather than failing. `/login` redirects the same way when `m.activeProvider == providerLocal` and `hasUsableLocalModel()` (backed by `HasLocalModelFn`, nil-safe defaulting to `true`) is false.
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `ProbeLocalModelsFn` | `func(baseURL string) (models []LocalModelChoice, ok bool)` | Probes `{baseURL}/models` for an OpenAI-compatible model list. `ok=false` on any failure (network, non-2xx, bad JSON, empty result). Nil ⇒ treated as a failed probe. |
+| `SaveLocalModelFn` | `func(entry LocalModelEntry) (modelID string, err error)` | Persists the chosen/entered model to disk (`wllr.local_models`) and rebuilds the active provider. Nil ⇒ setup surfaces a "not available" notification instead of saving. |
+| `HasLocalModelFn` | `func() bool` | Reports whether the local provider currently has a usable model. Nil ⇒ assume true (no `/login` redirect). |
+
+Discovery-success flow: base-URL prompt (`openLocalModelBaseURLPrompt`, callback `localModelBaseURLCallback`) → `localModelBaseURLEnteredMsg` stores `localSetupBaseURL` and returns `probeLocalModelsCmd` as an async `tea.Cmd` → `localModelProbeResultMsg{OK: true, Models}` opens a picker of discovered models (`openModelPickerFromProbe`, callback `localModelPickerCallback`) built from the stashed `localSetupModels` → picker selection resolves the full choice from `localSetupModels` by ID and emits `localModelPickedMsg` → `applyLocalModelPick` calls `SaveLocalModelFn`, notifies, and on success updates active provider/model state via `setActiveProviderModel`.
+
+Manual-fallback flow: `localModelProbeResultMsg{OK: false}` (or empty models) resets `localSetupManualStep` to 0, seeds `localSetupManualEntry.BaseURL`, and opens the first of four sequential text-input prompts (`localModelManualFields`: model ID, display name, context window, optional API key) via `localModelManualFieldCallback`. Each `localModelManualFieldEnteredMsg` fills the corresponding `localSetupManualEntry` field (empty model ID re-prompts the same step instead of advancing; empty display name defaults to the model ID; context window is parsed best-effort via `parseContextWindowLoose`, defaulting to 0 rather than erroring; API key is always optional) and advances to the next field, or — after the fourth — calls `applyLocalModelPick` exactly as the discovery path does.
+
+**Invariant:** cancelling (`Esc`) the base-URL prompt or any manual field calls `resetLocalModelSetupState`, zeroing all `localSetup*` fields so a later attempt starts fresh; cancelling the discovered-models picker does the same. Cancelling any *other* picker/text-input does not touch this state.
+
+**Invariant:** `providerLocal` is duplicated as a harness-local constant (`localmodelsetup.go`) since `harness` cannot import `cmd/` (which imports `harness`); it must be kept in sync with `cmd/provider.go`'s constant of the same name.
 
 ### OAuth Login Flow
 

@@ -172,6 +172,21 @@ type Model struct {
 	// local callback server (manual paste only). Set by cmd/main.go.
 	AwaitOAuthFn func() (input string, ok bool)
 
+	// ProbeLocalModelsFn probes {baseURL}/models for an OpenAI-compatible model
+	// list. Returns ok=false on any failure (network, non-2xx, bad JSON, empty).
+	// Set by cmd/main.go.
+	ProbeLocalModelsFn func(baseURL string) (models []LocalModelChoice, ok bool)
+
+	// SaveLocalModelFn persists a newly chosen/entered local model to disk and
+	// applies it as the active provider/model. Returns the applied model ID.
+	// Set by cmd/main.go.
+	SaveLocalModelFn func(entry LocalModelEntry) (modelID string, err error)
+
+	// HasLocalModelFn reports whether the local provider currently has at least
+	// one usable model configured. Nil means assume a model exists (no redirect
+	// into local-model setup on /login). Set by cmd/main.go.
+	HasLocalModelFn func() bool
+
 	// scene holds extension-driven UI areas (the declarative, node-based
 	// renderer). Shared by pointer with the harnessUIBridge so the bridge can
 	// mutate it off-loop and the View can read it.
@@ -184,6 +199,13 @@ type Model struct {
 	authPromptProvider   string
 	pendingAuthProvider  string
 	oauthCaptureProvider string
+
+	// Local-model interactive setup state (base-URL probe + discovered-model
+	// picker, or manual-entry fallback). See localmodelsetup.go.
+	localSetupBaseURL     string
+	localSetupModels      []LocalModelChoice
+	localSetupManualStep  int
+	localSetupManualEntry LocalModelEntry
 
 	// Modal overlay state (non-empty when modal is open).
 	modalContent string
@@ -800,6 +822,9 @@ func (m Model) updateKeyPressPicker(kp tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	selected, id, cancelled := m.picker.HandleKey(kp)
 	if cancelled {
 		m.picker.Close()
+		if callback == localModelPickerCallback {
+			m.resetLocalModelSetupState()
+		}
 		return m, nil, true
 	}
 	if selected {
@@ -819,6 +844,17 @@ func (m Model) updateKeyPressPicker(kp tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		if callback == loginProviderPickerCallback {
 			return m, func() tea.Msg { return loginProviderSelectedMsg{Provider: id} }, true
 		}
+		if callback == localModelPickerCallback {
+			for _, choice := range m.localSetupModels {
+				if choice.ID == id {
+					chosen := choice
+					return m, func() tea.Msg {
+						return localModelPickedMsg{ID: chosen.ID, Name: chosen.Name, ContextWindow: chosen.ContextWindow}
+					}, true
+				}
+			}
+			return m, nil, true
+		}
 		extHost := m.extHost
 		return m, func() tea.Msg {
 			payload, _ := json.Marshal(sdk.OnCommandPayload{Name: callback, Args: []string{id}})
@@ -836,14 +872,21 @@ func (m Model) updateKeyPressTextInput(kp tea.KeyPressMsg) (Model, tea.Cmd, bool
 	submitted, value, cancelled, cmd := m.textInput.HandleKey(kp)
 	if cancelled {
 		m.textInput.Close()
+		if callback == localModelBaseURLCallback || callback == localModelManualFieldCallback {
+			m.resetLocalModelSetupState()
+		}
 		return m, nil, true
 	}
 	if submitted {
 		m.textInput.Close()
-		// Core-owned text inputs (callback prefixed "__wllr:") will route to a
-		// harness handler here, mirroring updateKeyPressPicker's specific-callback
-		// checks (e.g. a future local-model setup wizard), before falling through
-		// to the generic extension dispatch below.
+		// Core-owned text inputs (callback prefixed "__wllr:") route to a harness
+		// handler instead of dispatching EventOnCommand to a WASM extension.
+		if callback == localModelBaseURLCallback {
+			return m, func() tea.Msg { return localModelBaseURLEnteredMsg{URL: value} }, true
+		}
+		if callback == localModelManualFieldCallback {
+			return m, func() tea.Msg { return localModelManualFieldEnteredMsg{Value: value} }, true
+		}
 		extHost := m.extHost
 		return m, func() tea.Msg {
 			payload, _ := json.Marshal(sdk.OnCommandPayload{Name: callback, Args: []string{value}})
@@ -1134,6 +1177,10 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 		return m, nil, true
 
 	case loginMsg:
+		if m.activeProvider == providerLocal && !m.hasUsableLocalModel() {
+			m.openLocalModelBaseURLPrompt()
+			return m, nil, true
+		}
 		m.openAuthPrompt(m.activeProvider)
 		return m, nil, true
 
@@ -1143,6 +1190,66 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 	case showModelPickerMsg:
 		m.openModelPicker()
 		return m, nil, true
+
+	case showLocalModelSetupMsg:
+		m.openLocalModelBaseURLPrompt()
+		return m, nil, true
+
+	case localModelBaseURLEnteredMsg:
+		m.localSetupBaseURL = msg.URL
+		m.pushNotification("Probing endpoint…")
+		return m, m.probeLocalModelsCmd(msg.URL), true
+
+	case localModelProbeResultMsg:
+		if msg.OK && len(msg.Models) > 0 {
+			m.openModelPickerFromProbe(msg.Models)
+			return m, nil, true
+		}
+		m.localSetupManualStep = 0
+		m.localSetupManualEntry = LocalModelEntry{BaseURL: m.localSetupBaseURL}
+		m.pushNotification("Could not discover models — enter details manually.")
+		m.openNextManualField()
+		return m, nil, true
+
+	case localModelPickedMsg:
+		entry := LocalModelEntry{
+			ID:            msg.ID,
+			Name:          msg.Name,
+			BaseURL:       m.localSetupBaseURL,
+			ContextWindow: msg.ContextWindow,
+		}
+		return m, m.applyLocalModelPick(entry), true
+
+	case localModelManualFieldEnteredMsg:
+		switch m.localSetupManualStep {
+		case 0:
+			value := strings.TrimSpace(msg.Value)
+			if value == "" {
+				m.pushNotification("model id is required")
+				m.openNextManualField()
+				return m, nil, true
+			}
+			m.localSetupManualEntry.ID = value
+		case 1:
+			name := strings.TrimSpace(msg.Value)
+			if name == "" {
+				name = m.localSetupManualEntry.ID
+			}
+			m.localSetupManualEntry.Name = name
+		case 2:
+			m.localSetupManualEntry.ContextWindow = parseContextWindowLoose(msg.Value)
+		case 3:
+			m.localSetupManualEntry.APIKey = msg.Value
+		default:
+			return m, nil, true
+		}
+		if m.localSetupManualStep < 3 {
+			m.localSetupManualStep++
+			m.openNextManualField()
+			return m, nil, true
+		}
+		entry := m.localSetupManualEntry
+		return m, m.applyLocalModelPick(entry), true
 
 	case abortStreamMsg:
 		m.cancelActiveTurn()

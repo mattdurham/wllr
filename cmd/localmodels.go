@@ -104,16 +104,7 @@ func discoverLocalModels(ctx context.Context, cfg *Config) []modelInfo {
 				model.Name = id
 			}
 			if model.ContextWindow == 0 {
-				model.ContextWindow = remote.ContextLength
-				if model.ContextWindow == 0 {
-					model.ContextWindow = remote.MaxContextLength
-				}
-				if model.ContextWindow == 0 {
-					model.ContextWindow = remote.MaxModelLength
-				}
-				if model.ContextWindow == 0 {
-					model.ContextWindow = remote.NumContext
-				}
+				model.ContextWindow = contextWindowFromOpenAIModel(remote)
 			}
 			if model.LocalBaseURL == "" {
 				model.LocalBaseURL = baseURL
@@ -124,6 +115,24 @@ func discoverLocalModels(ctx context.Context, cfg *Config) []modelInfo {
 	}
 	sort.Slice(discovered, func(i, j int) bool { return discovered[i].ID < discovered[j].ID })
 	return discovered
+}
+
+// contextWindowFromOpenAIModel resolves a context-window token count from an
+// OpenAI-compatible /models entry, trying each vendor-specific field in turn.
+// Returns 0 if none are populated.
+func contextWindowFromOpenAIModel(m openAIModel) int64 {
+	switch {
+	case m.ContextLength > 0:
+		return m.ContextLength
+	case m.MaxContextLength > 0:
+		return m.MaxContextLength
+	case m.MaxModelLength > 0:
+		return m.MaxModelLength
+	case m.NumContext > 0:
+		return m.NumContext
+	default:
+		return 0
+	}
 }
 
 func queryLocalModels(parent context.Context, endpoint, apiKey string) ([]openAIModel, bool) {
