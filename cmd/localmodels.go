@@ -62,6 +62,11 @@ type openAIModel struct {
 	MaxContextLength int64  `json:"max_context_length"`
 	MaxModelLength   int64  `json:"max_model_len"`
 	NumContext       int64  `json:"num_ctx"`
+	// TopProvider is an OpenRouter-style nested shape some OpenAI-compatible
+	// servers use instead of (or alongside) a top-level context_length.
+	TopProvider struct {
+		ContextLength int64 `json:"context_length"`
+	} `json:"top_provider"`
 }
 
 // discoverLocalModels queries each configured OpenAI-compatible endpoint. The
@@ -130,6 +135,8 @@ func contextWindowFromOpenAIModel(m openAIModel) int64 {
 		return m.MaxModelLength
 	case m.NumContext > 0:
 		return m.NumContext
+	case m.TopProvider.ContextLength > 0:
+		return m.TopProvider.ContextLength
 	default:
 		return 0
 	}
@@ -173,6 +180,49 @@ func queryLocalModels(parent context.Context, endpoint, apiKey string) ([]openAI
 		return nil, queryLocalModelsBadResponse
 	}
 	return payload.Data, queryLocalModelsOK
+}
+
+// localModelsDiscoveryPathSuffixes are appended, in order, to a user-entered
+// base URL when probing for an OpenAI-compatible /models endpoint. Most
+// OpenAI-compatible servers expect the caller to already include "/v1" in the
+// base URL, but users commonly type the bare host:port — this fills that gap
+// without requiring them to know the convention.
+var localModelsDiscoveryPathSuffixes = []string{
+	"/models",
+	"/v1/models",
+	"/api/v1/models",
+}
+
+// probeLocalModelsEndpoint tries each of localModelsDiscoveryPathSuffixes
+// against baseURL in order, returning the models found and the base URL
+// (baseURL + the matched suffix's directory) that actually worked — so the
+// caller persists a base_url that will keep working on subsequent launches,
+// not necessarily the literal string the user typed. Returns
+// queryLocalModelsUnreachable only if every attempt failed to connect at all
+// (no attempt got as far as a response); a bad/empty response from at least
+// one reachable attempt is reported as queryLocalModelsBadResponse so an
+// unreachable host is never masked by a later attempt's connection failure.
+func probeLocalModelsEndpoint(ctx context.Context, baseURL, apiKey string) ([]openAIModel, string, queryLocalModelsResult) {
+	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if base == "" {
+		return nil, "", queryLocalModelsUnreachable
+	}
+	reachedAny := false
+	for _, suffix := range localModelsDiscoveryPathSuffixes {
+		endpoint := base + suffix
+		models, result := queryLocalModels(ctx, endpoint, apiKey)
+		if result == queryLocalModelsOK && len(models) > 0 {
+			resolvedBase := strings.TrimSuffix(endpoint, "/models")
+			return models, resolvedBase, queryLocalModelsOK
+		}
+		if result != queryLocalModelsUnreachable {
+			reachedAny = true
+		}
+	}
+	if reachedAny {
+		return nil, "", queryLocalModelsBadResponse
+	}
+	return nil, "", queryLocalModelsUnreachable
 }
 
 func applyLocalModelChoice(ctx context.Context, cfg *Config, id string) bool {

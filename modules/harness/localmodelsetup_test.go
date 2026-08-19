@@ -35,11 +35,11 @@ func TestSelectProviderFn_LocalSetupNeeded_ShowsSetupFlow(t *testing.T) {
 func TestLocalModelSetup_DiscoverySuccess_FullFlow(t *testing.T) {
 	m := newTestModel()
 	var savedEntry LocalModelEntry
-	m.ProbeLocalModelsFn = func(baseURL string) ([]LocalModelChoice, LocalModelProbeStatus) {
+	m.ProbeLocalModelsFn = func(baseURL string) ([]LocalModelChoice, string, LocalModelProbeStatus) {
 		if baseURL != "http://localhost:11434/v1" {
 			t.Errorf("probe baseURL = %q", baseURL)
 		}
-		return []LocalModelChoice{{ID: "llama3.2", Name: "Llama 3.2", ContextWindow: 131072}}, LocalModelProbeOK
+		return []LocalModelChoice{{ID: "llama3.2", Name: "Llama 3.2", ContextWindow: 131072}}, baseURL, LocalModelProbeOK
 	}
 	m.SaveLocalModelFn = func(entry LocalModelEntry) (string, error) {
 		savedEntry = entry

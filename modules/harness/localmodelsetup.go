@@ -144,14 +144,20 @@ func (m *Model) resetLocalModelSetupState() {
 
 // probeLocalModelsCmd returns a tea.Cmd that probes baseURL asynchronously via
 // ProbeLocalModelsFn and reports the outcome as localModelProbeResultMsg.
+// msg.BaseURL is the resolved base URL that actually worked (which may differ
+// from the input baseURL, e.g. with "/v1" appended) when Status is
+// LocalModelProbeOK; otherwise it echoes the input baseURL.
 func (m *Model) probeLocalModelsCmd(baseURL string) tea.Cmd {
 	probe := m.ProbeLocalModelsFn
 	return func() tea.Msg {
 		if probe == nil {
 			return localModelProbeResultMsg{BaseURL: baseURL, Status: LocalModelProbeUnreachable}
 		}
-		models, status := probe(baseURL)
-		return localModelProbeResultMsg{BaseURL: baseURL, Models: models, Status: status}
+		models, resolvedBaseURL, status := probe(baseURL)
+		if status != LocalModelProbeOK || resolvedBaseURL == "" {
+			resolvedBaseURL = baseURL
+		}
+		return localModelProbeResultMsg{BaseURL: resolvedBaseURL, Models: models, Status: status}
 	}
 }
 

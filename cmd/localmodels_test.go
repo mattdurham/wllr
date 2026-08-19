@@ -164,6 +164,11 @@ func TestContextWindowFromOpenAIModel_FallbackChain(t *testing.T) {
 		{"max_context_length fallback", openAIModel{MaxContextLength: 200, MaxModelLength: 300, NumContext: 400}, 200},
 		{"max_model_len fallback", openAIModel{MaxModelLength: 300, NumContext: 400}, 300},
 		{"num_ctx fallback", openAIModel{NumContext: 400}, 400},
+		{"top_provider.context_length fallback (OpenRouter-style)", func() openAIModel {
+			m := openAIModel{}
+			m.TopProvider.ContextLength = 131072
+			return m
+		}(), 131072},
 		{"none set", openAIModel{}, 0},
 	}
 	for _, tt := range tests {
@@ -220,5 +225,87 @@ func TestResolveLocalProviderConfigFallsBackFromStaleModel(t *testing.T) {
 	}
 	if cfg.LocalBaseURL != server.URL+"/v1" {
 		t.Fatalf("local base URL = %q, want %q", cfg.LocalBaseURL, server.URL+"/v1")
+	}
+}
+
+func TestProbeLocalModelsEndpoint_BareURLWorks(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models" {
+			t.Errorf("request path = %q, want /models", r.URL.Path)
+		}
+		_, _ = fmt.Fprint(w, `{"data":[{"id":"model-a"}]}`)
+	}))
+	defer server.Close()
+
+	models, resolvedBase, result := probeLocalModelsEndpoint(context.Background(), server.URL, "")
+	if result != queryLocalModelsOK {
+		t.Fatalf("result = %v, want queryLocalModelsOK", result)
+	}
+	if len(models) != 1 || models[0].ID != "model-a" {
+		t.Fatalf("models = %+v", models)
+	}
+	if resolvedBase != server.URL {
+		t.Fatalf("resolvedBase = %q, want %q", resolvedBase, server.URL)
+	}
+}
+
+func TestProbeLocalModelsEndpoint_FallsBackToV1(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = fmt.Fprint(w, `{"data":[{"id":"model-a"}]}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = fmt.Fprint(w, `{"error":{"message":"unknown endpoint"}}`)
+		}
+	}))
+	defer server.Close()
+
+	// Simulates a user typing the bare host:port without the "/v1" suffix
+	// their OpenAI-compatible server actually expects.
+	models, resolvedBase, result := probeLocalModelsEndpoint(context.Background(), server.URL, "")
+	if result != queryLocalModelsOK {
+		t.Fatalf("result = %v, want queryLocalModelsOK", result)
+	}
+	if len(models) != 1 || models[0].ID != "model-a" {
+		t.Fatalf("models = %+v", models)
+	}
+	wantBase := server.URL + "/v1"
+	if resolvedBase != wantBase {
+		t.Fatalf("resolvedBase = %q, want %q (the working path, not the bare input)", resolvedBase, wantBase)
+	}
+}
+
+func TestProbeLocalModelsEndpoint_AllPathsFail(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	models, resolvedBase, result := probeLocalModelsEndpoint(context.Background(), server.URL, "")
+	if result != queryLocalModelsBadResponse {
+		t.Fatalf("result = %v, want queryLocalModelsBadResponse (server was reached, just had nothing usable)", result)
+	}
+	if models != nil || resolvedBase != "" {
+		t.Fatalf("models=%+v resolvedBase=%q, want both empty", models, resolvedBase)
+	}
+}
+
+func TestProbeLocalModelsEndpoint_Unreachable(t *testing.T) {
+	// Port 1 is a privileged, normally-unbound port — no server listens there,
+	// so every candidate path fails to connect at all.
+	models, resolvedBase, result := probeLocalModelsEndpoint(context.Background(), "http://127.0.0.1:1", "")
+	if result != queryLocalModelsUnreachable {
+		t.Fatalf("result = %v, want queryLocalModelsUnreachable", result)
+	}
+	if models != nil || resolvedBase != "" {
+		t.Fatalf("models=%+v resolvedBase=%q, want both empty", models, resolvedBase)
+	}
+}
+
+func TestProbeLocalModelsEndpoint_EmptyURL(t *testing.T) {
+	_, _, result := probeLocalModelsEndpoint(context.Background(), "  ", "")
+	if result != queryLocalModelsUnreachable {
+		t.Fatalf("result = %v, want queryLocalModelsUnreachable", result)
 	}
 }
