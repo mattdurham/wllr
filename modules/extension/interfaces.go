@@ -133,6 +133,7 @@ type UIBridge interface {
 	Notify(text string)
 	ShowModal(text string)
 	ShowPicker(title string, items []sdk.ShowPickerItem, callback string)
+	ShowTextInput(title, placeholder, initialValue, callback string)
 	Abort()
 	SetStatus(key, value string)
 	GetStatusInfo() sdk.StatusInfo

@@ -3,6 +3,7 @@ package harness
 // NOTE: Any changes to this file must be reflected in the corresponding SPECS.md or NOTES.md.
 
 import (
+	"errors"
 	"fmt"
 
 	tea "charm.land/bubbletea/v2"
@@ -43,6 +44,9 @@ func (m *Model) applyLoginProviderSelection(provider string) tea.Cmd {
 	if m.SelectProviderFn != nil {
 		var err error
 		model, requiresLogin, err = m.SelectProviderFn(provider)
+		if errors.Is(err, ErrLocalModelSetupNeeded) {
+			return func() tea.Msg { return showLocalModelSetupMsg{} }
+		}
 		if err != nil {
 			m.pushNotification(fmt.Sprintf("⚠ could not select provider: %v", err))
 			return nil

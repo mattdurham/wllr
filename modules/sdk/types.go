@@ -227,6 +227,9 @@ const (
 	// MethodShowPicker opens an interactive TUI list picker. After the user
 	// selects an item the harness fires EventOnCommand{name: callback, args: [id]}.
 	MethodShowPicker = "show_picker"
+	// MethodShowTextInput opens an interactive TUI text input overlay. After the
+	// user submits the harness fires EventOnCommand{name: callback, args: [value]}.
+	MethodShowTextInput = "show_text_input"
 	// MethodAgentResetHistory replaces the main agent's conversation history
 	// and rebuilds the chat view from the supplied messages.
 	MethodAgentResetHistory = "agent_reset_history"

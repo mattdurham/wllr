@@ -25,6 +25,7 @@ type sceneUIBridge struct{ scene *harness.SceneRenderer }
 func (b *sceneUIBridge) Notify(string)                                      {}
 func (b *sceneUIBridge) ShowModal(string)                                   {}
 func (b *sceneUIBridge) ShowPicker(string, []sdk.ShowPickerItem, string)    {}
+func (b *sceneUIBridge) ShowTextInput(string, string, string, string)       {}
 func (b *sceneUIBridge) Abort()                                             {}
 func (b *sceneUIBridge) SetStatus(string, string)                           {}
 func (b *sceneUIBridge) GetStatusInfo() sdk.StatusInfo                      { return sdk.StatusInfo{} }

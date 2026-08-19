@@ -183,6 +183,7 @@ type testUIBridge struct {
 	onNotify          func(text string)
 	onShowModal       func(text string)
 	onShowPicker      func(title string, items []sdk.ShowPickerItem, callback string)
+	onShowTextInput   func(title, placeholder, initialValue, callback string)
 	onAbort           func()
 	onSetStatus       func(key, value string)
 	onGetStatusInfo   func() sdk.StatusInfo
@@ -216,6 +217,12 @@ func (b *testUIBridge) ShowModal(text string) {
 func (b *testUIBridge) ShowPicker(title string, items []sdk.ShowPickerItem, callback string) {
 	if b.onShowPicker != nil {
 		b.onShowPicker(title, items, callback)
+	}
+}
+
+func (b *testUIBridge) ShowTextInput(title, placeholder, initialValue, callback string) {
+	if b.onShowTextInput != nil {
+		b.onShowTextInput(title, placeholder, initialValue, callback)
 	}
 }
 

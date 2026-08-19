@@ -85,8 +85,8 @@ func discoverLocalModels(ctx context.Context, cfg *Config) []modelInfo {
 		if baseURL == "" {
 			continue
 		}
-		models, ok := queryLocalModels(ctx, baseURL+"/models", local.APIKey)
-		if !ok {
+		models, result := queryLocalModels(ctx, baseURL+"/models", local.APIKey)
+		if result != queryLocalModelsOK {
 			continue
 		}
 		for _, remote := range models {
@@ -104,16 +104,7 @@ func discoverLocalModels(ctx context.Context, cfg *Config) []modelInfo {
 				model.Name = id
 			}
 			if model.ContextWindow == 0 {
-				model.ContextWindow = remote.ContextLength
-				if model.ContextWindow == 0 {
-					model.ContextWindow = remote.MaxContextLength
-				}
-				if model.ContextWindow == 0 {
-					model.ContextWindow = remote.MaxModelLength
-				}
-				if model.ContextWindow == 0 {
-					model.ContextWindow = remote.NumContext
-				}
+				model.ContextWindow = contextWindowFromOpenAIModel(remote)
 			}
 			if model.LocalBaseURL == "" {
 				model.LocalBaseURL = baseURL
@@ -126,29 +117,62 @@ func discoverLocalModels(ctx context.Context, cfg *Config) []modelInfo {
 	return discovered
 }
 
-func queryLocalModels(parent context.Context, endpoint, apiKey string) ([]openAIModel, bool) {
+// contextWindowFromOpenAIModel resolves a context-window token count from an
+// OpenAI-compatible /models entry, trying each vendor-specific field in turn.
+// Returns 0 if none are populated.
+func contextWindowFromOpenAIModel(m openAIModel) int64 {
+	switch {
+	case m.ContextLength > 0:
+		return m.ContextLength
+	case m.MaxContextLength > 0:
+		return m.MaxContextLength
+	case m.MaxModelLength > 0:
+		return m.MaxModelLength
+	case m.NumContext > 0:
+		return m.NumContext
+	default:
+		return 0
+	}
+}
+
+// queryLocalModelsResult classifies why a probe did not yield models, so
+// callers can distinguish an unreachable endpoint (bad host/port, refused,
+// timed out) from one that responded but had nothing usable.
+type queryLocalModelsResult int
+
+const (
+	queryLocalModelsOK queryLocalModelsResult = iota
+	// queryLocalModelsUnreachable means the request itself failed to complete
+	// (DNS failure, connection refused, timeout) — the URL is likely wrong.
+	queryLocalModelsUnreachable
+	// queryLocalModelsBadResponse means the endpoint was reached but returned a
+	// non-2xx status or a body that isn't a valid /models listing.
+	queryLocalModelsBadResponse
+)
+
+func queryLocalModels(parent context.Context, endpoint, apiKey string) ([]openAIModel, queryLocalModelsResult) {
 	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return nil, false
+		return nil, queryLocalModelsUnreachable
 	}
 	if strings.TrimSpace(apiKey) != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, false
+		return nil, queryLocalModelsUnreachable
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, false
+		return nil, queryLocalModelsBadResponse
 	}
 	var payload openAIModelsResponse
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, false
+		return nil, queryLocalModelsBadResponse
 	}
-	return payload.Data, true
+	return payload.Data, queryLocalModelsOK
 }
 
 func applyLocalModelChoice(ctx context.Context, cfg *Config, id string) bool {

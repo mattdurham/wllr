@@ -172,6 +172,22 @@ type Model struct {
 	// local callback server (manual paste only). Set by cmd/main.go.
 	AwaitOAuthFn func() (input string, ok bool)
 
+	// ProbeLocalModelsFn probes {baseURL}/models for an OpenAI-compatible model
+	// list. The returned status distinguishes an unreachable endpoint (bad
+	// URL/refused/timeout — re-prompt the user) from one that responded but had
+	// nothing usable (fall back to manual entry). Set by cmd/main.go.
+	ProbeLocalModelsFn func(baseURL string) (models []LocalModelChoice, status LocalModelProbeStatus)
+
+	// SaveLocalModelFn persists a newly chosen/entered local model to disk and
+	// applies it as the active provider/model. Returns the applied model ID.
+	// Set by cmd/main.go.
+	SaveLocalModelFn func(entry LocalModelEntry) (modelID string, err error)
+
+	// HasLocalModelFn reports whether the local provider currently has at least
+	// one usable model configured. Nil means assume a model exists (no redirect
+	// into local-model setup on /login). Set by cmd/main.go.
+	HasLocalModelFn func() bool
+
 	// scene holds extension-driven UI areas (the declarative, node-based
 	// renderer). Shared by pointer with the harnessUIBridge so the bridge can
 	// mutate it off-loop and the View can read it.
@@ -184,6 +200,13 @@ type Model struct {
 	authPromptProvider   string
 	pendingAuthProvider  string
 	oauthCaptureProvider string
+
+	// Local-model interactive setup state (base-URL probe + discovered-model
+	// picker, or manual-entry fallback). See localmodelsetup.go.
+	localSetupBaseURL     string
+	localSetupModels      []LocalModelChoice
+	localSetupManualStep  int
+	localSetupManualEntry LocalModelEntry
 
 	// Modal overlay state (non-empty when modal is open).
 	modalContent string
@@ -206,6 +229,8 @@ type Model struct {
 	chat ChatView
 
 	picker PickerView
+
+	textInput TextInputView
 
 	width, height int
 
@@ -682,6 +707,7 @@ func (m Model) updateWindow(msg tea.Msg) (Model, tea.Cmd, bool) {
 		m.input.SetWidth(msg.Width - 4)
 		m.chat.SetSize(msg.Width, m.chatHeight())
 		m.picker.SetSize(msg.Width, m.chatHeight())
+		m.textInput.SetSize(msg.Width, m.chatHeight())
 		// Re-render the WASM transcript at the new width.
 		m.refreshWASMChat()
 		return m, nil, true
@@ -692,6 +718,10 @@ func (m Model) updateWindow(msg tea.Msg) (Model, tea.Cmd, bool) {
 	case ShowPickerMsg:
 		m.picker.Open(msg.Title, msg.Items, msg.Callback)
 		m.picker.SetSize(m.width, m.chatHeight())
+		return m, nil, true
+	case ShowTextInputMsg:
+		m.textInput.Open(msg.Title, msg.Placeholder, msg.InitialValue, msg.Callback)
+		m.textInput.SetSize(m.width, m.chatHeight())
 		return m, nil, true
 	case ResetHistoryMsg:
 		// Agent history is replaced by the UIBridge; the visual transcript is
@@ -723,6 +753,9 @@ func (m Model) updateKeyPress(msg tea.Msg) (Model, tea.Cmd, bool) {
 		}
 	}
 
+	if m.textInput.IsActive() {
+		return m.updateKeyPressTextInput(kp)
+	}
 	if m.picker.IsActive() {
 		return m.updateKeyPressPicker(kp)
 	}
@@ -790,6 +823,9 @@ func (m Model) updateKeyPressPicker(kp tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	selected, id, cancelled := m.picker.HandleKey(kp)
 	if cancelled {
 		m.picker.Close()
+		if callback == localModelPickerCallback {
+			m.resetLocalModelSetupState()
+		}
 		return m, nil, true
 	}
 	if selected {
@@ -809,6 +845,17 @@ func (m Model) updateKeyPressPicker(kp tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		if callback == loginProviderPickerCallback {
 			return m, func() tea.Msg { return loginProviderSelectedMsg{Provider: id} }, true
 		}
+		if callback == localModelPickerCallback {
+			for _, choice := range m.localSetupModels {
+				if choice.ID == id {
+					chosen := choice
+					return m, func() tea.Msg {
+						return localModelPickedMsg{ID: chosen.ID, Name: chosen.Name, ContextWindow: chosen.ContextWindow}
+					}, true
+				}
+			}
+			return m, nil, true
+		}
 		extHost := m.extHost
 		return m, func() tea.Msg {
 			payload, _ := json.Marshal(sdk.OnCommandPayload{Name: callback, Args: []string{id}})
@@ -818,6 +865,38 @@ func (m Model) updateKeyPressPicker(kp tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		}, true
 	}
 	return m, nil, true
+}
+
+// updateKeyPressTextInput handles key events when the text input overlay is active.
+func (m Model) updateKeyPressTextInput(kp tea.KeyPressMsg) (Model, tea.Cmd, bool) {
+	callback := m.textInput.Callback
+	submitted, value, cancelled, cmd := m.textInput.HandleKey(kp)
+	if cancelled {
+		m.textInput.Close()
+		if callback == localModelBaseURLCallback || callback == localModelManualFieldCallback {
+			m.resetLocalModelSetupState()
+		}
+		return m, nil, true
+	}
+	if submitted {
+		m.textInput.Close()
+		// Core-owned text inputs (callback prefixed "__wllr:") route to a harness
+		// handler instead of dispatching EventOnCommand to a WASM extension.
+		if callback == localModelBaseURLCallback {
+			return m, func() tea.Msg { return localModelBaseURLEnteredMsg{URL: value} }, true
+		}
+		if callback == localModelManualFieldCallback {
+			return m, func() tea.Msg { return localModelManualFieldEnteredMsg{Value: value} }, true
+		}
+		extHost := m.extHost
+		return m, func() tea.Msg {
+			payload, _ := json.Marshal(sdk.OnCommandPayload{Name: callback, Args: []string{value}})
+			evt := sdk.Event{Type: sdk.EventOnCommand, Payload: payload}
+			results, err := extHost.DispatchEvent(context.Background(), evt)
+			return ExtensionEventResultMsg{Results: results, Err: err}
+		}, true
+	}
+	return m, cmd, true
 }
 
 // updateKeyPressModal handles key events when the modal overlay is open.
@@ -1099,6 +1178,10 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 		return m, nil, true
 
 	case loginMsg:
+		if m.activeProvider == providerLocal && !m.hasUsableLocalModel() {
+			m.openLocalModelBaseURLPrompt()
+			return m, nil, true
+		}
 		m.openAuthPrompt(m.activeProvider)
 		return m, nil, true
 
@@ -1108,6 +1191,72 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 	case showModelPickerMsg:
 		m.openModelPicker()
 		return m, nil, true
+
+	case showLocalModelSetupMsg:
+		m.openLocalModelBaseURLPrompt()
+		return m, nil, true
+
+	case localModelBaseURLEnteredMsg:
+		m.localSetupBaseURL = msg.URL
+		m.pushNotification("Probing endpoint…")
+		return m, m.probeLocalModelsCmd(msg.URL), true
+
+	case localModelProbeResultMsg:
+		if msg.Status == LocalModelProbeOK && len(msg.Models) > 0 {
+			m.openModelPickerFromProbe(msg.Models)
+			return m, nil, true
+		}
+		if msg.Status == LocalModelProbeUnreachable {
+			m.localSetupBaseURL = ""
+			m.pushNotification(fmt.Sprintf("⚠ could not reach %s — check the URL and try again.", msg.BaseURL))
+			m.openLocalModelBaseURLPrompt()
+			return m, nil, true
+		}
+		m.localSetupManualStep = 0
+		m.localSetupManualEntry = LocalModelEntry{BaseURL: m.localSetupBaseURL}
+		m.pushNotification("Endpoint reached but no models were found — enter details manually.")
+		m.openNextManualField()
+		return m, nil, true
+
+	case localModelPickedMsg:
+		entry := LocalModelEntry{
+			ID:            msg.ID,
+			Name:          msg.Name,
+			BaseURL:       m.localSetupBaseURL,
+			ContextWindow: msg.ContextWindow,
+		}
+		return m, m.applyLocalModelPick(entry), true
+
+	case localModelManualFieldEnteredMsg:
+		switch m.localSetupManualStep {
+		case 0:
+			value := strings.TrimSpace(msg.Value)
+			if value == "" {
+				m.pushNotification("model id is required")
+				m.openNextManualField()
+				return m, nil, true
+			}
+			m.localSetupManualEntry.ID = value
+		case 1:
+			name := strings.TrimSpace(msg.Value)
+			if name == "" {
+				name = m.localSetupManualEntry.ID
+			}
+			m.localSetupManualEntry.Name = name
+		case 2:
+			m.localSetupManualEntry.ContextWindow = parseContextWindowLoose(msg.Value)
+		case 3:
+			m.localSetupManualEntry.APIKey = msg.Value
+		default:
+			return m, nil, true
+		}
+		if m.localSetupManualStep < 3 {
+			m.localSetupManualStep++
+			m.openNextManualField()
+			return m, nil, true
+		}
+		entry := m.localSetupManualEntry
+		return m, m.applyLocalModelPick(entry), true
 
 	case abortStreamMsg:
 		m.cancelActiveTurn()
@@ -1699,7 +1848,9 @@ func (m Model) View() tea.View {
 	inputBox := m.renderInputBox()
 
 	var sb strings.Builder
-	if m.picker.IsActive() {
+	if m.textInput.IsActive() {
+		sb.WriteString(strings.TrimRight(m.textInput.View(), "\n") + "\n")
+	} else if m.picker.IsActive() {
 		sb.WriteString(strings.TrimRight(m.picker.View(), "\n") + "\n")
 	} else if m.modalContent != "" {
 		chatH := m.height - renderedLineCount(inputBox)

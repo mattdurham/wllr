@@ -541,6 +541,51 @@ Local model replacement flow: when the configured local model is not advertised 
 
 **Invariant:** `"__wllr:auth"` and `"__wllr:login_provider"` join `"__wllr:model"`/`"__wllr:thinking"` as reserved core-owned picker callbacks; they never dispatch `EventOnCommand`.
 
+### show_text_input Overlay
+
+`TextInputView` is a fullscreen overlay text input shown instead of the chat, mirroring `PickerView`'s structure but backed by `charm.land/bubbles/v2/textinput.Model` instead of a list.
+
+| Method | Behavior |
+|--------|----------|
+| `Open(title, placeholder, initialValue, callback string)` | Resets and configures the underlying `textinput.Model` (`Placeholder`, `SetValue(initialValue)`, cursor to end), calls `Focus()`, and activates the overlay. |
+| `Close()` | Deactivates the overlay and clears `Callback`. |
+| `IsActive() bool` | Reports whether the overlay is currently shown. |
+| `SetSize(width, height int)` | Updates overlay dimensions and the inner `textinput.Model` width. |
+| `HandleKey(kp tea.KeyPressMsg) (submitted bool, value string, cancelled bool, cmd tea.Cmd)` | Enter submits with the current value; Esc cancels; every other key is forwarded to `textinput.Model.Update` and its `tea.Cmd` is returned so cursor blink/paste commands keep working. |
+| `View() string` | Bordered box matching `PickerView`'s visual style (`pickerBorderStyle`/`pickerTitleStyle`/`pickerLabelStyle`), rendering the title, the input line, and a footer hint (` enter submit · esc cancel `). |
+
+`ShowTextInputMsg{Title, Placeholder, InitialValue, Callback}` is the bubbletea message `harnessUIBridge.ShowTextInput` sends to open the overlay; the `Model.Update` `ShowTextInputMsg` case opens `m.textInput` and sizes it against `m.chatHeight()`, matching the `ShowPickerMsg` case.
+
+`updateKeyPressTextInput` mirrors `updateKeyPressPicker`: on cancel it closes the overlay and returns; on submit it closes the overlay, then — before falling through to the generic extension dispatch — checks core-owned `"__wllr:"`-prefixed callbacks (`localModelBaseURLCallback`, `localModelManualFieldCallback`; see "Local-Model Setup Flow" below), the same structural slot `updateKeyPressPicker` uses for `modelPickerCallback`/`thinkingPickerCallback`/`authPickerCallback`/`loginProviderPickerCallback`. Any callback not recognized as core-owned dispatches `EventOnCommand` with `sdk.OnCommandPayload{Name: callback, Args: []string{value}}` to `m.extHost`, exactly like the picker's extension-owned fallback.
+
+**Invariant:** `m.textInput.IsActive()` is checked before `m.picker.IsActive()` in both key routing (`updateKeyPress`) and rendering (`View`), so the two overlays are mutually exclusive and text input takes priority if both were somehow opened.
+
+**Invariant:** `show_text_input` (`MethodShowTextInput`) requires no permission, matching `show_picker`.
+
+### Local-Model Setup Flow
+
+When the local provider has no configured/discoverable model, `SelectProviderFn` returns the sentinel `ErrLocalModelSetupNeeded` instead of an error, and `applyLoginProviderSelection` (in `providerpicker.go`) checks `errors.Is(err, ErrLocalModelSetupNeeded)` *before* its generic error-notification path, redirecting into an interactive setup flow (`localmodelsetup.go`) rather than failing. `/login` redirects the same way when `m.activeProvider == providerLocal` and `hasUsableLocalModel()` (backed by `HasLocalModelFn`, nil-safe defaulting to `true`) is false.
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `ProbeLocalModelsFn` | `func(baseURL string) (models []LocalModelChoice, status LocalModelProbeStatus)` | Probes `{baseURL}/models` for an OpenAI-compatible model list. Nil ⇒ treated as `LocalModelProbeUnreachable`. |
+| `SaveLocalModelFn` | `func(entry LocalModelEntry) (modelID string, err error)` | Persists the chosen/entered model to disk (`wllr.local_models`) and rebuilds the active provider. Nil ⇒ setup surfaces a "not available" notification instead of saving. |
+| `HasLocalModelFn` | `func() bool` | Reports whether the local provider currently has a usable model. Nil ⇒ assume true (no `/login` redirect). |
+
+`LocalModelProbeStatus` classifies why a probe did not yield models, distinguishing a wrong/unreachable endpoint from one that responded with nothing usable: `LocalModelProbeOK` (at least one model found), `LocalModelProbeUnreachable` (the request itself failed — bad URL, connection refused, timeout, DNS failure), `LocalModelProbeEmpty` (the endpoint responded but returned no usable models).
+
+Discovery-success flow: base-URL prompt (`openLocalModelBaseURLPrompt`, callback `localModelBaseURLCallback`) → `localModelBaseURLEnteredMsg` stores `localSetupBaseURL` and returns `probeLocalModelsCmd` as an async `tea.Cmd` → `localModelProbeResultMsg{Status: LocalModelProbeOK, Models}` opens a picker of discovered models (`openModelPickerFromProbe`, callback `localModelPickerCallback`) built from the stashed `localSetupModels` → picker selection resolves the full choice from `localSetupModels` by ID and emits `localModelPickedMsg` → `applyLocalModelPick` calls `SaveLocalModelFn`, notifies, and on success updates active provider/model state via `setActiveProviderModel`.
+
+Unreachable-endpoint flow: `localModelProbeResultMsg{Status: LocalModelProbeUnreachable}` clears `localSetupBaseURL`, pushes an error notification naming the unreachable URL, and re-opens the base-URL prompt (`openLocalModelBaseURLPrompt`) — it does **not** fall into manual entry, since the failure is almost always a wrong host/port rather than a server with no models.
+
+Manual-fallback flow: `localModelProbeResultMsg{Status: LocalModelProbeEmpty}` resets `localSetupManualStep` to 0, seeds `localSetupManualEntry.BaseURL`, and opens the first of four sequential text-input prompts (`localModelManualFields`: model ID, display name, context window, optional API key) via `localModelManualFieldCallback`. Each `localModelManualFieldEnteredMsg` fills the corresponding `localSetupManualEntry` field (empty model ID re-prompts the same step instead of advancing; empty display name defaults to the model ID; context window is parsed best-effort via `parseContextWindowLoose`, defaulting to 0 rather than erroring; API key is always optional) and advances to the next field, or — after the fourth — calls `applyLocalModelPick` exactly as the discovery path does.
+
+**Invariant:** cancelling (`Esc`) the base-URL prompt or any manual field calls `resetLocalModelSetupState`, zeroing all `localSetup*` fields so a later attempt starts fresh; cancelling the discovered-models picker does the same. Cancelling any *other* picker/text-input does not touch this state.
+
+**Invariant:** an unreachable endpoint (`LocalModelProbeUnreachable`) always re-prompts for the base URL and never falls back to manual entry; only a reachable endpoint with no usable models (`LocalModelProbeEmpty`) triggers manual entry. This keeps a mistyped/wrong-port URL from silently turning into a request to hand-type model metadata for a server that was never actually reached.
+
+**Invariant:** `providerLocal` is duplicated as a harness-local constant (`localmodelsetup.go`) since `harness` cannot import `cmd/` (which imports `harness`); it must be kept in sync with `cmd/provider.go`'s constant of the same name.
+
 ### OAuth Login Flow
 
 When the user chooses **OAuth** in the auth prompt (or runs `/login`), the harness drives an interactive OAuth login via two callbacks (set by `cmd/main.go`):

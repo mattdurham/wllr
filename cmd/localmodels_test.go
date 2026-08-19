@@ -109,6 +109,96 @@ func TestApplyLocalModelChoiceUsesDiscoveredModel(t *testing.T) {
 	}
 }
 
+func TestQueryLocalModels_NonOKStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	models, result := queryLocalModels(context.Background(), server.URL+"/models", "")
+	if result != queryLocalModelsBadResponse {
+		t.Fatalf("expected queryLocalModelsBadResponse for non-200 status, got %v models=%+v", result, models)
+	}
+}
+
+func TestQueryLocalModels_MalformedJSON(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, `not json`)
+	}))
+	defer server.Close()
+
+	if _, result := queryLocalModels(context.Background(), server.URL+"/models", ""); result != queryLocalModelsBadResponse {
+		t.Fatalf("expected queryLocalModelsBadResponse for malformed JSON, got %v", result)
+	}
+}
+
+func TestQueryLocalModels_EmptyDataList(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(w, `{"data":[]}`)
+	}))
+	defer server.Close()
+
+	models, result := queryLocalModels(context.Background(), server.URL+"/models", "")
+	if result != queryLocalModelsOK {
+		t.Fatalf("expected queryLocalModelsOK even with empty data (the endpoint responded successfully), got %v", result)
+	}
+	if len(models) != 0 {
+		t.Fatalf("len(models) = %d, want 0", len(models))
+	}
+}
+
+func TestQueryLocalModels_ConnectionRefused(t *testing.T) {
+	// Port 1 is a privileged, normally-unbound port — no server listens there.
+	if _, result := queryLocalModels(context.Background(), "http://127.0.0.1:1/models", ""); result != queryLocalModelsUnreachable {
+		t.Fatalf("expected queryLocalModelsUnreachable for connection-refused endpoint, got %v", result)
+	}
+}
+
+func TestContextWindowFromOpenAIModel_FallbackChain(t *testing.T) {
+	tests := []struct {
+		name  string
+		model openAIModel
+		want  int64
+	}{
+		{"context_length wins", openAIModel{ContextLength: 100, MaxContextLength: 200, MaxModelLength: 300, NumContext: 400}, 100},
+		{"max_context_length fallback", openAIModel{MaxContextLength: 200, MaxModelLength: 300, NumContext: 400}, 200},
+		{"max_model_len fallback", openAIModel{MaxModelLength: 300, NumContext: 400}, 300},
+		{"num_ctx fallback", openAIModel{NumContext: 400}, 400},
+		{"none set", openAIModel{}, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := contextWindowFromOpenAIModel(tt.model); got != tt.want {
+				t.Errorf("contextWindowFromOpenAIModel(%+v) = %d, want %d", tt.model, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestQueryLocalModels_SuccessTranslation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprint(
+			w,
+			`{"data":[{"id":"model-a","name":"Model A","context_length":131072},{"id":"model-b","max_model_len":8192}]}`,
+		)
+	}))
+	defer server.Close()
+
+	models, result := queryLocalModels(context.Background(), server.URL+"/models", "")
+	if result != queryLocalModelsOK {
+		t.Fatalf("expected queryLocalModelsOK, got %v", result)
+	}
+	if len(models) != 2 {
+		t.Fatalf("len(models) = %d, want 2", len(models))
+	}
+	if models[0].ID != "model-a" || models[0].Name != "Model A" || contextWindowFromOpenAIModel(models[0]) != 131072 {
+		t.Errorf("first model = %+v", models[0])
+	}
+	if models[1].ID != "model-b" || contextWindowFromOpenAIModel(models[1]) != 8192 {
+		t.Errorf("second model = %+v", models[1])
+	}
+}
+
 func TestResolveLocalProviderConfigFallsBackFromStaleModel(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprint(w, `{"data":[{"id":"replacement-model","context_length":131072}]}`)

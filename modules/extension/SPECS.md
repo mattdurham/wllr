@@ -212,6 +212,7 @@ The full set of dispatched methods is:
 | `MethodTeamGetInfo`           | `handleTeamGetInfo`                              |
 | `MethodTeamList`              | `handleTeamList`                                 |
 | `MethodShowPicker`            | `handleShowPicker`                               |
+| `MethodShowTextInput`         | `handleShowTextInput`                            |
 | `MethodMCPSpawn`              | `handleMCPSpawn`                                 |
 | `MethodMCPClose`              | `handleMCPClose`                                 |
 | `MethodMCPSend`               | `handleMCPSend`                                  |
@@ -235,7 +236,7 @@ The full set of dispatched methods is:
 |---------------|---------------------|-------------------------|----------------------------------------------------------------|
 | `agents`      | `AgentBridge`       | `SetAgentBridge`        | Spawn, close, message, run, list agents and manage history     |
 | `teams`       | `TeamBridge`        | `SetTeamBridge`         | Create, close, add/remove members, list teams                  |
-| `ui`          | `UIBridge`          | `SetUIBridge`           | Notify, modal, picker, status, system prompt, scene-graph areas |
+| `ui`          | `UIBridge`          | `SetUIBridge`           | Notify, modal, picker, text input, status, system prompt, scene-graph areas |
 | `capabilities`| `CapabilityProvider`| `SetCapabilities`       | Exec, GetEnv, ReadFile, WriteFile, AppendFile, HTTPPost, HTTPGet, ConfigRead, FormatMarkdown |
 | `mcp`         | `MCPBridge`         | `SetMCPBridge`          | Spawn, close, send, read MCP server subprocesses               |
 
@@ -246,6 +247,8 @@ The full set of dispatched methods is:
 **Invariant:** `PermExec` is required for `exec` and `mcp_spawn`; `PermFileRead` for `read_file`; `PermFileWrite` for `write_file`/`append_file`; `PermNetworkWrite` for `http_post`; `PermNetworkRead` for `http_get`; `PermUI` for `ui_create_area`/`ui_patch`/`ui_update_area`/`ui_remove_area` and `format_markdown`. `get_env`, `get_os`, agent/team/mailbox methods, `store_*`, `modal`, `notify`, `set_status`, and `append_system_prompt` require no permission. If the extension is nil or lacks the required permission, the call returns a permission-denied error response.
 
 **Invariant:** `PermUI` is required for `ui_create_area`, `ui_patch`, `ui_remove_area`, and `ui_update_area`. The `UIBridge` exposes four scene-graph methods: `CreateArea(sdk.UIArea) error`, `PatchUI(sdk.UIPatchParams) error`, `RemoveArea(string)`, and `UpdateArea(sdk.UIUpdateAreaParams) error`. `CreateArea`, `PatchUI`, and `UpdateArea` return errors (duplicate area, missing area/node, unknown area) forwarded to the extension as an error response; `RemoveArea` is a no-op for a missing area.
+
+**Invariant:** `show_text_input` (`MethodShowTextInput`) requires no permission, mirroring `show_picker`. `handleShowTextInput` unmarshals `sdk.ShowTextInputParams` and calls `UIBridge.ShowTextInput(title, placeholder, initialValue, callback)`; a missing `UIBridge` or malformed params produce an error response.
 
 **Invariant:** `get_context_usage` (`MethodGetContextUsage`) requires no permission. It is a
 read-only observability call. When the `AgentBridge` is nil or not yet installed, the handler
