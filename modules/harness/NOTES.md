@@ -634,24 +634,21 @@ persists only the chosen model ID.
 ## Trailing newlines trimmed before rendering — fix for excessive spacing (UI P4)
 
 *Added: 2026-07-26*
+*Revised: 2026-08-18 — moved trailing-newline trimming out of the renderer*
 
-**Decision:** Add `trimTrailingNewlines(s string) string` helper in scene.go that removes trailing newline characters from text content before rendering. This is called on all `UINodeText` nodes during `renderNode`.
+**Original decision (2026-07-26):** Add `trimTrailingNewlines(s string) string` helper in scene.go that removes trailing newline characters from text content before rendering, called on every `UINodeText` node during `renderNode`.
 
-**Rationale:** Text content that contains trailing newlines (e.g., `"text\n"`, `"text\n\n"`) produces blank lines when rendered through lipgloss. This is especially problematic for streamed assistant responses, notifications, and user prompts that may have trailing newlines from various sources. The issue manifests as "large blank gaps" in rendered output, making the UI feel sparse and hard to read. Trimming trailing newlines at render time ensures consistent behavior regardless of how text content was produced, without requiring every caller to sanitize input.
+**Problem found (2026-08-18):** `renderNode` is also the function backing `RenderAppendTextNode`, the incremental-diff fast path `refreshWASMChatAppend` (`model.go`) uses to avoid a full scene re-render on every streamed token. Stripping trailing newlines there strips them from the *currently accumulated, still-growing* message text — not just from genuinely final content. If a paragraph break streams in as its own chunk (or split across two chunks) and a render happens to land in the gap before the next word arrives, the newline is invisible in the live transcript for that window: the next chunk's text visibly crams up against the previous paragraph until more text streams in and the fuller node text (still intact underneath) reappears. This isn't cross-turn corruption — each turn is a separate scene node joined via `lipgloss.JoinVertical` — but it does produce exactly the "text jammed together" symptom reported for in-progress streaming responses.
+
+**Revised decision:** `renderNode` no longer trims trailing newlines at all. Instead it only calls `collapseBlankLineRuns`, which collapses runs of 3+ consecutive newlines down to 2 (at most one blank line) — this still fixes the original "large blank gaps" bug (issue #26 was about excessive *internal* vertical gaps within a single message, confirmed via the original `spacing_test.go` scenarios) without ever removing a newline that might still be a legitimate, in-progress paragraph break. Producers now trim trailing newlines once, when text is genuinely final: `extensions/agents/chat.go`'s `onChatUserPrompt` (user input is final the instant it's typed) and `onChatMessageEnd` (the assistant response is final at message-end, before its `OpReplaceText`/`OpInsert` call).
 
 **Consequence:**
-- All text nodes rendered through the scene graph no longer produce blank lines from trailing newlines
-- Text with multiple trailing newlines (`"\n\n"`) renders as single newline or no extra space
-- Empty strings that are only newlines render as empty content rather than blank lines
-- The fix is applied transparently and doesn't affect text wrapped by `lipgloss.Wrap` or styled by lipgloss
-- Behavior matches user expectations — blank lines are intentional content, not accidental formatting artifacts
+- A paragraph break split across streamed chunks is never dropped, even transiently, from the live transcript.
+- Runs of 3+ newlines are still collapsed to one blank line at render time, so the original excessive-spacing bug stays fixed regardless of source (user input, streaming, or any other producer that forgets to trim).
+- Trailing whitespace is trimmed exactly once, at the two known finalization points in `chat.go`; a new producer of `UINodeText` content is responsible for trimming its own trailing newlines if the text is final at insert time (`renderNode` will not do it).
+- `spacing_test.go`'s three strictest assertions (which required *zero* blank lines for wholly-trailing-newline content) were relaxed to tolerate the `strings.Split` artifact of one wholly-trailing newline sequence — a run of 3+ (indicating the original bug) is still caught.
 
-**Testing:** Add comprehensive tests in `spacing_test.go`:
-- `TestExcessiveSpacingInRenderedText`: Reproduces the issue with trailing newlines in simple text, wrapped text, and VStack
-- `TestAppendTextTrailingNewlines`: Verifies appending text doesn't introduce extra blank lines
-- `TestWrapEdgeCases`: Tests specific edge cases with lipgloss.Wrap and newlines
-
-All harness tests pass, confirming no regressions in chat rendering.
+**Testing:** `spacing_test.go` — `TestExcessiveSpacingInRenderedText`, `TestAppendTextTrailingNewlines`, `TestWrapEdgeCases` (updated bounds, see per-case comments), plus new `TestStreamingParagraphBreakNotDroppedMidStream`, which reproduces the exact mid-stream-render scenario and fails against the pre-fix `trimTrailingNewlines` behavior (verified via `git stash` against the old `scene.go`).
 
 *Addendum (2026-07-26):* The fix is applied in `renderNode` after cloning the node but before any rendering logic. This ensures:
 - All text nodes (including cloned ones for overrides) have trailing newlines trimmed

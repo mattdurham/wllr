@@ -451,22 +451,34 @@ func (s *SceneRenderer) RenderAppendTextNode(
 	return previous, current, true
 }
 
-// trimTrailingNewlines removes trailing newlines from text content to prevent
-// blank lines in rendered output. This is called on all text nodes during
-// rendering to normalize text content that may contain trailing newlines from
-// various sources (user input, streaming responses, etc.).
-func trimTrailingNewlines(s string) string {
-	return strings.TrimRight(s, "\n\r")
+// collapseBlankLineRuns collapses runs of 3+ consecutive newlines down to 2
+// (i.e. at most one blank line), fixing excessive vertical gaps (issue #26)
+// without ever removing a genuine single paragraph break. Unlike trimming
+// trailing newlines, this is safe to apply mid-stream: a node's text may
+// still be growing via append_text, and a run this large is already
+// excessive regardless of whether more text follows.
+func collapseBlankLineRuns(s string) string {
+	for strings.Contains(s, "\n\n\n") {
+		s = strings.ReplaceAll(s, "\n\n\n", "\n\n")
+	}
+	return s
 }
 
 // renderNode renders a single node and its subtree to a string given the
-// available content width.
+// available content width. Text nodes only have excessive (3+) consecutive
+// newlines collapsed here; a wholly-trailing newline is NOT stripped at
+// render time, since a node's text may still be growing mid-stream (via
+// append_text) and a "trailing" newline at render time is often not actually
+// final — stripping it here would visibly drop paragraph breaks for the
+// window between it arriving and the next chunk. Producers of genuinely
+// final text (e.g. the chat extension's onChatMessageEnd) are responsible
+// for trimming trailing whitespace before it reaches the scene.
 func renderNode(n sdk.UINode, width int) string {
 	style, innerWidth := styleFromProps(n.Props, width)
 	var body string
 	switch n.Type {
 	case sdk.UINodeText:
-		body = trimTrailingNewlines(n.Text)
+		body = collapseBlankLineRuns(n.Text)
 		if n.Props != nil && n.Props.Wrap && innerWidth > 0 {
 			body = lipgloss.Wrap(body, innerWidth, "")
 		}
