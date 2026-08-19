@@ -25,7 +25,7 @@ var (
 	chatSeq             int    // monotonic counter for unique node IDs
 	chatAsstNode        string // ID of the assistant text node for the in-flight turn
 	chatPendingAsstNode string // reserved assistant node ID, inserted on first token
-	markdownEnabled     bool  // set from WLLR_NO_MARKDOWN on session start
+	markdownEnabled     bool   // set from WLLR_NO_MARKDOWN on session start
 )
 
 // initChat registers the transcript event handlers. They are inert until
@@ -64,9 +64,12 @@ func onChatUserPrompt(prompt string, _ bool) {
 	chatAsstNode = ""
 
 	userBox := UINode{
-		ID:    userID,
-		Type:  "text",
-		Text:  prompt,
+		ID:   userID,
+		Type: "text",
+		// The user prompt is final the moment it's typed, so trailing newlines
+		// (e.g. from a pasted block) are trimmed here rather than at render
+		// time, which would also clip in-flight streamed assistant text.
+		Text:  strings.TrimRight(prompt, "\n\r"),
 		Props: &UIProps{Border: "rounded", Fg: "success", Padding: []int{0, 1}, Width: "fill", Wrap: true},
 	}
 	UIPatch(chatArea, OpInsert(chatRootID, userBox))
@@ -115,6 +118,10 @@ func onChatMessageEnd(role, content string) {
 	if markdownEnabled {
 		display = FormatMarkdown(content)
 	}
+	// The response is final at this point, so trim trailing newlines here
+	// rather than at render time, which would also clip in-flight streamed
+	// text before the turn is actually done.
+	display = strings.TrimRight(display, "\n\r")
 	if chatAsstNode != "" {
 		// Streamed turn: the in-flight node already holds the raw text. Swap it
 		// for the rendered version without breaking append-mode streaming.
