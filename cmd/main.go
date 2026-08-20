@@ -262,17 +262,13 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 	// provider picker) redirects here when the local provider has no usable
 	// model, letting the user probe an endpoint or enter details manually.
 	m.HasLocalModelFn = func() bool { return len(localModels(ctx, cfg)) > 0 }
-	m.ProbeLocalModelsFn = func(baseURL string) ([]harness.LocalModelChoice, harness.LocalModelProbeStatus) {
-		trimmed := strings.TrimRight(strings.TrimSpace(baseURL), "/")
-		if trimmed == "" {
-			return nil, harness.LocalModelProbeUnreachable
-		}
-		models, result := queryLocalModels(ctx, trimmed+"/models", "")
+	m.ProbeLocalModelsFn = func(baseURL string) ([]harness.LocalModelChoice, string, harness.LocalModelProbeStatus) {
+		models, resolvedBase, result := probeLocalModelsEndpoint(ctx, baseURL, "")
 		if result == queryLocalModelsUnreachable {
-			return nil, harness.LocalModelProbeUnreachable
+			return nil, "", harness.LocalModelProbeUnreachable
 		}
 		if result != queryLocalModelsOK {
-			return nil, harness.LocalModelProbeEmpty
+			return nil, "", harness.LocalModelProbeEmpty
 		}
 		out := make([]harness.LocalModelChoice, 0, len(models))
 		for _, remote := range models {
@@ -291,9 +287,9 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 			})
 		}
 		if len(out) == 0 {
-			return nil, harness.LocalModelProbeEmpty
+			return nil, "", harness.LocalModelProbeEmpty
 		}
-		return out, harness.LocalModelProbeOK
+		return out, resolvedBase, harness.LocalModelProbeOK
 	}
 	m.SaveLocalModelFn = func(entry harness.LocalModelEntry) (string, error) {
 		lm := localModelConfig{

@@ -172,11 +172,15 @@ type Model struct {
 	// local callback server (manual paste only). Set by cmd/main.go.
 	AwaitOAuthFn func() (input string, ok bool)
 
-	// ProbeLocalModelsFn probes {baseURL}/models for an OpenAI-compatible model
-	// list. The returned status distinguishes an unreachable endpoint (bad
+	// ProbeLocalModelsFn probes an OpenAI-compatible /models endpoint starting
+	// from baseURL, trying a small set of common path conventions (e.g.
+	// appending "/v1") when the bare URL doesn't work. resolvedBaseURL is the
+	// base URL that actually worked, which may differ from baseURL and is what
+	// gets persisted — the caller should not assume resolvedBaseURL == baseURL.
+	// The returned status distinguishes an unreachable endpoint (bad
 	// URL/refused/timeout — re-prompt the user) from one that responded but had
 	// nothing usable (fall back to manual entry). Set by cmd/main.go.
-	ProbeLocalModelsFn func(baseURL string) (models []LocalModelChoice, status LocalModelProbeStatus)
+	ProbeLocalModelsFn func(baseURL string) (models []LocalModelChoice, resolvedBaseURL string, status LocalModelProbeStatus)
 
 	// SaveLocalModelFn persists a newly chosen/entered local model to disk and
 	// applies it as the active provider/model. Returns the applied model ID.
@@ -1203,6 +1207,10 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 
 	case localModelProbeResultMsg:
 		if msg.Status == LocalModelProbeOK && len(msg.Models) > 0 {
+			// msg.BaseURL is the resolved base URL that actually worked (it may
+			// differ from what the user typed, e.g. with "/v1" appended) — persist
+			// that, not the original input.
+			m.localSetupBaseURL = msg.BaseURL
 			m.openModelPickerFromProbe(msg.Models)
 			return m, nil, true
 		}
