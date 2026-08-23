@@ -42,3 +42,22 @@ func TestBuildDefaultActionPrompt_OmitsLSPGuidanceWithoutDiagnosticsTool(t *test
 		t.Fatalf("prompt should not include LSP guidance without LSP tools:\n%s", prompt)
 	}
 }
+
+func TestBuildDefaultActionPrompt_IncludesProjectScope(t *testing.T) {
+	prompt := buildDefaultActionPrompt(nil, nil)
+
+	for _, want := range []string{
+		"### Project Scope",
+		"current working directory where wllr was launched as the project root",
+		"scope file reads, searches, edits, tests, and shell commands",
+		"Prefer relative paths",
+		"Do not inspect parent directories, home directories, sibling repositories",
+		"Use the `edit_file` tool for source-code edits",
+		"Do not use `sed`, `perl`, Python, or shell redirection to modify files",
+		"`apply_patch` is a Codex-side editing capability",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}

@@ -99,7 +99,7 @@ log, and reset behavior are covered by `wasmchat_test.go`, `tui_test.go`, and
 | `TestSetPendingSetupWizard_DrivesInitWizard` | Pending setup drives startup wizard | `pendingSetupWizard` set; `Init()` returns a non-nil batch |
 | `TestSetPendingModelPicker_DrivesInitPrompt` | Pending local model replacement drives startup model selection | `pendingModelPicker` set; `Init()` returns a non-nil batch |
 | `TestLoginProviderSelected_CloudRecordsOAuthAndBeginsLogin` | Cloud wizard choice records OAuth and starts login | `RecordAuthFn` called with OAuth; `BeginOAuthFn` called; provider/model/modal/capture state set |
-| `TestLoginProviderSelected_LocalDoesNotBeginLogin` | Local wizard choice skips auth | no OAuth record; `BeginOAuthFn` not called; provider/model state set |
+| `TestLoginProviderSelected_LocalDoesNotBeginLogin` | Local wizard choice opens local setup | setup command is returned; no OAuth flow starts |
 
 ### oauth_test.go
 

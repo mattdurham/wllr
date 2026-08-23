@@ -392,6 +392,19 @@ Produces a markdown section injected via `pool.AppendBaseSystemPrompt`:
 
 You are an action-taking agent...
 
+### Project Scope
+
+- Treat the directory where wllr was launched as the project root.
+- Scope reads, searches, edits, tests, and shell commands to that directory and descendants by default.
+- Use relative paths and omit `exec.dir` unless another directory is explicitly requested.
+- Do not inspect parent directories, home directories, sibling repositories, or unrelated folders without an explicit user request or task requirement.
+
+### Editing Files
+
+- Use `edit_file` for source-code edits with exact `oldText`/`newText` replacements.
+- Do not use `sed`, `perl`, Python, or shell redirection to modify files; `rg` and `read_file` are for inspection.
+- `apply_patch` is not a wllr runtime command; use `edit_file` within wllr.
+
 Available tools: exec, lsp_diagnostics, lsp_lint, read_file, ...
 
 ### Code Intelligence
@@ -405,6 +418,8 @@ Available tools: exec, lsp_diagnostics, lsp_lint, read_file, ...
 ```
 
 **Invariant:** Tool names are sorted alphabetically before rendering. Tool descriptions are not duplicated in the prompt because schemas/descriptions are already sent through the provider tool API. Commands appear in the order returned by `Registry.List()` (sorted by name). Empty descriptions are replaced with `"(no description)"`.
+
+**Invariant:** The prompt always includes `Project Scope` guidance that treats the launch working directory as the default project root and prohibits unrelated filesystem exploration unless explicitly requested or required.
 
 **Invariant:** If any primary LSP tool is registered (`lsp_diagnostics`, `lsp_lint`, `lsp_definition`, or `lsp_references`), the prompt includes a `Code Intelligence` section that makes LSP tools the primary path for diagnostics, linting, code navigation, finding references, and refactor reconnaissance. The guidance names `lsp_symbols`, `lsp_definition`, `lsp_references`, `lsp_refactor_preview`, `lsp_diagnostics`, `lsp_lint`, and `lsp_capabilities`; tells agents to call `lsp_capabilities` at the start of repo/code work unless backend/output-contract details are already known for the session; tells agents to use symbol/definition/reference tools before broad shell search or large file sweeps; instructs agents to apply refactor edits with normal file-editing tools after reviewing preview output; and treats `exec`/manual search as fallback when LSP output is unavailable, incomplete, or unrelated to the task.
 
@@ -531,7 +546,7 @@ Flow mirrors the model picker: `/thinking` with no arg emits `showThinkingPicker
 
 Flow: when `pendingAuthProvider != ""`, `Init()` emits `showAuthPromptMsg{Provider}` → `openAuthPrompt()` opens a two-item picker ("Set up OAuth / login" = `"oauth"`, "Use an API key" = `"api_key"`) with the reserved `authPickerCallback` (`"__wllr:auth"`). On selection, `updateKeyPressPicker` emits `recordAuthMsg{Provider, Method}`; the handler calls `applyAuthChoice` → `RecordAuthFn` + a notification, and clears `authPromptProvider`.
 
-Blank first-run setup flow: when `pendingSetupWizard` is true, `Init()` emits `showLoginProviderPickerMsg{}`. `openLoginProviderPicker()` displays provider choices from `ProviderListFn` with the reserved `loginProviderPickerCallback` (`"__wllr:login_provider"`). On selection, `loginProviderSelectedMsg{Provider}` calls `SelectProviderFn`, updates active provider/model state from its return values, dispatches `EventModelChanged`, and either starts OAuth (when `requiresLogin` is true) or finishes without auth (for local providers).
+Provider setup flow: when `pendingSetupWizard` is true, or when `/login` is run, the harness emits `showLoginProviderPickerMsg{}`. `openLoginProviderPicker()` displays provider choices from `ProviderListFn` with the reserved `loginProviderPickerCallback` (`"__wllr:login_provider"`). Cloud selection calls `SelectProviderFn`, updates active provider/model state, dispatches `EventModelChanged`, and starts OAuth. Local selection always opens `showLocalModelSetupMsg{}` so the endpoint/model wizard can add or switch a local model; `/model` remains the shortcut for choosing among already configured local models.
 
 Local model replacement flow: when the configured local model is not advertised by its endpoint, startup selects an available replacement so provider construction can continue, then sets `pendingModelPicker`. `Init()` emits `showModelPickerMsg{}` and the existing model picker opens with an explicit unavailable-model message so the user can confirm or choose another available model; selecting a model uses `SelectModelFn` and persists the choice. The pending flag is consumed when that picker opens.
 

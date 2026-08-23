@@ -29,6 +29,18 @@ func buildDefaultActionPrompt(tools []sdk.Tool, commands []Command) string {
 	sb.WriteString(
 		"**Never end a turn by describing your next action.** Either call the tool now, or tell the user the task is complete.\n",
 	)
+	sb.WriteString(
+		"\n### Project Scope\n\n" +
+			"Treat the current working directory where wllr was launched as the project root. " +
+			"By default, scope file reads, searches, edits, tests, and shell commands to that directory and its descendants. " +
+			"Prefer relative paths and omit `exec.dir` so commands run in the current project. " +
+			"Do not inspect parent directories, home directories, sibling repositories, or unrelated folders unless the user explicitly asks or the task requires it. " +
+			"When a question is about the current project, investigate it from the current directory first.\n\n" +
+			"### Editing Files\n\n" +
+			"Use the `edit_file` tool for source-code edits: provide exact oldText/newText replacements and let the tool validate and apply them atomically. " +
+			"Do not use `sed`, `perl`, Python, or shell redirection to modify files. Use `rg` or `read_file` for inspection only. " +
+			"`apply_patch` is a Codex-side editing capability and is not a wllr runtime command; use `edit_file` inside wllr.\n",
+	)
 
 	// Tool schemas are already sent to the model via the API — listing them
 	// again with full descriptions in the system prompt doubles the token cost.

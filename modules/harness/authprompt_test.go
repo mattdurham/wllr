@@ -110,32 +110,17 @@ func TestLoginProviderSelected_CloudRecordsOAuthAndBeginsLogin(t *testing.T) {
 }
 
 func TestLoginProviderSelected_LocalDoesNotBeginLogin(t *testing.T) {
-	recorded := false
-	began := false
 	m := New(nil, "main", nil)
-	m.SelectProviderFn = func(provider string) (string, bool, error) {
-		return "llama3.2", false, nil
-	}
-	m.RecordAuthFn = func(string, string) error { recorded = true; return nil }
-	m.BeginOAuthFn = func(string) (string, string, error) {
-		began = true
-		return "", "", nil
-	}
-	m.AwaitOAuthFn = func() (string, bool) { return "", false }
 
 	next, cmd := m.Update(loginProviderSelectedMsg{Provider: "local"})
 	m = next.(Model)
 
-	if recorded {
-		t.Error("local provider should not record OAuth auth choice")
+	if cmd == nil {
+		t.Fatal("local provider selection should open the setup wizard")
 	}
-	if began {
-		t.Error("local provider should not begin OAuth login")
-	}
-	if cmd != nil {
-		t.Error("local provider selection should not return an OAuth command")
-	}
-	if m.activeProvider != "local" || m.activeModel != "llama3.2" {
-		t.Errorf("selection got provider=%q model=%q, want local/llama3.2", m.activeProvider, m.activeModel)
+	if msg := cmd(); msg == nil {
+		t.Fatal("local provider setup command returned nil")
+	} else if _, ok := msg.(showLocalModelSetupMsg); !ok {
+		t.Fatalf("local provider message = %T, want showLocalModelSetupMsg", msg)
 	}
 }

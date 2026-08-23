@@ -39,6 +39,12 @@ func (m *Model) applyLoginProviderSelection(provider string) tea.Cmd {
 	if provider == "" {
 		return nil
 	}
+	// Selecting Local from the provider wizard always opens endpoint/model
+	// setup, allowing /login to add or switch local models. The /model picker
+	// remains the shortcut for choosing among configured local models.
+	if provider == providerLocal {
+		return func() tea.Msg { return showLocalModelSetupMsg{} }
+	}
 	requiresLogin := false
 	model := ""
 	if m.SelectProviderFn != nil {
