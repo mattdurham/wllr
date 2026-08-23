@@ -229,6 +229,11 @@ opens a setup wizard in the TUI. The wizard lets you choose:
 The wizard persists both `wllr.provider` and a provider-appropriate default
 `wllr.model` in `~/.config/wllr/config.json`.
 
+Run `/login` at any time to reopen this provider wizard and choose **Local
+model**. If no local model is configured, it prompts for the endpoint, discovers
+available models, and lets you select one. Use `/login auth` when you want to
+authenticate the currently active cloud provider directly.
+
 You can also authenticate before starting the TUI:
 
 ```sh
@@ -255,7 +260,7 @@ per provider and never again once a choice exists.
 
 ### OAuth login (Anthropic / Claude Pro·Max)
 
-Choosing **OAuth** (or running `/login` any time) starts an interactive sign-in:
+Choosing **OAuth** (or running `/login auth` any time) starts an interactive sign-in:
 
 1. wllr shows an authorize URL in a modal (also copied to your clipboard). Open
    it in a browser **on the same machine as wllr**.
@@ -285,7 +290,7 @@ API key or a pre-obtained `sk-ant-oat…` token).
 
 ### OAuth login (OpenAI Codex / ChatGPT Plus·Pro)
 
-With `WLLR_PROVIDER=openai`, choosing **OAuth** (or `/login`) uses the
+With `WLLR_PROVIDER=openai`, choosing **OAuth** (or `/login auth`) uses the
 **device-code** flow — which works anywhere, including over SSH, with no local
 server or port forwarding:
 

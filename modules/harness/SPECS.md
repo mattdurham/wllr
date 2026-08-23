@@ -313,7 +313,7 @@ Built-in commands registered at startup:
 | `/model`        | true    | No arg → `showModelPickerMsg{}` (opens model picker); `/model <name>` → `setModelMsg{Model: name}` |
 | `/models`       | true    | Alias for `/model` with no args; opens model picker |
 | `/thinking`     | true    | No arg → `showThinkingPickerMsg{}` (opens level picker); `/thinking <level>` → `setThinkingMsg{Level: level}` |
-| `/login`        | true    | Emits `loginMsg{}` (opens the auth prompt for the active provider) |
+| `/login`        | true    | No args → `showLoginProviderPickerMsg{}` (opens the install-style provider wizard); `/login auth` → `loginMsg{}` (authenticates the active provider) |
 | `/status`       | true    | Emits `StatusUpdateMsg{Key: "_override", Value: text}`       |
 | `/tools`        | true    | Emits `showToolsMsg{}`                                       |
 | `/prompt`       | false   | Shows accumulated base system prompt in a modal              |
@@ -564,7 +564,7 @@ Local model replacement flow: when the configured local model is not advertised 
 
 ### Local-Model Setup Flow
 
-When the local provider has no configured/discoverable model, `SelectProviderFn` returns the sentinel `ErrLocalModelSetupNeeded` instead of an error, and `applyLoginProviderSelection` (in `providerpicker.go`) checks `errors.Is(err, ErrLocalModelSetupNeeded)` *before* its generic error-notification path, redirecting into an interactive setup flow (`localmodelsetup.go`) rather than failing. `/login` redirects the same way when `m.activeProvider == providerLocal` and `hasUsableLocalModel()` (backed by `HasLocalModelFn`, nil-safe defaulting to `true`) is false.
+When the local provider has no configured/discoverable model, `SelectProviderFn` returns the sentinel `ErrLocalModelSetupNeeded` instead of an error, and `applyLoginProviderSelection` (in `providerpicker.go`) checks `errors.Is(err, ErrLocalModelSetupNeeded)` *before* its generic error-notification path, redirecting into an interactive setup flow (`localmodelsetup.go`) rather than failing. `/login` opens this provider picker on demand; choosing Local therefore reaches the same setup flow as the install wizard. `/login auth` remains the explicit active-provider authentication path.
 
 | Field | Type | Purpose |
 |-------|------|---------|
@@ -588,7 +588,7 @@ Manual-fallback flow: `localModelProbeResultMsg{Status: LocalModelProbeEmpty}` r
 
 ### OAuth Login Flow
 
-When the user chooses **OAuth** in the auth prompt (or runs `/login`), the harness drives an interactive OAuth login via two callbacks (set by `cmd/main.go`):
+When the user chooses **OAuth** in the auth prompt (or runs `/login auth`), the harness drives an interactive OAuth login via two callbacks (set by `cmd/main.go`):
 
 | Field | Type | Purpose |
 |-------|------|---------|
@@ -596,14 +596,14 @@ When the user chooses **OAuth** in the auth prompt (or runs `/login`), the harne
 | `CompleteOAuthFn` | `func(provider, input string) error` | Exchanges the awaited material (per provider) for tokens, persists and applies them. Nil ⇒ completion unavailable. |
 | `AwaitOAuthFn` | `func() (input string, ok bool)` | Blocks until login resolves and returns the material `CompleteOAuthFn` needs (+ true), or false on cancel/error. Backed by the local callback server (Anthropic) or the device-code poll (Codex). Nil ⇒ login unavailable. |
 
-Flow: selecting OAuth (or `/login` → `loginMsg` → `openAuthPrompt(activeProvider)`) leads to `beginOAuthLogin` → `BeginOAuthFn` returns the modal body + URL. The body is shown in a modal and the URL copied to the clipboard (`tea.SetClipboard`/OSC52). `beginOAuthLogin` returns a `tea.Batch` of a command that blocks on `AwaitOAuthFn` (yielding `oauthCallbackMsg`) and the clipboard copy. Login completes automatically when `AwaitOAuthFn` resolves: `oauthCallbackMsg{OK:true}` → `completeOAuthFromCallback` closes the modal and runs `CompleteOAuthFn` off-loop, reporting success/failure as a `NotifyMsg`. There is **no manual-paste fallback**. The two provider styles:
+Flow: selecting OAuth (or `/login auth` → `loginMsg` → `openAuthPrompt(activeProvider)`) leads to `beginOAuthLogin` → `BeginOAuthFn` returns the modal body + URL. The body is shown in a modal and the URL copied to the clipboard (`tea.SetClipboard`/OSC52). `beginOAuthLogin` returns a `tea.Batch` of a command that blocks on `AwaitOAuthFn` (yielding `oauthCallbackMsg`) and the clipboard copy. Login completes automatically when `AwaitOAuthFn` resolves: `oauthCallbackMsg{OK:true}` → `completeOAuthFromCallback` closes the modal and runs `CompleteOAuthFn` off-loop, reporting success/failure as a `NotifyMsg`. There is **no manual-paste fallback**. The two provider styles:
 
 - **Anthropic** — browser + local callback server on `127.0.0.1:53692`; the browser must reach it (same machine, or tunnel the port).
 - **Codex (openai)** — device-code: the modal shows a verification URL + user code; `AwaitOAuthFn` polls until approval. Works anywhere (incl. SSH), no local server.
 
-`/login` is available any time, not just first run.
+`/login` is available any time, not just first run. It opens the provider wizard; use `/login auth` for direct authentication of the active provider.
 
-**Invariant:** OAuth login requires both `BeginOAuthFn` and `AwaitOAuthFn`; if either is nil, `/login`'s OAuth path reports "not available" and does not enter capture mode. A normal `SubmitMsg` is never repurposed as an OAuth code.
+**Invariant:** OAuth login requires both `BeginOAuthFn` and `AwaitOAuthFn`; if either is nil, `/login auth`'s OAuth path reports "not available" and does not enter capture mode. A normal `SubmitMsg` is never repurposed as an OAuth code.
 
 **Invariant:** OAuth login is provider-scoped; `BeginOAuthFn`/`CompleteOAuthFn` return an error for providers without a supported flow (today Anthropic and OpenAI/Codex), surfaced as a notification.
 

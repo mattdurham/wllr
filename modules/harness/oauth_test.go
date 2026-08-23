@@ -115,14 +115,14 @@ func TestCompleteOAuthFromCallback_IgnoredWhenNotCapturing(t *testing.T) {
 	}
 }
 
-func TestBuiltinLogin_EmitsLoginMsg(t *testing.T) {
+func TestBuiltinLoginAuth_EmitsLoginMsg(t *testing.T) {
 	r := NewRegistry()
 	registerBuiltins(r)
-	cmd := r.Dispatch("login", nil)
+	cmd := r.Dispatch("login", []string{"auth"})
 	if cmd == nil {
 		t.Fatal("expected non-nil Cmd")
 	}
 	if _, ok := cmd().(loginMsg); !ok {
-		t.Errorf("expected loginMsg, got %T", cmd())
+		t.Errorf("expected loginMsg from /login auth, got %T", cmd())
 	}
 }

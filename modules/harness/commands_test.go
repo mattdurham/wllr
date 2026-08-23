@@ -189,6 +189,26 @@ func TestBuiltinModel_NoArgs(t *testing.T) {
 	}
 }
 
+func TestBuiltinLogin_OpensProviderWizard(t *testing.T) {
+	r := NewRegistry()
+	registerBuiltins(r)
+
+	msg := r.Dispatch("login", nil)()
+	if _, ok := msg.(showLoginProviderPickerMsg); !ok {
+		t.Fatalf("/login message = %T, want showLoginProviderPickerMsg", msg)
+	}
+}
+
+func TestBuiltinLogin_AuthOpensAuthentication(t *testing.T) {
+	r := NewRegistry()
+	registerBuiltins(r)
+
+	msg := r.Dispatch("login", []string{"auth"})()
+	if _, ok := msg.(loginMsg); !ok {
+		t.Fatalf("/login auth message = %T, want loginMsg", msg)
+	}
+}
+
 func TestBuiltinThinking_EmitsMsg(t *testing.T) {
 	r := NewRegistry()
 	registerBuiltins(r)

@@ -128,10 +128,13 @@ func registerBuiltins(r *Registry) {
 
 	r.Register(Command{
 		Name:    "login",
-		Desc:    "Authenticate the active provider (OAuth/login or API key)",
+		Desc:    "Choose a provider, including local model setup (/login auth to authenticate)",
 		Instant: true,
-		Handler: func(_ []string) tea.Cmd {
-			return func() tea.Msg { return loginMsg{} }
+		Handler: func(args []string) tea.Cmd {
+			if len(args) > 0 && args[0] == "auth" {
+				return func() tea.Msg { return loginMsg{} }
+			}
+			return func() tea.Msg { return showLoginProviderPickerMsg{} }
 		},
 	})
 
