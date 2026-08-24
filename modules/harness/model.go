@@ -142,8 +142,22 @@ type Model struct {
 	SelectModelFn func(modelID string) error
 
 	// ThinkingListFn returns the reasoning levels selectable in the /thinking
-	// picker. Nil means thinking-level selection is unavailable. Set by cmd/main.go.
+	// picker. Nil means thinking-level selection is not wired. An empty list
+	// means the current model does not support thinking; the picker then shows
+	// a "not available" notification (with ThinkingUnsupportedReasonFn's
+	// explanation when set) instead of opening. Set by cmd/main.go.
 	ThinkingListFn func() []ThinkingChoice
+
+	// ThinkingStatusFn returns the status-bar value reflecting the current model's
+	// thinking support (a level ID, or "unavailable"). Used when /thinking
+	// finds the model unsupported. Nil means no status update. Set by cmd/main.go.
+	ThinkingStatusFn func() string
+
+	// ThinkingUnsupportedReasonFn returns a user-facing explanation of why the
+	// current model does not support reasoning ("not available — <reason>")
+	// for the /thinking message. Empty means the generic message. Set by
+	// cmd/main.go.
+	ThinkingUnsupportedReasonFn func() string
 
 	// SelectThinkingFn switches the active reasoning level: it updates the main
 	// agent's provider options and persists the choice. Returns an error if the

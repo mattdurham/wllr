@@ -190,6 +190,12 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 			slog.Warn("wllr: could not persist model selection", "model", modelID, "error", saveErr)
 		}
 		oauthState.model = modelID
+		// Re-apply the thinking selection for the new provider: the persisted
+		// mode when valid, the local endpoint's declared default when local, or
+		// a clear when the stored mode is invalid for the new provider (no stale
+		// agent options or status). Runs before the switch because every case
+		// below returns.
+		m.SetThinkingForModel(startupThinkingMode(ctx, cfg, provider))
 		switch provider {
 		case providerOpenAI, providerAnthropic:
 			return modelID, true, nil
@@ -252,6 +258,10 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 		if saveErr := saveModel(modelID); saveErr != nil {
 			slog.Warn("wllr: could not persist model selection", "model", modelID, "error", saveErr)
 		}
+		// Re-apply the thinking selection for the new model: the persisted mode
+		// when valid for it, the local endpoint's declared default when local,
+		// or a clear when the stored mode is invalid for the new model.
+		m.SetThinkingForModel(startupThinkingMode(ctx, cfg, currentProvider))
 		return nil
 	}
 	if localModelReplaced {
@@ -335,22 +345,44 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 		if main := pool.Get(agent.MainAgentID); main != nil {
 			main.SetModel(newLM, lm.ID)
 		}
+		// Setup just finished: adopt the model's thinking default (detected) so
+		// the new local model starts with the server's declared setting.
+		m.SetThinkingForModel(startupThinkingMode(ctx, cfg, providerLocal))
 		return lm.ID, nil
 	}
 
-	// Wire the /thinking picker: list model-specific reasoning modes, and apply + persist on
-	// selection. Applying sets the main agent's provider options (mapped to the
-	// active provider's native mechanism) for subsequent turns.
+	// Wire the /thinking picker: list the active model's reasoning modes and
+	// apply + persist on selection. For local models the mode set is detected
+	// (config > LM Studio app API > standard OpenAI fallback); an empty set is
+	// expected for models the endpoint says cannot reason.
 	m.ThinkingListFn = func() []harness.ThinkingChoice {
-		modes := supportedThinkingModesForModel(currentProvider, cfg.Model)
-		if len(modes) == 0 {
-			return nil
+		var modes []thinkingMode
+		if currentProvider == providerLocal {
+			modes = localThinkingModesForModel(ctx, cfg)
+		} else {
+			modes = supportedThinkingModesForModel(currentProvider, cfg.Model)
 		}
 		out := make([]harness.ThinkingChoice, 0, len(modes))
-		for _, m := range modes {
-			out = append(out, harness.ThinkingChoice{ID: m.ID, Label: m.Name})
+		for _, t := range modes {
+			out = append(out, harness.ThinkingChoice{ID: t.ID, Label: t.Name})
 		}
 		return out
+	}
+	m.ThinkingStatusFn = func() string {
+		if lvl := m.ActiveThinking(); lvl != "" {
+			return lvl
+		}
+		return "unavailable"
+	}
+	m.ThinkingUnsupportedReasonFn = func() string {
+		if currentProvider != providerLocal {
+			return "this provider/model does not support reasoning"
+		}
+		_, declared, _ := localThinkingInfo(ctx, cfg)
+		if declared {
+			return fmt.Sprintf("%s does not support reasoning (per the endpoint's model listing)", cfg.Model)
+		}
+		return "no reasoning modes could be detected for " + cfg.Model
 	}
 	m.SelectThinkingFn = func(levelID string) error {
 		po := providerOptionsForThinkingMode(currentProvider, levelID)
@@ -363,14 +395,28 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 		return nil
 	}
 
-	// Apply the persisted thinking mode (if any) to the main agent at startup so
-	// the saved reasoning level survives restarts, and reflect it in the status.
-	if lvl := savedThinkingMode(); lvl != "" {
+	// Apply the startup thinking mode to the main agent: the persisted mode for
+	// the provider, or — for local models — the endpoint-declared default when
+	// nothing valid is persisted (so the server's own default is visible and
+	// adjustable, and the agent never starts on an effort the model rejects).
+	if lvl := startupThinkingMode(ctx, cfg, currentProvider); lvl != "" {
 		po := providerOptionsForThinkingMode(currentProvider, lvl)
 		if main := pool.Get(agent.MainAgentID); main != nil {
 			main.SetProviderOptions(po)
 		}
 		m.SetActiveThinking(lvl)
+	}
+	// On startup with a local model that cannot reason (endpoint-declared):
+	// clear the (possibly stale) persisted mode and reflect the state in the
+	// status bar.
+	if currentProvider == providerLocal {
+		modes, declared, _ := localThinkingInfo(ctx, cfg)
+		if declared && len(modes) == 0 {
+			if err := saveThinkingMode(""); err != nil {
+				slog.Warn("wllr: could not clear thinking mode", "error", err)
+			}
+			m.SetThinkingUnavailable()
+		}
 	}
 
 	// Apply a stored, valid OAuth token at startup (refreshing if expired) so a

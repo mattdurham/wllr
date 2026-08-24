@@ -1,6 +1,9 @@
 package main
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+)
 
 // NOTE: model catalog. Source: charmbracelet Catwalk (https://catwalk.charm.sh/v2/providers),
 // the same model-metadata service used by crush. Regenerate by fetching that
@@ -18,6 +21,19 @@ type thinkingMode struct {
 	Description string // Optional description
 }
 
+// Standard OpenAI reasoning-effort mode IDs, shared by the openai provider
+// (native) and the local provider (OpenAI-compatible endpoint). The IDs are
+// the values sent as reasoning_effort. Local models may advertise a narrower,
+// endpoint-specific set via discovery (see probeLocalReasoning).
+const (
+	thinkingModeNone    = "none"
+	thinkingModeMinimal = "minimal"
+	thinkingModeLow     = "low"
+	thinkingModeMedium  = "medium"
+	thinkingModeHigh    = "high"
+	thinkingModeXHigh   = "xhigh"
+)
+
 // modelInfo describes one selectable model for the /model picker.
 type modelInfo struct {
 	ID           string
@@ -27,6 +43,19 @@ type modelInfo struct {
 
 	ContextWindow int64
 	ThinkingModes []thinkingMode // Model-specific thinking modes
+
+	// ReasoningDefault is the server-declared default reasoning setting for a
+	// discovered local model (from the LM Studio app API). For a model whose
+	// advertised modes already contain the standard "none" ID, an empty value
+	// means the default is "none". Switching to a local model adopts this
+	// default when no provider-specific thinking mode is saved.
+	ReasoningDefault string
+
+	// ReasoningDeclared reports whether the model's endpoint explicitly declared
+	// its reasoning capability (LM Studio app API listing). When true and
+	// ThinkingModes is empty, the model is known not to support reasoning and
+	// the /thinking picker reports so instead of guessing.
+	ReasoningDeclared bool
 }
 
 // modelCatalog maps a provider name (cfg.Provider) to its selectable models,
@@ -452,18 +481,116 @@ func contextWindowForSelection(provider, id string, cfg *Config) int64 {
 	return contextWindowFromCatalog(provider, id)
 }
 
-// supportedThinkingModesForModel returns the thinking modes supported by a given model.
+// supportedThinkingModesForModel returns the thinking modes supported by a
+// given model. Precedence: the model catalog (openai and friends), explicit
+// local_models configuration, and the standard OpenAI effort set for local
+// models without an endpoint-declared set (OpenAI-compatible endpoints speak
+// reasoning_effort).
 func supportedThinkingModesForModel(provider, model string) []thinkingMode {
-	models := modelsForProvider(provider)
-	if models == nil {
-		return nil
-	}
-	for _, m := range models {
-		if m.ID == model {
-			return m.ThinkingModes
+	if models := modelsForProvider(provider); models != nil {
+		for _, m := range models {
+			if m.ID == model {
+				return m.ThinkingModes
+			}
 		}
 	}
+	if provider == providerLocal && model != "" {
+		if lm, ok := loadWllrSettings().localModelEntry(model); ok && len(lm.ThinkingModes) > 0 {
+			if filtered := thinkingModesFromIDs(lm.ThinkingModes); len(filtered) > 0 {
+				return filtered
+			}
+		}
+		return openAIStandardThinkingModes()
+	}
 	return nil
+}
+
+// openAIStandardThinkingModes is the full standard OpenAI reasoning-effort
+// vocabulary, in picker order. Used for local models whose endpoint does not
+// declare a supported set.
+func openAIStandardThinkingModes() []thinkingMode {
+	return []thinkingMode{
+		{ID: thinkingModeNone, Name: "None", Description: "No extended reasoning"},
+		{ID: thinkingModeMinimal, Name: "Minimal", Description: "Minimal extended reasoning"},
+		{ID: thinkingModeLow, Name: "Low", Description: "Extended reasoning (low effort)"},
+		{ID: thinkingModeMedium, Name: "Medium", Description: "Extended reasoning (medium effort)"},
+		{ID: thinkingModeHigh, Name: "High", Description: "Extended reasoning (high effort)"},
+		{ID: thinkingModeXHigh, Name: "X-High", Description: "Extended reasoning (maximum effort)"},
+	}
+}
+
+// adoptedLocalThinkingMode returns the mode ID to adopt when switching to a
+// local model with the given endpoint-declared default: the declared default
+// itself if it is in the model's mode set, otherwise "none" if the set offers
+// it, otherwise the first mode in the set.
+func adoptedLocalThinkingMode(modes []thinkingMode, declaredDefault string) string {
+	if len(modes) == 0 {
+		return thinkingModeNone
+	}
+	if declaredDefault != "" {
+		for _, m := range modes {
+			if m.ID == declaredDefault {
+				return m.ID
+			}
+		}
+	}
+	for _, m := range modes {
+		if m.ID == thinkingModeNone {
+			return m.ID
+		}
+	}
+	return modes[0].ID
+}
+
+// thinkingModeInSet reports whether a mode ID is present in a mode set.
+func thinkingModeInSet(modes []thinkingMode, id string) bool {
+	for _, m := range modes {
+		if m.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// startupThinkingMode determines the thinking mode to apply for the current
+// provider/model: the persisted mode when it is valid for that provider. For
+// local models with an endpoint-declared capability set, a missing or stale
+// persisted mode falls back to the model's endpoint-declared default (so the
+// user sees and can adjust the server's own choice, and an invalid effort can
+// never 400 the request). For non-local providers a stale/invalid mode yields
+// "" (nothing applied — the legacy behavior).
+func startupThinkingMode(ctx context.Context, cfg *Config, provider string) string {
+	lvl := savedThinkingMode()
+	if provider != providerLocal {
+		if lvl == "" {
+			return ""
+		}
+		if providerOptionsForThinkingMode(provider, lvl) != nil {
+			return lvl
+		}
+		return ""
+	}
+	modes, declared, def := localThinkingInfo(ctx, cfg)
+	if lvl != "" && thinkingModeInSet(modes, lvl) {
+		return lvl
+	}
+	if declared {
+		if len(modes) == 0 {
+			// The endpoint says this model has no reasoning capability: send
+			// nothing (it cannot think) rather than an effort it may reject.
+			return ""
+		}
+		return adoptedLocalThinkingMode(modes, def)
+	}
+	// Endpoint did not declare capabilities (unknown OpenAI-compatible server):
+	// trust only standard-vocabulary persisted modes; otherwise send nothing
+	// (server default) rather than guessing.
+	if lvl != "" {
+		if _, ok := openAIReasoningEffortByMode[lvl]; ok {
+			return lvl
+		}
+	}
+	return ""
 }
 
 // currentThinkingModeForModel returns the currently active thinking mode ID for a model.

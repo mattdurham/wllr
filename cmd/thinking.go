@@ -79,6 +79,20 @@ var openAIReasoningEffort = map[thinkingLevel]fantasyopenapiprovider.ReasoningEf
 	thinkingXHigh:   fantasyopenapiprovider.ReasoningEffortXHigh,
 }
 
+// openAIReasoningEffortByMode maps standard OpenAI reasoning-effort mode IDs
+// (shared by the openai and local providers) to their wire values. The map is
+// the single source of truth for the standard vocabulary; mode IDs outside it
+// (e.g. LM Studio's boolean "on") map to nil, which omits the field and lets
+// the server apply its own default.
+var openAIReasoningEffortByMode = map[string]fantasyopenapiprovider.ReasoningEffort{
+	thinkingModeNone:    fantasyopenapiprovider.ReasoningEffortNone,
+	thinkingModeMinimal: fantasyopenapiprovider.ReasoningEffortMinimal,
+	thinkingModeLow:     fantasyopenapiprovider.ReasoningEffortLow,
+	thinkingModeMedium:  fantasyopenapiprovider.ReasoningEffortMedium,
+	thinkingModeHigh:    fantasyopenapiprovider.ReasoningEffortHigh,
+	thinkingModeXHigh:   fantasyopenapiprovider.ReasoningEffortXHigh,
+}
+
 // isValidThinkingLevel reports whether s names a known level.
 func isValidThinkingLevel(s string) bool {
 	_, ok := thinkingLevelLabels[thinkingLevel(s)]
@@ -116,7 +130,7 @@ func providerOptionsForThinking(provider string, level thinkingLevel) fantasy.Pr
 				},
 			},
 		}
-	case providerOpenAI:
+	case providerOpenAI, providerLocal:
 		if level == thinkingOff {
 			return nil
 		}

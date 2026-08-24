@@ -462,6 +462,20 @@ persists only the chosen model ID.
 
 ---
 
+## Local-model thinking detection — probe the endpoint, detect support, then decide (popup vs "not available")
+
+*Added: 2026-08-24*
+
+**Decision:** Detect reasoning support for local (OpenAI-compatible) models at runtime and let the `/thinking` flow branch on the result: **supported → open the picker; unsupported → tell the user; unknown → the standard OpenAI fallback set.** Detection has three layers, in precedence order: (1) explicit `local_models.<entry>.thinking_modes` config (a list of effort IDs); (2) the **LM Studio app API v1** (`/api/v1/models`, probed best-effort from the OpenAI-compatible base URL — the one OpenAI-ecosystem endpoint that exposes `capabilities.reasoning.allowed_options` + `default` per model); (3) the standard six-value OpenAI `reasoning_effort` set. The OpenAI-compatible `/v1/models` spec has no reasoning field (verified: OpenAI, LM Studio), so it cannot detect — config and the app API are the only sources. The mapping translates the app API's boolean/graded vocabulary to wire-safe IDs: `off`→`none`, `on`→`medium` (the endpoint rejects `"on"` with a 400 — verified against LM Studio), other values pass through if standard. A model whose listing has a capabilities object but no reasoning entry is **declared non-reasoning** (`ReasoningDeclared` + empty set) — distinct from an unknown endpoint.
+
+**Rationale:** The picker previously silently said "not available" for local models because `modelCatalog["local"]` is nil and the mappers had no local case. LM Studio's app API v1 turns this into a real detection: it lists `allowed_options` and the model's own `default` for every installed model. Empirical verification against a live LM Studio: qwen3.8 declares `off/low/medium/xhigh/on` (default `xhigh`), boolean models declare `off/on`, non-thinking models declare `reasoning: null` — and the OpenAI endpoint accepts only `none/minimal/low/medium/high/xhigh` as `reasoning_effort` (it 400s on `"on"`), with an *omitted* field meaning "server default" (LM Studio defaults loaded thinking models to `on`, so `none` must be sent explicitly to disable).
+
+**Consequence:** `providerOptionsForThinkingMode` treats `local` like `openai` (emits `reasoning_effort` always, incl. `none`; unknown IDs → `none` so a stale saved mode can never 400). New `cmd/localmodels.go`: `queryLMSV1Models` (5s timeout, best-effort), `lmsReasoningToModes`/`lmsReasoningDefault`/`lmsReasoningModeID`, `localThinkingInfo` with a per-model cache (the probe runs once per model/endpoint, not per `/thinking`). `modelcatalog.go`: `supportedThinkingModesForModel` gains the local fallback, `startupThinkingMode` (persisted valid mode > endpoint-declared default > none-in-set > send-nothing for declared non-reasoning), `adoptedLocalThinkingMode`, `thinkingModeInSet`; `ReasoningDeclared`/`ReasoningDefault` on `modelInfo`; `localModelConfig.ThinkingModes` (+wire) for the explicit config layer. Harness: `ThinkingStatusFn`/`ThinkingUnsupportedReasonFn` + `SetThinkingForModel`/`SetThinkingUnavailable`; `openThinkingPicker` implements the three states. `cmd/main.go` wires the callbacks and re-applies on model/provider switch + setup-finish, and clears the persisted mode at startup for a declared non-reasoning local model (status shows `unavailable`). Codex/OpenAI paths are unchanged except they now share the explicit-`none` emission. Covered by cmd `thinkinglocal_test.go` + extended `localmodels_test.go` and the harness SPECS/NOTES updates above.
+
+**Config shape** (`~/.config/wllr/config.yaml`, optional per local model): `thinking_modes: ["none", "low", "medium"]` — only needed to override what the endpoint declares.
+
+---
+
 ## First-run provider auth prompt — ask once, record, don't ask again
 
 *Added: 2026-06-30*

@@ -8,9 +8,15 @@ import (
 )
 
 // providerOptionsForThinkingMode builds the fantasy provider options for the
-// given provider and model-specific thinking mode ID. Returns nil when the mode
-// is invalid or the provider has no reasoning mechanism, which clears any
-// previously-set thinking options.
+// given provider and model-specific thinking mode ID. Returns nil when the
+// provider has no reasoning mechanism (or the mode clears reasoning on a
+// provider that signals it by omission), which clears any previously-set
+// thinking options.
+//
+// openai and local share the OpenAI reasoning_effort wire vocabulary, but the
+// emission policy differs: openai omits the field for "none"/unknown (native
+// default applies), local always emits it (the server would otherwise keep
+// its own default — LM Studio's is "on" for loaded thinking models).
 func providerOptionsForThinkingMode(provider, modeID string) fantasy.ProviderOptions {
 	switch provider {
 	case providerAnthropic:
@@ -26,9 +32,33 @@ func providerOptionsForThinkingMode(provider, modeID string) fantasy.ProviderOpt
 			},
 		}
 	case providerOpenAI:
+		// Native OpenAI (incl. Codex): the standard effort IDs map through
+		// verbatim, including "none" (which maps to an explicit
+		// ReasoningEffort=none — a documented value that turns reasoning off).
+		// Only unknown/stale IDs (e.g. a saved mode from another model) hit the
+		// nil branch and omit the field, so they can never 400 a request. This
+		// is the pre-existing behavior; the codex/openai path is unchanged.
 		effort := openAIReasoningEffortForThinkingMode(modeID)
 		if effort == nil {
 			return nil
+		}
+		return fantasy.ProviderOptions{
+			fantasyopenapiprovider.Name: &fantasyopenapiprovider.ProviderOptions{
+				ReasoningEffort: effort,
+			},
+		}
+	case providerLocal:
+		// Local (OpenAI-compatible) endpoints always get the effort, including
+		// an explicit "none": an omitted field leaves the server on its own
+		// default (LM Studio defaults loaded thinking models to "on"), so an
+		// explicit "none" is the only way to actually disable. Unlike openai,
+		// unknown/stale IDs (e.g. the boolean "on") are sent as "none" —
+		// disabling rather than 400-ing (the endpoint rejects anything outside
+		// the six OpenAI values).
+		effort := openAIReasoningEffortForThinkingMode(modeID)
+		if effort == nil {
+			none := fantasyopenapiprovider.ReasoningEffortNone
+			effort = &none
 		}
 		return fantasy.ProviderOptions{
 			fantasyopenapiprovider.Name: &fantasyopenapiprovider.ProviderOptions{

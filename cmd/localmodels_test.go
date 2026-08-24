@@ -57,17 +57,28 @@ func TestFirstAvailableModelKeepsPreferredWhenPresent(t *testing.T) {
 }
 
 func TestLocalModelsDiscoversModelsFromEndpoint(t *testing.T) {
+	var sawModels, sawReasoning bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/models" {
-			t.Errorf("request path = %q, want /v1/models", r.URL.Path)
-		}
 		if got := r.Header.Get("Authorization"); got != "Bearer test-key" {
 			t.Errorf("authorization = %q, want bearer token", got)
 		}
-		_, _ = fmt.Fprint(
-			w,
-			`{"object":"list","data":[{"id":"model-a","name":"Model A","context_length":262144},{"id":"model-b"}]}`,
-		)
+		switch r.URL.Path {
+		case "/v1/models":
+			// The standard OpenAI-compatible listing.
+			sawModels = true
+			_, _ = fmt.Fprint(
+				w,
+				`{"object":"list","data":[{"id":"model-a","name":"Model A","context_length":262144},{"id":"model-b"}]}`,
+			)
+		case "/api/v1/models":
+			// LM Studio's app API v1 (reasoning capability discovery) —
+			// expected to be probed best-effort; a 404 is a fine answer.
+			sawReasoning = true
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = fmt.Fprint(w, `{"error":"unknown"}`)
+		default:
+			t.Errorf("unexpected request path %q", r.URL.Path)
+		}
 	}))
 	defer server.Close()
 
@@ -86,6 +97,12 @@ func TestLocalModelsDiscoversModelsFromEndpoint(t *testing.T) {
 	}
 	if models[1].Name != "model-b" || models[1].LocalBaseURL != server.URL+"/v1" {
 		t.Fatalf("second discovered model = %+v", models[1])
+	}
+	if !sawModels {
+		t.Error("expected a request to /v1/models")
+	}
+	if !sawReasoning {
+		t.Error("expected a best-effort probe of /api/v1/models (reasoning discovery)")
 	}
 }
 

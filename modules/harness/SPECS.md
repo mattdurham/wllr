@@ -520,16 +520,20 @@ Flow: `/model` with no arg (or `/models`) emits `showModelPickerMsg` → `openMo
 
 ### Thinking-Level Hooks
 
-`harness.Model` exposes two callback fields for the `/thinking` picker (set by `cmd/main.go`):
+`harness.Model` exposes three callback fields for the `/thinking` picker (set by `cmd/main.go`):
 
 | Field | Type | Purpose |
 |-------|------|---------|
-| `ThinkingListFn` | `func() []ThinkingChoice` | Returns the selectable reasoning levels for the picker. Nil ⇒ selection unavailable. |
+| `ThinkingListFn` | `func() []ThinkingChoice` | Returns the selectable reasoning levels for the picker. Nil ⇒ selection not wired. An **empty list** means the current model does not support thinking. |
+| `ThinkingStatusFn` | `func() string` | Status-bar value for the unsupported case (a level ID, or `"unavailable"`). Used when `ThinkingListFn` returns empty. Nil ⇒ no status update. |
+| `ThinkingUnsupportedReasonFn` | `func() string` | User-facing reason for the "not available" message (the model + why, e.g. "the endpoint says it cannot reason"). Empty ⇒ generic message. |
 | `SelectThinkingFn` | `func(levelID string) error` | Applies a reasoning level: sets the main agent's provider options (`Agent.SetProviderOptions`) and persists the choice. Nil ⇒ display-only. |
 
-Flow mirrors the model picker: `/thinking` with no arg emits `showThinkingPickerMsg` → `openThinkingPicker()` builds items from `ThinkingListFn` (marking the current level) and opens the picker with the reserved `thinkingPickerCallback` (`"__wllr:thinking"`). On selection, `updateKeyPressPicker` emits `setThinkingMsg{Level: id}`; the handler calls `applyThinkingSelection` → `SelectThinkingFn` + `activeThinking`/status (`think` key) update. `/thinking <level>` skips the picker. `SetActiveThinking(level)` reflects a persisted level at startup without changing agent options.
+Flow mirrors the model picker: `/thinking` with no arg emits `showThinkingPickerMsg` → `openThinkingPicker()` builds items from `ThinkingListFn` (marking the current level) and opens the picker with the reserved `thinkingPickerCallback` (`"__wllr:thinking"`). **Three states:** (1) non-empty list → picker popup; (2) empty list with a reason → `"Thinking not available — <reason>"` notification and the `ThinkingStatusFn` status (renders `unavailable` in the status bar); (3) empty list without a reason → the generic `"No thinking levels available."` notification. On selection, `updateKeyPressPicker` emits `setThinkingMsg{Level: id}`; the handler calls `applyThinkingSelection` → `SelectThinkingFn` + `activeThinking`/status (`think` key) update. `/thinking <level>` skips the picker. `SetActiveThinking(level)` reflects a persisted level at startup without changing agent options. `SetThinkingForModel(levelID)` re-applies after a model/provider switch (empty level clears the display); `SetThinkingUnavailable()` marks a non-reasoning model in the status.
 
 **Invariant:** `SelectThinkingFn` errors surface as a notification and leave the active level unchanged; `activeThinking`/status update only after a successful apply.
+
+**Invariant:** the unsupported path never opens a picker and never changes the agent's provider options; it only updates the status display.
 
 ### First-Run Provider Auth Prompt
 

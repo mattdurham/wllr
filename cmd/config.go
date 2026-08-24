@@ -144,6 +144,12 @@ type localModelConfig struct {
 	APIKey           string          `json:"api_key"`
 	RawContextWindow json.RawMessage `json:"context_window"`
 	ContextWindow    int64           `json:"-"`
+
+	// ThinkingModes is an explicit per-model list of reasoning effort mode IDs
+	// (e.g. ["none","low","medium","high"]). When set, it overrides whatever
+	// the model's endpoint declares (LM Studio app API) and the standard
+	// OpenAI fallback set for the /thinking picker.
+	ThinkingModes []string `json:"thinking_modes,omitempty"`
 }
 
 func loadWllrSettings() wllrSettings {
@@ -167,6 +173,17 @@ func (cfg *Config) localModelByID(id string) (localModelConfig, bool) {
 		return localModelConfig{}, false
 	}
 	for _, lm := range cfg.LocalModels {
+		if lm.ID == id {
+			return lm, true
+		}
+	}
+	return localModelConfig{}, false
+}
+
+// localModelEntry returns the local model entry with the given ID from the
+// persisted settings, for callers that only hold the model ID.
+func (s wllrSettings) localModelEntry(id string) (localModelConfig, bool) {
+	for _, lm := range s.LocalModels {
 		if lm.ID == id {
 			return lm, true
 		}
