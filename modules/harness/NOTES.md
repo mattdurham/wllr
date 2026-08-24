@@ -180,11 +180,16 @@ Append-only design decision log. Never delete entries; add an `*Addendum (date):
 
 *Added: 2026-05-09*
 
-**Decision:** `cmdDispatchSessionStart` returns `sessionStartDoneMsg` (not `ExtensionEventResultMsg`). When `sessionStartDoneMsg` arrives in `updateExtension`, the harness builds a default action prompt from the current registered tools and commands and appends it to the pool's base system prompt via `buildDefaultActionPrompt`.
+**Historical decision:** `cmdDispatchSessionStart` returns `sessionStartDoneMsg` (not `ExtensionEventResultMsg`). Prompt assembly is now performed by the bundled prompt WASM extension using metadata in `SessionStartPayload`.
 
 **Rationale:** Without a built-in system prompt, the agent has no baseline instruction to use its tools proactively — it defaults to describing what it would do rather than doing it. Pi solves this with a hardcoded system prompt in code. Wllr's equivalent is to inject it dynamically after `session_start` completes, so the list accurately reflects every tool and command registered by extensions during `_init` and `session_start`. Using a distinct message type (not the generic `ExtensionEventResultMsg`) ensures the injection happens exactly once per session, not on every command dispatch result.
 
-**Consequence:** The default action prompt is always appended after whatever AGENTS.md and extension-injected content precede it. Extensions that call `set_system_prompt` (full replace) during `session_start` will have the default prompt appended after their content. Tool and command registrations that happen after `session_start` (e.g. dynamic registration mid-session) are not reflected in the injected prompt — the prompt is a point-in-time snapshot.
+**Consequence:** The prompt extension installs the complete base prompt once during `session_start`; later extensions may append content with `append_system_prompt`.
+
+*Addendum (2026-08-23):* Prompt assembly moved to the bundled `prompt.wasm`
+extension. The harness now sends registered tool and slash-command metadata in
+`SessionStartPayload`; the extension owns the base prompt, configured prompt
+files, and AGENTS/CLAUDE loading. Other extensions continue to append content.
 
 ---
 
@@ -619,7 +624,10 @@ persists only the chosen model ID.
 
 *Added: 2026-07-02*
 
-**Decision:** Add a conditional `Code Intelligence` section to `buildDefaultActionPrompt` whenever primary LSP tools such as `lsp_diagnostics`, `lsp_lint`, `lsp_definition`, or `lsp_references` are registered.
+**Historical decision:** Add a conditional `Code Intelligence` section to the
+prompt whenever primary LSP tools such as `lsp_diagnostics`, `lsp_lint`,
+`lsp_definition`, or `lsp_references` are registered. This logic now lives in
+the bundled prompt WASM extension.
 
 **Rationale:** The model already receives tool schemas, but the default prompt only named available tools. Agents were not reliably choosing code-intelligence tools because nothing explained where they fit into an agentic coding workflow. The new guidance makes diagnostics, linting, navigation, references, and refactor previews first-class tool uses, and points capability checks at backend and output-contract discovery.
 

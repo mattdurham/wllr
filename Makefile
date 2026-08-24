@@ -29,7 +29,7 @@
 #   make precommit        — run build and all quality checks (REQUIRED before commit)
 #
 # Built-in extensions (embedded in the binary):
-#   agents, history, logging, plan, queue, sigil, statusline
+#   agents, history, logging, plan, prompt, queue, sigil, statusline
 #   (read_file, write_file, exec, get_env are native Go — no WASM build needed)
 #
 # Installed extensions (loaded from ~/.wllr/extensions/ at runtime):
@@ -77,6 +77,7 @@ builtins: $(DIST_DIR) $(BUILTINS)
 	$(WASM_BUILD) $(BUILTINS)/history.wasm extensions/history
 	$(WASM_BUILD) $(BUILTINS)/logging.wasm extensions/logging
 	$(WASM_BUILD) $(BUILTINS)/plan.wasm extensions/plan
+	$(WASM_BUILD) $(BUILTINS)/prompt.wasm extensions/context
 	$(WASM_BUILD) $(BUILTINS)/queue.wasm extensions/queue
 	$(WASM_BUILD) $(BUILTINS)/sigil.wasm extensions/sigil
 	$(WASM_BUILD) $(DIST_DIR)/statusline.wasm extensions/statusline
@@ -89,8 +90,6 @@ extensions: builtins optional-extensions
 optional-extensions:
 	mkdir -p $(EXT_DIR)/websearch
 	mkdir -p $(EXT_DIR)/context $(EXT_DIR)/skills $(EXT_DIR)/tasks $(EXT_DIR)/lsp $(EXT_DIR)/memory $(EXT_DIR)/permissions $(EXT_DIR)/mcp-bridge $(EXT_DIR)/otel-traces $(EXT_DIR)/websearch
-	$(WASM_BUILD) $(EXT_DIR)/context/context.wasm extensions/context
-	cp extensions/context/context.json $(EXT_DIR)/context/
 	$(WASM_BUILD) $(EXT_DIR)/skills/skills.wasm extensions/skills
 	cp extensions/skills/skills.json $(EXT_DIR)/skills/
 	$(WASM_BUILD) $(EXT_DIR)/tasks/tasks.wasm extensions/tasks

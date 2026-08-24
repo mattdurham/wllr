@@ -145,7 +145,7 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 
 	// --exec mode: run a single prompt non-interactively and exit.
 	if *execPrompt != "" {
-		runExecMode(ctx, h, langModel, *execPrompt)
+		runExecMode(ctx, h, pool, langModel, *execPrompt)
 		return
 	}
 
@@ -537,7 +537,7 @@ func registerAgentStatusTool(h *extension.Host, pool *agent.AgentPool) {
 // Loading fails closed: a missing, unreadable, or malformed manifest yields
 // zero permissions (and a warning), never an implicit all-permissions grant.
 func loadBuiltinExtensions(ctx context.Context, h *extension.Host) {
-	for _, name := range []string{"agents", "history", "logging", "plan", "queue", "sigil", "statusline"} {
+	for _, name := range []string{"agents", "history", "logging", "plan", "prompt", "queue", "sigil", "statusline"} {
 		filename := name + ".wasm"
 		data, err := builtinFS.ReadFile("builtins/" + filename)
 		if err != nil {
@@ -623,7 +623,7 @@ func startMCPBridge(ctx context.Context, h *extension.Host) func() {
 // runExecMode runs a single prompt non-interactively and exits.
 // It builds a one-shot fantasy agent, streams the response to stdout, and calls
 // os.Exit(1) on error.
-func runExecMode(ctx context.Context, h *extension.Host, langModel fantasy.LanguageModel, prompt string) {
+func runExecMode(ctx context.Context, h *extension.Host, pool *agent.AgentPool, langModel fantasy.LanguageModel, prompt string) {
 	fantasyTools := tools.BuildFantasyTools(h, "exec", func(level int, msg string) {
 		slog.Log(
 			ctx,
@@ -635,8 +635,17 @@ func runExecMode(ctx context.Context, h *extension.Host, langModel fantasy.Langu
 	if len(fantasyTools) > 0 {
 		agentOpts = append(agentOpts, fantasy.WithTools(fantasyTools...))
 	}
-	if sp := loadSystemPrompt(); sp != "" {
-		agentOpts = append(agentOpts, fantasy.WithSystemPrompt(sp))
+	tools := h.GetRegisteredTools()
+	promptTools := make([]sdk.PromptTool, 0, len(tools))
+	for _, tool := range tools {
+		promptTools = append(promptTools, sdk.PromptTool{Name: tool.Name})
+	}
+	payload, _ := json.Marshal(sdk.SessionStartPayload{Reason: "exec", Tools: promptTools})
+	_, _ = h.DispatchEvent(ctx, sdk.Event{Type: sdk.EventSessionStart, Payload: payload})
+	if pool != nil {
+		if sp := pool.BaseSystemPrompt(); sp != "" {
+			agentOpts = append(agentOpts, fantasy.WithSystemPrompt(sp))
+		}
 	}
 	fa := fantasy.NewAgent(langModel, agentOpts...)
 	_, execErr := fa.Stream(ctx, fantasy.AgentStreamCall{

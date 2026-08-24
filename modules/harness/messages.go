@@ -42,11 +42,6 @@ package harness
 // ResetHistoryMsg asks the TUI to replace the main agent's history and
 // rebuild the chat view from the supplied messages.
 
-// sessionStartDoneMsg is returned after EventSessionStart has been dispatched to
-// all extensions. It is distinct from ExtensionEventResultMsg so the harness can
-// inject the default action prompt exactly once, after all session_start handlers
-// have had a chance to register tools and commands.
-
 // agentWakeupMsg is sent when OnAgentRun triggers a main-agent turn (e.g.
 // a sub-agent called send_message). It sets m.streaming=true so the TUI
 // shows the "working." indicator during the agent-triggered turn.

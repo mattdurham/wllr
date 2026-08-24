@@ -639,15 +639,25 @@ func (m Model) Init() tea.Cmd {
 }
 
 // cmdDispatchSessionStart sends EventSessionStart to all extensions asynchronously.
-// It returns sessionStartDoneMsg (not ExtensionEventResultMsg) so the harness can
-// inject the default action prompt after all session_start handlers have run.
 func (m Model) cmdDispatchSessionStart() tea.Cmd {
 	if m.extHost == nil {
 		return nil
 	}
 	extHost := m.extHost
+	tools := extHost.GetRegisteredTools()
+	promptTools := make([]sdk.PromptTool, 0, len(tools))
+	for _, tool := range tools {
+		promptTools = append(promptTools, sdk.PromptTool{Name: tool.Name})
+	}
+	commands := m.commands.List()
+	promptCommands := make([]sdk.PromptCommand, 0, len(commands))
+	for _, command := range commands {
+		promptCommands = append(promptCommands, sdk.PromptCommand{Name: command.Name, Desc: command.Desc})
+	}
 	return func() tea.Msg {
-		payload, _ := json.Marshal(sdk.SessionStartPayload{Reason: "new_session"})
+		payload, _ := json.Marshal(sdk.SessionStartPayload{
+			Reason: "new_session", Tools: promptTools, Commands: promptCommands,
+		})
 		evt := sdk.Event{Type: sdk.EventSessionStart, Payload: payload}
 		results, err := extHost.DispatchEvent(context.Background(), evt)
 		return sessionStartDoneMsg{Results: results, Err: err}
@@ -1296,19 +1306,6 @@ func (m Model) updateExtension(msg tea.Msg) (Model, tea.Cmd, bool) {
 			}
 		}
 		m.updateSuggestions()
-		// Append the default action prompt after all session_start handlers have run,
-		// so the tool and command lists reflect everything registered at startup.
-		// Prepend the action prompt before AGENTS.md content so the directive
-		// comes first in the system prompt — buried-at-the-end guidance is ignored.
-		if m.agentPool != nil && m.extHost != nil {
-			action := buildDefaultActionPrompt(m.extHost.GetRegisteredTools(), m.commands.List())
-			existing := m.agentPool.BaseSystemPrompt()
-			if existing == "" {
-				m.agentPool.SetBaseSystemPrompt(action)
-			} else {
-				m.agentPool.SetBaseSystemPrompt(action + "\n\n" + existing)
-			}
-		}
 		// Start the 1-second extension tick after session is ready.
 		return m, tea.Tick(time.Second, func(time.Time) tea.Msg { return extensionTickMsg{} }), true
 

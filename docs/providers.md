@@ -185,6 +185,24 @@ For `provider: "local"`, wllr uses the configured `local_models` entries. Each
 entry supplies the OpenAI-compatible endpoint for that specific model, so `/models`
 can switch between local instances.
 
+### Prompt configuration
+
+The bundled prompt WASM reads optional prompt settings from the `wllr` group in
+`~/.config/wllr/config.json`:
+
+```json
+{
+  "wllr": {
+    "prompt_override": "Plain text replacing the built-in prompt.",
+    "prompt_files": ["docs/agent-guidance.md", "~/.wllr/team-prompt.md"]
+  }
+}
+```
+
+`prompt_files` are loaded in order. Relative paths resolve from the launch
+directory; missing files are logged and skipped. The prompt extension also
+loads global and project `AGENTS.md`/`CLAUDE.md` context automatically.
+
 ### Local provider config
 
 Configure local models in `~/.config/wllr/config.json` under the `wllr` group:

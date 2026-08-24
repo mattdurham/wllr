@@ -1,114 +1,24 @@
 //go:build wasip1
 
-// Package main is the context built-in extension for the wllr coding harness.
-// On session_start it reads AGENTS.md (falling back to CLAUDE.md) from
-// ~/.wllr/ and the current working directory (or parent directories), then injects the combined
-// content as the agent system prompt via set_system_prompt.
-//
-// Lookup order (first match wins for each scope):
-//
-//	Global: ~/.wllr/AGENTS.md → ~/.wllr/CLAUDE.md
-//	CWD:    ./AGENTS.md        → ./CLAUDE.md
-//
-// Both global and CWD content are combined (CWD appended after global).
-//
-// After loading context files, the extension also injects the current working
-// directory (CWD) into the system prompt to make file lookup and repo-oriented
-// reasoning more robust.
+// Package main is the prompt built-in extension for the wllr coding harness.
+// It owns the complete base prompt while other extensions may append sections.
 package main
 
-import (
-	"os"
-	"path/filepath"
-	"strings"
-)
+import "encoding/json"
 
 func init() {
-	OnSessionStart(onSessionStart)
-}
-
-func onSessionStart() {
-	var parts []string
-
-	// Global context: ~/.wllr/AGENTS.md or CLAUDE.md
-	if content := readFirst(globalPaths()); content != "" {
-		parts = append(parts, content)
-	}
-
-	// CWD context: search for AGENTS.md or CLAUDE.md in current dir or parent directories
-	if content := findAndReadContextFile(); content != "" {
-		parts = append(parts, content)
-	}
-
-	// Inject current working directory to make file lookup more robust
-	if cwd, err := os.Getwd(); err == nil && cwd != "" {
-		parts = append(parts, cwdNote(cwd))
-	}
-
-	if len(parts) == 0 {
-		return
-	}
-
-	prompt := strings.Join(parts, "\n\n---\n\n")
-	Logf(1, "context: loaded system prompt (%d bytes)", len(prompt))
-	SetSystemPrompt(prompt)
-}
-
-func globalPaths() []string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil
-	}
-	return []string{
-		filepath.Join(home, ".wllr", "AGENTS.md"),
-		filepath.Join(home, ".wllr", "CLAUDE.md"),
-	}
-}
-
-func readFirst(paths []string) string {
-	for _, p := range paths {
-		data, err := os.ReadFile(p)
-		if err == nil && len(data) > 0 {
-			Log(1, "context: loaded "+p)
-			return strings.TrimSpace(string(data))
+	OnRawSessionStart(func(data []byte) {
+		var payload sessionPromptPayload
+		if err := json.Unmarshal(data, &payload); err != nil {
+			Logf(2, "prompt: invalid session_start payload: %v", err)
+			return
 		}
-	}
-	return ""
-}
-
-// findAndReadContextFile searches for AGENTS.md or CLAUDE.md starting from
-// the current working directory and walking up the directory tree.
-// Returns the content of the first file found, or empty string if none found.
-func findAndReadContextFile() string {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return ""
-	}
-
-	// Start from current directory and walk up
-	dir := cwd
-	for {
-		for _, filename := range []string{"AGENTS.md", "CLAUDE.md"} {
-			path := filepath.Join(dir, filename)
-			data, err := os.ReadFile(path)
-			if err == nil && len(data) > 0 {
-				Log(1, "context: loaded "+path)
-				return strings.TrimSpace(string(data))
-			}
+		prompt := buildPrompt(payload.Tools, payload.Commands)
+		if prompt != "" {
+			SetSystemPrompt(prompt)
+			Logf(1, "prompt: loaded system prompt (%d bytes)", len(prompt))
 		}
-
-		// Move to parent directory
-		parent := filepath.Dir(dir)
-		
-		// Stop if we've reached the root
-		if parent == dir {
-			break
-		}
-		
-		dir = parent
-	}
-
-	return ""
+	})
 }
 
 func main() {}

@@ -441,8 +441,8 @@ func (h *Host) buildDispatch() map[string]func(ctx context.Context, ext *Extensi
 		sdk.MethodFormatMarkdown: func(_ context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleFormatMarkdown(ext, req)
 		},
-		sdk.MethodConfigRead: func(_ context.Context, ext *Extension, _ sdk.HostCallRequest) sdk.HostCallResponse {
-			return h.handleConfigRead(ext)
+		sdk.MethodConfigRead: func(_ context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleConfigRead(ext, req)
 		},
 		sdk.MethodAgentSpawn: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleAgentSpawn(req)
@@ -929,13 +929,19 @@ func (h *Host) handleFormatMarkdown(ext *Extension, req sdk.HostCallRequest) sdk
 	return sdk.HostCallResponse{Result: result}
 }
 
-func (h *Host) handleConfigRead(ext *Extension) sdk.HostCallResponse {
+func (h *Host) handleConfigRead(ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
 	if h.capabilityProvider() == nil {
 		return sdk.HostCallResponse{Error: "config_read: not supported by host"}
 	}
 	group := ""
 	if ext != nil {
 		group = ext.name
+	}
+	var params struct {
+		Group string `json:"group"`
+	}
+	if len(req.Params) > 0 && json.Unmarshal(req.Params, &params) == nil && params.Group != "" {
+		group = params.Group
 	}
 	data, err := h.capabilityProvider().ConfigRead(group)
 	if err != nil {

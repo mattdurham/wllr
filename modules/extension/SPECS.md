@@ -196,7 +196,7 @@ The full set of dispatched methods is:
 | `MethodHTTPPost`              | `handleHTTPPost`                                 |
 | `MethodHTTPGet`               | `handleHTTPGet` (requires `network_read`)        |
 | `MethodFormatMarkdown`        | `handleFormatMarkdown` (requires `ui`)           |
-| `MethodConfigRead`            | `handleConfigRead`                               |
+| `MethodConfigRead`            | `handleConfigRead` (default caller group; optional `{"group":"wllr"}` override) |
 | `MethodAgentSpawn`            | `handleAgentSpawn`                               |
 | `MethodAgentClose`            | `handleAgentClose`                               |
 | `MethodAgentSendMessage`      | `handleAgentSendMessage`                         |

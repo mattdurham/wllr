@@ -81,9 +81,15 @@ All fields are `omitempty`.
 
 ### SessionStartPayload (`EventSessionStart`)
 
-| Field    | Type   | Description                                          |
-|----------|--------|------------------------------------------------------|
-| `reason` | string | Why the session was started (e.g. `"new_session"`)   |
+| Field      | Type            | Description                                          |
+|------------|-----------------|------------------------------------------------------|
+| `reason`   | string          | Why the session was started (e.g. `"new_session"`)   |
+| `tools`    | PromptTool[]    | Registered tool names available to prompt assembly   |
+| `commands` | PromptCommand[] | Registered slash commands and descriptions           |
+
+`tools` and `commands` are optional for compatibility. `PromptTool` contains
+`name`; `PromptCommand` contains `name` and optional `description`. The harness
+populates them before startup extension dispatch.
 
 ### BeforeAgentStartPayload (`EventBeforeAgentStart`)
 
@@ -344,7 +350,7 @@ Note: Percent is 0–100. CompactConfig.ThresholdPct is a fraction 0.0–1.0.
 | `MethodRequestPermission` | `"request_permission"` | Check whether the extension holds a given permission          |
 | `MethodGetEnv`            | `"get_env"`            | Read a host environment variable (no permission required)     |
 | `MethodGetOS`             | `"get_os"`             | Returns the host operating system and architecture strings    |
-| `MethodConfigRead`        | `"config_read"`        | Read the calling extension's config group from the shared config file |
+| `MethodConfigRead`        | `"config_read"`        | Read the calling extension's config group, or an explicit `group`, from the shared config file |
 | `MethodModal`             | `"modal"`              | Display text in a modal overlay window                        |
 | `MethodSetSystemPrompt`   | `"set_system_prompt"`  | Replace the base system prompt on all agents                  |
 | `MethodAppendSystemPrompt`| `"append_system_prompt"`| Append text to the existing base system prompt               |

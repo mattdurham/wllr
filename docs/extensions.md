@@ -802,15 +802,23 @@ JSON envelope is:
 
 ### `session_start`
 
+The payload includes `reason` plus optional `tools` and `commands` arrays. The
+bundled `prompt.wasm` extension uses these registrations to assemble the
+complete base system prompt. `tools` contains `{name}` and `commands` contains
+`{name, description}`. Other extensions may append prompt sections afterward
+with `append_system_prompt`.
+
 Fired once when the TUI initialises a new session.
 
 ```json
-{"reason": "new_session"}
+{"reason": "new_session", "tools": [{"name": "read_file"}], "commands": [{"name": "help", "description": "Show help"}]}
 ```
 
 | Field    | Type   | Description                    |
 |----------|--------|--------------------------------|
 | `reason` | string | Always `"new_session"` in v1.  |
+| `tools` | array | Optional registered tool names. |
+| `commands` | array | Optional registered slash commands and descriptions. |
 
 ---
 

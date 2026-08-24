@@ -68,7 +68,7 @@ log, and reset behavior are covered by `wasmchat_test.go`, `tui_test.go`, and
 
 ---
 
-### default_prompt_test.go
+### Prompt assembly (moved to extensions/context)
 
 | Test | Scenario | Setup | Assertions |
 |---|---|---|---|

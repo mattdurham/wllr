@@ -175,6 +175,11 @@ func OnSessionStart(fn func()) {
 	_sdkOn("session_start", func(_ json.RawMessage) { fn() })
 }
 
+// OnRawSessionStart registers a session_start handler with its JSON payload.
+func OnRawSessionStart(fn func([]byte)) {
+	_sdkOn("session_start", func(payload json.RawMessage) { fn(payload) })
+}
+
 // OnShutdown registers a handler called when the host is shutting down.
 func OnShutdown(fn func(reason string)) {
 	_sdkOn("shutdown", func(payload json.RawMessage) {
@@ -374,6 +379,16 @@ func Logf(level int, format string, args ...any) {
 // _sdkCall fires a host_call and discards the response.
 func _sdkCall(method string, params any) {
 	_sdkCallResult(method, params)
+}
+
+// ConfigRead reads this extension's group from the shared config file.
+func ConfigRead() json.RawMessage {
+	return _sdkCallResult("config_read", nil)
+}
+
+// ConfigReadGroup reads an explicitly named config group.
+func ConfigReadGroup(group string) json.RawMessage {
+	return _sdkCallResult("config_read", map[string]string{"group": group})
 }
 
 // _sdkCallResult fires a host_call and returns the raw response Result field,

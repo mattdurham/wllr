@@ -30,3 +30,20 @@ func TestOnSessionStart_AppendsCWD(t *testing.T) {
 		t.Errorf("cwdNote(%q) = %q missing 'current working directory' text", testCWD, note)
 	}
 }
+
+func TestBuildPromptWithConfig_OverrideAndDynamicMetadata(t *testing.T) {
+	prompt := buildPromptWithConfig(
+		[]promptTool{{Name: "read_file"}, {Name: "exec"}},
+		[]promptCommand{{Name: "help", Desc: "show help"}},
+		promptConfig{Override: "custom base"},
+	)
+	if !strings.HasPrefix(prompt, "custom base\n\nAvailable tools: exec, read_file") {
+		t.Fatalf("prompt does not honor override or sort tools: %q", prompt)
+	}
+	if !strings.Contains(prompt, "**/help** — show help") {
+		t.Fatalf("prompt missing command metadata: %q", prompt)
+	}
+	if strings.Contains(prompt, "## Action Rules") {
+		t.Fatalf("built-in prompt should be replaced by override: %q", prompt)
+	}
+}

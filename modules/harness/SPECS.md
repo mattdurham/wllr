@@ -377,15 +377,15 @@ and at least one turn has completed. Updated once per `StreamDoneMsg`.
 
 ---
 
-## 20. buildDefaultActionPrompt
+## 20. Prompt assembly
 
-```go
-func buildDefaultActionPrompt(tools []sdk.Tool, commands []Command) string
-```
+Prompt rendering is implemented by the bundled `prompt.wasm` extension. The
+harness includes registered tool names and slash-command metadata in the
+`SessionStartPayload`; it does not construct prompt text.
 
-Called once from `updateExtension` when `sessionStartDoneMsg` arrives — after all `session_start` extension handlers have run and all tool/command registrations are complete.
-
-Produces a markdown section injected via `pool.AppendBaseSystemPrompt`:
+The extension produces the markdown base prompt via `SetSystemPrompt`, loads
+configured prompt files and AGENTS/CLAUDE context, and permits other
+extensions to append sections with `AppendSystemPrompt`:
 
 ```
 ## Action Rules

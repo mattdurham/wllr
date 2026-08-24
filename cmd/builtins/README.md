@@ -18,6 +18,7 @@ malformed manifest yields zero permissions, never an implicit all-permissions
 grant).
 
 Current grants (least privilege, from actual runtime host-call usage):
+- `prompt` -> `["file_read"]` (configured prompt and project context files)
 - `agents`, `statusline`, `plan` -> `["ui"]` (drive the TUI scene graph)
 - `logging` -> `["file_write"]` (append_file)
 - `history`, `queue`, `sigil` -> `[]` (unrestricted host calls only)

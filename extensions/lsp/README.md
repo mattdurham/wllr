@@ -49,7 +49,7 @@ Runs file-scoped diagnostics when a backend is configured.
 Input:
 
 ```json
-{"file": "modules/harness/default_prompt.go"}
+{"file": "extensions/context/cwd.go"}
 ```
 
 Output:
@@ -57,9 +57,9 @@ Output:
 ```json
 {
   "kind": "diagnostics",
-  "target": "modules/harness/default_prompt.go",
+  "target": "extensions/context/cwd.go",
   "language": "go",
-  "command": "go vet 'modules/harness/default_prompt.go'",
+  "command": "go vet 'extensions/context/cwd.go'",
   "ok": true,
   "output": "no issues found"
 }
