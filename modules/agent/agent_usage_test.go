@@ -317,13 +317,14 @@ func TestEventContextUsageDispatched(t *testing.T) {
 	}
 
 	type dispatchEvent struct {
-		cu      sdk.ContextUsage
-		compact bool
+		cu          sdk.ContextUsage
+		compact     bool
+		compactions int
 	}
 	dispatched := make(chan dispatchEvent, 1)
-	pool.SetContextUsageDispatcher(func(cu sdk.ContextUsage, compact bool, thresholdPct float64) {
+	pool.SetContextUsageDispatcher(func(cu sdk.ContextUsage, compact bool, thresholdPct float64, compactions int) {
 		select {
-		case dispatched <- dispatchEvent{cu, compact}:
+		case dispatched <- dispatchEvent{cu, compact, compactions}:
 		default:
 		}
 	})
@@ -351,6 +352,9 @@ func TestEventContextUsageDispatched(t *testing.T) {
 		}
 		if ev.compact {
 			t.Error("expected Compacted=false for this turn (no compaction threshold crossed)")
+		}
+		if ev.compactions != 0 {
+			t.Errorf("expected Compactions=0 for a turn without compaction, got %d", ev.compactions)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for contextUsageDispatcher to be called")

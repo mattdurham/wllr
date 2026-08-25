@@ -185,6 +185,7 @@ No payload fields — the event carries no structured data beyond the event type
 |-------------|--------------|---------------------------------------------------------------------------------|
 | `usage`     | ContextUsage | Context window usage for the turn (see ContextUsage type in Supporting Types)  |
 | `compacted` | bool         | `true` when `compactHistory` ran and succeeded during the turn                  |
+| `compactions` | int        | Cumulative successful compactions for the agent this session (`omitempty`)       |
 | `threshold_pct` | float64     | Compaction trigger threshold as a percentage (0–100, e.g. 80 means 80%)       |
 
 **Note for extension authors:** `ContextUsage.Percent` is expressed as a percentage (0–100, e.g. 75.4 means 75.4% full). `threshold_pct` is the compaction trigger threshold as a percentage (0–100). To compute remaining-to-threshold, use `threshold_pct - percent`. Do not hard-code the threshold value.
@@ -571,7 +572,7 @@ Returned as `int32` from the `host_call` WASM import (not the JSON layer).
 9. `BeforeToolCallPayload` and `AfterToolCallPayload` both include `agent_id` to allow extensions to correlate tool calls with the originating agent.
 10. `OnCommandPayload` is the payload for `EventOnCommand`, dispatched when a user invokes an extension-registered slash command.
 11. `ContextUsage.Percent` is always `InputTokens / ContextWindow * 100`; when `ContextWindow == 0` the value is exactly `0.0` (never NaN or Inf).
-12. `ContextUsagePayload.Compacted` is `true` only when `compactHistory` ran and succeeded during the turn that produced the event.
+12. `ContextUsagePayload.Compacted` is `true` only when `compactHistory` ran and succeeded during the turn that produced the event. `Compactions` is the cumulative successful-compaction count for the agent (additive; omitted from the JSON when zero).
 13. `EventContextUsage` (`"context_usage"`) is fired once per completed turn, after the turn's usage is stored, only on success (not on error or cancellation).
 14. `MethodGetContextUsage` (`"get_context_usage"`) requires no permission; it returns a zero-valued `ContextUsage` when the agent bridge is unavailable.
 15. UI scene-graph types (`UINode`, `UIProps`, `UIPatchOp`, `UIPatchParams`, `UIArea`, `UICreateAreaParams`) are pure JSON data definitions; `UIPatchOp.Index` is a `*int` so a valid index of `0` survives the wire while a nil index (append) is omitted.

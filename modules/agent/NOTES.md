@@ -450,3 +450,15 @@ The user chose the simple "always notify" design over per-turn suppression or an
 **Consequence:** `Agent` gains activity state guarded by `activityMu` plus an atomic shutdown-request flag. Activity updates are observational and do not affect turn execution, inbox ordering, or history. Status surfaces can now distinguish "running and recently active" from "running but quiet for a long time" without pinging the child.
 
 *Addendum (2026-07-05):* Tool completion is now recorded via `MarkToolCallDone`, which updates `LastToolDoneAt` and clears the active tool fields when the completed tool matches the active call. A running turn remains "working" for status purposes; a completed tool only means the agent moved past that tool, not that the child is idle or stuck.
+
+---
+
+## 31. Compaction observability — counters, cost, and triggers
+
+*Added: 2026-08-24*
+
+**Decision:** `compactHistory` returns a `CompactionResult` (history, summary, messages folded in, summarization-call usage, latency, trigger kind) and `executeTurn` calls `Agent.observeCompaction(result)` after each run, which increments a per-session `compactionCount` and emits one structured `slog.Info` record per successful compaction.
+
+**Rationale:** Compaction successes were previously invisible — only failures logged, and the summarization LLM call's token cost was discarded. Operators could not tell how often autocompaction fires, what it costs, or which trigger (heuristic estimate vs usage threshold vs reactive context-limit retry) fired.
+
+**Consequence:** `didCompact` is derived from `Summary != ""` rather than assumed true, so no-op compactions (history fit the budget, or no valid user boundary) never count, never log, and never set `Compacted` in the `EventContextUsage` payload. The counter is turn-goroutine-local (one turn at a time — no lock needed) and monotonic for the session lifetime. `EventContextUsage` gains an additive `compactions` field (omitempty) for extension charts. The `compaction_summary` stream is a separate `fantasy.NewAgent(lm)` call — its usage is reported from `res.TotalUsage` and is not folded into the turn's `lastUsage`, so compaction cost does not skew the percentage trigger.

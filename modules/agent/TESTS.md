@@ -83,6 +83,15 @@
 | `TestIdleNotification_SuppressedDuringShutdown` | Shutdown path suppresses idle notice | Deliver shutdown_request, run worker | Creator gets exactly 1 AGENT_SHUTDOWN, 0 idle notices |
 | `TestIdleNotification_MultipleWorkersCoalesce` | N workers idle-notify shared creator | 5 workers each run + go idle | Each worker's idle notice in creator history exactly once (no loss/dup) |
 
+### compactionobs_test.go
+
+| Test | Scenario | Setup | Assertions |
+|------|----------|-------|------------|
+| `TestCompactHistory_UsageSurfaced` | Summarization cost is observable | `compactTestLM` emitting fixed usage; 212×400-char history over budget | result carries the summarize call's input/output tokens, trigger, and messages_compacted; no-op run reports zero usage and empty summary |
+| `TestObserveCompaction_Summary_IncrementsCounter` | Per-session counter counts real compactions | agent + successful `compactHistory` | `CompactionCount()` increments once per observed summary |
+| `TestObserveCompaction_NoOp_DoesNotCount` | No-op compactions increment nothing | agent + no-op `compactHistory` (fits budget) | counter stays 0 |
+| `TestExecuteTurn_CompactionCounterIncrementsAndDispatches` | Full-turn observability wiring | main agent, 200k window, seeded over-budget history + usage above 0.80 threshold | turn completes, counter = 1, dispatcher sees `compacted=true` and `compactions=1` |
+
 ### activity_test.go
 
 | Test | Scenario | Setup | Assertions |

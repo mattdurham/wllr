@@ -135,13 +135,17 @@ func TestCompactHistory_ShortHistory_ReturnsUnchanged(t *testing.T) {
 		history[i] = sdk.Message{Role: sdk.RoleUser, Content: msg}
 	}
 
-	result, _, err := compactHistory(context.Background(), lm, history, "", 0)
+	result, err := compactHistory(context.Background(), lm, history, "", 0, CompactionTriggerProactive)
 	if err != nil {
 		t.Fatalf("compactHistory: %v", err)
 	}
 	// Should be returned unchanged — total tokens (2,000) fit within budget (20,000).
-	if len(result) != len(history) {
-		t.Errorf("expected %d messages, got %d", len(history), len(result))
+	if len(result.History) != len(history) {
+		t.Errorf("expected %d messages, got %d", len(history), len(result.History))
+	}
+	// A no-op compaction must not report a summary or usage.
+	if result.Summary != "" {
+		t.Errorf("no-op compaction reported a summary: %q", result.Summary)
 	}
 }
 
@@ -162,27 +166,27 @@ func TestCompactHistory_LongHistory_ReturnsSummaryPlusRecent(t *testing.T) {
 	// Override the first message to be identifiable as the anchor.
 	history[0] = sdk.Message{Role: sdk.RoleUser, Content: "anchor message"}
 
-	result, _, err := compactHistory(context.Background(), lm, history, "", 0)
+	result, err := compactHistory(context.Background(), lm, history, "", 0, CompactionTriggerProactive)
 	if err != nil {
 		t.Fatalf("compactHistory: %v", err)
 	}
 
 	// Result should be: anchor + summary + recent messages (fewer than total).
-	if len(result) >= len(history) {
-		t.Errorf("expected fewer messages after compaction, got %d (same as input %d)", len(result), len(history))
+	if len(result.History) >= len(history) {
+		t.Errorf("expected fewer messages after compaction, got %d (same as input %d)", len(result.History), len(history))
 	}
-	if len(result) < 3 {
-		t.Errorf("expected at least 3 messages (anchor + summary + 1 recent), got %d", len(result))
+	if len(result.History) < 3 {
+		t.Errorf("expected at least 3 messages (anchor + summary + 1 recent), got %d", len(result.History))
 	}
 
 	// First message is the preserved anchor (original task).
-	if result[0].Content != "anchor message" {
-		t.Errorf("first message should be the anchor, got: %q", result[0].Content)
+	if result.History[0].Content != "anchor message" {
+		t.Errorf("first message should be the anchor, got: %q", result.History[0].Content)
 	}
 
 	// Second message should contain the summary.
-	if !strings.Contains(result[1].Content, "summary") {
-		t.Errorf("second message should contain summary text, got: %q", result[1].Content)
+	if !strings.Contains(result.History[1].Content, "summary") {
+		t.Errorf("second message should contain summary text, got: %q", result.History[1].Content)
 	}
 }
 
@@ -201,19 +205,21 @@ func TestCompactHistory_EmptySummary_ReturnsOriginal(t *testing.T) {
 		}
 	}
 
-	result, _, err := compactHistory(context.Background(), lm, history, "", 0)
+	result, err := compactHistory(context.Background(), lm, history, "", 0, CompactionTriggerProactive)
 	// Should error and return original.
 	if err == nil {
 		t.Error("expected error for empty summary")
 	}
-	if len(result) != len(history) {
-		t.Errorf("expected original %d messages, got %d", len(history), len(result))
+	if len(result.History) != len(history) {
+		t.Errorf("expected original %d messages, got %d", len(history), len(result.History))
 	}
 }
 
 // compactTestLM is a fantasy.LanguageModel used for compaction tests.
 type compactTestLM struct {
-	response string
+	response  string
+	inputTok  int64
+	outputTok int64
 }
 
 func (c *compactTestLM) Model() string    { return "compact-test" }
@@ -225,7 +231,15 @@ func (c *compactTestLM) Stream(_ context.Context, _ fantasy.Call) (fantasy.Strea
 		if resp != "" {
 			yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, Delta: resp})
 		}
-		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop})
+		yield(fantasy.StreamPart{
+			Type:         fantasy.StreamPartTypeFinish,
+			FinishReason: fantasy.FinishReasonStop,
+			Usage: fantasy.Usage{
+				InputTokens:  c.inputTok,
+				OutputTokens: c.outputTok,
+				TotalTokens:  c.inputTok + c.outputTok,
+			},
+		})
 	}, nil
 }
 
@@ -349,7 +363,7 @@ func TestExtractFilePaths_NoMatches_ReturnsEmpty(t *testing.T) {
 	}
 }
 
-// ---- compactHistory with priorSummary and summaryText ----
+// ---- compactHistory with priorSummary and res.Summary ----
 
 func TestCompactHistory_WithPriorSummary_IncludesPriorInPrompt(t *testing.T) {
 	var capturedPrompt string
@@ -367,15 +381,15 @@ func TestCompactHistory_WithPriorSummary_IncludesPriorInPrompt(t *testing.T) {
 	}
 
 	priorSummary := "## Goal\nPrior work summary."
-	_, summaryOut, err := compactHistory(context.Background(), lm, history, priorSummary, 0)
+	res, err := compactHistory(context.Background(), lm, history, priorSummary, 0, CompactionTriggerProactive)
 	if err != nil {
 		t.Fatalf("compactHistory: %v", err)
 	}
 	if !strings.Contains(capturedPrompt, priorSummary) {
 		t.Errorf("prompt does not contain prior summary; prompt = %q", capturedPrompt[:min(200, len(capturedPrompt))])
 	}
-	if summaryOut == "" {
-		t.Error("expected non-empty summaryOut")
+	if res.Summary == "" {
+		t.Error("expected non-empty res.Summary")
 	}
 }
 
@@ -390,12 +404,12 @@ func TestCompactHistory_ReturnsSummaryString(t *testing.T) {
 			history[i] = sdk.Message{Role: sdk.RoleAssistant, Content: msg}
 		}
 	}
-	_, summaryText, err := compactHistory(context.Background(), lm, history, "", 0)
+	res, err := compactHistory(context.Background(), lm, history, "", 0, CompactionTriggerProactive)
 	if err != nil {
 		t.Fatalf("compactHistory: %v", err)
 	}
-	if summaryText != "This is the summary text." {
-		t.Errorf("summaryText = %q, want %q", summaryText, "This is the summary text.")
+	if res.Summary != "This is the summary text." {
+		t.Errorf("res.Summary = %q, want %q", res.Summary, "This is the summary text.")
 	}
 }
 
@@ -413,12 +427,12 @@ func TestCompactHistory_FilePathsAppendedToSummaryMessage(t *testing.T) {
 	// Inject a file path into one of the messages that will be summarized.
 	history[2] = sdk.Message{Role: sdk.RoleAssistant, Content: "read_file /home/user/project/foo.go result: ok"}
 
-	result, _, err := compactHistory(context.Background(), lm, history, "", 0)
+	result, err := compactHistory(context.Background(), lm, history, "", 0, CompactionTriggerProactive)
 	if err != nil {
 		t.Fatalf("compactHistory: %v", err)
 	}
-	// The summary message is result[1] (index 0 is anchor).
-	summaryMsg := result[1].Content
+	// The summary message is result.History[1] (index 0 is anchor).
+	summaryMsg := result.History[1].Content
 	if !strings.Contains(summaryMsg, "/home/user/project/foo.go") {
 		t.Errorf("summary message does not list file path; content = %q", summaryMsg[:min(200, len(summaryMsg))])
 	}

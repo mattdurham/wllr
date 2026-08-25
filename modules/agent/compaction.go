@@ -9,9 +9,25 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"charm.land/fantasy"
 	"github.com/mattdurham/wllr/modules/sdk"
+)
+
+// Compaction trigger identifiers. They are surfaced in the structured
+// compaction log so operators can tell heuristic (token-estimate) compaction
+// apart from usage-threshold and reactive (provider context-limit) compaction.
+const (
+	// CompactionTriggerProactive is set when the preflight token-estimate
+	// check (shouldCompactWithTools) decided compaction was needed.
+	CompactionTriggerProactive = "proactive"
+	// CompactionTriggerUsage is set when the provider-reported usage crossed
+	// the percentage threshold (shouldCompactByUsage).
+	CompactionTriggerUsage = "usage_threshold"
+	// CompactionTriggerReactive is set when the provider rejected the request
+	// as context-too-long and the turn is compacted and retried.
+	CompactionTriggerReactive = "reactive"
 )
 
 // CompactConfig controls the percentage-based compaction trigger.
@@ -222,9 +238,39 @@ const compactionSummaryPrompt = `Summarize the new conversation messages above (
 
 Keep each section concise. Preserve exact file paths, function names, and error messages verbatim.`
 
-// compactHistory summarizes the oldest messages using the LLM and returns a
-// compacted history: one summary message followed by the most recent messages,
-// plus the raw summary text for the caller to store as priorSummary.
+// CompactionResult is the outcome of a compactHistory run. On no-op
+// (history fits the budget, or no valid user boundary) Summary and Usage are
+// zero-valued and History is the input unchanged; callers must treat
+// Summary == "" as "compaction did not happen" and must not increment
+// compaction counters or emit compaction log records for it.
+type CompactionResult struct {
+	// History is the post-compaction history (input unchanged on no-op or
+	// failure).
+	History []sdk.Message
+	// Summary is the raw summary text (empty on no-op or failure).
+	Summary string
+	// Messages is the number of history messages folded into the summary
+	// (zero on no-op or failure).
+	Messages int
+	// Usage is the token cost of the summarization call (zero on no-op or
+	// failure).
+	Usage fantasy.Usage
+	// Latency is the wall-clock duration of the summarization call (zero on
+	// no-op or failure).
+	Latency time.Duration
+	// Trigger is the compaction trigger kind (see CompactionTrigger*) that
+	// caused this run. Set for every result so callers can log it without
+	// re-deriving it.
+	Trigger string
+}
+
+// compactHistory summarizes the oldest messages using the LLM and returns the
+// run outcome: compacted history, raw summary text for the caller to store as
+// priorSummary, the number of messages folded into the summary, and the token
+// usage of the summarization call itself.
+//
+// trigger identifies the trigger kind (see CompactionTrigger*); it is carried
+// in the return value so callers can log it without re-deriving it.
 //
 // keepRecentTokens controls how many recent tokens (chars/4 heuristic) are
 // kept verbatim. Pass 0 to use defaultKeepRecentTokens (20,000).
@@ -242,13 +288,14 @@ func compactHistory(
 	history []sdk.Message,
 	priorSummary string,
 	keepRecentTokens int64,
-) ([]sdk.Message, string, error) {
+	trigger string,
+) (CompactionResult, error) {
 	if keepRecentTokens <= 0 {
 		keepRecentTokens = defaultKeepRecentTokens
 	}
 
 	if len(history) < 2 {
-		return history, "", nil
+		return noOpCompaction(history, trigger), nil
 	}
 
 	// Always preserve the first message (original task) outside the summary.
@@ -256,7 +303,7 @@ func compactHistory(
 	rest := history[1:]
 
 	if len(rest) == 0 {
-		return history, "", nil
+		return noOpCompaction(history, trigger), nil
 	}
 
 	// Find the token-budget cut point within rest.
@@ -264,7 +311,7 @@ func compactHistory(
 	cutIdx := findCutPoint(rest, keepRecentTokens)
 	if cutIdx == 0 || cutIdx == -1 {
 		// Everything fits, or no valid user boundary exists — skip compaction.
-		return history, "", nil
+		return noOpCompaction(history, trigger), nil
 	}
 
 	toSummarize := rest[:cutIdx]
@@ -291,10 +338,13 @@ func compactHistory(
 		src.WriteString("\n\n")
 	}
 
-	// Stream the summary from the model.
+	// Stream the summary from the model. The returned result carries the
+	// summarization call's token usage, so its cost is observable instead of
+	// silently folded into the session total.
 	var summary strings.Builder
 	fa := fantasy.NewAgent(lm)
-	_, err := fa.Stream(ctx, fantasy.AgentStreamCall{
+	streamStart := time.Now()
+	res, err := fa.Stream(ctx, fantasy.AgentStreamCall{
 		Prompt: src.String() + "\n\n---\n\n" + compactionSummaryPrompt,
 		OnTextDelta: func(_, text string) error {
 			summary.WriteString(text)
@@ -302,10 +352,15 @@ func compactHistory(
 		},
 	})
 	if err != nil {
-		return history, "", fmt.Errorf("compaction: summarize: %w", err)
+		return noOpCompaction(history, trigger), fmt.Errorf("compaction: summarize: %w", err)
 	}
 	if summary.Len() == 0 {
-		return history, "", fmt.Errorf("compaction: empty summary")
+		return noOpCompaction(history, trigger), fmt.Errorf("compaction: empty summary")
+	}
+
+	var usage fantasy.Usage
+	if res != nil {
+		usage = res.TotalUsage
 	}
 
 	summaryText := summary.String()
@@ -331,5 +386,19 @@ func compactHistory(
 		Content: msgContent.String(),
 	}
 	compacted := append([]sdk.Message{summaryMsg}, toKeep...)
-	return append(anchor, compacted...), summaryText, nil
+	return CompactionResult{
+		History:  append(anchor, compacted...),
+		Summary:  summaryText,
+		Messages: len(toSummarize),
+		Usage:    usage,
+		Latency:  time.Since(streamStart),
+		Trigger:  trigger,
+	}, nil
+}
+
+// noOpCompaction builds a CompactionResult for runs that did not compact
+// (history fits, no valid boundary, or summarization failure). Summary is
+// empty, which callers treat as "compaction did not happen".
+func noOpCompaction(history []sdk.Message, trigger string) CompactionResult {
+	return CompactionResult{History: history, Trigger: trigger}
 }

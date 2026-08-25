@@ -198,7 +198,7 @@ Before each API call, `shouldCompact` checks whether the estimated context (hist
 prompt + next message) exceeds `contextWindow - reserveTokens` (16,384 tokens reserved for
 output). If so, `compactHistory` is called first.
 
-`compactHistory(ctx, lm, history, priorSummary string, keepRecentTokens int64)`:
+`compactHistory(ctx, lm, history, priorSummary string, keepRecentTokens int64, trigger string) (CompactionResult, error)`:
 
 1. Applies a token-budget walk via `findCutPoint(rest, keepRecentTokens)` (default 20,000
    tokens) to determine how many recent messages to keep verbatim. `keepRecentTokens=0` uses
@@ -215,11 +215,23 @@ output). If so, `compactHistory` is called first.
 4. Scans the to-be-compacted messages for absolute file paths via `extractFilePaths` and
    appends a "Files referenced in compacted span" list to the summary message.
 5. Replaces the old messages with a single `sdk.RoleUser` summary message, then appends
-   the kept recent messages. Returns `(compactedHistory, summaryText, error)`.
+   the kept recent messages. Returns a `CompactionResult`.
 6. Updates `a.history` and `a.lastSummary` under their respective mutexes if compaction
    succeeds.
 7. If the LLM call fails or returns an empty summary, returns the original history and an
    empty summary string.
+
+`CompactionResult` fields: `History` (post-compaction history; input unchanged on no-op or
+failure), `Summary` (raw summary text; empty on no-op or failure), `Messages` (count of
+history messages folded into the summary), `Usage` (token cost of the summarization call,
+from the stream result's `TotalUsage`), `Latency` (wall-clock duration of the summarization
+call), and `Trigger` (the `CompactionTrigger*` kind that caused the run — carried in the
+result so callers log it without re-deriving it). No-op runs (history under 2 messages,
+everything fits the budget, or no valid user boundary) are built by `noOpCompaction`: zero
+`Summary`, zero `Usage`/`Messages`/`Latency`.
+
+**Invariant:** `Summary == ""` means "compaction did not happen". Callers must not increment
+compaction counters or emit successful-compaction log records for such results.
 
 **Invariant:** If compaction fails, the original history is used unchanged and the turn
 proceeds normally.
@@ -272,9 +284,29 @@ definitions, since provider requests count those definitions against the context
 
 The check order in `Submit` is:
 
-1. If `pool.CompactConfig().Enabled` and `shouldCompactByUsage(a.LastUsage(), contextWindow, cfg.ThresholdPct)` → compact.
-2. Else if `shouldCompact(history, sysPrompt, content, contextWindow)` → compact (chars/4 heuristic).
+1. If `pool.CompactConfig().Enabled` and `shouldCompactByUsage(a.LastUsage(), contextWindow, cfg.ThresholdPct)` → compact with trigger `CompactionTriggerUsage` ("usage_threshold").
+2. Else if `shouldCompactWithTools(history, sysPrompt, content, tools, contextWindow)` → compact with trigger `CompactionTriggerProactive` ("proactive") (chars/4 heuristic including serialized tool definitions).
 3. Else → no proactive compaction.
+
+Reactive compaction after a context-too-long error uses `CompactionTriggerReactive` ("reactive").
+
+### Compaction Observability
+
+After a successful `compactHistory` call, `executeTurn` calls `a.observeCompaction(result)`,
+which increments the per-session `compactionCount` and emits a structured log record
+(`"agent: context compaction completed"`) carrying agent ID, model, trigger, messages
+compacted, summary size, the summarization call's input/output tokens, latency, and the
+cumulative session compaction count. This makes compaction frequency, cost, and trigger
+mix queryable from logs without a metrics endpoint.
+
+`compactionCount` is a per-`Agent` monotonic counter (session lifetime, never reset).
+
+**Invariant:** `observeCompaction` increments `compactionCount` and emits the log record
+only when `result.Summary != ""`. No-op compactions and failures increment nothing; failures
+are surfaced through the existing `slog.Error` path.
+
+**Invariant:** `compactionCount` is only written from the agent's turn goroutine (one turn
+at a time), so it needs no lock; `CompactionCount()` is the read accessor.
 
 **Invariant:** The first turn always uses the heuristic because `lastUsage` is zero-valued until
 the first `streamTurn` call completes. This is the chicken-and-egg bootstrap case.
@@ -332,7 +364,7 @@ concurrent writes.
 After each successful turn, the pool's `contextUsageDispatcher` callback is invoked:
 
 ```go
-pool.dispatchContextUsage(cu sdk.ContextUsage, compacted bool)
+pool.dispatchContextUsage(cu sdk.ContextUsage, compacted bool, thresholdPct float64, compactions int)
 ```
 
 The callback is set by the harness via `pool.SetContextUsageDispatcher` and forwards
@@ -340,6 +372,8 @@ The callback is set by the harness via `pool.SetContextUsageDispatcher` and forw
 between the `agent` and `extension` packages.
 
 `compacted` is `true` when `compactHistory` ran successfully during the turn.
+`compactions` is the dispatching agent's cumulative successful-compaction count
+(`a.compactionCount`) — additive observability data for the `EventContextUsage` payload.
 
 **Invariant:** `dispatchContextUsage` is only called on successful turns (`err == nil`).
 On error or cancellation it is not called, consistent with the pattern for other events.

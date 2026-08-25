@@ -57,6 +57,12 @@ type Agent struct {
 	// can build an incremental summary. Protected by lastSummaryMu.
 	lastSummary string
 
+	// compactionCount is the number of successful context compactions this agent
+	// has run for its session lifetime. Monotonically non-decreasing; no-op
+	// compactions (history fits) and failures do not increment it. Incremented
+	// only from the turn goroutine — no separate lock needed (one turn at a time).
+	compactionCount int
+
 	// pendingShutdownFrom is set when a shutdown_request arrives alongside normal
 	// pending messages in finishTurn. The shutdown is deferred until all normal
 	// messages are drained (drain-until-empty pattern). Only accessed from
@@ -357,6 +363,39 @@ func (a *Agent) SetLastSummary(s string) {
 	a.lastSummaryMu.Lock()
 	a.lastSummary = s
 	a.lastSummaryMu.Unlock()
+}
+
+// CompactionCount returns the number of successful context compactions this
+// agent has run this session. No-op compactions and failures are not counted.
+func (a *Agent) CompactionCount() int {
+	return a.compactionCount
+}
+
+// observeCompaction records a successful compaction for observability: it
+// increments the per-session counter and emits the structured log record that
+// lets operators judge compaction frequency and cost. No-op compactions
+// (empty summary — history fit the budget or no valid boundary existed) emit
+// nothing and increment nothing.
+//
+// Called only from the agent's turn goroutine (one turn at a time), so the
+// counter needs no lock. modelName comes from a.ModelName() (guarded).
+func (a *Agent) observeCompaction(result CompactionResult) {
+	if result.Summary == "" {
+		return
+	}
+	a.compactionCount++
+	slog.Info(
+		"agent: context compaction completed",
+		"agent", a.id,
+		"model", a.ModelName(),
+		"trigger", result.Trigger,
+		"messages_compacted", result.Messages,
+		"summary_chars", len(result.Summary),
+		"usage_input", result.Usage.InputTokens,
+		"usage_output", result.Usage.OutputTokens,
+		"compaction_latency_ms", result.Latency.Milliseconds(),
+		"compactions", a.compactionCount,
+	)
 }
 
 // LastUsage returns the token usage from the most recently completed turn.
@@ -704,14 +743,19 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 		keepRecent = defaultKeepRecentTokens
 	}
 	shouldProactivelyCompact := shouldCompactWithTools(history, sysPrompt, content, tools, contextWindow)
-	if compactCfg.Enabled && shouldCompactByUsage(a.LastUsage(), contextWindow, compactCfg.ThresholdPct) {
+	usageTriggerFired := compactCfg.Enabled && shouldCompactByUsage(a.LastUsage(), contextWindow, compactCfg.ThresholdPct)
+	if usageTriggerFired {
 		shouldProactivelyCompact = true
 	}
 	if shouldProactivelyCompact {
 		if onToken != nil {
 			onToken("[Compacting context…]\n\n")
 		}
-		compacted, summaryText, cerr := compactHistory(childCtx, lm, history, priorSummary, keepRecent)
+		trigger := CompactionTriggerProactive
+		if usageTriggerFired {
+			trigger = CompactionTriggerUsage
+		}
+		result, cerr := compactHistory(childCtx, lm, history, priorSummary, keepRecent, trigger)
 		if cerr != nil {
 			compactionErr := fmt.Errorf("context compaction failed: %w", cerr)
 			slog.Error("agent: context compaction failed", "agent", a.id, "model", modelName, "error", compactionErr)
@@ -721,14 +765,15 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 			a.finishTurn(ctx, compactionErr, nil, onDone, inboxMsgs)
 			return
 		}
-		didCompact = true
-		history = compacted
+		a.observeCompaction(result)
+		didCompact = result.Summary != ""
+		history = result.History
 		a.historyMu.Lock()
-		a.history = compacted
+		a.history = history
 		a.historyMu.Unlock()
-		if summaryText != "" {
+		if result.Summary != "" {
 			a.lastSummaryMu.Lock()
-			a.lastSummary = summaryText
+			a.lastSummary = result.Summary
 			a.lastSummaryMu.Unlock()
 		}
 	}
@@ -776,7 +821,7 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 		if onToken != nil {
 			onToken("\n\n[Context limit reached — compacting and retrying…]\n\n")
 		}
-		compacted, summaryText, cerr := compactHistory(childCtx, lm, history, priorSummary, keepRecent)
+		result, cerr := compactHistory(childCtx, lm, history, priorSummary, keepRecent, CompactionTriggerReactive)
 		if cerr != nil {
 			compactionErr := fmt.Errorf("context compaction failed after context limit: %w", cerr)
 			slog.Error(
@@ -794,14 +839,15 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 			a.finishTurn(ctx, compactionErr, nil, onDone, inboxMsgs)
 			return
 		}
-		didCompact = true
-		history = compacted
+		a.observeCompaction(result)
+		didCompact = result.Summary != ""
+		history = result.History
 		a.historyMu.Lock()
 		a.history = history
 		a.historyMu.Unlock()
-		if summaryText != "" {
+		if result.Summary != "" {
 			a.lastSummaryMu.Lock()
-			a.lastSummary = summaryText
+			a.lastSummary = result.Summary
 			a.lastSummaryMu.Unlock()
 		}
 		streamMsgs, streamPrompt, blocked, blockReason = buildStream(history, content)
@@ -820,7 +866,7 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 		// bar and WASM extensions (EventContextUsage) see the latest usage.
 		// Sub-agent turns do not drive the main context indicator.
 		if pool != nil && a.id == MainAgentID {
-			pool.dispatchContextUsage(sdk.ContextUsageFromFantasy(usage, contextWindow), didCompact)
+			pool.dispatchContextUsage(sdk.ContextUsageFromFantasy(usage, contextWindow), didCompact, a.compactionCount)
 		}
 	} else {
 		a.setLastUsage(fantasy.Usage{})

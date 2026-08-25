@@ -380,9 +380,9 @@ func (m *Model) SetProgram(p *tea.Program) {
 		// Wire context-usage dispatcher so agent turns forward EventContextUsage
 		// to WASM extensions without a circular import between agent and extension.
 		if pool != nil {
-			pool.SetContextUsageDispatcher(func(cu sdk.ContextUsage, compact bool, thresholdPct float64) {
+			pool.SetContextUsageDispatcher(func(cu sdk.ContextUsage, compact bool, thresholdPct float64, compactions int) {
 				payload, _ := json.Marshal(
-					sdk.ContextUsagePayload{Usage: cu, Compacted: compact, ThresholdPct: thresholdPct},
+					sdk.ContextUsagePayload{Usage: cu, Compacted: compact, Compactions: compactions, ThresholdPct: thresholdPct},
 				)
 				evt := sdk.Event{Type: sdk.EventContextUsage, Payload: payload}
 				_, _ = extHostRef.DispatchEvent(context.Background(), evt)

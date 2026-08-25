@@ -104,7 +104,7 @@ func (p *AgentPool) SetCompactConfig(cfg CompactConfig) {
 // EventContextUsage to WASM extensions from the harness layer without creating
 // a circular import between the agent and extension packages.
 // Thread-safe; may be called before or after agents are spawned.
-func (p *AgentPool) SetContextUsageDispatcher(fn func(cu sdk.ContextUsage, compact bool, thresholdPct float64)) {
+func (p *AgentPool) SetContextUsageDispatcher(fn func(cu sdk.ContextUsage, compact bool, thresholdPct float64, compactions int)) {
 	p.dispatchMu.Lock()
 	p.contextUsageDispatcher = fn
 	p.dispatchMu.Unlock()
@@ -112,13 +112,15 @@ func (p *AgentPool) SetContextUsageDispatcher(fn func(cu sdk.ContextUsage, compa
 
 // dispatchContextUsage calls the registered contextUsageDispatcher, if any.
 // Called from agent goroutines after each completed turn.
-func (p *AgentPool) dispatchContextUsage(cu sdk.ContextUsage, compacted bool) {
+// compactions is the dispatching agent's cumulative successful-compaction
+// count (additive observability data for the EventContextUsage payload).
+func (p *AgentPool) dispatchContextUsage(cu sdk.ContextUsage, compacted bool, compactions int) {
 	p.dispatchMu.RLock()
 	fn := p.contextUsageDispatcher
 	p.dispatchMu.RUnlock()
 	if fn != nil {
 		cfg := p.CompactConfig()
-		fn(cu, compacted, cfg.ThresholdPct)
+		fn(cu, compacted, cfg.ThresholdPct, compactions)
 	}
 }
 
