@@ -382,16 +382,27 @@ func TestLocalThinkingInfo_ExplicitConfigWins(t *testing.T) {
 }
 
 func TestStartupThinkingMode(t *testing.T) {
-	// Non-local provider: a valid persisted mode is returned as-is.
-	if got := startupThinkingMode(context.Background(), &Config{Provider: providerOpenAI, Model: "gpt-5.5"}, providerOpenAI); got != "" {
-		// No config file here (WLLR_CONFIG unset in this subtest) → no persisted
-		// mode → "".
-		t.Errorf("no persisted mode: got %q, want empty", got)
+	// Hermetic config: point WLLR_CONFIG at a temp file (same pattern as the
+	// other config tests). configPath() falls back to ~/.config/wllr/config.yaml
+	// when WLLR_CONFIG is unset, so without this a developer's real persisted
+	// thinking_mode would leak into these assertions and the test would fail
+	// on any machine with usage history.
+	path := withConfigPath(t)
+	if err := os.WriteFile(path, []byte(`{"wllr":{"thinking_mode":"high"}}`), 0o600); err != nil {
+		t.Fatal(err)
 	}
 
-	// Local, declared endpoint: no persisted mode → the declared default.
+	// Non-local provider: a valid persisted mode is returned as-is.
+	if got := startupThinkingMode(context.Background(), &Config{Provider: providerOpenAI, Model: "gpt-5.5"}, providerOpenAI); got != "high" {
+		t.Errorf("persisted valid mode: got %q, want high", got)
+	}
+
+	// Local, declared endpoint: wipe the persisted mode → the declared default.
 	resetLocalThinkingState()
 	defer resetLocalThinkingState()
+	if err := os.WriteFile(path, []byte(`{"wllr":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v1/models":
