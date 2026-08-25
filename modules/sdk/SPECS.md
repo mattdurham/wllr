@@ -186,9 +186,9 @@ No payload fields — the event carries no structured data beyond the event type
 | `usage`     | ContextUsage | Context window usage for the turn (see ContextUsage type in Supporting Types)  |
 | `compacted` | bool         | `true` when `compactHistory` ran and succeeded during the turn                  |
 | `compactions` | int        | Cumulative successful compactions for the agent this session (`omitempty`)       |
-| `threshold_pct` | float64     | Compaction trigger threshold as a percentage (0–100, e.g. 80 means 80%)       |
+| `threshold_pct` | float64     | Compaction trigger threshold as a fraction of the context window (0.80 = 80%); 0 when disabled   |
 
-**Note for extension authors:** `ContextUsage.Percent` is expressed as a percentage (0–100, e.g. 75.4 means 75.4% full). `threshold_pct` is the compaction trigger threshold as a percentage (0–100). To compute remaining-to-threshold, use `threshold_pct - percent`. Do not hard-code the threshold value.
+**Note for extension authors:** `ContextUsage.Percent` is expressed as a percentage (0–100, e.g. 75.4 means 75.4% full). `threshold_pct` is the compaction trigger threshold expressed as a fraction (0.80 = 80%). To compute remaining-to-threshold, use `threshold_pct*100 - percent`, clamped at 0. Do not hard-code the threshold value.
 
 ### ModelChangedPayload (`EventModelChanged`)
 

@@ -860,8 +860,9 @@ func TestModel_View_WithStatusLineFitsHeight(t *testing.T) {
 }
 
 // TestStatusBarCtxPercent verifies that after a StreamDoneMsg, when the pool's main
-// agent has real usage and the context window is set, statuses["ctx rem"] shows remaining
-// headroom until compaction (threshold% - current%).
+// agent has real usage and the context window is set, statuses["ctx"] shows window
+// usage and remaining headroom until compaction ("P%/R%": percent and
+// threshold% - current%).
 func TestStatusBarCtxPercent(t *testing.T) {
 	pool := agent.NewPool()
 	pool.SetContextWindow(200_000)
@@ -887,15 +888,19 @@ func TestStatusBarCtxPercent(t *testing.T) {
 		t.Fatal("timeout waiting for turn")
 	}
 
-	// Simulate StreamDoneMsg — this should update ctx rem in status bar.
+	// Simulate StreamDoneMsg — this should update the ctx status.
 	m, _ = callUpdate(m, StreamDoneMsg{Err: nil})
 
-	rem := m.live.getStatus("ctx rem")
-	if rem == "" {
-		t.Fatal("expected live.statuses[ctx rem] to be present after StreamDoneMsg with non-zero usage")
+	// 50k / 200k = 25% used; threshold 80% → rem 55%.
+	ctx := m.live.getStatus("ctx")
+	if ctx == "" {
+		t.Fatal("expected live.statuses[ctx] to be present after StreamDoneMsg with non-zero usage")
 	}
-	// threshold=80%, current=25% → rem=55%
-	if rem != "55%" {
+	if ctx != "25%/55%" {
+		t.Errorf("live.statuses[ctx] = %q, want %q", ctx, "25%/55%")
+	}
+	// The legacy key keeps showing remaining-only for old statusline builds.
+	if rem := m.live.getStatus("ctx rem"); rem != "55%" {
 		t.Errorf("live.statuses[ctx rem] = %q, want %q", rem, "55%")
 	}
 }
@@ -915,6 +920,9 @@ func TestStatusBarCtxPercentZero(t *testing.T) {
 	// StreamDoneMsg with zero context window — ctx rem key should not appear.
 	m, _ = callUpdate(m, StreamDoneMsg{Err: nil})
 
+	if v := m.live.getStatus("ctx"); v != "" {
+		t.Errorf("live.statuses[ctx] should be absent when ContextWindow is 0, got %q", v)
+	}
 	if v := m.live.getStatus("ctx rem"); v != "" {
 		t.Errorf("live.statuses[ctx rem] should be absent when ContextWindow is 0, got %q", v)
 	}

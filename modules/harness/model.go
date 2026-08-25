@@ -1043,14 +1043,16 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 			// Update context-usage percentage from real API token counts.
 			cu := m.agentPool.MainAgentContextUsage()
 			if cu.ContextWindow > 0 {
-				cfg := m.agentPool.CompactConfig()
-				rem := cfg.ThresholdPct*100 - cu.Percent
+				rem := m.agentPool.CompactConfig().ThresholdPct*100 - cu.Percent
 				// Clamp remaining to non-negative values to avoid confusing negative percentages
 				if rem < 0 {
 					rem = 0
 				}
+				m.live.setStatus("ctx", fmt.Sprintf("%.0f%%/%.0f%%", cu.Percent, rem))
+				// Keep the legacy key for older copies of the bundled statusline wasm.
 				m.live.setStatus("ctx rem", fmt.Sprintf("%.0f%%", rem))
 			} else {
+				m.live.setStatus("ctx", "")
 				m.live.setStatus("ctx rem", "")
 			}
 		}

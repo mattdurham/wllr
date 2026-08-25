@@ -17,7 +17,8 @@
 //	  sl-tokens      (text, fg:muted)   — empty when tokens=0
 //	  sl-sep3        (text, "  ")
 //	  sl-working     (text, fg:accent)  — empty when idle
-//	  sl-ctx         (text, fg:muted)   — appended when context window is configured
+//	  sl-ctx         (text, fg:muted)   — "ctx:P%/R%" when a context window is configured
+//	  sl-compact     (text, fg:muted)   — "C<n>" after the first successful compaction
 //
 // Other extensions can insert additional nodes into "statusline-root" via
 // ui_patch insert ops. Because this extension uses set_root to update the whole
@@ -44,16 +45,18 @@ const (
 	sep3ID     = "sl-sep3"
 	workingID  = "sl-working"
 	ctxID      = "sl-ctx"
+	compactID  = "sl-compact"
 )
 
 // ─── display state ───────────────────────────────────────────────────────────
 
 var (
-	lastProvider string
-	lastModel    string
-	lastTokens   int
-	lastWorking  string // rendered working indicator text or ""
-	lastCtx      string // ctx rem text or "" when no window configured
+	lastProvider    string
+	lastModel       string
+	lastTokens      int
+	lastWorking     string // rendered working indicator text or ""
+	lastCtx         string // ctx text or "" when no window configured
+	lastCompactions int    // cumulative successful compactions this session
 )
 
 // ─── init ────────────────────────────────────────────────────────────────────
@@ -85,21 +88,28 @@ func init() {
 		patchAll()
 	})
 
-	// EventContextUsage fires after each completed turn.
-	OnContextUsage(func(_, _ int64, ctxWindow int64, percent float64, _ bool, thresholdPct float64) {
+	// EventContextUsage fires after each completed turn (main agent only).
+	OnContextUsage(func(_, _ int64, ctxWindow int64, percent float64, _ bool, thresholdPct float64, compactions int) {
+		// threshold_pct may be a fraction (0.80) or a percentage (80) depending
+		// on host build; normalize fractions to percentages.
+		if thresholdPct > 0 && thresholdPct <= 1 {
+			thresholdPct *= 100
+		}
 		desired := ""
 		if ctxWindow > 0 {
-			remaining := thresholdPct*100 - percent
+			remaining := thresholdPct - percent
 			// Clamp remaining to non-negative values to avoid confusing negative percentages
 			if remaining < 0 {
 				remaining = 0
 			}
-			desired = fmt.Sprintf("  ctx:%.0f%%", remaining)
+			desired = fmt.Sprintf("  ctx:%.0f%%/%.0f%%", percent, remaining)
 		}
-		if desired == lastCtx {
+		changed := desired != lastCtx || compactions != lastCompactions
+		lastCtx = desired
+		lastCompactions = compactions
+		if !changed {
 			return
 		}
-		lastCtx = desired
 		patchAll()
 	})
 
@@ -142,6 +152,9 @@ func patchAll() {
 	}
 	if lastCtx != "" {
 		nodes = append(nodes, UINode{ID: ctxID, Type: "text", Text: lastCtx, Props: &muted})
+	}
+	if lastCompactions > 0 {
+		nodes = append(nodes, UINode{ID: compactID, Type: "text", Text: renderCompactions(lastCompactions), Props: &muted})
 	}
 	UIPatch(areaID, OpSetRoot(UIHStack(rootID, nodes...)))
 }
@@ -203,11 +216,23 @@ func renderContext(info StatusInfo) string {
 	if info.Statuses == nil {
 		return ""
 	}
-	remaining := strings.TrimSpace(info.Statuses["ctx rem"])
-	if remaining == "" {
-		return ""
+	// Prefer the new "ctx" key ("P%" or "P%/R%": window usage, plus remaining to
+	// the compaction threshold); fall back to the legacy "ctx rem" key
+	// (remaining only) for hosts built before the ctx key existed.
+	value := strings.TrimSpace(info.Statuses["ctx"])
+	if value == "" {
+		remaining := strings.TrimSpace(info.Statuses["ctx rem"])
+		if remaining == "" {
+			return ""
+		}
+		return "  ctx:" + remaining
 	}
-	return "  ctx:" + remaining
+	return "  ctx:" + value
+}
+
+// renderCompactions renders the session's successful-compaction count ("C<n>").
+func renderCompactions(n int) string {
+	return fmt.Sprintf("  C%d", n)
 }
 
 func renderTokens(n int) string {

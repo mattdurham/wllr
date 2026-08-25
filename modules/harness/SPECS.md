@@ -341,17 +341,20 @@ The `StatusBar` struct has been removed. All state that was in `StatusBar` is no
 `liveState`; the statusline scene area (owned by the bundled WASM extension) reads
 it via `get_status_info`.
 
-### Context Usage (`ctx rem`)
+### Context Usage (`ctx` / `ctx rem`)
 
 On each `StreamDoneMsg`, the handler calls `m.agentPool.MainAgentContextUsage()` and
-updates `liveState.statuses["ctx rem"]` via `setStatus`:
+updates the context-usage status keys via `setStatus`:
 
-- When `cu.ContextWindow > 0`: `"ctx rem"` = `fmt.Sprintf("%.0f%%", rem)` where `rem`
-  is `thresholdPct*100 - cu.Percent`.
-- When `cu.ContextWindow == 0`: `"ctx rem"` is deleted (empty string to `setStatus`).
+- When `cu.ContextWindow > 0`:
+  - `"ctx"` = `fmt.Sprintf("%.0f%%/%.0f%%", cu.Percent, rem)` — window usage plus
+    remaining headroom, where `rem = thresholdPct*100 - cu.Percent` (clamped at 0).
+  - `"ctx rem"` (legacy key, kept for older bundled statusline builds) =
+    `fmt.Sprintf("%.0f%%", rem)`.
+- When `cu.ContextWindow == 0`: both keys are deleted (empty string to `setStatus`).
 
-**Invariant:** The `ctx rem` key is only present when a context window is configured
-and at least one turn has completed. Updated once per `StreamDoneMsg`.
+**Invariant:** The `ctx` and `ctx rem` keys are only present when a context window is
+configured and at least one turn has completed. Updated once per `StreamDoneMsg`.
 
 ---
 
