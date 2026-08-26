@@ -46,11 +46,12 @@ type Agent struct {
 	// SetProviderOptions. Guarded by lmMu; read once per turn in Submit.
 	providerOpts fantasy.ProviderOptions
 
-	id           string
-	name         string
-	modelName    string // for context window lookup
-	systemPrompt string
-	creatorID    string // ID of the agent that spawned this one; "" for top-level agents
+	id            string
+	name          string
+	modelName     string // for context window lookup
+	contextWindow int64  // resolved input context window for this model
+	systemPrompt  string
+	creatorID     string // ID of the agent that spawned this one; "" for top-level agents
 
 	// lastSummary is the most recent compaction summary text. Passed to
 	// compactHistory as priorSummary on subsequent compaction calls so the model
@@ -305,14 +306,26 @@ func (a *Agent) ModelName() string {
 	return a.modelName
 }
 
+// ContextWindow returns the resolved input context window for this agent.
+func (a *Agent) ContextWindow() int64 {
+	a.lmMu.RLock()
+	defer a.lmMu.RUnlock()
+	return a.contextWindow
+}
+
 // SetModel swaps the language model and model name used for subsequent turns.
 // Thread-safe; a turn already in flight finishes on the previous model, and the
 // next Submit picks up the new one. Used by the /model picker to switch the
 // active model at runtime.
-func (a *Agent) SetModel(lm fantasy.LanguageModel, modelName string) {
+func (a *Agent) SetModel(lm fantasy.LanguageModel, modelName string, contextWindow ...int64) {
 	a.lmMu.Lock()
 	a.lm = lm
 	a.modelName = modelName
+	if len(contextWindow) > 0 {
+		a.contextWindow = contextWindow[0]
+	} else {
+		a.contextWindow = contextWindowForModel(modelName)
+	}
 	a.lmMu.Unlock()
 }
 
@@ -608,6 +621,8 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 	pool := a.pool
 	a.lmMu.RLock()
 	lm := a.lm
+	modelName := a.modelName
+	contextWindow := a.contextWindow
 	providerOpts := a.providerOpts
 	a.lmMu.RUnlock()
 	opts := a.opts
@@ -630,6 +645,8 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 			priorHistory,
 			priorSummary,
 			lm,
+			modelName,
+			contextWindow,
 			opts,
 			pool,
 			toolsFn,
@@ -653,6 +670,8 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 	priorHistory []sdk.Message,
 	priorSummary string,
 	lm fantasy.LanguageModel,
+	modelName string,
+	contextWindow int64,
 	opts SpawnOpts,
 	pool *AgentPool,
 	toolsFn func() []fantasy.AgentTool,
@@ -666,10 +685,6 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 		}
 		return
 	}
-
-	// Snapshot the model name once (guarded read; SetModel may swap it between
-	// turns). lm was already captured consistently with it in Submit.
-	modelName := a.ModelName()
 
 	// Resolve tools: prefer dynamic toolsFn, fall back to opts.Tools.
 	tools := opts.Tools
@@ -722,13 +737,13 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 
 	// Proactive compaction: if the estimated context is close to the model's
 	// limit, summarize old history BEFORE sending, avoiding a 400 error.
-	// Use pool-configured context window if set; fall back to model-name lookup.
-	contextWindow := int64(0)
-	if pool != nil {
-		contextWindow = pool.ContextWindow()
-	}
-	if contextWindow == 0 {
-		contextWindow = contextWindowForModel(modelName)
+	// Context windows are resolved per agent/model. A zero value means startup
+	// or model selection failed to resolve required metadata; never guess.
+	if contextWindow <= 0 {
+		if contextWindow = contextWindowForModel(modelName); contextWindow <= 0 {
+			a.finishTurn(ctx, fmt.Errorf("agent %s: context window for model %q is unknown; configure it before running", a.id, modelName), nil, onDone, inboxMsgs)
+			return
+		}
 	}
 	history := priorHistory
 	didCompact := false
@@ -798,9 +813,15 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 			return nil, "", true, rsn
 		}
 		if newModel != "" && newModel != modelName {
+			newContextWindow := pool.ContextWindowForModel(newModel)
+			if newContextWindow <= 0 {
+				return nil, "", true, fmt.Sprintf("context window for rerouted model %q is unknown", newModel)
+			}
 			if newLM, lerr := pool.LanguageModelForModel(childCtx, newModel); lerr == nil {
 				lm = newLM
 				fa = fantasy.NewAgent(lm, agentOpts...)
+				contextWindow = newContextWindow
+				keepRecent = contextWindow / 10
 			}
 		}
 		return redacted, "", false, ""

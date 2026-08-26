@@ -514,8 +514,11 @@ Returns the current set of registered tools from `extHost.RegisteredTools()` as 
 |-------|------|---------|
 | `ModelListFn` | `func() []ModelChoice` | Returns the active provider's selectable models for the picker. Nil ⇒ selection unavailable. |
 | `SelectModelFn` | `func(modelID string) error` | Switches the active model: rebuilds the main agent's LM (`Agent.SetModel`), updates the context window, and persists the choice. Nil ⇒ display-only. |
+| `SetContextWindowFn` | `func(provider, modelID string, tokens int64) error` | Persists and applies a user-entered context window after unknown-model selection. |
 
-Flow: `/model` with no arg (or `/models`) emits `showModelPickerMsg` → `openModelPicker()` builds picker items from `ModelListFn` (marking the current model) and opens the picker with the reserved `modelPickerCallback` (`"__wllr:model"`). On selection, `updateKeyPressPicker` recognises the core callback and emits `setModelMsg{Model: id}` (rather than dispatching `EventOnCommand` to a WASM extension); the `setModelMsg` handler calls `applyModelSelection` → `SelectModelFn` + status update + `EventModelChanged`. `/model <name>` skips the picker and emits `setModelMsg` directly.
+Flow: `/model` with no arg (or `/models`) emits `showModelPickerMsg` → `openModelPicker()` builds picker items from `ModelListFn` (marking the current model and indicating missing context metadata) and opens the picker with the reserved `modelPickerCallback` (`"__wllr:model"`). On selection, `updateKeyPressPicker` recognises the core callback and emits `setModelMsg{Model: id}` (rather than dispatching `EventOnCommand` to a WASM extension); the `setModelMsg` handler calls `applyModelSelection` → `SelectModelFn` + status update + `EventModelChanged`. If selection returns `ErrContextWindowRequired`, a required core text input collects a positive token count, calls `SetContextWindowFn`, and retries selection. `/model <name>` follows the same validation path.
+
+Startup uses the same required context-window prompt when `SetPendingContextWindow(provider, model)` is set. Empty, zero, negative, and non-numeric values are rejected; the model is not applied until persistence and selection succeed.
 
 **Invariant:** picker callbacks prefixed `"__wllr:"` are core-owned and route to harness handlers, never to `EventOnCommand`. Extension command names cannot collide (the prefix is reserved). Reserved callbacks: `"__wllr:model"`, `"__wllr:thinking"`.
 

@@ -122,6 +122,8 @@ func TestProviderIntercept_RerouteRequestsNewModel(t *testing.T) {
 	pool := agent.NewPool()
 	pool.SetProvider(prov)
 	pool.SetDefaultModelName("frontier")
+	pool.SetModelContextWindow("frontier", 200_000)
+	pool.SetModelContextWindow("local-cheap", 128_000)
 	pool.SetProviderRequestInterceptor(
 		func(_ string, msgs []sdk.Message, _ string) ([]sdk.Message, string, bool, string) {
 			return msgs, "local-cheap", false, "" // reroute

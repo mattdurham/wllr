@@ -111,7 +111,7 @@ func TestOpenModelPicker_UsesChoiceSublabel(t *testing.T) {
 	m.height = 24
 	m.activeModel = "m1"
 	m.ModelListFn = func() []ModelChoice {
-		return []ModelChoice{{ID: "m1", Name: "Model One", Sublabel: "http://localhost:8000/v1 · 300k ctx"}}
+		return []ModelChoice{{ID: "m1", Name: "Model One", Sublabel: "http://localhost:8000/v1 · 300k ctx", ContextWindowKnown: true}}
 	}
 
 	m.openModelPicker()

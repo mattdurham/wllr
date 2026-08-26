@@ -45,8 +45,9 @@ var (
 // defaultModelName is used when LanguageModelForModel is called with an
 // empty name (e.g. sub-agents that don't specify a model).
 
-// contextWindow is the model's input context window in tokens.
-// Set via SetContextWindow; defaults to 0 (compaction uses model-name fallback).
+// contextWindow is retained as the compatibility/default-model value. Effective
+// windows are stored per model in contextWindows so agents using different
+// models do not share a compaction limit.
 
 // tokenCount accumulates all text tokens emitted by all agents in this pool.
 
@@ -73,8 +74,9 @@ func NewPool() *AgentPool {
 		}
 	}
 	return &AgentPool{
-		agents: make(map[string]*Agent),
-		teams:  make(map[string]*Team),
+		agents:         make(map[string]*Agent),
+		teams:          make(map[string]*Team),
+		contextWindows: make(map[string]int64),
 		compactConfig: CompactConfig{
 			Enabled:      true,
 			ThresholdPct: threshold,
@@ -219,12 +221,52 @@ func (p *AgentPool) SetProvider(prov fantasy.Provider) {
 	p.provider = prov
 }
 
-// SetContextWindow sets the model's input context window in tokens.
-// When non-zero this overrides the model-name-based lookup in compaction.
+// SetContextWindow sets the input context window for the current default model.
+// New code should prefer SetModelContextWindow when the model is explicit.
 func (p *AgentPool) SetContextWindow(tokens int64) {
 	p.mu.Lock()
 	p.contextWindow = tokens
+	if p.contextWindows == nil {
+		p.contextWindows = make(map[string]int64)
+	}
+	if p.defaultModelName != "" && tokens > 0 {
+		p.contextWindows[strings.ToLower(p.defaultModelName)] = tokens
+	}
 	p.mu.Unlock()
+}
+
+// SetModelContextWindow records a resolved input context window for one model.
+// A non-positive value removes the model's explicit metadata.
+func (p *AgentPool) SetModelContextWindow(model string, tokens int64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.contextWindows == nil {
+		p.contextWindows = make(map[string]int64)
+	}
+	model = strings.ToLower(strings.TrimSpace(model))
+	if model == "" {
+		return
+	}
+	if tokens > 0 {
+		p.contextWindows[model] = tokens
+	} else {
+		delete(p.contextWindows, model)
+	}
+	if model == strings.ToLower(p.defaultModelName) {
+		p.contextWindow = tokens
+	}
+}
+
+// ContextWindowForModel returns the explicitly resolved window for model, or 0
+// when the model still requires resolution.
+func (p *AgentPool) ContextWindowForModel(model string) int64 {
+	p.mu.RLock()
+	window := p.contextWindows[strings.ToLower(strings.TrimSpace(model))]
+	p.mu.RUnlock()
+	if window > 0 {
+		return window
+	}
+	return contextWindowForModel(model)
 }
 
 // ContextWindow returns the configured context window, or 0 if unset.
@@ -325,7 +367,15 @@ func (p *AgentPool) BaseSystemPrompt() string {
 func (p *AgentPool) SetDefaultModelName(name string) {
 	p.mu.Lock()
 	p.defaultModelName = name
+	p.contextWindow = p.contextWindows[strings.ToLower(name)]
 	p.mu.Unlock()
+}
+
+// DefaultModelName returns the pool's model used when a spawn request omits one.
+func (p *AgentPool) DefaultModelName() string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.defaultModelName
 }
 
 // SetProviderName stores a human-readable display name for the configured provider.
@@ -388,14 +438,31 @@ func (p *AgentPool) Spawn(id string, lm fantasy.LanguageModel, opts SpawnOpts) (
 	if opts.ModelName != "" {
 		modelName = opts.ModelName
 	}
+	contextWindow := opts.ContextWindow
+	if contextWindow <= 0 {
+		contextWindow = p.contextWindows[strings.ToLower(modelName)]
+	}
+	if contextWindow <= 0 {
+		contextWindow = contextWindowForModel(modelName)
+	}
+	if contextWindow <= 0 && modelName == "" {
+		contextWindow = p.contextWindow
+	}
+	// Empty model names are retained for low-level callers and test doubles
+	// that predate explicit model metadata. Production-created agents always
+	// carry a model name and must resolve it before running.
+	if contextWindow <= 0 && modelName == "" {
+		contextWindow = defaultContextWindow
+	}
 	a := &Agent{
-		id:           id,
-		name:         opts.Name,
-		lm:           lm,
-		opts:         opts,
-		pool:         p,
-		modelName:    modelName,
-		providerOpts: opts.ProviderOptions,
+		id:            id,
+		name:          opts.Name,
+		lm:            lm,
+		opts:          opts,
+		pool:          p,
+		modelName:     modelName,
+		contextWindow: contextWindow,
+		providerOpts:  opts.ProviderOptions,
 	}
 	// New agents inherit the base system prompt unless explicitly disabled.
 	// Sub-agents that don't need the full orchestration context can set

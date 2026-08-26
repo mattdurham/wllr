@@ -16,16 +16,17 @@ import (
 
 // ---- contextWindowForModel ----
 
-func TestContextWindowForModel_KnownModels_ReturnDefault(t *testing.T) {
-	// contextWindowForModel looks up the model in the generated table (exact then
-	// substring match). All currently-mapped models happen to return 1_000_000
-	// which equals defaultContextWindow, so known and unknown names both return
-	// defaultContextWindow today.
-	for _, model := range []string{"claude-sonnet-4-6", "gpt-4o", "gemini-2.0", "", "unknown"} {
-		got := contextWindowForModel(model)
-		if got != defaultContextWindow {
-			t.Errorf("contextWindowForModel(%q) = %d, want %d (default)", model, got, defaultContextWindow)
+func TestContextWindowForModel_KnownModels(t *testing.T) {
+	for model, want := range map[string]int64{"claude-sonnet-4-6": 200_000, "gpt-4o": 128_000} {
+		if got := contextWindowForModel(model); got != want {
+			t.Errorf("contextWindowForModel(%q) = %d, want %d", model, got, want)
 		}
+	}
+}
+
+func TestContextWindowForModel_UnknownRequiresResolution(t *testing.T) {
+	if got := contextWindowForModel("unknown-model"); got != 0 {
+		t.Fatalf("contextWindowForModel(unknown) = %d, want 0", got)
 	}
 }
 
