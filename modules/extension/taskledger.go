@@ -101,7 +101,7 @@ func (l *TaskLedger) loadSnapshot() error {
 	return nil
 }
 
-func (l *TaskLedger) replay() error {
+func (l *TaskLedger) replay() (err error) {
 	f, err := os.Open(filepath.Join(l.dir, "tasks.jsonl"))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -109,7 +109,11 @@ func (l *TaskLedger) replay() error {
 	if err != nil {
 		return fmt.Errorf("open task journal: %w", err)
 	}
-	defer f.Close()
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("close task journal: %w", closeErr)
+		}
+	}()
 	r := bufio.NewReader(f)
 	lineNo := 0
 	for {
@@ -160,8 +164,7 @@ func opaqueID(prefix string) (string, error) {
 	}
 	return prefix + "_" + hex.EncodeToString(b), nil
 }
-func clone[T any](v T) T { return v }
-func (l *TaskLedger) commitLocked() error {
+func (l *TaskLedger) commitLocked() (err error) {
 	rec := taskJournalRecord{1, l.sequence, l.lists, l.tasks, l.events, ""}
 	raw, _ := json.Marshal(rec)
 	sum := sha256.Sum256(raw)
@@ -184,7 +187,11 @@ func (l *TaskLedger) commitLocked() error {
 		return err
 	}
 	name := f.Name()
-	defer os.Remove(name)
+	defer func() {
+		if removeErr := os.Remove(name); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) && err == nil {
+			err = fmt.Errorf("remove temporary task snapshot: %w", removeErr)
+		}
+	}()
 	if _, err = f.Write(sb); err == nil {
 		err = f.Sync()
 	}
