@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"time"
 
 	"github.com/mattdurham/wllr/modules/agent"
 	"github.com/mattdurham/wllr/modules/extension"
@@ -47,7 +49,10 @@ func (s *ConversationSession) Start(ctx context.Context) error {
 	if s.host == nil {
 		return nil
 	}
-	payload, _ := json.Marshal(sdk.SessionStartPayload{Reason: "new_session"})
+	wd, _ := os.Getwd()
+	payload, _ := json.Marshal(sdk.SessionStartPayload{
+		Reason: "new_session", CWD: wd, StartedAt: time.Now().Format(time.RFC3339Nano),
+	})
 	evt := sdk.Event{Type: sdk.EventSessionStart, Payload: payload}
 	results, err := s.host.DispatchEvent(ctx, evt)
 	if err != nil {

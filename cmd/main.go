@@ -694,7 +694,8 @@ func runExecMode(ctx context.Context, h *extension.Host, pool *agent.AgentPool, 
 	for _, tool := range tools {
 		promptTools = append(promptTools, sdk.PromptTool{Name: tool.Name})
 	}
-	payload, _ := json.Marshal(sdk.SessionStartPayload{Reason: "exec", Tools: promptTools})
+	wd, _ := os.Getwd()
+	payload, _ := json.Marshal(sdk.SessionStartPayload{Reason: "exec", Tools: promptTools, CWD: wd, StartedAt: time.Now().Format(time.RFC3339Nano)})
 	_, _ = h.DispatchEvent(ctx, sdk.Event{Type: sdk.EventSessionStart, Payload: payload})
 	if pool != nil {
 		if sp := pool.BaseSystemPrompt(); sp != "" {

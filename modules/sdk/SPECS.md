@@ -93,10 +93,16 @@ All fields are `omitempty`.
 | `reason`   | string          | Why the session was started (e.g. `"new_session"`)   |
 | `tools`    | PromptTool[]    | Registered tool names available to prompt assembly   |
 | `commands` | PromptCommand[] | Registered slash commands and descriptions           |
+| `cwd`      | string          | Host working directory at session start (optional)   |
+| `started_at` | string        | Host timestamp, RFC3339Nano (optional)               |
 
-`tools` and `commands` are optional for compatibility. `PromptTool` contains
-`name`; `PromptCommand` contains `name` and optional `description`. The harness
-populates them before startup extension dispatch.
+`tools`, `commands`, `cwd`, and `started_at` are optional for compatibility.
+`PromptTool` contains `name`; `PromptCommand` contains `name` and optional
+`description`. The harness populates them before startup extension dispatch.
+`cwd` and `started_at` carry host ground truth: the WASM sandbox has no working
+directory (guest `os.Getwd` returns `/`) and its clock may be stale, so
+extensions must prefer these fields over their own `os` calls when writing
+pathed or timestamped artifacts.
 
 ### BeforeAgentStartPayload (`EventBeforeAgentStart`)
 
@@ -339,7 +345,13 @@ Note: Percent is 0–100. CompactConfig.ThresholdPct is a fraction 0.0–1.0.
 
 ---
 
-## host_call Method Constants (56 total)
+## host_call Method Constants (67 total)
+
+The tables below document 59 of the 67 constants. The remaining 8 — the task
+ledger methods (`tasklist_create`, `tasks_create`, `tasks_claim`,
+`tasks_update`, `tasks_report`, `tasks_get`, `tasks_list`,
+`tasks_events_after`) — are documented as wire strings in the **Task ledger
+wire contract** section above.
 
 ### Core methods
 
@@ -358,6 +370,8 @@ Note: Percent is 0–100. CompactConfig.ThresholdPct is a fraction 0.0–1.0.
 | `MethodRequestPermission` | `"request_permission"` | Check whether the extension holds a given permission          |
 | `MethodGetEnv`            | `"get_env"`            | Read a host environment variable (no permission required)     |
 | `MethodGetOS`             | `"get_os"`             | Returns the host operating system and architecture strings    |
+| `MethodHostInfo`          | `"host_info"`          | Returns host ground truth: `cwd`, `now` (RFC3339Nano), `os`, `arch` (no permission required) |
+| `MethodListSessions`      | `"list_sessions"`      | List session files under `base` with host mtimes, newest first, up to `limit`, excluding `exclude` (requires PermFileRead) |
 | `MethodConfigRead`        | `"config_read"`        | Read the calling extension's config group, or an explicit `group`, from the shared config file |
 | `MethodModal`             | `"modal"`              | Display text in a modal overlay window                        |
 | `MethodSetSystemPrompt`   | `"set_system_prompt"`  | Replace the base system prompt on all agents                  |
@@ -583,5 +597,5 @@ Returned as `int32` from the `host_call` WASM import (not the JSON layer).
 13. `EventContextUsage` (`"context_usage"`) is fired once per completed turn, after the turn's usage is stored, only on success (not on error or cancellation).
 14. `MethodGetContextUsage` (`"get_context_usage"`) requires no permission; it returns a zero-valued `ContextUsage` when the agent bridge is unavailable.
 15. UI scene-graph types (`UINode`, `UIProps`, `UIPatchOp`, `UIPatchParams`, `UIArea`, `UICreateAreaParams`) are pure JSON data definitions; `UIPatchOp.Index` is a `*int` so a valid index of `0` survives the wire while a nil index (append) is omitted.
-16. All 56 `Method*` constants are documented above; missing methods in SPECS.md indicate incomplete documentation rather than missing implementation.
+16. All 67 `Method*` constants are documented above (59 in the method tables, 8 in the Task ledger wire contract); missing methods in SPECS.md indicate incomplete documentation rather than missing implementation.
 17. `ShowTextInputParams` mirrors `ShowPickerParams`: `Title` and `Callback` are required, `Placeholder` and `InitialValue` are `omitempty` and default to `""`. After submission the harness fires `EventOnCommand{name: callback, args: [value]}`, the same delivery shape as `show_picker`.

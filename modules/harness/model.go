@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -669,8 +670,10 @@ func (m Model) cmdDispatchSessionStart() tea.Cmd {
 		promptCommands = append(promptCommands, sdk.PromptCommand{Name: command.Name, Desc: command.Desc})
 	}
 	return func() tea.Msg {
+		wd, _ := os.Getwd()
 		payload, _ := json.Marshal(sdk.SessionStartPayload{
 			Reason: "new_session", Tools: promptTools, Commands: promptCommands,
+			CWD: wd, StartedAt: time.Now().Format(time.RFC3339Nano),
 		})
 		evt := sdk.Event{Type: sdk.EventSessionStart, Payload: payload}
 		results, err := extHost.DispatchEvent(context.Background(), evt)

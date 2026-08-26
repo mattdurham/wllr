@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/mattdurham/wllr/modules/sdk"
 	"github.com/tetratelabs/wazero"
@@ -56,6 +57,12 @@ type Host struct {
 
 	logger   *slog.Logger
 	dispatch map[string]func(ctx context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse
+
+	// cwd is the host working directory at startup, injected into WASM
+	// modules (WLLR_CWD env) and reported via host_info. The WASM sandbox has
+	// no working directory, so guest os.Getwd() returns "/"; extensions that
+	// need the real launch directory must take it from the host.
+	cwd string
 
 	// Bus is the shared event stream. All DispatchEvent calls publish here
 	// in addition to dispatching to WASM extensions.
@@ -114,6 +121,11 @@ func NewHost(logger *slog.Logger) *Host {
 		pendingTools:    make(map[string]chan toolResult),
 		nativeTools:     make(map[string]func(ctx context.Context, input json.RawMessage) (string, bool)),
 		Bus:             NewEventBus(),
+	}
+	if wd, err := os.Getwd(); err == nil && wd != "" {
+		h.cwd = wd
+	} else {
+		h.cwd = "/"
 	}
 	h.dispatch = h.buildDispatch()
 	cacheDir := filepath.Join(os.TempDir(), "wllr-wasm-cache")
@@ -540,6 +552,12 @@ func (h *Host) buildDispatch() map[string]func(ctx context.Context, ext *Extensi
 		},
 		sdk.MethodGetOS: func(_ context.Context, _ *Extension, _ sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleGetOS()
+		},
+		sdk.MethodHostInfo: func(_ context.Context, _ *Extension, _ sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleHostInfo()
+		},
+		sdk.MethodListSessions: func(_ context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleListSessions(ext, req)
 		},
 		sdk.MethodGetStatusInfo: func(_ context.Context, _ *Extension, _ sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleGetStatusInfo()
@@ -1599,6 +1617,10 @@ func (h *Host) loadExtension(
 			cfg = cfg.WithEnv(kv[:idx], kv[idx+1:])
 		}
 	}
+	// The WASM sandbox has no working directory (guest os.Getwd returns "/"),
+	// so expose the host cwd explicitly for extensions that record pathed or
+	// timestamped artifacts (history, prompt context discovery).
+	cfg = cfg.WithEnv("WLLR_CWD", h.cwd)
 	mod, err := h.runtime.InstantiateWithConfig(ctx, data, cfg)
 	if err != nil {
 		return fmt.Errorf("instantiate extension %s: %w", name, err)
@@ -2330,6 +2352,146 @@ func (h *Host) handleGetOS() sdk.HostCallResponse {
 		"arch": runtime.GOARCH,
 	})
 	return sdk.HostCallResponse{Result: result}
+}
+
+// handleHostInfo returns host ground truth for extensions: the real working
+// directory, current time, and os/arch. The WASM sandbox has no working
+// directory (guest os.Getwd returns "/") and its clock may be stale, so
+// extensions that write pathed or timestamped artifacts must take these
+// values from the host rather than their own os calls. No permission required.
+func (h *Host) handleHostInfo() sdk.HostCallResponse {
+	result, _ := json.Marshal(map[string]string{
+		"cwd":   h.cwd,
+		"now":   time.Now().Format(time.RFC3339Nano),
+		"os":    runtime.GOOS,
+		"arch":  runtime.GOARCH,
+	})
+	return sdk.HostCallResponse{Result: result}
+}
+
+// hostSessionInfo is one entry returned by list_sessions.
+type hostSessionInfo struct {
+	Path      string `json:"path"`
+	Timestamp string `json:"timestamp"`
+	Preview   string `json:"preview,omitempty"`
+}
+
+// handleListSessions enumerates session files host-side, because the WASM
+// sandbox cannot reliably list or stat them (no working directory, stale
+// clock). It walks base — root-level .jsonl files plus files one level of
+// subdirectories deep — returns entries with real host mtimes, newest first,
+// capped at limit, excluding the caller's current file. Requires PermFileRead.
+func (h *Host) handleListSessions(ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+	if ext == nil || !ext.HasPermission(sdk.PermFileRead) {
+		return sdk.HostCallResponse{Error: "list_sessions: permission denied: requires file_read"}
+	}
+	var params struct {
+		Base    string `json:"base"`
+		Exclude string `json:"exclude"`
+		Limit   int    `json:"limit"`
+	}
+	if len(req.Params) > 0 {
+		_ = json.Unmarshal(req.Params, &params)
+	}
+	if params.Base == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return sdk.HostCallResponse{Error: "list_sessions: no home directory"}
+		}
+		params.Base = filepath.Join(home, ".wllr", "sessions")
+	}
+	if params.Limit <= 0 {
+		params.Limit = 25
+	}
+	entries, err := listSessionFiles(params.Base, params.Exclude, params.Limit)
+	if err != nil {
+		return sdk.HostCallResponse{Error: fmt.Sprintf("list_sessions: %v", err)}
+	}
+	result, _ := json.Marshal(entries)
+	return sdk.HostCallResponse{Result: result}
+}
+
+// listSessionFiles walks base (root-level .jsonl files plus files one level of
+// subdirectories deep) and returns hostSessionInfo entries with real host mtimes,
+// newest first, capped at limit, excluding paths equal to exclude.
+func listSessionFiles(base, exclude string, limit int) ([]hostSessionInfo, error) {
+	type meta struct {
+		path  string
+		mtime time.Time
+	}
+	dedup := map[string]bool{}
+	var metas []meta
+	add := func(p string) {
+		if p == exclude || dedup[p] {
+			return
+		}
+		dedup[p] = true
+		info, serr := os.Stat(p)
+		if serr != nil || !info.Mode().IsRegular() {
+			return
+		}
+		metas = append(metas, meta{path: p, mtime: info.ModTime()})
+	}
+	root, err := os.ReadDir(base)
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range root {
+		if e.IsDir() {
+			sub, serr := os.ReadDir(filepath.Join(base, e.Name()))
+			if serr != nil {
+				continue
+			}
+			for _, f := range sub {
+				if f.IsDir() || !strings.HasSuffix(f.Name(), ".jsonl") {
+					continue
+				}
+				add(filepath.Join(base, e.Name(), f.Name()))
+			}
+		} else if strings.HasSuffix(e.Name(), ".jsonl") {
+			add(filepath.Join(base, e.Name()))
+		}
+	}
+	sort.Slice(metas, func(i, j int) bool { return metas[i].mtime.After(metas[j].mtime) })
+	if limit > 0 && len(metas) > limit {
+		metas = metas[:limit]
+	}
+	infos := make([]hostSessionInfo, 0, len(metas))
+	for _, m := range metas {
+		infos = append(infos, hostSessionInfo{
+			Path:      m.path,
+			Timestamp: m.mtime.Format(time.RFC3339Nano),
+			Preview:   sessionPreview(m.path),
+		})
+	}
+	return infos, nil
+}
+
+// sessionPreview extracts the first non-empty user message from a session JSONL
+// file as a short picker preview. The first line is the session header and is
+// skipped.
+func sessionPreview(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	for _, line := range lines[1:] {
+		var m struct {
+			Type    string `json:"type"`
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		}
+		if json.Unmarshal([]byte(line), &m) != nil || m.Type != "message" || m.Role != "user" || m.Content == "" {
+			continue
+		}
+		r := []rune(m.Content)
+		if len(r) > 70 {
+			return string(r[:70]) + "…"
+		}
+		return m.Content
+	}
+	return ""
 }
 
 func (h *Host) handleGetStatusInfo() sdk.HostCallResponse {

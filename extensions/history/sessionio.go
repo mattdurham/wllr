@@ -8,7 +8,19 @@ import (
 	"encoding/json"
 	"os"
 	"strings"
+	"time"
 )
+
+// formatTimestamp renders an RFC3339Nano timestamp (as produced by the host
+// for list_sessions / host_info) as a human "2006-01-02 15:04" picker label,
+// falling back to the raw string if it does not parse.
+func formatTimestamp(raw string) string {
+	t, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return raw
+	}
+	return t.Format("2006-01-02 15:04")
+}
 
 func loadMessages(path string) ([]storedMsg, error) {
 	data, err := os.ReadFile(path)

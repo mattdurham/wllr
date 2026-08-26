@@ -275,3 +275,15 @@ structured results remain `json.RawMessage` to preserve caller-defined payloads.
 *Addendum (2026-07-05):* Runtime liveness consumers should prefer explicit `working`/`liveness` fields when available. A running child is working unless a concrete dead state is reported; orchestrators should wait for child notifications rather than using repeated polling as a waiting mechanism.
 
 **Consequence:** The result shape is additive and backward-compatible for extensions that only read `id` and `name`. Extensions can now surface current activity and graceful-shutdown state without adding a new host_call method.
+
+---
+
+## 21. host_info / list_sessions — host ground truth for extensions
+
+*Added: 2026-08-26*
+
+**Decision:** Add two host_call methods: `MethodHostInfo` (`"host_info"`, returns `{"cwd", "now" (RFC3339Nano), "os", "arch"}`, no permission) and `MethodListSessions` (`"list_sessions"`, requires PermFileRead, returns `[{"path","timestamp","preview"}]` with real host mtimes, newest first). `SessionStartPayload` gains optional `cwd` and `started_at` fields carrying the same ground truth to session_start subscribers. The extension host also injects `WLLR_CWD` into every WASM module environment.
+
+**Rationale:** The WASM sandbox has no working directory (guest `os.Getwd` returns `/`) and its clock is unreliable (the history extension's session filenames all stamped `2022-01-01T00:00:00` and landed in a single `""` subdirectory). Extensions that write pathed or timestamped artifacts therefore could not reliably scope files to the real launch directory, and the history picker (which lists sessions inside WASM) saw only the `""` directory. Both reads were being done in-guest where the guest cannot know the truth; the host is the only component that does.
+
+**Consequence:** Method constant count rises to 67 (59 tabled in SPECS.md, 8 task-ledger methods in its wire-contract section). Additive, ABIVersion unchanged. The history extension consumes all three surfaces: `OnRawSessionStart` + `HostInfo()` for the session header (path + timestamp), and `ListSessions` host-side in `/history` for real mtimes and first-user-message previews. Existing guest-side `get_env`/`get_os` behavior is untouched; `WLLR_CWD` is a new env key.

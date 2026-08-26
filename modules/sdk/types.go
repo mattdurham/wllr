@@ -224,6 +224,19 @@ const (
 	MethodMCPSend  = "mcp_send"
 	MethodMCPRead  = "mcp_read"
 
+	// MethodHostInfo returns host ground truth: {"cwd", "now" (RFC3339Nano),
+	// "os", "arch"}. The WASM sandbox has no working directory (guest Getwd
+	// returns "/") and its clock may be stale, so extensions that write
+	// timestamped or pathed artifacts should take these values from the host.
+	// No permission required — read-only.
+	MethodHostInfo = "host_info"
+
+	// MethodListSessions lists session files under base (root-level files plus
+	// files one level of subdirectories deep) with real host mtimes, newest
+	// first, up to limit entries, excluding paths equal to exclude. Requires
+	// PermFileRead. Result: [{"path", "timestamp", "preview"}].
+	MethodListSessions = "list_sessions"
+
 	// MethodShowPicker opens an interactive TUI list picker. After the user
 	// selects an item the harness fires EventOnCommand{name: callback, args: [id]}.
 	MethodShowPicker = "show_picker"

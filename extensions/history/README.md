@@ -26,9 +26,12 @@ Subscribes to four lifecycle events:
 | `before_tool_call` | `tool_call` entry (name + input) |
 
 Files live under a per-cwd directory so sessions are scoped to the project you
-were working in. The filename timestamp/id use `time.Now()` + `crypto/rand` so
-they are unique even though the WASM runtime's clock may be unreliable (session
-list display uses the file mtime instead — see `peekSession`).
+were working in. The session directory and header timestamp come from **host
+ground truth** (`session_start` payload `cwd`/`started_at`, falling back to the
+`host_info` host_call) because the WASM sandbox has no working directory
+(`os.Getwd` returns `/`) and an unreliable clock — without this, every session
+landed in a single `""` subdirectory with 2022 timestamps. The filename id uses
+`crypto/rand` for uniqueness.
 
 ## The `/history` flow (browse → choose point → replay)
 
@@ -36,7 +39,10 @@ list display uses the file mtime instead — see `peekSession`).
 
 1. **Select a session.** Lists up to the 20 most recent sessions (across all
    cwds), newest first, each showing its timestamp and a preview of the first
-   user message. (The in-progress current session is excluded.)
+   user message. (The in-progress current session is excluded.) Listing is done
+   **host-side** via the `list_sessions` host_call with real host mtimes and
+   previews, because the WASM sandbox cannot reliably enumerate or stat the
+   host filesystem.
 2. **Select a resume point.** Lists every message in that session, numbered and
    tagged `you`/`asst` with a one-line preview.
 
@@ -124,3 +130,15 @@ Run them from the extension module:
 ```bash
 cd extensions/history && go test ./...
 ```
+
+## Host-side listing (`list_sessions`)
+
+The `/history` picker calls the `list_sessions` host_call (host handler in
+`modules/extension/host.go`). The host walks `~/.wllr/sessions` (root-level
+`.jsonl` files plus files one subdirectory deep), stats each file for its real
+mtime, extracts the first non-empty user message as a preview, sorts newest
+first, and caps at `limit` (default 25), excluding the current session file.
+This requires `file_read`; the bundled extension is trusted and receives it
+automatically. Message *loading* (`loadMessages`) still happens in-guest — the
+guest filesystem is readable for file contents; only stat/mtime and reliable
+enumeration needed the host.

@@ -175,6 +175,13 @@ func OnSessionStart(fn func()) {
 	_sdkOn("session_start", func(_ json.RawMessage) { fn() })
 }
 
+// OnRawSessionStart registers a handler that receives the raw session_start
+// payload. Use this when the handler needs payload fields such as cwd and
+// started_at, which the host injects for extensions.
+func OnRawSessionStart(fn func(data []byte)) {
+	_sdkOn("session_start", func(payload json.RawMessage) { fn(payload) })
+}
+
 // OnShutdown registers a handler called when the host is shutting down.
 func OnShutdown(fn func(reason string)) {
 	_sdkOn("shutdown", func(payload json.RawMessage) {
@@ -324,6 +331,50 @@ func GetEnv(name string) (string, error) {
 		return "", err
 	}
 	return r.Value, nil
+}
+
+// HostInfo returns host ground truth: the real working directory, current
+// time (RFC3339Nano), and os/arch. The WASM sandbox has no working directory
+// (guest os.Getwd returns "/") and its clock may be stale, so use these
+// values instead of the guest's own os calls when writing pathed or
+// timestamped artifacts.
+func HostInfo() (cwd, now string, err error) {
+	raw := _sdkCallResult("host_info", nil)
+	if raw == nil {
+		return "", "", fmt.Errorf("host_info: no response")
+	}
+	var r struct {
+		CWD  string `json:"cwd"`
+		Now  string `json:"now"`
+	}
+	if e := json.Unmarshal(raw, &r); e != nil {
+		return "", "", e
+	}
+	return r.CWD, r.Now, nil
+}
+
+// HostSession is one entry returned by ListSessions.
+type HostSession struct {
+	Path      string `json:"path"`
+	Timestamp string `json:"timestamp"`
+	Preview   string `json:"preview,omitempty"`
+}
+
+// ListSessions lists session files under base (default ~/.wllr/sessions) with
+// real host mtimes, newest first, up to limit entries, excluding the current
+// file. Listing is done host-side because the WASM sandbox cannot reliably
+// stat or enumerate the host filesystem. Requires the file_read permission.
+func ListSessions(base, exclude string, limit int) ([]HostSession, error) {
+	params := map[string]any{"base": base, "exclude": exclude, "limit": limit}
+	raw := _sdkCallResult("list_sessions", params)
+	if raw == nil {
+		return nil, fmt.Errorf("list_sessions: no response")
+	}
+	var out []HostSession
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // StoreSet stores a key-value pair in the extension's private store.

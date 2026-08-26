@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 )
@@ -21,7 +20,7 @@ import (
 func init() {
 	RegisterCommand("history", "Browse previous conversations and resume from any point")
 
-	OnSessionStart(handleSessionStart)
+	OnRawSessionStart(handleSessionStart)
 
 	OnBeforeAgentStart(func(prompt string) {
 		recordMessage("user", prompt)
@@ -43,10 +42,11 @@ func init() {
 			return
 		}
 		entryCount++
+		ts := nowRFC()
 		appendJSONL(currentFile, toolCallEntry{
 			Type:       "tool_call",
 			ID:         fmt.Sprintf("t%d", entryCount),
-			Timestamp:  time.Now().Format(time.RFC3339Nano),
+			Timestamp:  ts,
 			ToolCallID: p.ToolCallID,
 			ToolName:   p.ToolName,
 			Input:      p.Input,
@@ -83,23 +83,52 @@ var (
 
 // ─── Event handlers ───────────────────────────────────────────────────────────
 
-func handleSessionStart() {
+// sessionStartPayload is the host-injected session_start payload: it carries
+// host ground truth (real cwd, real timestamp) because the WASM sandbox has
+// no working directory and an unreliable clock.
+type sessionStartPayload struct {
+	Reason    string `json:"reason"`
+	CWD       string `json:"cwd"`
+	StartedAt string `json:"started_at"` // RFC3339Nano
+}
+
+func handleSessionStart(raw []byte) {
+	var p sessionStartPayload
+	_ = json.Unmarshal(raw, &p)
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		home = "/tmp"
 	}
-	cwd, _ := os.Getwd()
 
-	sessDir := filepath.Join(home, ".wllr", "sessions", sanitizePath(cwd))
+	// Prefer host ground truth; fall back to the guest's own values.
+	if cwd, now, hErr := HostInfo(); hErr == nil && cwd != "" && now != "" {
+		if p.CWD == "" {
+			p.CWD = cwd
+		}
+		if p.StartedAt == "" {
+			p.StartedAt = now
+		}
+	}
+	if p.CWD == "" {
+		p.CWD, _ = os.Getwd()
+	}
+	var ts time.Time
+	if t, terr := time.Parse(time.RFC3339Nano, p.StartedAt); terr == nil {
+		ts = t
+	} else {
+		ts = time.Now()
+	}
+
+	sessDir := filepath.Join(home, ".wllr", "sessions", sanitizePath(p.CWD))
 	if err := os.MkdirAll(sessDir, 0o755); err != nil {
 		Logf(2, "history: mkdir %s: %v", sessDir, err)
 		return
 	}
 
-	// Use crypto/rand for the ID so filenames are unique even if time.Now()
-	// returns a fixed value in the WASM runtime.
+	// Use crypto/rand for the ID so filenames stay unique even if the WASM
+	// runtime's clock is unreliable.
 	id := randomID()
-	ts := time.Now()
 	fname := ts.Format("2006-01-02T15-04-05") + "_" + id + ".jsonl"
 	currentFile = filepath.Join(sessDir, fname)
 	entryCount = 0
@@ -108,7 +137,7 @@ func handleSessionStart() {
 		Type:      "session",
 		ID:        id,
 		Timestamp: ts.Format(time.RFC3339Nano),
-		CWD:       cwd,
+		CWD:       p.CWD,
 	})
 	Logf(1, "history: session started → %s", currentFile)
 }
@@ -127,34 +156,48 @@ func recordMessage(role, content string) {
 		return
 	}
 	entryCount++
+	ts := nowRFC()
 	appendJSONL(currentFile, messageEntry{
 		Type:      "message",
 		ID:        fmt.Sprintf("%s%d", string(role[0]), entryCount),
-		Timestamp: time.Now().Format(time.RFC3339Nano),
+		Timestamp: ts,
 		Role:      role,
 		Content:   content,
 	})
 }
 
+// nowRFC returns the current host time as RFC3339Nano, falling back to the
+// guest clock if the host_info call is unavailable.
+func nowRFC() string {
+	if _, now, err := HostInfo(); err == nil && now != "" {
+		return now
+	}
+	return time.Now().Format(time.RFC3339Nano)
+}
+
 // ─── /history → session picker ───────────────────────────────────────────────
 
 func handleHistoryCommand() {
-	sessions, err := listSessions()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "/tmp"
+	}
+	base := filepath.Join(home, ".wllr", "sessions")
+
+	// List host-side: the WASM sandbox cannot reliably stat or sort by mtime,
+	// so the host returns real mtimes and first-user-message previews.
+	sessions, err := ListSessions(base, currentFile, 20)
 	if err != nil || len(sessions) == 0 {
 		Modal("No previous sessions found.\n\nStart a conversation to create your first session.")
 		return
 	}
 
-	limit := 20
-	if len(sessions) < limit {
-		limit = len(sessions)
-	}
-	items := make([]PickerItem, 0, limit)
-	for _, s := range sessions[:limit] {
+	items := make([]PickerItem, 0, len(sessions))
+	for _, s := range sessions {
 		items = append(items, PickerItem{
-			ID:       s.path,
-			Label:    s.timestamp,
-			Sublabel: s.preview,
+			ID:       s.Path,
+			Label:    formatTimestamp(s.Timestamp),
+			Sublabel: s.Preview,
 		})
 	}
 	ShowPicker("Select a session  (↑↓ · enter · esc)", items, "history:session_selected")
@@ -233,80 +276,6 @@ func handleMessageSelected(idxStr string) {
 }
 
 // ─── Session file I/O ─────────────────────────────────────────────────────────
-
-func listSessions() ([]sessionInfo, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, err
-	}
-	base := filepath.Join(home, ".wllr", "sessions")
-
-	entries, err := os.ReadDir(base)
-	if err != nil {
-		return nil, err
-	}
-
-	var all []sessionInfo
-	for _, dir := range entries {
-		if !dir.IsDir() {
-			continue
-		}
-		files, err := os.ReadDir(filepath.Join(base, dir.Name()))
-		if err != nil {
-			continue
-		}
-		for _, f := range files {
-			if f.IsDir() || !strings.HasSuffix(f.Name(), ".jsonl") {
-				continue
-			}
-			path := filepath.Join(base, dir.Name(), f.Name())
-			if path == currentFile {
-				continue
-			}
-			si, err := peekSession(path)
-			if err == nil {
-				all = append(all, si)
-			}
-		}
-	}
-
-	sort.Slice(all, func(i, j int) bool { return all[i].timestamp > all[j].timestamp })
-	return all, nil
-}
-
-func peekSession(path string) (sessionInfo, error) {
-	// Use file modification time for the display timestamp — the header
-	// timestamp comes from time.Now() inside WASM which may be incorrect.
-	info, err := os.Stat(path)
-	if err != nil {
-		return sessionInfo{}, err
-	}
-	ts := info.ModTime().Format("2006-01-02 15:04")
-
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return sessionInfo{}, err
-	}
-	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	if len(lines) == 0 {
-		return sessionInfo{}, fmt.Errorf("empty")
-	}
-
-	preview := "(empty)"
-	for _, line := range lines[1:] {
-		var m messageEntry
-		if json.Unmarshal([]byte(line), &m) == nil && m.Type == "message" && m.Role == "user" && m.Content != "" {
-			r := []rune(m.Content)
-			if len(r) > 70 {
-				preview = string(r[:70]) + "…"
-			} else {
-				preview = m.Content
-			}
-			break
-		}
-	}
-	return sessionInfo{path: path, timestamp: ts, preview: preview}, nil
-}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
