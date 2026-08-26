@@ -191,6 +191,16 @@
         },
         "required": ["list_id", "agent_id"]
       }
+    },
+    {
+      "name": "tasks_report",
+      "description": "Report a claimed task result with its attempt ID",
+      "inputSchema": {"type":"object","properties":{"list_id":{"type":"string"},"task_id":{"type":"string"},"attempt_id":{"type":"string"},"agent_id":{"type":"string"},"status":{"type":"string","enum":["completed","blocked","failed","cancelled"]},"result":{},"reason":{"type":"string"},"error":{"type":"string"}},"required":["list_id","task_id","attempt_id","agent_id","status"]}
+    },
+    {
+      "name": "tasks_events_after",
+      "description": "Replay durable task events after a cursor",
+      "inputSchema": {"type":"object","properties":{"list_id":{"type":"string"},"cursor":{"type":"integer"},"limit":{"type":"integer"}},"required":["list_id","cursor"]}
     }
   ]
 }

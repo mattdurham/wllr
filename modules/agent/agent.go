@@ -997,11 +997,14 @@ func (a *Agent) finishTurn(ctx context.Context, err error, ctxErr error, onDone 
 		// creator (top-level agents such as main never self-notify). The message is
 		// a normal (model-visible) message, unlike the system-only AGENT_SHUTDOWN.
 		if shutdownFrom == "" && a.creatorID != "" && a.pool != nil {
-			idleMsg := fmt.Sprintf(
-				"[agent '%s' is idle — review its results with get_agent_status or shut it down with shutdown_agent]",
-				a.id,
+			idleMsg, encodeErr := a.lifecycleMessage(
+				lifecycleEventIdle,
+				"child is idle; review its results with get_agent_status or shut it down with shutdown_agent",
+				nil,
 			)
-			if derr := a.pool.Deliver(a.creatorID, sdk.Message{
+			if encodeErr != nil {
+				slog.Warn("finishTurn: failed to encode idle notification", "agent", a.id, "err", encodeErr)
+			} else if derr := a.pool.Deliver(a.creatorID, sdk.Message{
 				Role:    sdk.RoleUser,
 				Content: idleMsg,
 			}, true); derr != nil && !errors.Is(derr, ErrAgentNotFound) {
@@ -1027,16 +1030,15 @@ func (a *Agent) finishTurn(ctx context.Context, err error, ctxErr error, onDone 
 
 			// Send AGENT_SHUTDOWN back to the creator, remove self from pool, and
 			// fire onDone exactly once before returning.
-			shutdownPayload, _ := json.Marshal(map[string]string{
-				"event":    "AGENT_SHUTDOWN",
-				"agent_id": a.id,
-			})
+			shutdownPayload, payloadErr := a.lifecycleMessage(lifecycleEventShutdown, "agent shut down gracefully", nil)
 			if a.pool != nil {
-				if err := a.pool.SendMessage(shutdownFrom, sdk.Message{
+				if payloadErr != nil {
+					slog.Warn("finishTurn: failed to encode AGENT_SHUTDOWN", "agent", a.id, "err", payloadErr)
+				} else if err := a.pool.Deliver(shutdownFrom, sdk.Message{
 					Role:    sdk.RoleUser,
-					Content: string(shutdownPayload),
+					Content: shutdownPayload,
 					Type:    sdk.MessageTypeSystem,
-				}); err != nil && !errors.Is(err, ErrAgentNotFound) {
+				}, true); err != nil && !errors.Is(err, ErrAgentNotFound) {
 					slog.Warn("finishTurn: failed to send AGENT_SHUTDOWN", "agent", a.id, "err", err)
 				}
 				if err := a.pool.Close(a.id); err != nil && !errors.Is(err, ErrAgentNotFound) {

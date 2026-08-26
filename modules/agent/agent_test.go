@@ -597,6 +597,8 @@ func TestFinishTurn_ShutdownRequest_SendsAgentShutdownAndClosesSelf(t *testing.T
 	if worker == nil {
 		t.Fatal("worker not found after spawn")
 	}
+	orchTurn := make(chan []sdk.Message, 1)
+	orch.SetOnTurnStart(func(_ string, inbox []sdk.Message) { orchTurn <- inbox })
 
 	done := make(chan error, 1)
 	worker.SetOnDone(func(e error) { done <- e })
@@ -635,10 +637,12 @@ func TestFinishTurn_ShutdownRequest_SendsAgentShutdownAndClosesSelf(t *testing.T
 		t.Error("worker should have been removed from pool after shutdown_request, but it's still present")
 	}
 
-	// Orchestrator's inbox should contain an AGENT_SHUTDOWN system message.
-	orchInbox := orch.DrainInbox()
-	if len(orchInbox) == 0 {
-		t.Fatal("orchestrator's inbox is empty — expected AGENT_SHUTDOWN system message")
+	// The wake-enabled notification is consumed by the orchestrator's turn.
+	var orchInbox []sdk.Message
+	select {
+	case orchInbox = <-orchTurn:
+	case <-time.After(2 * time.Second):
+		t.Fatal("orchestrator was not woken by AGENT_SHUTDOWN")
 	}
 	found := false
 	for _, m := range orchInbox {
@@ -680,6 +684,8 @@ func TestFinishTurn_NormalMessagesProcessedBeforeShutdown(t *testing.T) {
 	if worker == nil {
 		t.Fatal("worker not found")
 	}
+	orchTurn := make(chan []sdk.Message, 1)
+	orch.SetOnTurnStart(func(_ string, inbox []sdk.Message) { orchTurn <- inbox })
 
 	done := make(chan error, 1)
 	worker.SetOnDone(func(e error) { done <- e })
@@ -720,8 +726,13 @@ func TestFinishTurn_NormalMessagesProcessedBeforeShutdown(t *testing.T) {
 		t.Error("worker should have been removed from pool after shutdown processing")
 	}
 
-	// Orchestrator should have received AGENT_SHUTDOWN.
-	orchInbox := orch.DrainInbox()
+	// Orchestrator should have received AGENT_SHUTDOWN through its wake turn.
+	var orchInbox []sdk.Message
+	select {
+	case orchInbox = <-orchTurn:
+	case <-time.After(2 * time.Second):
+		t.Fatal("orchestrator was not woken by AGENT_SHUTDOWN")
+	}
 	found := false
 	for _, m := range orchInbox {
 		if m.Type != sdk.MessageTypeSystem {

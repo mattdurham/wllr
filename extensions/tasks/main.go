@@ -4,368 +4,141 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
-	"sync"
+	"sort"
 )
 
-// agentCall fires a host_call for agent-related methods and returns the raw
-// response, or "" on error. It reuses the SDK's _sdkCallResult to avoid
-// duplicating the WASM import.
-func agentCall(method string, params any) string {
-	raw := _sdkCallResult(method, params)
-	if raw == nil {
-		return ""
-	}
-	return string(raw)
+type taskListResponse struct {
+	List struct {
+		ListID  string `json:"list_id"`
+		Version int64  `json:"version"`
+	} `json:"list"`
+}
+type taskResponse struct {
+	Task taskRecord `json:"task"`
+}
+type tasksResponse struct {
+	Tasks      []taskRecord `json:"tasks"`
+	Cursor     int64        `json:"cursor"`
+	NextCursor int64        `json:"next_cursor"`
+}
+type eventsResponse struct {
+	Events     []taskEvent `json:"events"`
+	Cursor     int64       `json:"cursor"`
+	NextCursor int64       `json:"next_cursor"`
+}
+type taskRecord struct {
+	TaskID          string          `json:"task_id"`
+	ListID          string          `json:"list_id"`
+	Title           string          `json:"title"`
+	Description     string          `json:"description,omitempty"`
+	Status          string          `json:"status"`
+	Priority        int             `json:"priority,omitempty"`
+	DependsOn       []string        `json:"depends_on,omitempty"`
+	Result          json.RawMessage `json:"result,omitempty"`
+	Error           string          `json:"error,omitempty"`
+	Reason          string          `json:"reason,omitempty"`
+	ParentTaskID    string          `json:"parent_task_id,omitempty"`
+	OwnerAgentID    string          `json:"owner_agent_id,omitempty"`
+	AssigneeAgentID string          `json:"assignee_agent_id,omitempty"`
+	WorkspaceMode   string          `json:"workspace_mode"`
+	AttemptID       string          `json:"attempt_id,omitempty"`
+	Version         int64           `json:"version"`
+}
+type taskEvent struct {
+	EventID      string          `json:"event_id"`
+	ListID       string          `json:"list_id"`
+	TaskID       string          `json:"task_id,omitempty"`
+	AttemptID    string          `json:"attempt_id,omitempty"`
+	Event        string          `json:"event"`
+	Version      int64           `json:"version"`
+	ActorAgentID string          `json:"actor_agent_id,omitempty"`
+	Snapshot     json.RawMessage `json:"snapshot,omitempty"`
 }
 
-// Task represents a task in a task list.
-
-// pending, in_progress, completed, blocked
-// low, medium, high, critical
-
-// Task IDs this task depends on
-
-// TaskList represents a collection of tasks.
-
-var (
-	taskLists    = make(map[string]*TaskList)
-	taskListMu   sync.RWMutex
-	listCounter  int
-	taskCounters = make(map[string]int)
-	counterMu    sync.Mutex
-)
+func ledgerCall(method string, params any, out any) (string, bool) {
+	raw, hostErr := _sdkCallResultWithError(method, params)
+	if hostErr != "" {
+		return method + ": " + hostErr, true
+	}
+	if out != nil {
+		if err := json.Unmarshal(raw, out); err != nil {
+			return method + ": invalid host result: " + err.Error(), true
+		}
+	}
+	return string(raw), false
+}
 
 func init() {
-	RegisterToolWithOutput(
-		"tasklist_create",
-		"Create a new task list and return its unique ID",
-		json.RawMessage(
-			`{"type":"object","properties":{"name":{"type":"string","description":"Name of the task list"},"description":{"type":"string","description":"Description of the task list"},"owner_agent_id":{"type":"string","description":"Agent ID to notify on task completion or blocking"}},"required":["name"]}`,
-		),
-		json.RawMessage(
-			`{"type":"object","properties":{"list_id":{"type":"string","description":"Created task list ID"}},"required":["list_id"]}`,
-		),
-	)
-	RegisterToolWithOutput(
-		"tasks_create",
-		"Create a new task in a task list",
-		json.RawMessage(
-			`{"type":"object","properties":{"list_id":{"type":"string","description":"Task list ID"},"title":{"type":"string","description":"Task title"},"description":{"type":"string","description":"Task description"},"priority":{"type":"string","enum":["low","medium","high","critical"],"description":"Task priority"},"tags":{"type":"array","items":{"type":"string"},"description":"Task tags"},"dependencies":{"type":"array","items":{"type":"string"},"description":"Task IDs this task depends on"}},"required":["list_id","title"]}`,
-		),
-		json.RawMessage(
-			`{"type":"object","properties":{"task_id":{"type":"string","description":"Created task ID"}},"required":["task_id"]}`,
-		),
-	)
-	RegisterToolWithOutput(
-		"tasks_update",
-		"Update an existing task",
-		json.RawMessage(
-			`{"type":"object","properties":{"list_id":{"type":"string","description":"Task list ID"},"task_id":{"type":"string","description":"Task ID"},"title":{"type":"string","description":"New title"},"description":{"type":"string","description":"New description"},"status":{"type":"string","enum":["pending","in_progress","completed","blocked"],"description":"New status"},"priority":{"type":"string","enum":["low","medium","high","critical"],"description":"New priority"},"tags":{"type":"array","items":{"type":"string"},"description":"New tags"},"dependencies":{"type":"array","items":{"type":"string"},"description":"New dependencies"}},"required":["list_id","task_id"]}`,
-		),
-		json.RawMessage(`{"type":"object","properties":{"success":{"type":"boolean"}},"required":["success"]}`),
-	)
-	RegisterToolWithOutput(
-		"tasks_list",
-		"List all tasks in a task list",
-		json.RawMessage(
-			`{"type":"object","properties":{"list_id":{"type":"string","description":"Task list ID"},"status":{"type":"string","enum":["pending","in_progress","completed","blocked"],"description":"Filter by status (optional)"}},"required":["list_id"]}`,
-		),
-		json.RawMessage(
-			`{"type":"object","properties":{"tasks":{"type":"array","items":{"type":"object","description":"Task object"}}},"required":["tasks"]}`,
-		),
-	)
-	RegisterToolWithOutput(
-		"tasks_get",
-		"Get details of a specific task",
-		json.RawMessage(
-			`{"type":"object","properties":{"list_id":{"type":"string","description":"Task list ID"},"task_id":{"type":"string","description":"Task ID"}},"required":["list_id","task_id"]}`,
-		),
-		json.RawMessage(`{"type":"object","description":"Task object"}`),
-	)
-	RegisterToolWithOutput(
-		"tasks_claim",
-		"Atomically claim the next available (pending, dependency-satisfied) task in a list. Sets it to in_progress and records the assignee. Returns the claimed task, or {\"task\":null} when none are available. Prefer this over tasks_list+tasks_update when multiple workers share a list — it cannot double-assign a task.",
-		json.RawMessage(
-			`{"type":"object","properties":{"list_id":{"type":"string","description":"Task list ID"},"agent_id":{"type":"string","description":"Claiming agent's ID (recorded as assignee)"}},"required":["list_id","agent_id"]}`,
-		),
-		json.RawMessage(
-			`{"type":"object","properties":{"task":{"description":"Claimed task object, or null when no task is available"}},"required":["task"]}`,
-		),
-	)
-
-	OnToolCall(func(callID, toolName string, input json.RawMessage) (string, bool) {
-		p := toolPayload{ToolCallID: callID, Input: input}
-		switch toolName {
+	RegisterToolWithOutput("tasklist_create", "Create a durable task list.", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"},"description":{"type":"string"},"owner_agent_id":{"type":"string"}},"required":["name"]}`), json.RawMessage(`{"type":"object"}`))
+	RegisterToolWithOutput("tasks_create", "Create a durable task; workspace_mode is metadata only.", json.RawMessage(`{"type":"object","properties":{"list_id":{"type":"string"},"title":{"type":"string"},"description":{"type":"string"},"priority":{"type":"integer"},"parent_task_id":{"type":"string"},"owner_agent_id":{"type":"string"},"workspace_mode":{"type":"string","enum":["shared","worktree","readonly"]},"depends_on":{"type":"array","items":{"type":"string"}}},"required":["list_id","title"]}`), json.RawMessage(`{"type":"object"}`))
+	RegisterToolWithOutput("tasks_update", "CAS-update a durable task; pass the returned version as expected_version.", json.RawMessage(`{"type":"object","properties":{"list_id":{"type":"string"},"task_id":{"type":"string"},"expected_version":{"type":"integer"},"title":{"type":"string"},"description":{"type":"string"},"priority":{"type":"integer"},"assignee_agent_id":{"type":"string"},"workspace_mode":{"type":"string","enum":["shared","worktree","readonly"]}},"required":["list_id","task_id","expected_version"]}`), json.RawMessage(`{"type":"object"}`))
+	RegisterToolWithOutput("tasks_list", "List durable tasks with a bounded cursor.", json.RawMessage(`{"type":"object","properties":{"list_id":{"type":"string"},"cursor":{"type":"integer"},"limit":{"type":"integer"},"status":{"type":"string"}},"required":["list_id"]}`), json.RawMessage(`{"type":"object"}`))
+	RegisterToolWithOutput("tasks_get", "Get the authoritative durable task record.", json.RawMessage(`{"type":"object","properties":{"list_id":{"type":"string"},"task_id":{"type":"string"}},"required":["list_id","task_id"]}`), json.RawMessage(`{"type":"object"}`))
+	RegisterToolWithOutput("tasks_claim", "Claim the next eligible task atomically.", json.RawMessage(`{"type":"object","properties":{"list_id":{"type":"string"},"agent_id":{"type":"string"}},"required":["list_id","agent_id"]}`), json.RawMessage(`{"type":"object"}`))
+	RegisterToolWithOutput("tasks_report", "Report a claimed task result exactly once.", json.RawMessage(`{"type":"object","properties":{"list_id":{"type":"string"},"task_id":{"type":"string"},"attempt_id":{"type":"string"},"agent_id":{"type":"string"},"status":{"type":"string","enum":["completed","blocked","failed","cancelled"]},"result":{},"error":{"type":"string"},"reason":{"type":"string"}},"required":["list_id","task_id","attempt_id","agent_id","status"]}`), json.RawMessage(`{"type":"object"}`))
+	RegisterToolWithOutput("tasks_events_after", "Replay task events after a cursor; use this after every wake or compaction.", json.RawMessage(`{"type":"object","properties":{"list_id":{"type":"string"},"cursor":{"type":"integer"},"limit":{"type":"integer"}},"required":["list_id","cursor"]}`), json.RawMessage(`{"type":"object"}`))
+	OnToolCall(func(_ string, name string, input json.RawMessage) (string, bool) {
+		var params map[string]any
+		if err := json.Unmarshal(input, &params); err != nil {
+			return name + ": invalid JSON: " + err.Error(), true
+		}
+		switch name {
 		case "tasklist_create":
-			return handleTasklistCreate(p)
-		case "tasks_create":
-			return handleTasksCreate(p)
-		case "tasks_update":
-			return handleTasksUpdate(p)
+			var out taskListResponse
+			return ledgerCall(name, params, &out)
+		case "tasks_create", "tasks_update", "tasks_get", "tasks_report":
+			var out taskResponse
+			return ledgerCall(name, params, &out)
+		case "tasks_events_after":
+			var out eventsResponse
+			return ledgerCall(name, params, &out)
 		case "tasks_list":
-			return handleTasksList(p)
-		case "tasks_get":
-			return handleTasksGet(p)
+			return listTasks(params)
 		case "tasks_claim":
-			return handleTasksClaim(p)
+			return claimNextTask(params)
 		default:
 			return "", false
 		}
 	})
 }
 
-func handleTasklistCreate(p toolPayload) (string, bool) {
-	var input struct {
-		Name         string `json:"name"`
-		Description  string `json:"description"`
-		OwnerAgentID string `json:"owner_agent_id"`
+func listTasks(params map[string]any) (string, bool) {
+	var out tasksResponse
+	result, failed := ledgerCall("tasks_list", params, &out)
+	if failed || params["status"] == nil {
+		return result, failed
 	}
-	if err := json.Unmarshal(p.Input, &input); err != nil || input.Name == "" {
-		return "tasklist_create: name is required", true
-	}
-
-	counterMu.Lock()
-	listCounter++
-	listID := fmt.Sprintf("list-%d", listCounter)
-	counterMu.Unlock()
-
-	taskList := &TaskList{
-		ID:           listID,
-		Name:         input.Name,
-		Description:  input.Description,
-		Tasks:        make(map[string]*Task),
-		OwnerAgentID: input.OwnerAgentID,
-	}
-
-	taskListMu.Lock()
-	taskLists[listID] = taskList
-	taskCounters[listID] = 0
-	taskListMu.Unlock()
-
-	out, _ := json.Marshal(map[string]string{"list_id": listID})
-	return string(out), false
-}
-
-func handleTasksCreate(p toolPayload) (string, bool) {
-	var input struct {
-		ListID       string   `json:"list_id"`
-		Title        string   `json:"title"`
-		Description  string   `json:"description"`
-		Priority     string   `json:"priority"`
-		Tags         []string `json:"tags"`
-		Dependencies []string `json:"dependencies"`
-	}
-	if err := json.Unmarshal(p.Input, &input); err != nil || input.ListID == "" || input.Title == "" {
-		return "tasks_create: list_id and title are required", true
-	}
-
-	taskListMu.RLock()
-	taskList, exists := taskLists[input.ListID]
-	taskListMu.RUnlock()
-
-	if !exists {
-		return "tasks_create: task list not found", true
-	}
-
-	counterMu.Lock()
-	taskCounters[input.ListID]++
-	taskID := fmt.Sprintf("task-%d", taskCounters[input.ListID])
-	counterMu.Unlock()
-
-	if input.Priority == "" {
-		input.Priority = "medium"
-	}
-
-	task := &Task{
-		ID:           taskID,
-		Title:        input.Title,
-		Description:  input.Description,
-		Status:       "pending",
-		Priority:     input.Priority,
-		Tags:         input.Tags,
-		Dependencies: input.Dependencies,
-	}
-
-	taskList.mu.Lock()
-	taskList.Tasks[taskID] = task
-	taskList.mu.Unlock()
-
-	out, _ := json.Marshal(map[string]string{"task_id": taskID})
-	return string(out), false
-}
-
-func handleTasksUpdate(p toolPayload) (string, bool) {
-	var input struct {
-		ListID       string   `json:"list_id"`
-		TaskID       string   `json:"task_id"`
-		Title        string   `json:"title"`
-		Description  string   `json:"description"`
-		Status       string   `json:"status"`
-		Priority     string   `json:"priority"`
-		Tags         []string `json:"tags"`
-		Dependencies []string `json:"dependencies"`
-	}
-	if err := json.Unmarshal(p.Input, &input); err != nil || input.ListID == "" || input.TaskID == "" {
-		return "tasks_update: list_id and task_id are required", true
-	}
-
-	taskListMu.RLock()
-	taskList, exists := taskLists[input.ListID]
-	taskListMu.RUnlock()
-
-	if !exists {
-		return "tasks_update: task list not found", true
-	}
-
-	taskList.mu.Lock()
-	task, exists := taskList.Tasks[input.TaskID]
-	if !exists {
-		taskList.mu.Unlock()
-		return "tasks_update: task not found", true
-	}
-
-	oldStatus := task.Status
-
-	if input.Title != "" {
-		task.Title = input.Title
-	}
-	if input.Description != "" {
-		task.Description = input.Description
-	}
-	if input.Status != "" {
-		task.Status = input.Status
-	}
-	if input.Priority != "" {
-		task.Priority = input.Priority
-	}
-	if input.Tags != nil {
-		task.Tags = input.Tags
-	}
-	if input.Dependencies != nil {
-		task.Dependencies = input.Dependencies
-	}
-
-	ownerAgentID := taskList.OwnerAgentID
-	taskTitle := task.Title
-	taskID := task.ID
-	newStatus := task.Status
-	taskList.mu.Unlock()
-
-	if shouldNotify(oldStatus, newStatus) && ownerAgentID != "" {
-		// agent_deliver queues the TASK_DONE notification AND wakes the owner so it
-		// reacts immediately. The prior agent_send_message-only path left the
-		// notification sitting in the owner's inbox until it happened to run for
-		// some other reason — a silent stall in the task-coordination pattern.
-		resp := agentCall("agent_deliver", map[string]string{
-			"id":      ownerAgentID,
-			"message": fmt.Sprintf("TASK_DONE: %s %s", taskID, taskTitle),
-		})
-		if resp != "" {
-			var errResp struct {
-				Error string `json:"error"`
-			}
-			if jsonErr := json.Unmarshal([]byte(resp), &errResp); jsonErr == nil && errResp.Error != "" {
-				fmt.Printf("tasks: agent_deliver warning: %s\n", errResp.Error)
-			}
+	want, _ := params["status"].(string)
+	filtered := out.Tasks[:0]
+	for _, task := range out.Tasks {
+		if task.Status == want {
+			filtered = append(filtered, task)
 		}
 	}
-
-	out, _ := json.Marshal(map[string]bool{"success": true})
-	return string(out), false
+	out.Tasks = filtered
+	b, _ := json.Marshal(out)
+	return string(b), false
 }
 
-func handleTasksList(p toolPayload) (string, bool) {
-	var input struct {
-		ListID string `json:"list_id"`
-		Status string `json:"status"`
+func claimNextTask(params map[string]any) (string, bool) {
+	listID, _ := params["list_id"].(string)
+	agentID, _ := params["agent_id"].(string)
+	var listed tasksResponse
+	if _, failed := ledgerCall("tasks_list", map[string]any{"list_id": listID, "limit": 100}, &listed); failed {
+		return "tasks_claim: unable to read task list", true
 	}
-	if err := json.Unmarshal(p.Input, &input); err != nil || input.ListID == "" {
-		return "tasks_list: list_id is required", true
-	}
-
-	taskListMu.RLock()
-	taskList, exists := taskLists[input.ListID]
-	taskListMu.RUnlock()
-
-	if !exists {
-		return "tasks_list: task list not found", true
-	}
-
-	taskList.mu.RLock()
-	var tasks []*Task
-	for _, task := range taskList.Tasks {
-		if input.Status == "" || task.Status == input.Status {
-			tasks = append(tasks, task)
+	sort.Slice(listed.Tasks, func(i, j int) bool { return listed.Tasks[i].TaskID < listed.Tasks[j].TaskID })
+	for _, task := range listed.Tasks {
+		if task.Status != "pending" {
+			continue
+		}
+		var claimed taskResponse
+		result, failed := ledgerCall("tasks_claim", map[string]any{"list_id": listID, "task_id": task.TaskID, "agent_id": agentID, "expected_version": task.Version}, &claimed)
+		if !failed {
+			return result, false
 		}
 	}
-	taskList.mu.RUnlock()
-
-	out, _ := json.Marshal(map[string][]*Task{"tasks": tasks})
-	return string(out), false
-}
-
-func handleTasksClaim(p toolPayload) (string, bool) {
-	var input struct {
-		ListID  string `json:"list_id"`
-		AgentID string `json:"agent_id"`
-	}
-	if err := json.Unmarshal(p.Input, &input); err != nil || input.ListID == "" || input.AgentID == "" {
-		return "tasks_claim: list_id and agent_id are required", true
-	}
-
-	taskListMu.RLock()
-	taskList, exists := taskLists[input.ListID]
-	taskListMu.RUnlock()
-	if !exists {
-		return "tasks_claim: task list not found", true
-	}
-
-	// Hold the list lock across the entire find-and-claim so two concurrent
-	// claims can never select the same task. WASM is single-threaded per module
-	// instance, but agent turns dispatch into the same instance serially; the
-	// lock makes the check-then-set atomic regardless. The find-and-claim logic
-	// lives in claimNext (untagged, unit-tested in claim_test.go).
-	taskList.mu.Lock()
-	claimed := claimNext(taskList, input.AgentID)
-	taskList.mu.Unlock()
-
-	if claimed == nil {
-		// No claimable task. Return an explicit null so callers can distinguish
-		// "nothing to do" from an error.
-		return `{"task":null}`, false
-	}
-	out, _ := json.Marshal(map[string]*Task{"task": claimed})
-	return string(out), false
-}
-
-func handleTasksGet(p toolPayload) (string, bool) {
-	var input struct {
-		ListID string `json:"list_id"`
-		TaskID string `json:"task_id"`
-	}
-	if err := json.Unmarshal(p.Input, &input); err != nil || input.ListID == "" || input.TaskID == "" {
-		return "tasks_get: list_id and task_id are required", true
-	}
-
-	taskListMu.RLock()
-	taskList, exists := taskLists[input.ListID]
-	taskListMu.RUnlock()
-
-	if !exists {
-		return "tasks_get: task list not found", true
-	}
-
-	taskList.mu.RLock()
-	task, exists := taskList.Tasks[input.TaskID]
-	taskList.mu.RUnlock()
-
-	if !exists {
-		return "tasks_get: task not found", true
-	}
-
-	out, _ := json.Marshal(task)
-	return string(out), false
+	return `{"task":null}`, false
 }
 
 func main() {}

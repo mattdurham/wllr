@@ -380,55 +380,68 @@ Output: `{id, active}`.
 
 ## Tasks Extension
 
-Task objects contain `id`, `title`, `description`, `status`, `priority`, `tags`,
-`dependencies`, `created_at`, `updated_at`, and optional `assignee`.
+Task objects are durable host-ledger records with opaque `task_id` and `list_id`,
+`version`, timestamps, `attempt_id` after claim, structured `result` or
+`error`/`reason`, dependency IDs, and `workspace_mode` (`shared`, `worktree`,
+or `readonly`; metadata placeholders only).
 
 ### `tasklist_create`
 
 Input: `name` string required; `description` and `owner_agent_id` strings
 optional.
 
-Output: JSON object `{ "list_id": string }`. Missing `name` is fatal.
+Output: `{ "list": { "list_id": string, "version": integer, ... } }`.
 
 ### `tasks_create`
 
-Input: `list_id` and `title` strings required. Optional fields are
-`description`, `priority`, `tags`, and `dependencies`. `priority` defaults to
-`medium`.
+Input: `list_id` and `title` required; optional description, integer priority,
+parent/owner IDs, `depends_on`, and `workspace_mode`.
 
-Output: JSON object `{ "task_id": string }`. Missing fields or unknown task list
-is fatal.
+Output: `{ "task": Task }`. Missing fields or unknown task list is fatal.
 
 ### `tasks_update`
 
-Input: `list_id` and `task_id` strings required. Optional replacement fields are
-`title`, `description`, `status`, `priority`, `tags`, and `dependencies`.
+Input: `list_id`, `task_id`, and `expected_version` required; optional field
+replacements. The expected version is a compare-and-set guard.
 
-Output: JSON object `{ "success": true }`. Missing fields, unknown task list, or
-unknown task is fatal.
+Output: updated `{ "task": Task }`; stale versions fail without mutation.
 
 ### `tasks_list`
 
-Input: `list_id` string required; `status` optional filter.
+Input: `list_id` required; optional `cursor`, `limit`, and compatibility `status`
+filter.
 
-Output: JSON object `{ "tasks": [Task, ...] }`. Missing `list_id` or unknown
-task list is fatal.
+Output: `{ "tasks": [Task, ...], "cursor": integer, "next_cursor": integer }`.
 
 ### `tasks_get`
 
 Input: `list_id` and `task_id` strings, required.
 
-Output: JSON Task object. Missing fields, unknown task list, or unknown task is
-fatal.
+Output: `{ "task": Task }`. Missing fields, unknown task list, or unknown task is fatal.
 
 ### `tasks_claim`
 
-Input: `list_id` and `agent_id` strings, required.
+Input: `list_id` and `agent_id` required. The facade selects a pending,
+dependency-satisfied task and the host atomically claims it with its version.
 
 Output: JSON object `{ "task": Task }` for the lowest pending,
 dependency-satisfied task after setting status to `in_progress` and recording
 `assignee`. Returns `{ "task": null }` when no task is available; that is not a
-fatal error. Missing fields or unknown task list is fatal.
+fatal error. The result includes `attempt_id` and the new `version`.
+
+### `tasks_report`
+
+Input: `list_id`, `task_id`, `attempt_id`, `agent_id`, and terminal status
+(`completed`, `blocked`, `failed`, or `cancelled`). Completed reports require a
+structured `result`; other terminal outcomes require `reason` or `error`.
+Output: `{ "task": Task }`; the attempt must match the current claim.
+
+### `tasks_events_after`
+
+Input: `list_id`, non-negative `cursor`, and optional bounded `limit`.
+Output: `{ "events": [Event, ...], "cursor": integer, "next_cursor": integer }`.
+Events have unique `event_id` values. Cursor zero replays from the beginning and
+is the authoritative missed-wake reconciliation path.
 
 ## Sigil Extension
 

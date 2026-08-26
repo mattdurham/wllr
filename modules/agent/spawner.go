@@ -11,6 +11,7 @@ import (
 	"charm.land/fantasy"
 	anthropicprovider "charm.land/fantasy/providers/anthropic"
 	"github.com/mattdurham/wllr/modules/extension"
+	"github.com/mattdurham/wllr/modules/sdk"
 )
 
 // Spawner creates sub-agents in a pool with appropriate callbacks and conventions.
@@ -100,15 +101,17 @@ func (s *Spawner) Spawn(ctx context.Context, req extension.SpawnRequest) error {
 		if notifyFn != nil {
 			notifyFn(fmt.Sprintf("sub-agent %s: %v", subID, e))
 		}
-		// Surface the error to the main agent so the orchestrator can react.
-		if main := pool.Get(MainAgentID); main != nil {
-			msg := fmt.Sprintf(
-				"[sub-agent '%s' failed: %v — you should handle this or try a different approach]",
-				subID,
-				e,
-			)
-			if err := pool.Send(MainAgentID, msg); err != nil && !errors.Is(err, ErrAgentNotFound) {
-				slog.Error("sub-agent: failed to notify main of error", "agent", subID, "sendErr", err)
+		// Surface the error to the actual creator so nested agents are notified too.
+		target := a.lifecycleTarget()
+		if targetAgent := pool.Get(target); targetAgent != nil {
+			msg, encodeErr := a.lifecycleMessage(lifecycleEventFailed, "child turn failed; inspect status and decide whether to retry or recover", e)
+			if encodeErr != nil {
+				slog.Error("sub-agent: failed to encode error notification", "agent", subID, "err", encodeErr)
+			} else if deliverErr := pool.Deliver(target, sdk.Message{
+				Role:    sdk.RoleUser,
+				Content: msg,
+			}, true); deliverErr != nil && !errors.Is(deliverErr, ErrAgentNotFound) {
+				slog.Error("sub-agent: failed to notify creator of error", "agent", subID, "creator", target, "sendErr", deliverErr)
 			}
 		}
 	})
