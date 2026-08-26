@@ -117,6 +117,9 @@ func onChatMessageEnd(role, content string) {
 	display := content
 	if markdownEnabled {
 		display = FormatMarkdown(content)
+		if display == "" {
+			display = content
+		}
 	}
 	// The response is final at this point, so trim trailing newlines here
 	// rather than at render time, which would also clip in-flight streamed
