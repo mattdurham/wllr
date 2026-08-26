@@ -189,8 +189,10 @@ Each `Agent` stores a `modelName string` (and its `lm fantasy.LanguageModel`) fo
 **Invariant:** `SetProviderOptions` is safe to call concurrently with turns; a turn in flight finishes on the options it captured, the next `Submit` picks up the swap. `providerOpts` is always read/written under `lmMu`.
 
 Token estimation uses the `chars/4` heuristic (`estimateTokens`, `estimateStr`).
-`contextWindowForModel` currently returns `defaultContextWindow` (1,000,000) for all model
-names. Explicit overrides are set via `pool.SetContextWindow`.
+`contextWindowForModel` returns the model's known window from the generated
+catalog table (`models.generated.go`, substring match) and falls back to
+`defaultContextWindow` (1,000,000) for unknown model names. An explicit
+`pool.SetContextWindow` override always takes precedence over the table
 
 ### Proactive Compaction
 

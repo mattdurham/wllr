@@ -1,5 +1,9 @@
 # Knowledge Log
 
+## 2026-08-08
+
+* **Update**: Recorded the local-model context-window resolution decision (config entry > endpoint > nothing; window-less results clear the pool's window) and updated the statusline package doc with the `ctx:P%/R%` + `C<n>` indicators.
+
 ## 2026-08-05
 
 * **Update**: Added OKF playbooks for LSP-first navigation and wllr-specific code implementation and verification.

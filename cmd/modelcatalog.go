@@ -471,12 +471,16 @@ func contextWindowForSelection(provider, id string, cfg *Config) int64 {
 		return cfg.ContextWindow
 	}
 	if provider == providerLocal && cfg != nil {
+		// Explicit local_models config is authoritative over anything the
+		// endpoint exposes; the pool-facing resolved window (what
+		// rememberLocalModel applied) is the next source of truth.
 		if lm, ok := cfg.localModelByID(id); ok && lm.ContextWindow > 0 {
 			return lm.ContextWindow
 		}
-		if cfg.LocalContextWindow > 0 {
-			return cfg.LocalContextWindow
+		if cfg.ContextWindow > 0 {
+			return cfg.ContextWindow
 		}
+		return cfg.LocalContextWindow
 	}
 	return contextWindowFromCatalog(provider, id)
 }

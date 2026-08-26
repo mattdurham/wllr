@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
@@ -32,6 +33,14 @@ func resolveLocalProviderConfig(ctx context.Context, cfg *Config) bool {
 		}
 	}
 	if cfg.Model != "" {
+		// The selected model was not among the returned listings (stale after a
+		// model swap, or its endpoint was unreachable): fall back to the first
+		// available model so startup still succeeds. rememberLocalModel makes
+		// cfg.ContextWindow reflect the replacement (adopting its window, or
+		// clearing to 0 when it has none unless a user override is set), so the
+		// pool's compaction threshold and the status display track the model
+		// actually in use — a window-less successor must not inherit the
+		// previous model's window.
 		for _, model := range models {
 			if rememberLocalModel(cfg, model) {
 				return true
@@ -119,6 +128,19 @@ func discoverLocalModels(ctx context.Context, cfg *Config) []modelInfo {
 			}
 			if model.Name == "" {
 				model.Name = id
+			}
+			// An explicitly configured window wins over anything the endpoint
+			// reports; when the endpoint reports a different non-zero value (a
+			// model swap that did not update the config), surface it — an
+			// endpoint that exposes nothing (0) is not a conflict, just the
+			// normal case where the config value fills in.
+			if configured, ok := configuringByID[id]; ok && configured.ContextWindow > 0 && contextWindowFromOpenAIModel(remote) > 0 && configured.ContextWindow != contextWindowFromOpenAIModel(remote) {
+				slog.Warn(
+					"wllr: local model context window differs from configured value; using configured",
+					"model", id,
+					"configured", configured.ContextWindow,
+					"endpoint", contextWindowFromOpenAIModel(remote),
+				)
 			}
 			if model.ContextWindow == 0 {
 				model.ContextWindow = contextWindowFromOpenAIModel(remote)
@@ -501,11 +523,26 @@ func rememberLocalModel(cfg *Config, model modelInfo) bool {
 	cfg.Model = model.ID
 	cfg.LocalBaseURL = model.LocalBaseURL
 	cfg.LocalAPIKey = model.LocalAPIKey
-	if model.ContextWindow > 0 {
+	// Window precedence: the model's explicit local_models context_window is
+	// authoritative (it is what the user meant when they typed it), the
+	// endpoint's exposed value fills in when no config value exists, and a
+	// window-less result clears the pool-facing window so a model that exposes
+	// nothing does not inherit another model's window. An explicit user
+	// override (WLLR_CONTEXT_WINDOW / config context_window) is never
+	// overwritten here.
+	if entry, ok := cfg.localModelByID(model.ID); ok && entry.ContextWindow > 0 {
+		cfg.LocalContextWindow = entry.ContextWindow
+		if !cfg.ContextWindowConfigured {
+			cfg.ContextWindow = entry.ContextWindow
+		}
+	} else if model.ContextWindow > 0 {
 		cfg.LocalContextWindow = model.ContextWindow
 		if !cfg.ContextWindowConfigured {
 			cfg.ContextWindow = model.ContextWindow
 		}
+	} else if !cfg.ContextWindowConfigured {
+		cfg.ContextWindow = 0
+		cfg.LocalContextWindow = 0
 	}
 	return true
 }

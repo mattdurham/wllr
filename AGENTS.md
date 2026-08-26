@@ -97,7 +97,10 @@ and `log.md` use their reserved OKF structures.
 Useful config/env entry points:
 
 - `WLLR_PROVIDER`, `WLLR_MODEL`
-- `WLLR_CONTEXT_WINDOW`
+- `WLLR_CONTEXT_WINDOW` — explicit context-window override (tokens, or `1m`
+  style). Precedence for local models: this override > the model's
+  `local_models` `context_window` > the endpoint's exposed value > nothing
+  (hidden indicator; see `.knowledge/decisions/local-model-context-window-resolution.md`).
 - `WLLR_CONFIG`
 - `WLLR_EXTENSIONS_DIR`
 - `WLLR_COMPACT_THRESHOLD`

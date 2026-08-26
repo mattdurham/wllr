@@ -126,6 +126,71 @@ func TestApplyLocalModelChoiceUsesDiscoveredModel(t *testing.T) {
 	}
 }
 
+// TestApplyLocalModelChoiceWindowlessModelClearsInheritedWindow: selecting a
+// model the endpoint exposes with no context metadata must clear the window a
+// previous selection resolved (262144 in this case), so the pool does not
+// keep representing the previous model. An explicit local_models window on the
+// new model is authoritative and survives even though the endpoint says
+// nothing.
+func TestApplyLocalModelChoiceWindowlessModelClearsInheritedWindow(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/models" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = fmt.Fprint(w, `{"data":[{"id":"windowless-model"}]}`)
+	}))
+	defer server.Close()
+
+	cfg := &Config{Provider: providerLocal, Model: "previous-model", LocalModels: []localModelConfig{{
+		ID: "windowless-model", BaseURL: server.URL + "/v1",
+	}}}
+	cfg.ContextWindow = 262144 // inherited from the previous selection
+	cfg.LocalContextWindow = 262144
+
+	if !applyLocalModelChoice(context.Background(), cfg, "windowless-model") {
+		t.Fatal("applyLocalModelChoice returned false")
+	}
+	if cfg.ContextWindow != 0 {
+		t.Fatalf("ContextWindow = %d, want 0 (window-less model must not inherit the previous window)", cfg.ContextWindow)
+	}
+	if cfg.LocalContextWindow != 0 {
+		t.Fatalf("LocalContextWindow = %d, want 0", cfg.LocalContextWindow)
+	}
+}
+
+// TestApplyLocalModelChoiceConfigWindowSurvivesWindowlessEndpoint: the
+// authoritative rule for local models — an explicitly configured
+// local_models context_window wins over a silent endpoint, so a model whose
+// server exposes no context metadata still resolves its configured window
+// when (re)selected.
+func TestApplyLocalModelChoiceConfigWindowSurvivesWindowlessEndpoint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/models" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		// The endpoint lists the model but exposes no context metadata.
+		_, _ = fmt.Fprint(w, `{"data":[{"id":"configured-model"}]}`)
+	}))
+	defer server.Close()
+
+	cfg := &Config{Provider: providerLocal, LocalModels: []localModelConfig{{
+		ID: "configured-model", BaseURL: server.URL + "/v1", ContextWindow: 262144,
+	}}}
+	cfg.ContextWindow = 131072 // stale value from another model
+
+	if !applyLocalModelChoice(context.Background(), cfg, "configured-model") {
+		t.Fatal("applyLocalModelChoice returned false")
+	}
+	if cfg.ContextWindow != 262144 {
+		t.Fatalf("ContextWindow = %d, want 262144 (the model's explicit config window)", cfg.ContextWindow)
+	}
+	if got := contextWindowForSelection(providerLocal, "configured-model", cfg); got != 262144 {
+		t.Fatalf("contextWindowForSelection = %d, want 262144", got)
+	}
+}
+
 func TestQueryLocalModels_NonOKStatus(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -242,6 +307,147 @@ func TestResolveLocalProviderConfigFallsBackFromStaleModel(t *testing.T) {
 	}
 	if cfg.LocalBaseURL != server.URL+"/v1" {
 		t.Fatalf("local base URL = %q, want %q", cfg.LocalBaseURL, server.URL+"/v1")
+	}
+}
+
+// TestResolveLocalProviderConfigClearsStaleWindowOnFallback: when neither the
+// selected (stale) model nor its replacement carries an explicitly configured
+// window, the window left in cfg by a previous selection must be cleared, so
+// the pool's compaction threshold and the status display do not silently keep
+// using the previous model's window. (This is the exact regression from
+// qwen3-coder-next → qwen3.8-27b: the window-less replacement inherits a 262k
+// window it was never told about.)
+func TestResolveLocalProviderConfigClearsStaleWindowOnFallback(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/models" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = fmt.Fprint(w, `{"data":[{"id":"replacement-model"}]}`)
+	}))
+	defer server.Close()
+
+	cfg := &Config{
+		Provider: providerLocal,
+		Model:    "stale-model",
+		LocalModels: []localModelConfig{{
+			ID:      "stale-model",
+			BaseURL: server.URL + "/v1",
+		}},
+	}
+	// Simulate a prior selection that applied a window (e.g. a /model picker
+	// swap before the restart): not an explicit user override.
+	cfg.ContextWindow = 262144
+
+	if !resolveLocalProviderConfig(context.Background(), cfg) {
+		t.Fatal("resolveLocalProviderConfig = false, want true")
+	}
+	if cfg.Model != "replacement-model" {
+		t.Fatalf("model = %q, want replacement-model", cfg.Model)
+	}
+	if cfg.ContextWindow != 0 {
+		t.Fatalf("ContextWindow = %d, want 0 (window-less replacement must not inherit the previous model's window)", cfg.ContextWindow)
+	}
+	if cfg.LocalContextWindow != 0 {
+		t.Fatalf("LocalContextWindow = %d, want 0", cfg.LocalContextWindow)
+	}
+}
+
+// TestResolveLocalProviderConfigAdoptsReplacementWindowOnFallback: a windowed
+// replacement overwrites the stale model's window, so the pool and display
+// track the model actually in use.
+func TestResolveLocalProviderConfigAdoptsReplacementWindowOnFallback(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/models" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = fmt.Fprint(w, `{"data":[{"id":"replacement-model","context_length":131072}]}`)
+	}))
+	defer server.Close()
+
+	cfg := &Config{
+		Provider: providerLocal,
+		Model:    "stale-model",
+		LocalModels: []localModelConfig{{
+			ID:      "stale-model",
+			BaseURL: server.URL + "/v1",
+		}},
+	}
+	cfg.ContextWindow = 262144 // the stale model's window, as resolved at startup
+
+	if !resolveLocalProviderConfig(context.Background(), cfg) {
+		t.Fatal("resolveLocalProviderConfig = false, want true")
+	}
+	if cfg.Model != "replacement-model" {
+		t.Fatalf("model = %q, want replacement-model", cfg.Model)
+	}
+	if cfg.ContextWindow != 131072 {
+		t.Fatalf("ContextWindow = %d, want 131072 (the replacement's own window)", cfg.ContextWindow)
+	}
+	if cfg.LocalContextWindow != 131072 {
+		t.Fatalf("LocalContextWindow = %d, want 131072", cfg.LocalContextWindow)
+	}
+}
+
+// TestResolveLocalProviderConfigHonorsExplicitWindowOnFallback: an explicit
+// user override (WLLR_CONTEXT_WINDOW / config context_window) must survive the
+// stale-selection fallback even when the replacement model carries a window of
+// its own — ContextWindowConfigured is the contract that "configured" means
+// the user, not the model metadata.
+func TestResolveLocalProviderConfigHonorsExplicitWindowOnFallback(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/models" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = fmt.Fprint(w, `{"data":[{"id":"replacement-model","context_length":131072}]}`)
+	}))
+	defer server.Close()
+
+	cfg := &Config{
+		Provider:                providerLocal,
+		Model:                   "stale-model",
+		ContextWindow:           500000,
+		ContextWindowConfigured: true,
+		LocalModels: []localModelConfig{{
+			ID:      "stale-model",
+			BaseURL: server.URL + "/v1",
+		}},
+	}
+
+	resolveLocalProviderConfig(context.Background(), cfg)
+	if cfg.ContextWindow != 500000 {
+		t.Fatalf("ContextWindow = %d, want 500000 (explicit override preserved)", cfg.ContextWindow)
+	}
+}
+
+// TestDiscoverLocalModelsConfiguredWindowWinsOverEndpoint: an explicitly
+// configured window is authoritative over a conflicting endpoint value (a model
+// swap that did not update the config) — discovery only fills in a window when
+// none is configured, and logs when the two disagree.
+func TestDiscoverLocalModelsConfiguredWindowWinsOverEndpoint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = fmt.Fprint(w, `{"data":[{"id":"swapped-model","context_length":131072}]}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	cfg := &Config{LocalModels: []localModelConfig{{
+		ID:            "swapped-model",
+		BaseURL:       server.URL + "/v1",
+		ContextWindow: 262144,
+	}}}
+	models := discoverLocalModels(context.Background(), cfg)
+	if len(models) != 1 {
+		t.Fatalf("len(models) = %d, want 1: %+v", len(models), models)
+	}
+	if models[0].ContextWindow != 262144 {
+		t.Fatalf("ContextWindow = %d, want 262144 (explicit config wins over the endpoint's value)", models[0].ContextWindow)
 	}
 }
 

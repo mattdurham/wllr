@@ -180,7 +180,11 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 		cfg.Model = modelID
 		pool.SetProviderName(provider)
 		pool.SetDefaultModelName(modelID)
-		if cw := contextWindowForSelection(provider, modelID, cfg); cw > 0 {
+		// Apply the resolved window unconditionally (0 included): a window-less
+		// model must not keep the previous model's window in the pool, which
+		// would drive the compaction threshold and the ctx display wrongly.
+		// An explicit user override is always preferred and is never cleared.
+		if cw := contextWindowForSelection(provider, modelID, cfg); cw > 0 || !cfg.ContextWindowConfigured {
 			pool.SetContextWindow(cw)
 		}
 		if saveErr := saveProvider(provider); saveErr != nil {
@@ -252,7 +256,11 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 			main.SetModel(lm, modelID)
 		}
 		pool.SetDefaultModelName(modelID)
-		if cw := contextWindowForSelection(currentProvider, modelID, cfg); cw > 0 {
+		// Apply the resolved window unconditionally (0 included): a window-less
+		// model must not keep the previous model's window in the pool, which
+		// would drive the compaction threshold and the ctx display wrongly.
+		// An explicit user override is always preferred and is never cleared.
+		if cw := contextWindowForSelection(currentProvider, modelID, cfg); cw > 0 || !cfg.ContextWindowConfigured {
 			pool.SetContextWindow(cw)
 		}
 		if saveErr := saveModel(modelID); saveErr != nil {

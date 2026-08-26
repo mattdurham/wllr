@@ -199,11 +199,18 @@ func (cfg *Config) applyLocalModelSelection(id string) bool {
 	cfg.Model = lm.ID
 	cfg.LocalBaseURL = lm.BaseURL
 	cfg.LocalAPIKey = lm.APIKey
+	// Window precedence mirrors rememberLocalModel: an explicit local_models
+	// context_window is authoritative; a window-less entry clears the pool-
+	// facing window (unless a user override is set) so the next model in use
+	// is not represented by the previous model's window.
 	if lm.ContextWindow > 0 {
 		cfg.LocalContextWindow = lm.ContextWindow
 		if !cfg.ContextWindowConfigured {
 			cfg.ContextWindow = lm.ContextWindow
 		}
+	} else if !cfg.ContextWindowConfigured {
+		cfg.LocalContextWindow = 0
+		cfg.ContextWindow = 0
 	}
 	return true
 }

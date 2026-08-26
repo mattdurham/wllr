@@ -9,4 +9,5 @@
 * [Capabilities over policy — ship the seam, not opinions](capabilities-over-policy.md) — interceptor chain + hookable events, not baked-in behavior.
 * [Modules are spec-driven — the // NOTE invariant](spec-driven-modules.md) — code changes update SPECS/NOTES/TESTS.
 * [GitHub Issues are the source of truth for work tracking](github-issue-tracking.md) — use `gh` when available, with GitHub web tooling as the fallback.
+* [Local model context window resolution — config entry, then endpoint, then nothing](local-model-context-window-resolution.md) — a window-less model clears the pool's window; explicit override always wins.
 * [Agents verify repository state before editing](agent-editing-discipline.md) — targeted changes, preservation of user work, and verified completion.
