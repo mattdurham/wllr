@@ -23,6 +23,7 @@ func decodeTask(req sdk.HostCallRequest, v any) error {
 	}
 	return nil
 }
+
 func taskResult(v any) sdk.HostCallResponse {
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -30,6 +31,7 @@ func taskResult(v any) sdk.HostCallResponse {
 	}
 	return sdk.HostCallResponse{Result: b}
 }
+
 func (h *Host) withLedger(name string, fn func(*TaskLedger) sdk.HostCallResponse) sdk.HostCallResponse {
 	l := h.taskLedgerSnapshot()
 	if l == nil {
@@ -37,6 +39,7 @@ func (h *Host) withLedger(name string, fn func(*TaskLedger) sdk.HostCallResponse
 	}
 	return fn(l)
 }
+
 func (h *Host) handleTasklistCreate(req sdk.HostCallRequest) sdk.HostCallResponse {
 	var p sdk.TasklistCreateRequest
 	if err := decodeTask(req, &p); err != nil {
@@ -50,6 +53,7 @@ func (h *Host) handleTasklistCreate(req sdk.HostCallRequest) sdk.HostCallRespons
 		return taskResult(sdk.TaskListResponse{List: v})
 	})
 }
+
 func (h *Host) handleTasksCreate(req sdk.HostCallRequest) sdk.HostCallResponse {
 	var p sdk.TasksCreateRequest
 	if err := decodeTask(req, &p); err != nil {
@@ -63,6 +67,7 @@ func (h *Host) handleTasksCreate(req sdk.HostCallRequest) sdk.HostCallResponse {
 		return taskResult(sdk.TaskRecordResponse{Task: v})
 	})
 }
+
 func (h *Host) handleTasksClaim(req sdk.HostCallRequest) sdk.HostCallResponse {
 	var p sdk.TasksClaimRequest
 	if err := decodeTask(req, &p); err != nil {
@@ -76,6 +81,7 @@ func (h *Host) handleTasksClaim(req sdk.HostCallRequest) sdk.HostCallResponse {
 		return taskResult(sdk.TaskRecordResponse{Task: v})
 	})
 }
+
 func (h *Host) handleTasksUpdate(req sdk.HostCallRequest) sdk.HostCallResponse {
 	var p sdk.TasksUpdateRequest
 	if err := decodeTask(req, &p); err != nil {
@@ -89,6 +95,7 @@ func (h *Host) handleTasksUpdate(req sdk.HostCallRequest) sdk.HostCallResponse {
 		return taskResult(sdk.TaskRecordResponse{Task: v})
 	})
 }
+
 func (h *Host) handleTasksReport(req sdk.HostCallRequest) sdk.HostCallResponse {
 	var p sdk.TasksReportRequest
 	if err := decodeTask(req, &p); err != nil {
@@ -102,6 +109,7 @@ func (h *Host) handleTasksReport(req sdk.HostCallRequest) sdk.HostCallResponse {
 		return taskResult(sdk.TaskRecordResponse{Task: v})
 	})
 }
+
 func (h *Host) handleTasksGet(req sdk.HostCallRequest) sdk.HostCallResponse {
 	var p sdk.TasksGetRequest
 	if err := decodeTask(req, &p); err != nil {
@@ -115,6 +123,7 @@ func (h *Host) handleTasksGet(req sdk.HostCallRequest) sdk.HostCallResponse {
 		return taskResult(sdk.TaskRecordResponse{Task: v})
 	})
 }
+
 func (h *Host) handleTasksList(req sdk.HostCallRequest) sdk.HostCallResponse {
 	var p sdk.TasksListRequest
 	if err := decodeTask(req, &p); err != nil {
@@ -128,6 +137,7 @@ func (h *Host) handleTasksList(req sdk.HostCallRequest) sdk.HostCallResponse {
 		return taskResult(sdk.TaskListRecordsResponse{Tasks: v, Cursor: c, NextCursor: n})
 	})
 }
+
 func (h *Host) handleTasksEventsAfter(req sdk.HostCallRequest) sdk.HostCallResponse {
 	var p sdk.TasksEventsAfterRequest
 	if err := decodeTask(req, &p); err != nil {

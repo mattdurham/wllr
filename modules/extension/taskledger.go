@@ -20,10 +20,12 @@ import (
 	"github.com/mattdurham/wllr/modules/sdk"
 )
 
-var ErrTaskNotFound = errors.New("task not found")
-var ErrTaskListNotFound = errors.New("task list not found")
-var ErrTaskVersion = errors.New("task version conflict")
-var ErrTaskInvalid = errors.New("invalid task transition")
+var (
+	ErrTaskNotFound     = errors.New("task not found")
+	ErrTaskListNotFound = errors.New("task list not found")
+	ErrTaskVersion      = errors.New("task version conflict")
+	ErrTaskInvalid      = errors.New("invalid task transition")
+)
 
 type taskJournalRecord struct {
 	Schema   int                        `json:"schema"`
@@ -56,9 +58,11 @@ type TaskLedger struct {
 func NewTaskLedger(dir string, notify func(string, sdk.TaskEvent) error) (*TaskLedger, error) {
 	return openTaskLedger(dir, notify, false)
 }
+
 func OpenTaskLedger(dir string, notify func(string, sdk.TaskEvent) error) (*TaskLedger, error) {
 	return openTaskLedger(dir, notify, true)
 }
+
 func openTaskLedger(dir string, notify func(string, sdk.TaskEvent) error, recover bool) (*TaskLedger, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create task ledger directory: %w", err)
@@ -196,6 +200,7 @@ func (l *TaskLedger) commitLocked() error {
 	}
 	return os.Rename(name, filepath.Join(l.dir, "tasks.snapshot.json"))
 }
+
 func (l *TaskLedger) mutate(listID string, event sdk.TaskEvent, fn func()) error {
 	l.mu.Lock()
 	if l.closed {
@@ -240,6 +245,7 @@ func (l *TaskLedger) CreateList(req sdk.TasklistCreateRequest) (sdk.TaskList, er
 	err = l.mutate(id, sdk.TaskEvent{ListID: id, Event: "list_created", ActorAgentID: req.OwnerAgentID}, func() { l.lists[id] = out })
 	return out, err
 }
+
 func (l *TaskLedger) CreateTask(req sdk.TasksCreateRequest) (sdk.TaskRecord, error) {
 	l.mu.Lock()
 	_, ok := l.lists[req.ListID]
@@ -260,6 +266,7 @@ func (l *TaskLedger) CreateTask(req sdk.TasksCreateRequest) (sdk.TaskRecord, err
 	err = l.mutate(req.ListID, sdk.TaskEvent{ListID: req.ListID, TaskID: id, Event: "task_created", ActorAgentID: req.OwnerAgentID}, func() { l.tasks[id] = out })
 	return out, err
 }
+
 func (l *TaskLedger) Get(listID, taskID string) (sdk.TaskRecord, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -269,6 +276,7 @@ func (l *TaskLedger) Get(listID, taskID string) (sdk.TaskRecord, error) {
 	}
 	return t, nil
 }
+
 func (l *TaskLedger) Claim(req sdk.TasksClaimRequest) (sdk.TaskRecord, error) {
 	l.mu.Lock()
 	t, ok := l.tasks[req.TaskID]
@@ -316,6 +324,7 @@ func (l *TaskLedger) Claim(req sdk.TasksClaimRequest) (sdk.TaskRecord, error) {
 	}
 	return t, err
 }
+
 func (l *TaskLedger) UpdateCAS(req sdk.TasksUpdateRequest) (sdk.TaskRecord, error) {
 	l.mu.Lock()
 	t, ok := l.tasks[req.TaskID]
@@ -360,6 +369,7 @@ func (l *TaskLedger) UpdateCAS(req sdk.TasksUpdateRequest) (sdk.TaskRecord, erro
 	}
 	return t, err
 }
+
 func (l *TaskLedger) Report(req sdk.TasksReportRequest) (sdk.TaskRecord, error) {
 	l.mu.Lock()
 	t, ok := l.tasks[req.TaskID]
@@ -408,6 +418,7 @@ func (l *TaskLedger) Report(req sdk.TasksReportRequest) (sdk.TaskRecord, error) 
 	}
 	return t, err
 }
+
 func (l *TaskLedger) List(listID string, cursor int64, limit int) ([]sdk.TaskRecord, int64, int64, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -438,6 +449,7 @@ func (l *TaskLedger) List(listID string, cursor int64, limit int) ([]sdk.TaskRec
 	}
 	return all[start:end], int64(start), next, nil
 }
+
 func (l *TaskLedger) EventsAfter(listID string, cursor int64, limit int) ([]sdk.TaskEvent, int64, int64, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -462,6 +474,7 @@ func (l *TaskLedger) EventsAfter(listID string, cursor int64, limit int) ([]sdk.
 	}
 	return append([]sdk.TaskEvent(nil), all[start:end]...), int64(start), next, nil
 }
+
 func (l *TaskLedger) Close() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()

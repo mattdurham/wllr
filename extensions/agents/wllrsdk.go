@@ -547,7 +547,9 @@ func OpUpdate(id string, props UIProps) UIPatchOp {
 func OpRemove(id string) UIPatchOp           { return UIPatchOp{Op: "remove", ID: id} }
 func OpAppendText(id, text string) UIPatchOp { return UIPatchOp{Op: "append_text", ID: id, Text: text} }
 
-func OpReplaceText(id, text string) UIPatchOp { return UIPatchOp{Op: "replace_text", ID: id, Text: text} }
+func OpReplaceText(id, text string) UIPatchOp {
+	return UIPatchOp{Op: "replace_text", ID: id, Text: text}
+}
 
 // OnToken registers a handler called with batches of streamed assistant text as
 // the agent produces it. agentID identifies the producing agent.

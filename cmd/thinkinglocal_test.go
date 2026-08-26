@@ -310,8 +310,10 @@ func TestLocalThinkingInfo_DeclaredEndpoint(t *testing.T) {
 	}))
 	defer server.Close()
 
-	cfg := &Config{Provider: providerLocal, Model: "qwen/qwen3.8-27b", LocalBaseURL: server.URL + "/v1",
-		LocalModels: []localModelConfig{{ID: "qwen/qwen3.8-27b", BaseURL: server.URL + "/v1"}}}
+	cfg := &Config{
+		Provider: providerLocal, Model: "qwen/qwen3.8-27b", LocalBaseURL: server.URL + "/v1",
+		LocalModels: []localModelConfig{{ID: "qwen/qwen3.8-27b", BaseURL: server.URL + "/v1"}},
+	}
 	modes, declared, def := localThinkingInfo(context.Background(), cfg)
 	if !declared {
 		t.Error("declared = false, want true")
@@ -338,8 +340,10 @@ func TestLocalThinkingInfo_NoAppAPI(t *testing.T) {
 	}))
 	defer server.Close()
 
-	cfg := &Config{Provider: providerLocal, Model: "some-model", LocalBaseURL: server.URL + "/v1",
-		LocalModels: []localModelConfig{{ID: "some-model", BaseURL: server.URL + "/v1"}}}
+	cfg := &Config{
+		Provider: providerLocal, Model: "some-model", LocalBaseURL: server.URL + "/v1",
+		LocalModels: []localModelConfig{{ID: "some-model", BaseURL: server.URL + "/v1"}},
+	}
 	modes, declared, _ := localThinkingInfo(context.Background(), cfg)
 	if declared {
 		t.Error("declared = true for a server without the app API, want false")
@@ -366,8 +370,10 @@ func TestLocalThinkingInfo_ExplicitConfigWins(t *testing.T) {
 	}
 	t.Setenv("WLLR_CONFIG", path)
 
-	cfg := &Config{Provider: providerLocal, Model: "qwen/qwen3.8-27b", LocalBaseURL: "http://ignored.invalid/v1",
-		LocalModels: []localModelConfig{{ID: "qwen/qwen3.8-27b", BaseURL: "http://ignored.invalid/v1", ThinkingModes: []string{"none", "medium"}}}}
+	cfg := &Config{
+		Provider: providerLocal, Model: "qwen/qwen3.8-27b", LocalBaseURL: "http://ignored.invalid/v1",
+		LocalModels: []localModelConfig{{ID: "qwen/qwen3.8-27b", BaseURL: "http://ignored.invalid/v1", ThinkingModes: []string{"none", "medium"}}},
+	}
 	modes, declared, _ := localThinkingInfo(context.Background(), cfg)
 	if declared {
 		t.Error("explicit config must not report endpoint-declared")
@@ -414,8 +420,10 @@ func TestStartupThinkingMode(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	cfg := &Config{Provider: providerLocal, Model: "qwen/qwen3.8-27b", LocalBaseURL: server.URL + "/v1",
-		LocalModels: []localModelConfig{{ID: "qwen/qwen3.8-27b", BaseURL: server.URL + "/v1"}}}
+	cfg := &Config{
+		Provider: providerLocal, Model: "qwen/qwen3.8-27b", LocalBaseURL: server.URL + "/v1",
+		LocalModels: []localModelConfig{{ID: "qwen/qwen3.8-27b", BaseURL: server.URL + "/v1"}},
+	}
 	if got := startupThinkingMode(context.Background(), cfg, providerLocal); got != thinkingModeXHigh {
 		t.Errorf("startup mode = %q, want xhigh (server-declared default)", got)
 	}

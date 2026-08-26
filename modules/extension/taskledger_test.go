@@ -92,7 +92,7 @@ func TestTaskLedgerTruncatedTailAndEarlierCorruption(t *testing.T) {
 	list, _ := l.CreateList(sdk.TasklistCreateRequest{Name: "x"})
 	l.Close()
 	p := filepath.Join(dir, "tasks.jsonl")
-	f, _ := os.OpenFile(p, os.O_APPEND|os.O_WRONLY, 0600)
+	f, _ := os.OpenFile(p, os.O_APPEND|os.O_WRONLY, 0o600)
 	f.WriteString(`{"schema":1,"sequence":99`)
 	f.Close()
 	if recovered, err := OpenTaskLedger(dir, nil); err != nil {
@@ -106,7 +106,7 @@ func TestTaskLedgerTruncatedTailAndEarlierCorruption(t *testing.T) {
 		t.Fatal("journal unexpectedly empty")
 	}
 	good := lines[0] + "\n{"
-	os.WriteFile(p, []byte(good+"\n"+strings.Join(lines[1:], "\n")), 0600)
+	os.WriteFile(p, []byte(good+"\n"+strings.Join(lines[1:], "\n")), 0o600)
 	if _, err := OpenTaskLedger(dir, nil); err == nil {
 		t.Fatal("expected earlier corruption error")
 	}
