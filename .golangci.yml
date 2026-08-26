@@ -172,6 +172,12 @@ linters:
         linters:
           - revive
 
+      # sdk/taskledger.go defines the task protocol's tightly-coupled wire types
+      # together for discoverability.
+      - path: sdk/taskledger\.go
+        linters:
+          - revive
+
       # extension/interfaces.go defines SpawnRequest alongside the AgentBridge,
       # TeamBridge, CapabilityProvider, UIBridge, and MCPBridge interfaces — all
       # belong together as the extension API surface.
@@ -184,4 +190,3 @@ linters:
       - path: agent/spawner\.go
         linters:
           - revive
-

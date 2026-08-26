@@ -12,7 +12,7 @@ import (
 func TestHostTaskHandlersAndCommitBeforeNotify(t *testing.T) {
 	h := NewHost(nil)
 	defer h.Close(context.Background())
-	if got := h.routeHostCall(nil, nil, nil, sdk.HostCallRequest{Method: sdk.MethodTasksGet, Params: []byte(`{}`)}); got.Error == "" {
+	if got := h.routeHostCall(context.Background(), nil, nil, sdk.HostCallRequest{Method: sdk.MethodTasksGet, Params: []byte(`{}`)}); got.Error == "" {
 		t.Fatal("expected missing ledger error")
 	}
 	var delivered sdk.Message
@@ -28,7 +28,7 @@ func TestHostTaskHandlersAndCommitBeforeNotify(t *testing.T) {
 	}
 	call := func(method string, v any) sdk.HostCallResponse {
 		b, _ := json.Marshal(v)
-		return h.routeHostCall(nil, nil, nil, sdk.HostCallRequest{Method: method, Params: b})
+		return h.routeHostCall(context.Background(), nil, nil, sdk.HostCallRequest{Method: method, Params: b})
 	}
 	lr := call(sdk.MethodTasklistCreate, sdk.TasklistCreateRequest{Name: "x", OwnerAgentID: "owner"})
 	if lr.Error != "" {
@@ -61,7 +61,7 @@ func TestHostTaskHandlersRejectTrailingJSON(t *testing.T) {
 	h := NewHost(nil)
 	defer h.Close(context.Background())
 	h.SetTaskLedgerDirectory(t.TempDir())
-	r := h.routeHostCall(nil, nil, nil, sdk.HostCallRequest{Method: sdk.MethodTasklistCreate, Params: []byte(`{"name":"x"}{}`)})
+	r := h.routeHostCall(context.Background(), nil, nil, sdk.HostCallRequest{Method: sdk.MethodTasklistCreate, Params: []byte(`{"name":"x"}{}`)})
 	if r.Error == "" {
 		t.Fatal("expected malformed parameter error")
 	}
