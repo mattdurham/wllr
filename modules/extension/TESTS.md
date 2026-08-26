@@ -2,6 +2,9 @@
 
 Documents existing tests and specifies missing tests worth adding.
 
+Task ledger tests cover persistence across reopen, event replay, concurrent
+single-claim behavior, and truncated-tail versus earlier corruption handling.
+
 ---
 
 ## Existing Tests

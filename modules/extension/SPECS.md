@@ -3,6 +3,14 @@
 Package `extension` implements a wazero-based WASM extension host for the Bob harness.
 Extensions are compiled WASM modules that communicate with the host via a JSON-over-linear-memory ABI.
 
+## Durable task ledger
+
+Configured hosts persist task mutations to a flushed, checksummed append-only
+JSONL journal and atomically replaced snapshot. An incomplete final line is
+recoverable; earlier corruption is reported. Claims atomically assign an opaque
+attempt ID, reports require that attempt, events replay from cursor zero, and
+notifications happen after commit without rollback on delivery failure.
+
 ---
 
 ## 1. Required WASM Exports
