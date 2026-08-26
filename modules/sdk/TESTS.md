@@ -1,5 +1,8 @@
 # bob/sdk — Test Specifications
 
+`TestTaskLedgerWireRoundTrip` verifies opaque IDs, raw results, versions,
+statuses, workspace modes, and task host-call method constants.
+
 ## Existing Tests (types_test.go)
 
 ---
