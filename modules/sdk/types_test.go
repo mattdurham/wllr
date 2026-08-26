@@ -2,6 +2,7 @@ package sdk_test
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -385,6 +386,48 @@ func TestMethodAgentTeamConstants(t *testing.T) {
 	} {
 		if tc.name != tc.want {
 			t.Errorf("constant value mismatch: got %q, want %q", tc.name, tc.want)
+		}
+	}
+}
+
+func TestTaskLedgerWireRoundTrip(t *testing.T) {
+	original := sdk.TaskRecord{
+		TaskID: "task_opaque", ListID: "list_opaque", Status: sdk.TaskInProgress,
+		WorkspaceMode: sdk.TaskWorkspaceWorktree, AttemptID: "attempt_opaque", Version: 7,
+		Result: json.RawMessage(`{"ok":true}`), DependsOn: []string{"task_parent"},
+	}
+	b, err := json.Marshal(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got sdk.TaskRecord
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(original, got) {
+		t.Fatalf("round trip mismatch: %#v != %#v", got, original)
+	}
+	for _, tc := range []struct{ got, want string }{
+		{string(sdk.TaskPending), "pending"},
+		{string(sdk.TaskInProgress), "in_progress"},
+		{string(sdk.TaskCompleted), "completed"},
+		{string(sdk.TaskBlocked), "blocked"},
+		{string(sdk.TaskFailed), "failed"},
+		{string(sdk.TaskCancelled), "cancelled"},
+		{string(sdk.TaskWorkspaceShared), "shared"},
+		{string(sdk.TaskWorkspaceWorktree), "worktree"},
+		{string(sdk.TaskWorkspaceReadonly), "readonly"},
+		{sdk.MethodTasklistCreate, "tasklist_create"},
+		{sdk.MethodTasksCreate, "tasks_create"},
+		{sdk.MethodTasksClaim, "tasks_claim"},
+		{sdk.MethodTasksUpdate, "tasks_update"},
+		{sdk.MethodTasksReport, "tasks_report"},
+		{sdk.MethodTasksGet, "tasks_get"},
+		{sdk.MethodTasksList, "tasks_list"},
+		{sdk.MethodTasksEventsAfter, "tasks_events_after"},
+	} {
+		if tc.got != tc.want {
+			t.Errorf("got %q, want %q", tc.got, tc.want)
 		}
 	}
 }

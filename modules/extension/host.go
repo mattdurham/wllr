@@ -79,6 +79,7 @@ type Host struct {
 	capabilities CapabilityProvider
 	ui           UIBridge
 	mcp          MCPBridge
+	taskLedger   *TaskLedger
 
 	extensions    []*Extension
 	nativeToolsMu sync.RWMutex
@@ -129,6 +130,39 @@ func NewHost(logger *slog.Logger) *Host {
 		h.logger.Error("extension: install env module", "err", err)
 	}
 	return h
+}
+
+// NewHostWithTaskLedger creates a host with a durable, session-scoped task ledger.
+func NewHostWithTaskLedger(logger *slog.Logger, dir string) (*Host, error) {
+	h := NewHost(logger)
+	if err := h.SetTaskLedgerDirectory(dir); err != nil {
+		_ = h.Close(context.Background())
+		return nil, err
+	}
+	return h, nil
+}
+
+// SetTaskLedgerDirectory installs the session ledger during startup.
+func (h *Host) SetTaskLedgerDirectory(dir string) error {
+	l, err := OpenTaskLedger(dir, h.notifyTask)
+	if err != nil {
+		return err
+	}
+	h.mu.Lock()
+	old := h.taskLedger
+	h.taskLedger = l
+	h.mu.Unlock()
+	if old != nil {
+		return old.Close()
+	}
+	return nil
+}
+
+func (h *Host) taskLedgerSnapshot() *TaskLedger {
+	h.mu.RLock()
+	l := h.taskLedger
+	h.mu.RUnlock()
+	return l
 }
 
 // SetAgentBridge installs the agent management bridge.
@@ -539,6 +573,30 @@ func (h *Host) buildDispatch() map[string]func(ctx context.Context, ext *Extensi
 		},
 		sdk.MethodQueuedMessages: func(_ context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleQueuedMessages(ext, req)
+		},
+		sdk.MethodTasklistCreate: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleTasklistCreate(req)
+		},
+		sdk.MethodTasksCreate: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleTasksCreate(req)
+		},
+		sdk.MethodTasksClaim: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleTasksClaim(req)
+		},
+		sdk.MethodTasksUpdate: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleTasksUpdate(req)
+		},
+		sdk.MethodTasksReport: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleTasksReport(req)
+		},
+		sdk.MethodTasksGet: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleTasksGet(req)
+		},
+		sdk.MethodTasksList: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleTasksList(req)
+		},
+		sdk.MethodTasksEventsAfter: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleTasksEventsAfter(req)
 		},
 	}
 }
@@ -2234,6 +2292,11 @@ func (h *Host) Close(ctx context.Context) error {
 	payload, _ := json.Marshal(sdk.ShutdownPayload{Reason: "host_close"})
 	if _, err := h.DispatchEvent(ctx, sdk.Event{Type: sdk.EventShutdown, Payload: payload}); err != nil {
 		h.logger.Warn("extension: shutdown event failed", "err", err)
+	}
+	if l := h.taskLedgerSnapshot(); l != nil {
+		if err := l.Close(); err != nil {
+			h.logger.Warn("extension: task ledger close failed", "err", err)
+		}
 	}
 	return h.runtime.Close(ctx)
 }

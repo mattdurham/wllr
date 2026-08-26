@@ -2,11 +2,14 @@ package agent_test
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mattdurham/wllr/modules/agent"
 	"github.com/mattdurham/wllr/modules/extension"
+	"github.com/mattdurham/wllr/modules/sdk"
 	"github.com/mattdurham/wllr/modules/testutil"
 )
 
@@ -191,5 +194,52 @@ func TestSpawner_Spawn_CallerIDPropagated(t *testing.T) {
 	}
 	if got := a.CreatorID(); got != "main" {
 		t.Errorf("CreatorID = %q, want %q", got, "main")
+	}
+}
+
+func TestSpawner_FailureNotificationTargetsCreator(t *testing.T) {
+	prov := testutil.NewFakeProvider()
+	pool := agent.NewPool()
+	pool.SetProvider(prov)
+	pool.SetDefaultModelName("fake-model")
+	lm, _ := pool.LanguageModelForModel(context.Background(), "fake-model")
+	_, _ = pool.Spawn("main", lm, agent.SpawnOpts{})
+
+	parent, err := pool.Spawn("main/parent", lm, agent.SpawnOpts{})
+	if err != nil {
+		t.Fatalf("Spawn parent: %v", err)
+	}
+	parentTurn := make(chan []sdk.Message, 1)
+	parent.SetOnTurnStart(func(_ string, inbox []sdk.Message) { parentTurn <- inbox })
+
+	spawner := agent.NewSpawner(pool, nil, nil)
+	if err := spawner.Spawn(context.Background(), extension.SpawnRequest{
+		ID: "main/parent/worker", Name: "worker", ModelName: "fake-model", CallerID: "main/parent",
+	}); err != nil {
+		t.Fatalf("Spawn worker: %v", err)
+	}
+	worker := pool.Get("main/parent/worker")
+	worker.SetModel(&errStreamLM{}, "err-model")
+	worker.Submit(context.Background(), "fail")
+
+	select {
+	case inbox := <-parentTurn:
+		if len(inbox) != 1 {
+			t.Fatalf("parent inbox = %+v, want one lifecycle notification", inbox)
+		}
+		var event struct {
+			Event     string `json:"event"`
+			AgentID   string `json:"agent_id"`
+			CreatorID string `json:"creator_id"`
+			Error     string `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(inbox[0].Content), &event); err != nil {
+			t.Fatalf("decode failure notification: %v", err)
+		}
+		if event.Event != "agent_failed" || event.AgentID != "main/parent/worker" || event.CreatorID != "main/parent" || event.Error == "" {
+			t.Errorf("failure notification = %+v, want nested creator and error", event)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("parent was not woken by child failure")
 	}
 }

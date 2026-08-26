@@ -244,46 +244,46 @@ func TestContextWindowFromCatalog(t *testing.T) {
 // TestSupportedThinkingModesForModel tests that each model has the correct thinking modes
 func TestSupportedThinkingModesForModel(t *testing.T) {
 	tests := []struct {
-		name         string
-		provider     string
-		model        string
-		wantModes    int // expected number of thinking modes
-		wantHasNone  bool // whether "none" mode is included
+		name        string
+		provider    string
+		model       string
+		wantModes   int  // expected number of thinking modes
+		wantHasNone bool // whether "none" mode is included
 	}{
 		{
-			name:         "claude-opus-4-8",
-			provider:     "anthropic",
-			model:        "claude-opus-4-8",
-			wantModes:    5,
-			wantHasNone:  false,
+			name:        "claude-opus-4-8",
+			provider:    "anthropic",
+			model:       "claude-opus-4-8",
+			wantModes:   5,
+			wantHasNone: false,
 		},
 		{
-			name:         "claude-sonnet-4-6",
-			provider:     "anthropic",
-			model:        "claude-sonnet-4-6",
-			wantModes:    5,
-			wantHasNone:  false,
+			name:        "claude-sonnet-4-6",
+			provider:    "anthropic",
+			model:       "claude-sonnet-4-6",
+			wantModes:   5,
+			wantHasNone: false,
 		},
 		{
-			name:         "claude-haiku-4-5-20251001",
-			provider:     "anthropic",
-			model:        "claude-haiku-4-5-20251001",
-			wantModes:    1,
-			wantHasNone:  true,
+			name:        "claude-haiku-4-5-20251001",
+			provider:    "anthropic",
+			model:       "claude-haiku-4-5-20251001",
+			wantModes:   1,
+			wantHasNone: true,
 		},
 		{
-			name:         "gpt-5.5",
-			provider:     "openai",
-			model:        "gpt-5.5",
-			wantModes:    6,
-			wantHasNone:  true,
+			name:        "gpt-5.5",
+			provider:    "openai",
+			model:       "gpt-5.5",
+			wantModes:   6,
+			wantHasNone: true,
 		},
 		{
-			name:         "gemini-3.5-flash",
-			provider:     "gemini",
-			model:        "gemini-3.5-flash",
-			wantModes:    5,
-			wantHasNone:  false,
+			name:        "gemini-3.5-flash",
+			provider:    "gemini",
+			model:       "gemini-3.5-flash",
+			wantModes:   5,
+			wantHasNone: false,
 		},
 	}
 
@@ -478,7 +478,6 @@ func TestThinkingModeDefaultOpenAI(t *testing.T) {
 		}
 	}
 }
-
 
 // TestCurrentThinkingModeForModel_Better tests the current thinking mode lookup with better coverage
 func TestCurrentThinkingModeForModel_Better(t *testing.T) {

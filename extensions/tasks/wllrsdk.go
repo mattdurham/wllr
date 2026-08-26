@@ -379,13 +379,20 @@ func _sdkCall(method string, params any) {
 // _sdkCallResult fires a host_call and returns the raw response Result field,
 // or nil on error or empty response.
 func _sdkCallResult(method string, params any) json.RawMessage {
+	raw, _ := _sdkCallResultWithError(method, params)
+	return raw
+}
+
+// _sdkCallResultWithError preserves host errors so facade tools can return the
+// same actionable failure instead of silently converting it to an empty result.
+func _sdkCallResultWithError(method string, params any) (json.RawMessage, string) {
 	type request struct {
 		Method string `json:"method"`
 		Params any    `json:"params,omitempty"`
 	}
 	reqBytes, err := json.Marshal(request{Method: method, Params: params})
 	if err != nil {
-		return nil
+		return nil, err.Error()
 	}
 	buf := make([]byte, len(reqBytes))
 	copy(buf, reqBytes)
@@ -399,7 +406,7 @@ func _sdkCallResult(method string, params any) json.RawMessage {
 	)
 
 	if respPtr == 0 || respLen == 0 {
-		return nil
+		return nil, "host_call: no response"
 	}
 	respBytes := make([]byte, respLen)
 	copy(respBytes, unsafe.Slice((*byte)(unsafe.Pointer(uintptr(respPtr))), respLen))
@@ -409,8 +416,11 @@ func _sdkCallResult(method string, params any) json.RawMessage {
 		Error  string          `json:"error,omitempty"`
 		Result json.RawMessage `json:"result,omitempty"`
 	}
-	if err := json.Unmarshal(respBytes, &resp); err != nil || resp.Error != "" {
-		return nil
+	if err := json.Unmarshal(respBytes, &resp); err != nil {
+		return nil, err.Error()
 	}
-	return resp.Result
+	if resp.Error != "" {
+		return nil, resp.Error
+	}
+	return resp.Result, ""
 }

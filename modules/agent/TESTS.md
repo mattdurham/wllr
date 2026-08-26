@@ -82,6 +82,9 @@
 | `TestIdleNotification_TopLevelAgentDoesNotSelfNotify` | main never self-notifies | Spawn main (no creator), run a turn | main inbox empty after turn (no loop) |
 | `TestIdleNotification_SuppressedDuringShutdown` | Shutdown path suppresses idle notice | Deliver shutdown_request, run worker | Creator gets exactly 1 AGENT_SHUTDOWN, 0 idle notices |
 | `TestIdleNotification_MultipleWorkersCoalesce` | N workers idle-notify shared creator | 5 workers each run + go idle | Each worker's idle notice in creator history exactly once (no loss/dup) |
+| `TestIdleNotification_WakesCreator` | Structured lifecycle protocol | Child idles with creator | Creator receives `agent_idle` JSON containing child and creator IDs and is woken |
+| `TestSpawner_FailureNotificationTargetsCreator` | Nested child failure | Child with non-main creator fails | Creator receives `agent_failed` JSON with error, not hard-coded `main` |
+| `TestIdleNotification_SuppressedDuringShutdown`, `TestDeliver_ShutdownRequestToIdleAgent` | Shutdown acknowledgement | Child processes shutdown request | Creator receives `AGENT_SHUTDOWN` through wake-enabled delivery |
 
 ### compactionobs_test.go
 

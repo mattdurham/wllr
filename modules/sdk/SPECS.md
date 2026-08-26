@@ -3,6 +3,13 @@
 Package `sdk` defines shared types for the bob coding harness and its WASM extensions.
 These types cross the host/WASM boundary via JSON; their wire format is stable across ABI versions.
 
+## Task ledger wire contract
+
+Task ledger IDs are opaque strings. Mutations use versions for compare-and-set,
+results are raw JSON, and `workspace_mode` is metadata only. Supported methods
+are `tasklist_create`, `tasks_create`, `tasks_claim`, `tasks_update`,
+`tasks_report`, `tasks_get`, `tasks_list`, and `tasks_events_after`.
+
 ---
 
 ## ABIVersion

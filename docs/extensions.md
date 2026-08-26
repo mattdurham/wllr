@@ -216,15 +216,29 @@ Registered by the bundled `agents` extension.
 | `create_agent` | `name` string, required; `system_prompt` string, required; `prompt` string, required; `model` string, optional; `thinking_budget` integer, optional. | JSON result from host agent spawn/delivery. Includes the new agent ID on success. |
 | `shutdown_agent` | `agent_id` string, required. | JSON object with `status: "shutdown_requested"`, `agent_id`, `stopped: false`, and, when available, current running, queue, activity, and shutdown-request state. |
 | `list_agents` | No fields. | JSON object containing live agents with IDs, names, running state, pending message counts, recent activity age, turn duration, last/active tool names, and shutdown-request state. |
-| `send_message` | `agent_id` string, required; `message` string, required. | JSON result from host agent delivery. |
+| `send_message` | `agent_id` string, required; `message` string, required. | JSON result from host agent delivery. The recipient is woken immediately. |
 | `create_team` | `name` string, required. | JSON result from host team creation, including team ID on success. |
 | `add_to_team` | `team_id` string, required; `agent_id` string, required. | JSON result from host team membership update. |
 | `get_team` | `team_id` string, required. | JSON object describing the requested team. |
 | `shutdown_team` | `team_id` string, required. | JSON result from host team shutdown. |
 
+Child lifecycle notifications are delivered to the recorded creator as JSON
+messages and wake the creator immediately. Events are `agent_idle` (the child
+has no pending work), `agent_failed` (includes `error`), and `AGENT_SHUTDOWN`
+(graceful shutdown completed). Each includes `agent_id` and may include
+`creator_id` and `message`. These notifications identify lifecycle state only;
+child results should be sent explicitly with `send_message` or read from the
+child's status/history.
+
 ### Task tools
 
 Registered by the installed `tasks` extension.
+
+Task state is owned by the host ledger. IDs are opaque, records carry a
+monotonic `version`, claims create an `attempt_id`, and notifications are
+best-effort JSON envelopes identified by `event_id`; reconcile with
+`tasks_events_after` after every wake or compaction. `workspace_mode` values
+`shared`, `worktree`, and `readonly` are metadata placeholders only.
 
 Task fields use these string enums:
 
@@ -233,12 +247,14 @@ Task fields use these string enums:
 
 | Tool | Inputs | Output |
 |------|--------|--------|
-| `tasklist_create` | `name` string, required; `description` string, optional; `owner_agent_id` string, optional. | JSON object: `{"list_id":"..."}`. |
-| `tasks_create` | `list_id` string, required; `title` string, required; `description` string, optional; `priority` string, optional; `tags` string array, optional; `dependencies` string array, optional. | JSON object: `{"task_id":"..."}`. |
-| `tasks_update` | `list_id` string, required; `task_id` string, required; optional updates: `title`, `description`, `status`, `priority`, `tags`, `dependencies`. | JSON object: `{"success":true}`. |
-| `tasks_list` | `list_id` string, required; `status` string, optional filter. | JSON object: `{"tasks":[...]}` where each task includes `id`, `title`, `description`, `status`, `priority`, `tags`, `dependencies`, and assignment fields when present. |
-| `tasks_get` | `list_id` string, required; `task_id` string, required. | JSON task object. |
-| `tasks_claim` | `list_id` string, required; `agent_id` string, required. | JSON object: `{"task":{...}}` for a claimed task, or `{"task":null}` if none are available. |
+| `tasklist_create` | `name` required; optional `description`, `owner_agent_id`. | `{list:{list_id,version,...}}`. |
+| `tasks_create` | `list_id`, `title` required; optional `description`, integer `priority`, `parent_task_id`, `owner_agent_id`, `depends_on`, `workspace_mode`. | `{task:{task_id,version,status,...}}`. |
+| `tasks_update` | `list_id`, `task_id`, `expected_version` required; optional field replacements. | Updated `{task:{...}}`; stale versions fail. |
+| `tasks_list` | `list_id` required; optional `cursor`, `limit`, and compatibility `status` filter. | `{tasks:[...],cursor,next_cursor}`. |
+| `tasks_get` | `list_id`, `task_id` required. | Authoritative `{task:{...}}`. |
+| `tasks_claim` | `list_id`, `agent_id` required. | `{task:{...,attempt_id,version}}`, or `{task:null}`. |
+| `tasks_report` | `list_id`, `task_id`, `attempt_id`, `agent_id`, terminal `status` required; completed requires structured `result`, others require `reason` or `error`. | Updated terminal `{task:{...}}`. |
+| `tasks_events_after` | `list_id`, `cursor` required; optional bounded `limit`. | `{events:[...],cursor,next_cursor}`; deduplicate by `event_id`. |
 
 ### Plan tools
 

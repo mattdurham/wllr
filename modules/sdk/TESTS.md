@@ -1,5 +1,14 @@
 # bob/sdk — Test Specifications
 
+`TestTaskLedgerWireRoundTrip` verifies opaque IDs, raw results, versions,
+statuses, workspace modes, and task host-call method constants.
+
+Task protocol coverage also includes request/response field presence for
+`expected_version`, `attempt_id`, `result`, `reason`, cursors, and replayable
+event IDs. Integration tests exercise the facade lifecycle
+`create -> claim -> report -> events_after`, stale-version rejection, structured
+terminal reporting, and all three workspace-mode placeholders.
+
 ## Existing Tests (types_test.go)
 
 ---

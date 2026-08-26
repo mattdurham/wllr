@@ -131,6 +131,18 @@ dispatched, a shutdown request is queued, and the turn finishes.
 
 **Invariant:** `Deliver(id, msg, wake=true)` guarantees the message is *processed*, not merely queued. A delivered message can never be silently stranded in the inbox by a missing follow-up trigger — this is the failure mode the two-call pattern allowed (e.g. the tasks extension queued a `TASK_DONE` notification but never triggered a turn).
 
+### Parent/child lifecycle notifications
+
+When a child with a creator becomes idle, fails a turn, or completes a graceful
+shutdown, the pool sends the creator a lifecycle notification and wakes it via
+`Deliver(..., wake=true)`. Notification content is JSON with an `event` and
+`agent_id`; the events are `agent_idle`, `agent_failed` (also includes `error`),
+and `AGENT_SHUTDOWN`. `creator_id` and a human-readable `message` may also be
+present. `agent_idle` means only that the child has no current work; substantive
+results remain the responsibility of `send_message` and the child's history.
+Nested children notify their recorded creator. Errors use `main` only as a
+fallback when no creator is recorded. Shutdown acknowledgements are wake-enabled.
+
 **Invariant:** `Deliver` Submits with empty content. The just-appended inbox message becomes the turn content via the drain path; no synthetic placeholder string (such as the former `"[process pending inbox messages]"`) is ever injected into history.
 
 **Invariant:** `Activity()` is observational only. Reading activity must not enqueue messages, wake the agent, cancel the turn, or mutate history/inbox state.

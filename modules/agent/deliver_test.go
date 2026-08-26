@@ -2,6 +2,7 @@ package agent_test
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"sync"
 	"testing"
@@ -301,7 +302,13 @@ func TestIdleNotification_WakesCreator(t *testing.T) {
 	// The creator's history should contain the idle notification text.
 	var found bool
 	for _, m := range creator.History() {
-		if strings.Contains(m.Content, "is idle") && strings.Contains(m.Content, "main/worker") {
+		var event struct {
+			Event     string `json:"event"`
+			AgentID   string `json:"agent_id"`
+			CreatorID string `json:"creator_id"`
+		}
+		if json.Unmarshal([]byte(m.Content), &event) == nil &&
+			event.Event == "agent_idle" && event.AgentID == "main/worker" && event.CreatorID == "main" {
 			found = true
 		}
 	}
@@ -343,12 +350,12 @@ func TestIdleNotification_SuppressedDuringShutdown(t *testing.T) {
 	pool := agent.NewPool()
 
 	creatorLM := &tokenStreamLM{tokens: []string{"ack"}}
-	if _, err := pool.Spawn("main", creatorLM, agent.SpawnOpts{}); err != nil {
+	creator, err := pool.Spawn("main", creatorLM, agent.SpawnOpts{})
+	if err != nil {
 		t.Fatalf("Spawn creator: %v", err)
 	}
-	// Stop the creator from auto-running on delivery so we can inspect its raw
-	// inbox deterministically.
-	creator := pool.Get("main")
+	creatorTurn := make(chan []sdk.Message, 1)
+	creator.SetOnTurnStart(func(_ string, inbox []sdk.Message) { creatorTurn <- inbox })
 
 	workerLM := &tokenStreamLM{tokens: []string{"worker-done"}}
 	worker, err := pool.Spawn("main/worker", workerLM, agent.SpawnOpts{})
@@ -378,20 +385,14 @@ func TestIdleNotification_SuppressedDuringShutdown(t *testing.T) {
 		t.Errorf("worker error: %v", err)
 	}
 
-	// Allow the AGENT_SHUTDOWN delivery (and any erroneous idle delivery) to land.
-	// The worker self-closes, so poll the creator inbox briefly.
-	deadline := time.After(2 * time.Second)
-	for creator.InboxLen() < 1 {
-		select {
-		case <-deadline:
-			t.Fatal("timeout waiting for AGENT_SHUTDOWN to reach creator")
-		case <-time.After(10 * time.Millisecond):
-		}
+	// The wake-enabled delivery is consumed by the creator's turn. Observe the
+	// claimed inbox rather than expecting it to remain queued.
+	var msgs []sdk.Message
+	select {
+	case msgs = <-creatorTurn:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for AGENT_SHUTDOWN to wake creator")
 	}
-	// Give any (erroneous) second delivery a chance to arrive before asserting.
-	time.Sleep(100 * time.Millisecond)
-
-	msgs := creator.DrainInbox()
 	var shutdownCount, idleCount int
 	for _, m := range msgs {
 		if strings.Contains(m.Content, "AGENT_SHUTDOWN") {
@@ -417,9 +418,12 @@ func TestIdleNotification_SuppressedDuringShutdown(t *testing.T) {
 // turn skipped finishTurn's shutdown handling — stranding the agent forever.
 func TestDeliver_ShutdownRequestToIdleAgent(t *testing.T) {
 	pool := agent.NewPool()
-	if _, err := pool.Spawn("main", &tokenStreamLM{tokens: []string{"ack"}}, agent.SpawnOpts{}); err != nil {
+	creator, err := pool.Spawn("main", &tokenStreamLM{tokens: []string{"ack"}}, agent.SpawnOpts{})
+	if err != nil {
 		t.Fatalf("Spawn main: %v", err)
 	}
+	creatorTurn := make(chan []sdk.Message, 1)
+	creator.SetOnTurnStart(func(_ string, inbox []sdk.Message) { creatorTurn <- inbox })
 	worker, err := pool.Spawn("main/worker", &tokenStreamLM{tokens: []string{"done"}}, agent.SpawnOpts{})
 	if err != nil {
 		t.Fatalf("Spawn worker: %v", err)
@@ -452,9 +456,14 @@ func TestDeliver_ShutdownRequestToIdleAgent(t *testing.T) {
 		}
 	}
 
-	// The creator must have received AGENT_SHUTDOWN, not an idle notice.
-	creator := pool.Get("main")
-	msgs := creator.DrainInbox()
+	// The creator must have received AGENT_SHUTDOWN, not an idle notice. The
+	// notification is consumed by the creator's wake turn.
+	var msgs []sdk.Message
+	select {
+	case msgs = <-creatorTurn:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for AGENT_SHUTDOWN to wake creator")
+	}
 	var gotShutdown bool
 	for _, m := range msgs {
 		if strings.Contains(m.Content, "AGENT_SHUTDOWN") {

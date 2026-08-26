@@ -2,6 +2,13 @@
 
 Append-only design decision log. Never delete entries; add an `*Addendum (date):*` if a decision is reversed.
 
+## Task ledger types
+
+*Added: 2026-08-26*
+
+Task ledger wire types are centralized so WASM facades share the host contract;
+structured results remain `json.RawMessage` to preserve caller-defined payloads.
+
 ---
 
 ## 1. EventType is a string type, not an iota int

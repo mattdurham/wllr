@@ -2,6 +2,14 @@
 
 Append-only design decision log. Never delete entries; add an `*Addendum (date):*` if a decision is reversed.
 
+## 19. Host-owned task ledger
+
+*Added: 2026-08-26*
+
+Task state is host-owned so extension restarts cannot lose claims or results.
+Best-effort agent delivery follows the durable commit; reconciliation uses the
+authoritative event cursor API.
+
 ---
 
 ## 1. Why wazero over wasmer/wasmtime

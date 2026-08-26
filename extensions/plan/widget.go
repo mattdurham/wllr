@@ -125,8 +125,10 @@ func renderPlanWidget() {
 	foot := fmt.Sprintf("%d/%d · %s", done, total, status)
 	planMu.RUnlock()
 
-	UIPatch(planAreaID,
-		OpSetRoot(UIVStack(planRootID,
+	UIPatch(
+		planAreaID,
+		OpSetRoot(UIVStack(
+			planRootID,
 			UIText(planTitleID, title),
 			UIText(planBodyID, body.String()),
 			UIText(planFootID, foot),

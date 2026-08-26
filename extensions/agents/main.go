@@ -232,6 +232,26 @@ Send a message to an agent and trigger its next turn immediately.
 - Sub-agents may still call send_message for richer summaries — the message content
   will appear in the caller's conversation but is not needed for wakeup.
 
+### Parent/child lifecycle notifications
+
+The host sends lifecycle notifications to the recorded creator as JSON messages
+and wakes that creator. These are protocol messages, not child work results:
+
+- event: "agent_idle": the child finished its current work and has no pending
+  messages. Inspect its status/history, then process its result and shut it down
+  when finished.
+- event: "agent_failed": the child turn failed. The error field explains
+  why; inspect the child and decide whether to retry, recover, or report failure.
+- event: "AGENT_SHUTDOWN": the child completed a graceful shutdown and is no
+  longer available. Remove it from your active-worker set.
+
+Every lifecycle notification includes agent_id; it may include creator_id,
+error, and a human-readable message. Do not wait for a child by polling or
+by sending pings. A notification is the wake-up signal; the live status fields
+and child messages are the source of truth for what to do next. Always send a
+substantive result with send_message before going idle, especially for coding
+work.
+
 **shutdown_agent(agent_id)**
 Request graceful shutdown. If the agent is running, it may continue its current
 turn and tool calls before stopping. Do not take over its files until list_agents
@@ -430,6 +450,24 @@ wait_for_all blocks the orchestrator's WASM thread during the wait. For long-run
 this wastes resources and can cause timeouts. The IDLE signal pattern is fully event-driven.`
 
 	AppendSystemPrompt(guidance)
+	AppendSystemPrompt(`## Durable task coordination
+
+Tasks are host-owned and survive extension restart and compaction. Parents must
+create tasks with owner/parent IDs and a workspace_mode of shared, worktree, or
+readonly (metadata placeholders only), then pass list, task, and attempt IDs to
+workers. Workers claim once and report completed, blocked, failed, or cancelled
+through tasks_report; completed reports require a structured
+result and other terminal reports require a reason or error. Include and retain
+the returned version; updates use expected-version CAS and claims produce a
+new attempt_id.
+
+After every wake or compaction, reconcile with tasks_events_after from the
+last cursor (cursor zero is valid), deduplicating by event_id. A notification
+is only a wake hint; the ledger is authoritative. Use send_message for prose,
+progress, and questions. Never infer completion from TASK_DONE text or idle
+state, and inspect liveness before retrying or requeueing. Workers report before
+going idle. Never poll, sleep, or call wait_for_all.
+`)
 }
 
 func onAgentsCommand(_ []string) {
