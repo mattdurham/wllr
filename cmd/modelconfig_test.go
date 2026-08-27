@@ -37,6 +37,19 @@ func TestSaveModel_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestSaveContextWindow_RoundTripPerModel(t *testing.T) {
+	withConfigPath(t)
+	if err := saveContextWindow("openai", "gpt-4o", 128000); err != nil {
+		t.Fatalf("saveContextWindow: %v", err)
+	}
+	if got := savedContextWindow("openai", "gpt-4o"); got != 128000 {
+		t.Fatalf("savedContextWindow = %d, want 128000", got)
+	}
+	if got := savedContextWindow("openai", "other-model"); got != 0 {
+		t.Fatalf("savedContextWindow(other-model) = %d, want 0", got)
+	}
+}
+
 func TestSaveProvider_RoundTrip(t *testing.T) {
 	withConfigPath(t)
 

@@ -120,6 +120,28 @@ func TestSpawnOpts_ModelName_Empty_UsesPoolDefault(t *testing.T) {
 	}
 }
 
+func TestPoolContextWindow_IsPerModel(t *testing.T) {
+	pool := agent.NewPool()
+	pool.SetDefaultModelName("claude-sonnet-4-6")
+	pool.SetModelContextWindow("claude-sonnet-4-6", 200_000)
+	pool.SetModelContextWindow("gpt-4o", 128_000)
+
+	mainAgent, err := pool.Spawn("main", newMockLM(), agent.SpawnOpts{ModelName: "claude-sonnet-4-6"})
+	if err != nil {
+		t.Fatalf("spawn main: %v", err)
+	}
+	child, err := pool.Spawn("main/child", newMockLM(), agent.SpawnOpts{ModelName: "gpt-4o"})
+	if err != nil {
+		t.Fatalf("spawn child: %v", err)
+	}
+	if got := mainAgent.ContextWindow(); got != 200_000 {
+		t.Errorf("main context window = %d, want 200000", got)
+	}
+	if got := child.ContextWindow(); got != 128_000 {
+		t.Errorf("child context window = %d, want 128000", got)
+	}
+}
+
 // TestSetModel_SwapsModelForNextTurn verifies SetModel updates the reported
 // model name and the LM used by the next turn (the /model picker path).
 func TestSetModel_SwapsModelForNextTurn(t *testing.T) {

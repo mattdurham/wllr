@@ -3,7 +3,7 @@
 // Generated: 2026-05-11
 //
 // Context windows are not returned by the Anthropic API; values come from
-// known model metadata. Unknown models default to 1000000 tokens.
+// known model metadata. Unknown models require explicit resolution.
 
 package agent
 

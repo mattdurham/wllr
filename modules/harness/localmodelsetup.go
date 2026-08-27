@@ -176,6 +176,10 @@ func (m *Model) applyLocalModelPick(entry LocalModelEntry) tea.Cmd {
 		return nil
 	}
 	m.pushNotification("✓ Local model set to: " + modelID)
+	if entry.ContextWindow <= 0 {
+		m.openContextWindowPrompt(providerLocal, modelID)
+		return nil
+	}
 	return m.setActiveProviderModel(providerLocal, modelID)
 }
 

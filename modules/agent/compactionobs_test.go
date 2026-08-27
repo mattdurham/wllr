@@ -168,7 +168,7 @@ func TestExecuteTurn_CompactionCounterIncrementsAndDispatches(t *testing.T) {
 	pool.SetContextWindow(200_000)
 
 	lm := &obsUsageLM{tokens: []string{"response"}, inputTokens: 30_000, outputTokens: 100}
-	a, err := pool.Spawn(MainAgentID, lm, SpawnOpts{})
+	a, err := pool.Spawn(MainAgentID, lm, SpawnOpts{ContextWindow: 200_000})
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}

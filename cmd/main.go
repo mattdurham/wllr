@@ -80,11 +80,18 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 	}
 	pool.SetProviderName(cfg.Provider)
 	pool.SetDefaultModelName(cfg.Model)
+	if cfg.ContextWindow <= 0 {
+		cfg.ContextWindow = contextWindowForSelection(cfg.Provider, cfg.Model, cfg)
+	}
+	if cfg.ContextWindow <= 0 && *execPrompt != "" {
+		fmt.Fprintf(os.Stderr, "wllr: context window for model %q is unknown; set WLLR_CONTEXT_WINDOW or configure it in interactive mode\n", cfg.Model)
+		os.Exit(1)
+	}
 	if cfg.ContextWindow > 0 {
-		pool.SetContextWindow(cfg.ContextWindow)
+		pool.SetModelContextWindow(cfg.Model, cfg.ContextWindow)
 	}
 
-	if _, spawnErr := pool.Spawn(agent.MainAgentID, langModel, agent.SpawnOpts{TurnTimeout: -1}); spawnErr != nil {
+	if _, spawnErr := pool.Spawn(agent.MainAgentID, langModel, agent.SpawnOpts{ModelName: cfg.Model, ContextWindow: cfg.ContextWindow, TurnTimeout: -1}); spawnErr != nil {
 		fmt.Fprintf(os.Stderr, "wllr: spawn main agent: %v\n", spawnErr)
 		os.Exit(1)
 	}
@@ -109,6 +116,9 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 	// OnRegisterCommand (wired in harness.New) is set when _init and
 	// session_start handlers call register_command.
 	m := harness.New(pool, agent.MainAgentID, h)
+	if cfg.ContextWindow <= 0 && *execPrompt == "" {
+		m.SetPendingContextWindow(cfg.Provider, cfg.Model)
+	}
 
 	// Register stateless tools as native Go functions — bypasses WASM entirely.
 	registerNativeTools(h)
@@ -184,8 +194,8 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 		// model must not keep the previous model's window in the pool, which
 		// would drive the compaction threshold and the ctx display wrongly.
 		// An explicit user override is always preferred and is never cleared.
-		if cw := contextWindowForSelection(provider, modelID, cfg); cw > 0 || !cfg.ContextWindowConfigured {
-			pool.SetContextWindow(cw)
+		if cw := contextWindowForSelection(provider, modelID, cfg); cw > 0 {
+			pool.SetModelContextWindow(modelID, cw)
 		}
 		if saveErr := saveProvider(provider); saveErr != nil {
 			slog.Warn("wllr: could not persist provider selection", "provider", provider, "error", saveErr)
@@ -210,7 +220,7 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 			}
 			pool.SetProvider(prov)
 			if main := pool.Get(agent.MainAgentID); main != nil {
-				main.SetModel(lm, modelID)
+				main.SetModel(lm, modelID, contextWindowForSelection(provider, modelID, cfg))
 			}
 			return modelID, false, nil
 		default:
@@ -229,11 +239,16 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 		}
 		out := make([]harness.ModelChoice, 0, len(catalog))
 		for _, mi := range catalog {
-			out = append(out, harness.ModelChoice{ID: mi.ID, Name: mi.Name, Sublabel: modelChoiceSublabel(mi)})
+			cw := contextWindowForSelection(currentProvider, mi.ID, cfg)
+			out = append(out, harness.ModelChoice{ID: mi.ID, Name: mi.Name, Sublabel: modelChoiceSublabel(mi), ContextWindow: cw, ContextWindowKnown: cw > 0})
 		}
 		return out
 	}
 	m.SelectModelFn = func(modelID string) error {
+		contextWindow := contextWindowForSelection(currentProvider, modelID, cfg)
+		if contextWindow <= 0 {
+			return fmt.Errorf("%w: %s", harness.ErrContextWindowRequired, modelID)
+		}
 		var lm fantasy.LanguageModel
 		if currentProvider == providerLocal {
 			if !applyLocalModelChoice(ctx, cfg, modelID) {
@@ -253,16 +268,10 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 			}
 		}
 		if main := pool.Get(agent.MainAgentID); main != nil {
-			main.SetModel(lm, modelID)
+			main.SetModel(lm, modelID, contextWindow)
 		}
 		pool.SetDefaultModelName(modelID)
-		// Apply the resolved window unconditionally (0 included): a window-less
-		// model must not keep the previous model's window in the pool, which
-		// would drive the compaction threshold and the ctx display wrongly.
-		// An explicit user override is always preferred and is never cleared.
-		if cw := contextWindowForSelection(currentProvider, modelID, cfg); cw > 0 || !cfg.ContextWindowConfigured {
-			pool.SetContextWindow(cw)
-		}
+		pool.SetModelContextWindow(modelID, contextWindow)
 		if saveErr := saveModel(modelID); saveErr != nil {
 			slog.Warn("wllr: could not persist model selection", "model", modelID, "error", saveErr)
 		}
@@ -270,6 +279,13 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 		// when valid for it, the local endpoint's declared default when local,
 		// or a clear when the stored mode is invalid for the new model.
 		m.SetThinkingForModel(startupThinkingMode(ctx, cfg, currentProvider))
+		return nil
+	}
+	m.SetContextWindowFn = func(provider, modelID string, tokens int64) error {
+		if err := saveContextWindow(provider, modelID, tokens); err != nil {
+			return err
+		}
+		pool.SetModelContextWindow(modelID, tokens)
 		return nil
 	}
 	if localModelReplaced {
@@ -351,7 +367,7 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 		}
 		pool.SetProvider(prov)
 		if main := pool.Get(agent.MainAgentID); main != nil {
-			main.SetModel(newLM, lm.ID)
+			main.SetModel(newLM, lm.ID, contextWindowForSelection(providerLocal, lm.ID, cfg))
 		}
 		// Setup just finished: adopt the model's thinking default (detected) so
 		// the new local model starts with the server's declared setting.

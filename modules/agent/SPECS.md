@@ -192,19 +192,20 @@ On each `Submit` call, the resolved system prompt sent to the LLM is:
 
 ## 9. Context Window and Compaction
 
-Each `Agent` stores a `modelName string` (and its `lm fantasy.LanguageModel`) for context window lookup and streaming. Both are guarded by `lmMu sync.RWMutex` and may be swapped at runtime via `SetModel(lm, modelName)` (used by the `/model` picker). `ModelName()` reads under the lock. On each `Submit` call, the agent captures `lm` under `lmMu.RLock()` and, inside the turn, snapshots `modelName` once via `ModelName()`; `contextWindowForModel(modelName)` determines the model's known input context limit.
+Each `Agent` stores a `modelName string`, its `lm fantasy.LanguageModel`, and its resolved positive `contextWindow` for context sizing and streaming. These are guarded by `lmMu sync.RWMutex` and are captured together for each turn. `SetModel(lm, modelName, contextWindow)` swaps the complete model snapshot; an omitted context window is resolved only from built-in metadata. Unknown model metadata is represented by zero and prevents the turn from streaming.
 
-**Invariant:** `SetModel` is safe to call concurrently with turns. A turn already in flight finishes on the model it captured; the next `Submit` picks up the swapped model. `lm` and `modelName` are always read/written together under `lmMu`.
+**Invariant:** `SetModel` is safe to call concurrently with turns. A turn already in flight finishes on the model/context snapshot it captured; the next `Submit` picks up the swapped snapshot. `lm`, `modelName`, and `contextWindow` are always read/written together under `lmMu`.
 
 `Agent` also stores `providerOpts fantasy.ProviderOptions` (the provider-specific request options, e.g. extended-thinking budget / reasoning effort), seeded from `opts.ProviderOptions` at spawn and guarded by the same `lmMu`. `SetProviderOptions(po)` swaps them at runtime (used by the `/thinking` picker); a nil value clears them (thinking off). `Submit` snapshots `providerOpts` under `lmMu.RLock()` alongside `lm` and overrides `opts.ProviderOptions` with the snapshot for that turn.
 
 **Invariant:** `SetProviderOptions` is safe to call concurrently with turns; a turn in flight finishes on the options it captured, the next `Submit` picks up the swap. `providerOpts` is always read/written under `lmMu`.
 
 Token estimation uses the `chars/4` heuristic (`estimateTokens`, `estimateStr`).
-`contextWindowForModel` returns the model's known window from the generated
-catalog table (`models.generated.go`, substring match) and falls back to
-`defaultContextWindow` (1,000,000) for unknown model names. An explicit
-`pool.SetContextWindow` override always takes precedence over the table
+`contextWindowForModel` returns a built-in known model window or zero when
+metadata is unavailable. Provider/API metadata and user-entered values are
+stored on the pool per model and take precedence over built-in metadata. The
+application must resolve a positive value before starting a configured model;
+there is no unsafe unknown-model fallback.
 
 ### Proactive Compaction
 
@@ -482,6 +483,7 @@ type SpawnOpts struct {
 - `SystemPrompt`: the agent-specific prompt appended after the base prompt on every turn.
 - `Name`: human-readable display name for the agent; used in logs and agent list responses.
 - `ModelName`: overrides the pool's default model name for context-window sizing during compaction. If empty, the pool default is used.
+- `ContextWindow`: resolved input context window in tokens for this model. A positive value is required for production turns; zero means metadata resolution is incomplete.
 - `Tools`: static tool list. If `SetToolsFn` is called on the agent after spawn, the dynamic function takes priority over `Tools`.
 - `ThinkingBudget`: enables extended thinking with the given token budget. Only supported on Anthropic models. Zero means disabled.
 - `ProviderOptions`: passed directly to `fantasy.WithProviderOptions` on each turn. Used for provider-specific settings such as extended thinking.

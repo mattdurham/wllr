@@ -3,6 +3,7 @@ package harness
 // NOTE: Any changes to this file must be reflected in the corresponding SPECS.md or NOTES.md.
 
 import (
+	"errors"
 	"fmt"
 
 	tea "charm.land/bubbletea/v2"
@@ -12,9 +13,11 @@ import (
 // ModelChoice is one selectable model for the /model picker. ID is the wire
 // model identifier passed to the provider; Name is a human label.
 type ModelChoice struct {
-	ID       string
-	Name     string
-	Sublabel string
+	ID                 string
+	Name               string
+	Sublabel           string
+	ContextWindow      int64
+	ContextWindowKnown bool
 }
 
 // openModelPicker builds the picker items from ModelListFn and opens the picker
@@ -39,6 +42,9 @@ func (m *Model) openModelPicker() {
 		if c.ID == m.activeModel {
 			sub += "  (current)"
 		}
+		if !c.ContextWindowKnown {
+			sub += "  (context window required)"
+		}
 		items = append(items, sdk.ShowPickerItem{ID: c.ID, Label: c.Name, Sublabel: sub})
 	}
 	title := "Select a model  (↑↓ · enter · esc)"
@@ -59,6 +65,10 @@ func (m *Model) applyModelSelection(modelID string) tea.Cmd {
 	}
 	if m.SelectModelFn != nil {
 		if err := m.SelectModelFn(modelID); err != nil {
+			if errors.Is(err, ErrContextWindowRequired) {
+				m.openContextWindowPrompt(m.activeProvider, modelID)
+				return nil
+			}
 			m.pushNotification(fmt.Sprintf("⚠ could not switch model: %v", err))
 			return nil
 		}

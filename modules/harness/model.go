@@ -142,6 +142,10 @@ type Model struct {
 	// Set by cmd/main.go.
 	SelectModelFn func(modelID string) error
 
+	// SetContextWindowFn persists and applies a user-supplied context window for
+	// one provider/model after the required context prompt.
+	SetContextWindowFn func(provider, modelID string, tokens int64) error
+
 	// ThinkingListFn returns the reasoning levels selectable in the /thinking
 	// picker. Nil means thinking-level selection is not wired. An empty list
 	// means the current model does not support thinking; the picker then shows
@@ -256,11 +260,13 @@ type Model struct {
 	suggestionIdx  int
 	dropdownOffset int // first visible suggestion index
 
-	modalScroll        int
-	pendingSetupWizard bool
-	pendingModelPicker bool
-	streaming          bool
-	consoleVisible     bool
+	modalScroll            int
+	pendingSetupWizard     bool
+	pendingModelPicker     bool
+	pendingContextProvider string
+	pendingContextModel    string
+	streaming              bool
+	consoleVisible         bool
 
 	chatAppendDirty            bool
 	chatAppendRefreshScheduled bool
@@ -594,6 +600,13 @@ func (m *Model) SetPendingModelPicker() {
 	m.pendingModelPicker = true
 }
 
+// SetPendingContextWindow marks startup as needing a required context-window
+// prompt before the configured model may run.
+func (m *Model) SetPendingContextWindow(provider, model string) {
+	m.pendingContextProvider = provider
+	m.pendingContextModel = model
+}
+
 // SetActiveThinking sets the displayed active reasoning level and reflects it in
 // the status bar. Used at startup to show the persisted level. Does not itself
 // change the agent's provider options.
@@ -649,6 +662,12 @@ func (m Model) Init() tea.Cmd {
 	}
 	if m.pendingModelPicker {
 		cmds = append(cmds, func() tea.Msg { return showModelPickerMsg{} })
+	}
+	if m.pendingContextModel != "" {
+		provider, model := m.pendingContextProvider, m.pendingContextModel
+		cmds = append(cmds, func() tea.Msg {
+			return contextWindowEnteredMsg{Provider: provider, Model: model}
+		})
 	}
 	return tea.Batch(cmds...)
 }
@@ -918,6 +937,12 @@ func (m Model) updateKeyPressTextInput(kp tea.KeyPressMsg) (Model, tea.Cmd, bool
 		}
 		if callback == localModelManualFieldCallback {
 			return m, func() tea.Msg { return localModelManualFieldEnteredMsg{Value: value} }, true
+		}
+		if callback == contextWindowCallback {
+			provider, model := m.pendingContextProvider, m.pendingContextModel
+			return m, func() tea.Msg {
+				return contextWindowEnteredMsg{Provider: provider, Model: model, Value: value}
+			}, true
 		}
 		extHost := m.extHost
 		return m, func() tea.Msg {
@@ -1224,6 +1249,32 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 	case showModelPickerMsg:
 		m.openModelPicker()
 		return m, nil, true
+
+	case contextWindowEnteredMsg:
+		if msg.Value == "" {
+			m.openContextWindowPrompt(msg.Provider, msg.Model)
+			return m, nil, true
+		}
+		tokens, err := parseContextWindow(msg.Value)
+		if err != nil {
+			m.pushNotification("⚠ " + err.Error())
+			m.openContextWindowPrompt(msg.Provider, msg.Model)
+			return m, nil, true
+		}
+		if m.SetContextWindowFn == nil {
+			m.pushNotification("⚠ context-window configuration is unavailable")
+			m.openContextWindowPrompt(msg.Provider, msg.Model)
+			return m, nil, true
+		}
+		if err := m.SetContextWindowFn(msg.Provider, msg.Model, tokens); err != nil {
+			m.pushNotification(fmt.Sprintf("⚠ could not save context window: %v", err))
+			m.openContextWindowPrompt(msg.Provider, msg.Model)
+			return m, nil, true
+		}
+		model := msg.Model
+		m.pendingContextProvider = ""
+		m.pendingContextModel = ""
+		return m, m.applyModelSelection(model), true
 
 	case showLocalModelSetupMsg:
 		m.openLocalModelBaseURLPrompt()

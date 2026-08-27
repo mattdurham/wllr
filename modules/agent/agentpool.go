@@ -39,6 +39,7 @@ type AgentPool struct {
 	// Initialized from WLLR_COMPACT_THRESHOLD in NewPool; override via SetCompactConfig.
 	compactConfig      CompactConfig
 	contextWindow      int64
+	contextWindows     map[string]int64
 	tokenCount         atomic.Int64
 	mu                 sync.RWMutex
 	baseSystemPromptMu sync.RWMutex

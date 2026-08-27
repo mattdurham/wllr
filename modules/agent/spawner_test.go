@@ -50,6 +50,35 @@ func TestSpawner_Spawn_Basic(t *testing.T) {
 	}
 }
 
+func TestSpawner_Spawn_PropagatesKnownModelContext(t *testing.T) {
+	prov := testutil.NewFakeProvider()
+	pool := agent.NewPool()
+	pool.SetProvider(prov)
+	pool.SetDefaultModelName("gpt-4o")
+	mainLM, err := pool.LanguageModelForModel(context.Background(), "gpt-4o")
+	if err != nil {
+		t.Fatalf("main model: %v", err)
+	}
+	if _, err := pool.Spawn("main", mainLM, agent.SpawnOpts{ModelName: "gpt-4o"}); err != nil {
+		t.Fatalf("spawn main: %v", err)
+	}
+
+	spawner := agent.NewSpawner(pool, nil, nil)
+	if err := spawner.Spawn(context.Background(), extension.SpawnRequest{ID: "main/child", ModelName: "gpt-4o"}); err != nil {
+		t.Fatalf("spawn child: %v", err)
+	}
+	child := pool.Get("main/child")
+	if child == nil {
+		t.Fatal("child not in pool")
+	}
+	if got := child.ModelName(); got != "gpt-4o" {
+		t.Errorf("child model name = %q, want gpt-4o", got)
+	}
+	if got := child.ContextWindow(); got != 128_000 {
+		t.Errorf("child context window = %d, want 128000", got)
+	}
+}
+
 func TestSpawner_Spawn_ParentIDConvention(t *testing.T) {
 	// Verify that "main/coder" gets parentID="main" and "main/team/worker" gets parentID="main/team".
 	prov := testutil.NewFakeProvider()
@@ -219,7 +248,7 @@ func TestSpawner_FailureNotificationTargetsCreator(t *testing.T) {
 		t.Fatalf("Spawn worker: %v", err)
 	}
 	worker := pool.Get("main/parent/worker")
-	worker.SetModel(&errStreamLM{}, "err-model")
+	worker.SetModel(&errStreamLM{}, "err-model", 1_000_000)
 	worker.Submit(context.Background(), "fail")
 
 	select {

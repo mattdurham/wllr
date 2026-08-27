@@ -30,6 +30,27 @@ const (
 	CompactionTriggerReactive = "reactive"
 )
 
+// builtInContextWindows covers model families whose limits are known without
+// querying a provider. Provider- or endpoint-specific values are recorded on
+// the pool and take precedence over this table.
+var builtInContextWindows = map[string]int64{
+	"claude-opus-4-8": 1_000_000, "claude-opus-4-7": 1_000_000,
+	"claude-opus-4-6": 200_000, "claude-opus-4-5-20251101": 200_000,
+	"claude-sonnet-5": 1_000_000, "claude-sonnet-4-6": 200_000,
+	"claude-sonnet-4-5-20250929": 200_000, "claude-haiku-4-5-20251001": 200_000,
+	"claude-opus-4-1-20250805": 200_000, "claude-opus-4-20250514": 200_000,
+	"claude-sonnet-4-20250514": 200_000,
+	"gpt-5.5":                  1_050_000, "gpt-5.5-pro": 1_050_000, "gpt-5.4": 1_050_000,
+	"gpt-5.4-pro": 1_050_000, "gpt-5.4-mini": 400_000, "gpt-5.4-nano": 400_000,
+	"gpt-5.3-codex": 400_000, "gpt-5.2": 400_000, "gpt-5.2-codex": 400_000,
+	"gpt-5.1": 400_000, "gpt-5.1-codex": 400_000, "gpt-5.1-codex-max": 400_000,
+	"gpt-5.1-codex-mini": 400_000, "gpt-5-codex": 400_000, "gpt-5": 400_000,
+	"gpt-5-mini": 400_000, "gpt-5-nano": 400_000, "o4-mini": 200_000,
+	"o3": 200_000, "gpt-4.1": 1_047_576, "gpt-4.1-mini": 1_047_576,
+	"gpt-4.1-nano": 1_047_576, "o3-mini": 200_000, "gpt-4o": 128_000,
+	"gpt-4o-mini": 128_000,
+}
+
 // CompactConfig controls the percentage-based compaction trigger.
 // When Enabled is true and ThresholdPct > 0, shouldCompactByUsage is consulted
 // before the heuristic shouldCompact. ThresholdPct is expressed as a fraction
@@ -58,9 +79,8 @@ func shouldCompactByUsage(lastUsage fantasy.Usage, contextWindow int64, threshol
 }
 
 const (
-	// defaultContextWindow is the fallback when no explicit window is configured.
-	// Modern models (Claude 4.x, Gemini 2.x) all support >= 1M tokens; set
-	// WLLR_CONTEXT_WINDOW to reduce this for older or limited-tier models.
+	// defaultContextWindow is retained for legacy helper callers and tests. The
+	// agent turn path must resolve a positive per-model value before streaming.
 	defaultContextWindow int64 = 1_000_000
 	// reserveTokens is kept free for the model's output response.
 	reserveTokens int64 = 16_384
@@ -74,10 +94,23 @@ const (
 )
 
 // contextWindowForModel returns the context window for a model from the
-// generated table, defaulting to 1M for unknown models.
+// generated table, or 0 when metadata is unavailable.
 func contextWindowForModel(modelName string) int64 {
 	lower := strings.ToLower(modelName)
 	// Exact match first.
+	if w, ok := builtInContextWindows[lower]; ok {
+		return w
+	}
+	var builtInKey string
+	var builtInWindow int64
+	for id, w := range builtInContextWindows {
+		if strings.Contains(lower, id) && len(id) > len(builtInKey) {
+			builtInKey, builtInWindow = id, w
+		}
+	}
+	if builtInKey != "" {
+		return builtInWindow
+	}
 	if w, ok := modelContextWindows[lower]; ok {
 		return w
 	}
@@ -98,7 +131,7 @@ func contextWindowForModel(modelName string) int64 {
 	if bestKey != "" {
 		return bestW
 	}
-	return defaultContextWindow
+	return 0
 }
 
 // estimateTokens estimates token count using the chars/4 heuristic.

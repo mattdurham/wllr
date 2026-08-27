@@ -100,11 +100,11 @@ sufficient because Bubble Tea updates can lag the agent goroutine.
 
 *Added: 2026-05-08*
 
-**Decision:** Each `Agent` stores a `modelName string` field, set from `pool.defaultModelName` at spawn time. `contextWindowForModel` maps model name substrings to known context window sizes and is called per-turn in `Submit`.
+**Decision:** Each `Agent` stores its model name and resolved context window at spawn time. The pool records provider/API or user-resolved windows per model; built-in metadata supplies known Claude/Codex/OpenAI/Gemini values. Unknown models do not receive a guessed default and cannot run until resolved.
 
 **Rationale:** Different model families have very different context windows (128k vs 200k vs 1M tokens). A single hardcoded constant would either be too conservative (wasting compaction on large-context models) or too aggressive (skipping compaction on small-context models). The per-agent field allows sub-agents spawned with a different model to compact at the correct threshold. The substring-matching approach avoids maintaining an exhaustive model name registry while covering the most common cases.
 
-**Consequence:** Unknown model names fall back to `defaultContextWindow` (1,000,000). Extensions that spawn sub-agents with exotic model names should pass the model name explicitly; otherwise the fallback is used.
+**Consequence:** Unknown model names have no context window. Interactive model selection prompts for a positive token count and persists it per provider/model. Subagents with unresolved model metadata fail their turn with an actionable error so the parent can request resolution.
 
 ---
 
@@ -407,11 +407,11 @@ The user chose the simple "always notify" design over per-turn suppression or an
 
 *Added: 2026-06-30*
 
-**Decision:** Add `Agent.SetModel(lm fantasy.LanguageModel, modelName string)` and guard `lm`/`modelName` with a new `lmMu sync.RWMutex`. `ModelName()` reads under the lock; `Submit` captures `lm` under the lock; `executeTurn` snapshots `modelName` once via `ModelName()`.
+**Decision:** Add `Agent.SetModel(lm fantasy.LanguageModel, modelName string, contextWindow ...int64)` and guard the LM, model name, and resolved context window with a new `lmMu sync.RWMutex`. `Submit` captures the complete model snapshot under the lock so compaction cannot size a turn for a different model than the LM that streams it.
 
 **Rationale:** `/model` was cosmetic — it updated the status display but never changed the model the main agent actually ran (the LM was fixed at spawn). The new model picker needs to genuinely switch the running model. `SetModel` swaps both the LM and the name atomically so the next turn uses the new model, while a turn already in flight finishes on the model it captured. Previously `lm`/`modelName` were read without synchronisation (safe only because they were write-once at spawn); making them mutable at runtime requires the mutex to avoid a data race with in-flight `Submit`/`executeTurn` reads. The provider-request reroute path (§ Provider-Request Interception) already rebuilt the LM per-turn locally; `SetModel` is the persistent counterpart driven by the user rather than an interceptor.
 
-**Consequence:** `Agent` gains `lmMu`; `ModelName()` is now a locked accessor (was a bare field read). No behavior change for spawn-time model assignment. The harness `SelectModelFn` (wired in cmd/main.go) calls `SetModel` on the main agent plus `pool.SetDefaultModelName` (so future sub-agents inherit it) and `pool.SetContextWindow`. Covered by `TestSetModel_SwapsModelForNextTurn` (next turn streams from the swapped LM).
+**Consequence:** `Agent` gains `lmMu`; `ModelName()` and `ContextWindow()` are locked accessors. The harness `SelectModelFn` calls `SetModel` with the resolved model-specific window, updates the per-model pool metadata, and persists user-entered values. Covered by model snapshot and per-model context tests.
 
 ---
 

@@ -470,6 +470,9 @@ func contextWindowForSelection(provider, id string, cfg *Config) int64 {
 	if cfg != nil && cfg.ContextWindowConfigured && cfg.ContextWindow > 0 {
 		return cfg.ContextWindow
 	}
+	if saved := savedContextWindow(provider, id); saved > 0 {
+		return saved
+	}
 	if provider == providerLocal && cfg != nil {
 		// Explicit local_models config is authoritative over anything the
 		// endpoint exposes; the pool-facing resolved window (what

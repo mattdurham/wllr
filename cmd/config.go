@@ -134,7 +134,26 @@ type wllrSettings struct {
 	Model            string             `json:"model"`
 	LocalModels      []localModelConfig `json:"local_models"`
 	RawContextWindow json.RawMessage    `json:"context_window"`
+	ContextWindows   map[string]int64   `json:"context_windows"`
 	ContextWindow    int64              `json:"-"`
+}
+
+func contextWindowKey(provider, model string) string {
+	return strings.ToLower(strings.TrimSpace(provider)) + ":" + strings.ToLower(strings.TrimSpace(model))
+}
+
+func savedContextWindow(provider, model string) int64 {
+	settings := loadWllrSettings()
+	return settings.ContextWindows[contextWindowKey(provider, model)]
+}
+
+func saveContextWindow(provider, model string, tokens int64) error {
+	settings := loadWllrSettings()
+	if settings.ContextWindows == nil {
+		settings.ContextWindows = make(map[string]int64)
+	}
+	settings.ContextWindows[contextWindowKey(provider, model)] = tokens
+	return saveWllrRawField("context_windows", settings.ContextWindows)
 }
 
 type localModelConfig struct {

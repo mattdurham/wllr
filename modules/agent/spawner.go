@@ -60,6 +60,11 @@ func (s *Spawner) Spawn(ctx context.Context, req extension.SpawnRequest) error {
 	if err != nil {
 		return fmt.Errorf("spawn agent %q: get model %q: %w", req.ID, req.ModelName, err)
 	}
+	modelName := req.ModelName
+	if modelName == "" {
+		modelName = s.pool.DefaultModelName()
+	}
+	contextWindow := s.pool.ContextWindowForModel(modelName)
 
 	fullSystemPrompt := req.SystemPrompt
 	if fullSystemPrompt != "" {
@@ -69,9 +74,11 @@ func (s *Spawner) Spawn(ctx context.Context, req extension.SpawnRequest) error {
 		"\nTo report results back to the orchestrator, call send_message with agent_id=\"main\"."
 
 	opts := SpawnOpts{
-		SystemPrompt: fullSystemPrompt,
-		Name:         req.Name,
-		TurnTimeout:  -1,
+		SystemPrompt:  fullSystemPrompt,
+		Name:          req.Name,
+		ModelName:     modelName,
+		ContextWindow: contextWindow,
+		TurnTimeout:   -1,
 	}
 
 	if req.ThinkingBudget > 0 {
