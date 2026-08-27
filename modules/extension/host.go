@@ -2361,10 +2361,10 @@ func (h *Host) handleGetOS() sdk.HostCallResponse {
 // values from the host rather than their own os calls. No permission required.
 func (h *Host) handleHostInfo() sdk.HostCallResponse {
 	result, _ := json.Marshal(map[string]string{
-		"cwd":   h.cwd,
-		"now":   time.Now().Format(time.RFC3339Nano),
-		"os":    runtime.GOOS,
-		"arch":  runtime.GOARCH,
+		"cwd":  h.cwd,
+		"now":  time.Now().Format(time.RFC3339Nano),
+		"os":   runtime.GOOS,
+		"arch": runtime.GOARCH,
 	})
 	return sdk.HostCallResponse{Result: result}
 }
@@ -2485,11 +2485,30 @@ func sessionPreview(path string) string {
 		if json.Unmarshal([]byte(line), &m) != nil || m.Type != "message" || m.Role != "user" || m.Content == "" {
 			continue
 		}
-		r := []rune(m.Content)
+		// Normalize for display: squeeze whitespace runs so previews don't
+		// start with blank space.
+		space := true
+		var b strings.Builder
+		for _, r := range m.Content {
+			switch {
+			case r == ' ' || r == '\t' || r == '\n' || r == '\r':
+				if !space {
+					b.WriteRune(' ')
+				}
+				space = true
+			default:
+				b.WriteRune(r)
+				space = false
+			}
+		}
+		r := []rune(strings.TrimSpace(b.String()))
+		if len(r) == 0 {
+			continue
+		}
 		if len(r) > 70 {
 			return string(r[:70]) + "…"
 		}
-		return m.Content
+		return string(r)
 	}
 	return ""
 }

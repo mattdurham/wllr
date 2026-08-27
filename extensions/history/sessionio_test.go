@@ -103,6 +103,67 @@ func TestLoadMessages_DropsLeadingAssistant(t *testing.T) {
 	}
 }
 
+func TestLoadMessages_TrimmedContent(t *testing.T) {
+	path := writeJSONL(
+		t,
+		hdr,
+		`{"type":"message","role":"user","content":"  hello  "}`,
+		`{"type":"message","role":"assistant","content": "  hi there\n  "}`,
+	)
+	msgs, err := loadMessages(path)
+	if err != nil {
+		t.Fatalf("loadMessages: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("got %d, want 2: %+v", len(msgs), msgs)
+	}
+	if msgs[0].content != "hello" {
+		t.Errorf("msg0 content = %q, want %q", msgs[0].content, "hello")
+	}
+	if msgs[1].content != "hi there" {
+		t.Errorf("msg1 content = %q, want %q", msgs[1].content, "hi there")
+	}
+}
+
+func TestLoadMessages_WhitespaceOnlyCannotBreakAlternation(t *testing.T) {
+	path := writeJSONL(
+		t,
+		hdr,
+		`{"type":"message","role":"user","content":"q"}`,
+		`{"type":"message","role":"assistant","content":"\n\n\n"}`,
+		`{"type":"message","role":"assistant","content":"answer"}`,
+	)
+	msgs, err := loadMessages(path)
+	if err != nil {
+		t.Fatalf("loadMessages: %v", err)
+	}
+	// The blank assistant must be dropped *and* must not block the real
+	// assistant reply: [user q, assistant answer] expected.
+	if len(msgs) != 2 {
+		t.Fatalf("got %+v, want [q(user), answer(asst)]", msgs)
+	}
+	if msgs[1].role != "assistant" || msgs[1].content != "answer" {
+		t.Errorf("msg1 = %+v, want assistant/answer", msgs[1])
+	}
+}
+
+func TestCollapseWhitespace(t *testing.T) {
+	cases := map[string]string{
+		"  hello  ":                "hello",
+		"\n\n\n":                   "",
+		"a\nb\nc":                  "a b c",
+		"a\t\t\tb":                 "a b",
+		"\nLet me re-orient\n\n\n": "Let me re-orient",
+		"one two   three":          "one two three",
+		"":                         "",
+	}
+	for in, want := range cases {
+		if got := collapseWhitespace(in); got != want {
+			t.Errorf("collapseWhitespace(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestLoadMessages_MissingFile(t *testing.T) {
 	if _, err := loadMessages(filepath.Join(t.TempDir(), "nope.jsonl")); err == nil {
 		t.Error("expected error for missing file")

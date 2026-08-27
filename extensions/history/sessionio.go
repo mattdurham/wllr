@@ -22,6 +22,28 @@ func formatTimestamp(raw string) string {
 	return t.Format("2006-01-02 15:04")
 }
 
+// collapseWhitespace renders message content for picker previews: newlines and
+// tabs become spaces, runs of spaces are squeezed to one, and surrounding
+// whitespace is trimmed. Stored content is never rewritten — this is display
+// normalization only.
+func collapseWhitespace(s string) string {
+	s = strings.NewReplacer("\n", " ", "\t", " ", "\r", " ").Replace(s)
+	var b strings.Builder
+	prevSpace := false
+	for _, r := range s {
+		if r == ' ' {
+			if !prevSpace {
+				b.WriteRune(r)
+			}
+			prevSpace = true
+			continue
+		}
+		prevSpace = false
+		b.WriteRune(r)
+	}
+	return strings.TrimSpace(b.String())
+}
+
 func loadMessages(path string) ([]storedMsg, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -34,14 +56,16 @@ func loadMessages(path string) ([]storedMsg, error) {
 		if json.Unmarshal([]byte(line), &e) != nil || e.Type != "message" || e.Role == "" {
 			continue
 		}
-		if strings.TrimSpace(e.Content) == "" {
+		content := strings.TrimSpace(e.Content)
+		if content == "" {
 			continue // skip empty messages — API rejects them
 		}
-		// Enforce alternation: skip consecutive same-role messages.
+		// Enforce alternation: skip consecutive same-role messages. Checked
+		// after trimming so a skipped blank entry can't break the pairing.
 		if len(out) > 0 && out[len(out)-1].role == e.Role {
 			continue
 		}
-		out = append(out, storedMsg{role: e.Role, content: e.Content})
+		out = append(out, storedMsg{role: e.Role, content: content})
 	}
 	// API requires history to start with a user message.
 	for len(out) > 0 && out[0].role != "user" {

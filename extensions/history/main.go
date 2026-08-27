@@ -155,6 +155,13 @@ func recordMessage(role, content string) {
 	if currentFile == "" {
 		return
 	}
+	// Trim so stored entries never carry surrounding blanks; skip entries
+	// that are whitespace-only — the API rejects them and the load path
+	// drops them anyway.
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return
+	}
 	entryCount++
 	ts := nowRFC()
 	appendJSONL(currentFile, messageEntry{
@@ -224,7 +231,7 @@ func handleSessionSelected(path string) {
 		if m.role == "assistant" {
 			label = "asst"
 		}
-		preview := strings.ReplaceAll(m.content, "\n", " ")
+		preview := collapseWhitespace(m.content)
 		if r := []rune(preview); len(r) > 70 {
 			preview = string(r[:70]) + "…"
 		}

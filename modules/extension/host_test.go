@@ -2342,3 +2342,25 @@ func TestHost_UIMethods_PermissionDenied(t *testing.T) {
 		}
 	}
 }
+
+func TestSessionPreview_NormalizesWhitespace(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	content := `{"type":"session","id":"x","timestamp":"2026-01-01T00:00:00Z","cwd":"/"}
+{"type":"message","role":"user","content":"  \n  hello there  "}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if got := sessionPreview(path); got != "hello there" {
+		t.Errorf("sessionPreview = %q, want %q", got, "hello there")
+	}
+
+	// Whitespace-only user message yields no preview.
+	content = `{"type":"session","id":"x","timestamp":"2026-01-01T00:00:00Z","cwd":"/"}
+{"type":"message","role":"user","content":"\n\n\n"}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if got := sessionPreview(path); got != "" {
+		t.Errorf("sessionPreview = %q, want empty", got)
+	}
+}
