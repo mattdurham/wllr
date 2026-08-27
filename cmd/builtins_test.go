@@ -31,11 +31,24 @@ func TestBuiltinManifestPermissions_Granted(t *testing.T) {
 }
 
 func TestBuiltinManifestPermissions_None(t *testing.T) {
-	for _, name := range []string{"history", "queue", "sigil"} {
+	for _, name := range []string{"queue", "sigil"} {
 		perms := builtinManifestPermissions(name)
 		if len(perms) != 0 {
 			t.Errorf("%s built-in should be granted no permissions, got %v", name, perms)
 		}
+	}
+}
+
+func TestBuiltinManifestPermissions_HistoryHasFileRead(t *testing.T) {
+	// list_sessions (used by /history to enumerate session files host-side)
+	// is permission-gated on file_read; the manifest must grant it or the
+	// picker silently shows nothing.
+	perms := builtinManifestPermissions("history")
+	if !containsPerm(perms, sdk.PermFileRead) {
+		t.Errorf("history built-in should be granted file_read, got %v", perms)
+	}
+	if containsPerm(perms, sdk.PermExec) || containsPerm(perms, sdk.PermNetworkRead) || containsPerm(perms, sdk.PermNetworkWrite) {
+		t.Errorf("history built-in must not hold exec/network permissions, got %v", perms)
 	}
 }
 

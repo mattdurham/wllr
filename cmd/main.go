@@ -600,7 +600,8 @@ func registerAgentStatusTool(h *extension.Host, pool *agent.AgentPool) {
 // the declared manifest grants only what each built-in legitimately needs.
 //   - agents, statusline drive the TUI scene graph (ui_patch) -> require ui
 //   - logging appends to a log file (append_file) -> requires file_write
-//   - history, queue, sigil use only unrestricted host calls (store,
+//   - history uses list_sessions (host-side picker data) -> requires file_read
+//   - queue, sigil use only unrestricted host calls (store,
 //     modal, notify, register_command, agent_list/mailbox) -> require none
 //   - plan drives a compact sidebar widget (ui_patch) -> requires ui
 //

@@ -21,7 +21,8 @@ Current grants (least privilege, from actual runtime host-call usage):
 - `prompt` -> `["file_read"]` (configured prompt and project context files)
 - `agents`, `statusline`, `plan` -> `["ui"]` (drive the TUI scene graph)
 - `logging` -> `["file_write"]` (append_file)
-- `history`, `queue`, `sigil` -> `[]` (unrestricted host calls only)
+- `history` -> `["file_read"]` (list_sessions for the /history picker)
+- `queue`, `sigil` -> `[]` (unrestricted host calls only)
 
 Keep these manifests in sync with the actual host calls each built-in makes;
 `make clean` removes only the generated `.wasm` files, never these manifests.
