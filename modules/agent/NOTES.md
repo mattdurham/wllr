@@ -276,7 +276,7 @@ one response chunk.
 *Added: 2026-05-30*
 
 **Decision:** Replace the chars/4 token estimation for compaction decisions with real API
-token counts from `fantasy.AgentResult.TotalUsage`. Store the last turn's usage on `Agent`
+token counts from the peak provider step in `fantasy.AgentResult`. Store the last turn's usage on `Agent`
 as `lastUsage fantasy.Usage` and expose it via `Agent.LastUsage()`. Expose context window
 usage to the harness and extensions via `AgentPool.MainAgentContextUsage()`, `sdk.ContextUsage`,
 and `EventContextUsage`.
@@ -341,7 +341,7 @@ wire one up. The harness is responsible for ensuring the dispatcher is set befor
 
 *Added: 2026-06-29*
 
-**Decision:** `streamTurn` now returns the `fantasy.Usage` from the `*fantasy.AgentResult` produced by `fa.Stream` (previously discarded with `_`). `executeTurn` stores it via `a.setLastUsage(usage)` on a successful, non-cancelled turn (zero-valued on error/cancel) and, for the main agent only, calls `pool.dispatchContextUsage(sdk.ContextUsageFromFantasy(usage, contextWindow), didCompact)`.
+**Decision:** `streamTurn` now returns the peak provider-step usage from the `*fantasy.AgentResult` produced by `fa.Stream` (previously discarded with `_`). Fantasy's `TotalUsage` sums every tool-loop step, so it is cumulative billing telemetry rather than context occupancy. `executeTurn` stores the peak usage via `a.setLastUsage(usage)` on a successful, non-cancelled turn (zero-valued on error/cancel) and, for the main agent only, calls `pool.dispatchContextUsage(sdk.ContextUsageFromFantasy(usage, contextWindow), didCompact)`.
 
 **Rationale:** `setLastUsage` and `dispatchContextUsage` were defined and specified (see §19 and the sdk `EventContextUsage` contract) but never actually invoked — the streaming turn dropped the result's usage entirely, so `LastUsage()` always returned zero, `MainAgentContextUsage()` reported empty, and `EventContextUsage` never fired. This made the behavior diverge from the documented spec. The fix makes the runtime match the existing contract: usage is captured per turn, failed/cancelled turns report zero (never stale counts), and the dispatcher fires once per completed main-agent turn.
 

@@ -261,7 +261,7 @@ No payload fields — the event carries no structured data beyond the event type
 
 | Field           | Type    | Description                                                                 |
 |-----------------|---------|-----------------------------------------------------------------------------|
-| `InputTokens`   | int64   | Total input tokens for the last turn                                        |
+| `InputTokens`   | int64   | Input tokens for the peak provider request in the last turn                 |
 | `OutputTokens`  | int64   | Total output tokens for the last turn                                       |
 | `ContextWindow` | int64   | Model's maximum context window (from `WLLR_CONTEXT_WINDOW` or model default) |
 | `Percent`       | float64 | `InputTokens / ContextWindow × 100`; `0` if `ContextWindow == 0`           |

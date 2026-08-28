@@ -25,3 +25,17 @@
 - Implementing a tokenizer or exact provider token accounting.
 - Automatically discovering context limits by sending trial requests.
 - Changing worktree or task-ledger behavior.
+
+## Context Usage Metric Correction (2026-08-27)
+
+Fantasy's `AgentResult.TotalUsage` sums input tokens across every provider
+step in a tool loop. It is useful cumulative billing telemetry, but it is not
+the prompt size or context occupancy for the turn. The context metric will use
+the maximum `StepResult.Usage.InputTokens` observed in the turn, which reports
+the peak prompt sent to the provider and remains safe when the loop grows.
+
+The existing cumulative usage remains available inside the stream result for
+telemetry and is not used for compaction thresholds or the context statusline.
+Failed and cancelled turns continue to clear the stored usage. The public
+`ContextUsage` wire shape is unchanged; this corrects the meaning of its
+`InputTokens` field to match the existing specification.

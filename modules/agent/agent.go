@@ -1128,6 +1128,27 @@ func allControlMessages(msgs []sdk.Message) bool {
 	return true
 }
 
+// contextUsageFromResult returns the largest provider-reported input usage from
+// a tool-loop result. AgentResult.TotalUsage is cumulative across all steps and
+// therefore measures billing/activity, not the size of the current context.
+func contextUsageFromResult(res *fantasy.AgentResult) fantasy.Usage {
+	if res == nil {
+		return fantasy.Usage{}
+	}
+	usage := fantasy.Usage{}
+	found := false
+	for _, step := range res.Steps {
+		if step.Usage.InputTokens > usage.InputTokens {
+			usage = step.Usage
+			found = true
+		}
+	}
+	if !found {
+		return res.TotalUsage
+	}
+	return usage
+}
+
 // streamTurn sends history+content to fa and collects the full text response.
 // Extracted from Submit to keep its cyclomatic complexity below threshold.
 func (a *Agent) streamTurn(
@@ -1174,7 +1195,7 @@ func (a *Agent) streamTurn(
 	})
 	var usage fantasy.Usage
 	if res != nil {
-		usage = res.TotalUsage
+		usage = contextUsageFromResult(res)
 	}
 	return collected, usage, err
 }

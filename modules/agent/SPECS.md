@@ -354,7 +354,7 @@ after pool creation has no effect.
 
 ### lastUsage — Real API Token Tracking
 
-`Agent` stores the token usage from the most recently completed turn:
+`Agent` stores the peak provider-step token usage from the most recently completed turn:
 
 ```go
 lastUsage   fantasy.Usage
@@ -438,7 +438,7 @@ interceptor can never crash a turn.
 2. Counts each text delta as one token via `pool.addTokens(1)`.
 3. Forwards text deltas to `onToken` (if set).
 4. Forwards tool calls to `onToolCall` (if set), skipping provider-executed tool calls (`toolCall.ProviderExecuted == true`).
-5. Returns the collected text, real `fantasy.Usage` from `result.TotalUsage`, and any error.
+5. Returns the collected text, the peak provider-step `fantasy.Usage`, and any error. `TotalUsage` is cumulative across tool-loop steps and is not used for context occupancy or compaction thresholds.
 6. On error, returns a zero-valued `fantasy.Usage`.
 
 **Message filtering before LLM calls:** `sdkToFantasyMessages` is called on the history slice before constructing the `AgentStreamCall`. It skips any message whose `Type` is `sdk.MessageTypeSystem` or `sdk.MessageTypeSteering`. These messages are consumed by the Go runtime and must never reach the provider.
