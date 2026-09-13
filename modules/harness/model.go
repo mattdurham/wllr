@@ -1068,17 +1068,19 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 		if m.agentPool != nil {
 			n := int(m.agentPool.TokenCount())
 			m.live.setTokens(n)
-			// Update context-usage percentage from real API token counts.
+			// Update context usage from real API token counts.
 			cu := m.agentPool.MainAgentContextUsage()
 			if cu.ContextWindow > 0 {
-				rem := m.agentPool.CompactConfig().ThresholdPct*100 - cu.Percent
-				// Clamp remaining to non-negative values to avoid confusing negative percentages
+				rem := cu.ContextWindow - cu.InputTokens
+				if cu.InputTokens < 0 {
+					cu.InputTokens = 0
+				}
 				if rem < 0 {
 					rem = 0
 				}
-				m.live.setStatus("ctx", fmt.Sprintf("%.0f%%/%.0f%%", cu.Percent, rem))
+				m.live.setStatus("ctx", fmt.Sprintf("%d/%d", cu.InputTokens, rem))
 				// Keep the legacy key for older copies of the bundled statusline wasm.
-				m.live.setStatus("ctx rem", fmt.Sprintf("%.0f%%", rem))
+				m.live.setStatus("ctx rem", fmt.Sprintf("%d", rem))
 			} else {
 				m.live.setStatus("ctx", "")
 				m.live.setStatus("ctx rem", "")
@@ -2168,7 +2170,7 @@ func (m Model) queuedHeight(count int) int {
 }
 
 func (m Model) toolActivityHeight() int {
-	return toolActivityPaneLines
+	return m.toolActivityContentHeight() + 2
 }
 
 func (m Model) renderQueuedMessages() string {
@@ -2263,8 +2265,8 @@ func (m Model) renderToolActivity() string {
 		fillWidth = 0
 	}
 	header := b.Render("╭" + label + strings.Repeat("─", fillWidth) + "╮")
-	lines := m.chat.ToolActivityLines(contentWidth, toolActivityContentLines)
-	for len(lines) < toolActivityContentLines {
+	lines := m.chat.ToolActivityLines(contentWidth, m.toolActivityContentHeight())
+	for len(lines) < m.toolActivityContentHeight() {
 		lines = append(lines, "")
 	}
 	body := strings.Builder{}
@@ -2280,6 +2282,19 @@ func (m Model) renderToolActivity() string {
 	}
 	footer := b.Render("╰" + strings.Repeat("─", innerWidth) + "╯")
 	return header + "\n" + body.String() + footer
+}
+
+func (m Model) toolActivityContentHeight() int {
+	const maxContentLines = 12
+	width := m.width - 4
+	if width < 1 {
+		width = 1
+	}
+	lines := m.chat.ToolActivityLines(width, maxContentLines)
+	if len(lines) < toolActivityContentLines {
+		return toolActivityContentLines
+	}
+	return len(lines)
 }
 
 func (m Model) consoleHeight() int {

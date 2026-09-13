@@ -114,6 +114,33 @@ func TestChatView_UpdateToolCall_CreatesEntryForMissingStart(t *testing.T) {
 	}
 }
 
+func TestChatView_ToolActivityLinesWrapsFullCommand(t *testing.T) {
+	c := NewChatView(80, 5)
+	command := `go test ./... && go test -race ./pkg/indexo && go vet ./...`
+	c.AddToolCall("call-1", "main", "exec", `{"command":"`+command+`"}`)
+
+	lines := c.ToolActivityLines(30, 12)
+	joined := strings.Join(lines, "")
+	if strings.Contains(joined, "…") {
+		t.Fatalf("wrapped tool activity should not contain an ellipsis: %q", joined)
+	}
+	if !strings.Contains(joined, command) {
+		t.Fatalf("wrapped tool activity lost command: %q", joined)
+	}
+	if len(lines) < 2 {
+		t.Fatalf("long command should wrap, got %d line(s): %q", len(lines), joined)
+	}
+}
+
+func TestChatView_ViewOmitsViewportPaddingRows(t *testing.T) {
+	c := NewChatView(80, 5)
+	c.SetExternalContent("hello")
+
+	if got := c.View(); got != "hello" {
+		t.Fatalf("View() = %q, want only transcript content", got)
+	}
+}
+
 func numberedLines(n int) string {
 	lines := make([]string, n)
 	for i := range lines {

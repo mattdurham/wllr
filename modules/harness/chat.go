@@ -85,11 +85,11 @@ func (c *ChatView) ToolActivityLines(width, height int) []string {
 	if height <= 0 || len(c.toolLog) == 0 {
 		return nil
 	}
-	start := len(c.toolLog) - height
+	start := len(c.toolLog) - toolActivityEntryLimit
 	if start < 0 {
 		start = 0
 	}
-	lines := make([]string, 0, len(c.toolLog)-start)
+	lines := make([]string, 0, height)
 	for _, e := range c.toolLog[start:] {
 		status := "running"
 		if e.Done && e.IsError {
@@ -104,9 +104,27 @@ func (c *ChatView) ToolActivityLines(width, height int) []string {
 		if e.Preview != "" {
 			line += "  " + e.Preview
 		}
-		lines = append(lines, truncateRunes(line, width))
+		lines = append(lines, wrapRunes(line, width)...)
+	}
+	if len(lines) > height {
+		lines = lines[:height]
 	}
 	return lines
+}
+
+const toolActivityEntryLimit = 3
+
+func wrapRunes(s string, width int) []string {
+	if width <= 0 || len([]rune(s)) <= width {
+		return []string{s}
+	}
+	runes := []rune(s)
+	lines := make([]string, 0, (len(runes)+width-1)/width)
+	for len(runes) > width {
+		lines = append(lines, string(runes[:width]))
+		runes = runes[width:]
+	}
+	return append(lines, string(runes))
 }
 
 // Update handles viewport scrolling.
@@ -124,7 +142,11 @@ func (c *ChatView) ScrollDown(n int) { c.vp.ScrollDown(n) }
 
 // View renders the chat content.
 func (c ChatView) View() string {
-	return c.vp.View()
+	// The viewport always renders its full configured height, padding short
+	// content with space-only rows. Those rows are layout space, not transcript
+	// content; trim them here so lower panes do not appear separated by a large
+	// blank gap. The outer model still pads the complete view to terminal height.
+	return strings.TrimRight(c.vp.View(), " \n")
 }
 
 // toolInputPreview returns a single-line summary of the tool's JSON input,
@@ -151,11 +173,7 @@ func toolInputPreview(input string) string {
 			end := strings.Index(rest[1:], `"`)
 			if end >= 0 {
 				val := rest[1 : end+1]
-				preview := key + ": " + val
-				if r := []rune(preview); len(r) > 80 {
-					preview = string(r[:79]) + "…"
-				}
-				return preview
+				return key + ": " + val
 			}
 		}
 		break

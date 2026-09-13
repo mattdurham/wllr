@@ -891,17 +891,17 @@ func TestStatusBarCtxPercent(t *testing.T) {
 	// Simulate StreamDoneMsg — this should update the ctx status.
 	m, _ = callUpdate(m, StreamDoneMsg{Err: nil})
 
-	// 50k / 200k = 25% used; threshold 80% → rem 55%.
+	// Report actual context tokens used and remaining, not the compaction threshold.
 	ctx := m.live.getStatus("ctx")
 	if ctx == "" {
 		t.Fatal("expected live.statuses[ctx] to be present after StreamDoneMsg with non-zero usage")
 	}
-	if ctx != "25%/55%" {
-		t.Errorf("live.statuses[ctx] = %q, want %q", ctx, "25%/55%")
+	if ctx != "50000/150000" {
+		t.Errorf("live.statuses[ctx] = %q, want %q", ctx, "50000/150000")
 	}
 	// The legacy key keeps showing remaining-only for old statusline builds.
-	if rem := m.live.getStatus("ctx rem"); rem != "55%" {
-		t.Errorf("live.statuses[ctx rem] = %q, want %q", rem, "55%")
+	if rem := m.live.getStatus("ctx rem"); rem != "150000" {
+		t.Errorf("live.statuses[ctx rem] = %q, want %q", rem, "150000")
 	}
 }
 

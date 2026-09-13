@@ -80,7 +80,7 @@ Treat the current working directory where wllr was launched as the project root.
 
 ### Editing Files
 
-Use the edit_file tool for source-code edits: provide exact oldText/newText replacements and let the tool validate and apply them atomically. Do not use sed, perl, Python, or shell redirection to modify files. Use rg or read_file for inspection only. apply_patch is a Codex-side editing capability and is not a wllr runtime command; use edit_file inside wllr.`
+Use the edit_file tool for targeted edits to an existing single file. This is the required first choice for source, test, configuration, and documentation changes: provide exact oldText/newText replacements and let the tool validate and apply them atomically. Do not use sed, perl, Python, awk, ed, cat >, tee, shell redirection, or other shell/script techniques to modify files. Use rg or read_file for inspection only. Use write_file only when creating a new file or intentionally replacing an entire file. Use exec for commands that execute or inspect work, not as a substitute editor. If edit_file is unavailable, stop and report that limitation rather than silently switching to a shell editing command. apply_patch is a Codex-side editing capability and is not a wllr runtime command; use edit_file inside wllr.`
 
 type promptConfig struct {
 	Override string   `json:"prompt_override"`

@@ -327,13 +327,13 @@ Update loop and WASM bridge goroutines. It holds:
 
 - `streaming bool` — true while an agent turn is in progress.
 - `streamStart time.Time` — when the current turn started.
-- `tokens int` — latest total token count.
+- `tokens int` — internal streamed-chunk count retained for diagnostics; it is not presented as token usage.
 - `model string` — active model name.
 - `provider string` — active provider name.
 - `statuses map[string]string` — keyed status values that the `statusline` extension
   and `get_status_info` read. Updated via `setStatus(key, value)`; empty value deletes.
-- `tokens int` — latest total token count copied from `AgentPool.TokenCount()` on
-  each `TokenMsg` and `StreamDoneMsg`.
+- `tokens int` — streamed-chunk count copied from `AgentPool.TokenCount()` on
+  each `TokenMsg` and `StreamDoneMsg`; it is not a provider token count.
 - `width int` — terminal width.
 - `hasError bool` — true when the last turn completed with an error.
 
@@ -347,10 +347,10 @@ On each `StreamDoneMsg`, the handler calls `m.agentPool.MainAgentContextUsage()`
 updates the context-usage status keys via `setStatus`:
 
 - When `cu.ContextWindow > 0`:
-  - `"ctx"` = `fmt.Sprintf("%.0f%%/%.0f%%", cu.Percent, rem)` — window usage plus
-    remaining headroom, where `rem = thresholdPct*100 - cu.Percent` (clamped at 0).
-  - `"ctx rem"` (legacy key, kept for older bundled statusline builds) =
-    `fmt.Sprintf("%.0f%%", rem)`.
+  - `"ctx"` = `fmt.Sprintf("%d/%d", cu.InputTokens, remaining)` — actual input
+    tokens used / context tokens remaining, where `remaining = ContextWindow - InputTokens` (clamped at 0).
+  - `"ctx rem"` (legacy key, kept for older bundled statusline builds) = the
+    remaining context token count as a decimal string.
 - When `cu.ContextWindow == 0`: both keys are deleted (empty string to `setStatus`).
 
 **Invariant:** The `ctx` and `ctx rem` keys are only present when a context window is
@@ -467,7 +467,7 @@ Returns the current set of registered tools from `extHost.RegisteredTools()` as 
 - The output is padded to exactly `m.height` lines to prevent old content bleeding through on resize.
 - `statusLineHeight()` sums the constrained heights of all `UIAreaStatus` areas; it is called on every `View()` and `chatHeight()` invocation.
 - `inputBoxHeight()` counts the rendered input box lines instead of relying on a fixed constant, so the statusline cannot push the input bottom border off-screen if textarea rendering changes.
-- `toolActivityHeight()` returns 5 rows in the normal layout; those 5 rows are subtracted from `chatHeight()`.
+- `toolActivityHeight()` reserves the tools border plus the wrapped rows for the latest three tool calls (at least 5 rows total, capped at 14 rows); those rows are subtracted from `chatHeight()`.
 - Before a normal `View()` render, `ChatView.height` equals the layout computed from the same stable main-agent inbox snapshot used to render the queued-message pane, including its current five-row height when non-empty. Layout synchronization runs before updates and rendering; an inbox transition is reflected on the next render without allowing height/render decisions from one frame to disagree.
 - If the terminal cannot fit the queue pane while preserving the fixed lower UI, the queue pane is omitted from the render as well as from the height calculation; otherwise the chat viewport yields space to the queue and may shrink to zero while the input remains visible.
 - `bottomGutterHeight()` reserves one trailing row when the terminal has more than one row, so the input bottom border is not rendered on the final terminal line.
@@ -720,7 +720,7 @@ The main chat transcript content is produced by a WASM extension (the bundled `a
 - `Model.streamContent` accumulates streamed assistant text from `TokenMsg` so the completed response can be captured for `OnMessageEnd`/logging; it is reset on `StreamDoneMsg` and `/clear`.
 - `Model.pushNotification(text)` dispatches `sdk.EventNotify` (in a goroutine) so the transcript-owning extension renders notifications; it no longer writes to `ChatView`.
 - `renderScenes` always skips the `chat` area (it is rendered inside the viewport, not stacked below it). Non-chat scene areas are rendered above the chat viewport; their height is subtracted by `chatHeight()` so the chat history viewport is what shrinks when extra UI appears.
-- `renderToolActivity()` renders a persistent pane below the chat viewport with the latest three tool call rows. When no tools have run this turn, the pane renders as three empty content rows. Rows for non-main agents include the agent ID so sub-agent activity is distinguishable from main-agent tool calls.
+- `renderToolActivity()` renders a persistent pane below the chat viewport with the latest three tool calls. Long command previews wrap across rows instead of being hard-truncated; when no tools have run this turn, the pane renders as three empty content rows. Rows for non-main agents include the agent ID so sub-agent activity is distinguishable from main-agent tool calls.
 
 **Invariants:**
 

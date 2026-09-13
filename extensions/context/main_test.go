@@ -47,3 +47,17 @@ func TestBuildPromptWithConfig_OverrideAndDynamicMetadata(t *testing.T) {
 		t.Fatalf("built-in prompt should be replaced by override: %q", prompt)
 	}
 }
+
+func TestBuildPromptWithConfig_ContainsAuthoritativeEditingPolicy(t *testing.T) {
+	prompt := buildPromptWithConfig(nil, nil, promptConfig{})
+	for _, want := range []string{
+		"Use the edit_file tool for targeted edits to an existing single file",
+		"Do not use sed, perl, Python, awk, ed, cat >, tee, shell redirection",
+		"Use write_file only when creating a new file or intentionally replacing an entire file",
+		"If edit_file is unavailable, stop and report that limitation",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("built-in prompt missing editing policy %q", want)
+		}
+	}
+}

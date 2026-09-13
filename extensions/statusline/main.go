@@ -14,7 +14,6 @@
 //	  sl-sep1        (text, "  ")
 //	  sl-model       (text)
 //	  sl-sep2        (text, "  ")
-//	  sl-tokens      (text, fg:muted)   — empty when tokens=0
 //	  sl-sep3        (text, "  ")
 //	  sl-working     (text, fg:accent)  — empty when idle
 //	  sl-ctx         (text, fg:muted)   — "ctx:P%/R%" when a context window is configured
@@ -41,7 +40,6 @@ const (
 	sep1ID     = "sl-sep1"
 	modelID    = "sl-model"
 	sep2ID     = "sl-sep2"
-	tokensID   = "sl-tokens"
 	sep3ID     = "sl-sep3"
 	workingID  = "sl-working"
 	ctxID      = "sl-ctx"
@@ -53,7 +51,6 @@ const (
 var (
 	lastProvider    string
 	lastModel       string
-	lastTokens      int
 	lastWorking     string // rendered working indicator text or ""
 	lastCtx         string // ctx text or "" when no window configured
 	lastCompactions int    // cumulative successful compactions this session
@@ -89,20 +86,17 @@ func init() {
 	})
 
 	// EventContextUsage fires after each completed turn (main agent only).
-	OnContextUsage(func(_, _ int64, ctxWindow int64, percent float64, _ bool, thresholdPct float64, compactions int) {
-		// threshold_pct may be a fraction (0.80) or a percentage (80) depending
-		// on host build; normalize fractions to percentages.
-		if thresholdPct > 0 && thresholdPct <= 1 {
-			thresholdPct *= 100
-		}
+	OnContextUsage(func(inputTokens, _ int64, ctxWindow int64, _ float64, _ bool, _ float64, compactions int) {
 		desired := ""
 		if ctxWindow > 0 {
-			remaining := thresholdPct - percent
-			// Clamp remaining to non-negative values to avoid confusing negative percentages
+			if inputTokens < 0 {
+				inputTokens = 0
+			}
+			remaining := ctxWindow - inputTokens
 			if remaining < 0 {
 				remaining = 0
 			}
-			desired = fmt.Sprintf("  ctx:%.0f%%/%.0f%%", percent, remaining)
+			desired = fmt.Sprintf("  ctx:%d/%d", inputTokens, remaining)
 		}
 		changed := desired != lastCtx || compactions != lastCompactions
 		lastCtx = desired
@@ -146,7 +140,6 @@ func patchAll() {
 		UIText(sep1ID, "  "),
 		{ID: modelID, Type: "text", Text: modelLabel(lastModel)},
 		UIText(sep2ID, "  "),
-		{ID: tokensID, Type: "text", Text: renderTokens(lastTokens), Props: &muted},
 		UIText(sep3ID, "  "),
 		{ID: workingID, Type: "text", Text: lastWorking, Props: &accent},
 	}
@@ -201,13 +194,11 @@ func renderWorking(info StatusInfo) string {
 
 func syncDynamicStatus(info StatusInfo) bool {
 	working := renderWorking(info)
-	tokens := info.Tokens
 	ctx := renderContext(info)
-	if working == lastWorking && tokens == lastTokens && ctx == lastCtx {
+	if working == lastWorking && ctx == lastCtx {
 		return false
 	}
 	lastWorking = working
-	lastTokens = tokens
 	lastCtx = ctx
 	return true
 }
@@ -216,8 +207,8 @@ func renderContext(info StatusInfo) string {
 	if info.Statuses == nil {
 		return ""
 	}
-	// Prefer the new "ctx" key ("P%" or "P%/R%": window usage, plus remaining to
-	// the compaction threshold); fall back to the legacy "ctx rem" key
+	// Prefer the new "ctx" key ("used/remaining" context tokens); fall back to
+	// the legacy "ctx rem" key
 	// (remaining only) for hosts built before the ctx key existed.
 	value := strings.TrimSpace(info.Statuses["ctx"])
 	if value == "" {
@@ -233,19 +224,6 @@ func renderContext(info StatusInfo) string {
 // renderCompactions renders the session's successful-compaction count ("C<n>").
 func renderCompactions(n int) string {
 	return fmt.Sprintf("  C%d", n)
-}
-
-func renderTokens(n int) string {
-	if n == 0 {
-		return ""
-	}
-	if n >= 1_000_000 {
-		return fmt.Sprintf("tokens:%.1fm", float64(n)/1_000_000)
-	}
-	if n >= 1_000 {
-		return fmt.Sprintf("tokens:%.1fk", float64(n)/1_000)
-	}
-	return fmt.Sprintf("tokens:%d", n)
 }
 
 func formatElapsed(ms int64) string {
