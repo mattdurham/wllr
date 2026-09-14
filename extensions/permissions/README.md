@@ -1,13 +1,15 @@
 # Permissions Extension
 
-A wllr extension that enforces file system permissions for `read_file` and `write_file` tools.
+A wllr extension that enforces file system permissions and optional command
+rules for `read_file`, `write_file`, and `exec` tools.
 
 ## Features
 
-- **Intercepts** `read_file` and `write_file` tool calls before they execute
+- **Intercepts** `read_file`, `write_file`, and configured `exec` calls before they execute
 - **Configurable** allow/deny lists for both read and write operations
 - **Path matching** with support for exact paths, prefix matching, and glob patterns
 - **Tilde expansion** — `~/source` expands to your home directory
+- **Command rules** — optionally allow or deny executables such as `sed`
 - **Optional** — only enforces permissions when loaded
 
 ## Configuration
@@ -25,7 +27,18 @@ deny = []      # No read restrictions
 [extensions.permissions.write]
 allow = ["~/source", "~/documents", "/tmp"]  # Only allow writing to these directories
 deny = ["/etc", "/sys", "/proc"]             # Explicitly deny system directories
+
+# Optional command policy; no commands are denied unless configured here.
+[extensions.permissions.exec]
+deny_commands = ["sed", "perl"]
+deny_shell_operators = false
 ```
+
+Command rules match the executable at the start of each simple command,
+including commands separated by `;`, `&&`, `||`, pipes, or newlines. Paths such
+as `/usr/bin/sed` match `sed`. Set `allow_commands` to make the list an
+allowlist. This is a pragmatic filter rather than a complete shell parser;
+`deny_shell_operators = true` rejects common shell composition as well.
 
 ### Permission Rules
 

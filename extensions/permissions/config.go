@@ -4,4 +4,5 @@ package main
 type Config struct {
 	Read  PathRules `json:"read"`
 	Write PathRules `json:"write"`
+	Exec  ExecRules `json:"exec"`
 }

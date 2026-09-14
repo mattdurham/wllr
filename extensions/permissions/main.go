@@ -22,18 +22,20 @@ func init() {
 		config = Config{
 			Read:  PathRules{Allow: []string{"*"}},
 			Write: PathRules{Allow: []string{"*"}},
+			Exec:  ExecRules{},
 		}
 	}
 
 	// Set the event handler.
 	OnEvent = handleEvent
 
-	// Subscribe to before_tool_call to intercept read_file and write_file.
+	// Subscribe to before_tool_call to intercept file and configured exec rules.
 	Subscribe("before_tool_call")
 
 	SetStatus("permissions", "active")
-	Logf("info", "permissions: initialized (read allow=%v deny=%v, write allow=%v deny=%v)",
-		config.Read.Allow, config.Read.Deny, config.Write.Allow, config.Write.Deny)
+	Logf("info", "permissions: initialized (read allow=%v deny=%v, write allow=%v deny=%v, exec allow=%v deny=%v)",
+		config.Read.Allow, config.Read.Deny, config.Write.Allow, config.Write.Deny,
+		config.Exec.AllowCommands, config.Exec.DenyCommands)
 }
 
 // loadConfig reads the extension configuration from the host.
@@ -47,6 +49,7 @@ func loadConfig() error {
 		config = Config{
 			Read:  PathRules{Allow: []string{"*"}},
 			Write: PathRules{Allow: []string{"*"}},
+			Exec:  ExecRules{},
 		}
 		return nil
 	}
@@ -69,7 +72,25 @@ func handleEvent(evt Event) *EventResponse {
 		return nil
 	}
 
-	// Only intercept read_file and write_file.
+	// Intercept file tools and exec when command rules are configured.
+	if payload.ToolName == "exec" {
+		var input struct {
+			Command string `json:"command"`
+		}
+		if err := json.Unmarshal(payload.Input, &input); err != nil {
+			Logf("error", "permissions: unmarshal exec input: %v", err)
+			return nil
+		}
+		allowed, reason := checkCommandPermission(input.Command, config.Exec)
+		if !allowed {
+			Logf("warn", "permissions: blocked exec command %q: %s", input.Command, reason)
+			ToolResult(payload.ToolCallID, "Permission denied: "+reason, true)
+			return &EventResponse{Block: true}
+		}
+		Logf("debug", "permissions: allowed exec command %q", input.Command)
+		return nil
+	}
+
 	var rules PathRules
 	switch payload.ToolName {
 	case "read_file":
