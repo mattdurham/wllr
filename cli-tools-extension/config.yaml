@@ -1,22 +1,4 @@
 tools:
-  - name: engram
-    description: Store and retrieve memories using engram memory system
-    command: engram
-    schema:
-      type: object
-      properties:
-        action:
-          type: string
-          enum: ["store", "recall", "search"]
-          description: Action to perform
-        content:
-          type: string
-          description: Content to store or search query
-        tags:
-          type: string
-          description: Comma-separated tags for the memory
-      required: ["action"]
-    
   - name: ripgrep
     description: Fast recursive text search using ripgrep
     command: rg

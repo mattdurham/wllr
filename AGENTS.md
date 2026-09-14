@@ -149,7 +149,6 @@ Optional installed extensions are built by `make extensions` into
 - `extensions/tasks/` — task list tools.
 - `extensions/lsp/` — code-intelligence tools for diagnostics, linting,
   symbols, definitions, references, and refactor preview.
-- `extensions/memory/` — memory/Engram integration.
 - `extensions/permissions/` — read/write/exec permission policy enforcement.
 - `extensions/mcp-bridge/` — MCP subprocess bridge and dynamic MCP tools.
 - `extensions/otel-traces/` — optional OpenTelemetry trace export.

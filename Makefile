@@ -89,15 +89,13 @@ extensions: builtins optional-extensions
 
 optional-extensions:
 	mkdir -p $(EXT_DIR)/websearch
-	mkdir -p $(EXT_DIR)/context $(EXT_DIR)/skills $(EXT_DIR)/tasks $(EXT_DIR)/lsp $(EXT_DIR)/memory $(EXT_DIR)/permissions $(EXT_DIR)/mcp-bridge $(EXT_DIR)/otel-traces $(EXT_DIR)/websearch
+	mkdir -p $(EXT_DIR)/context $(EXT_DIR)/skills $(EXT_DIR)/tasks $(EXT_DIR)/lsp $(EXT_DIR)/permissions $(EXT_DIR)/mcp-bridge $(EXT_DIR)/otel-traces $(EXT_DIR)/websearch
 	$(WASM_BUILD) $(EXT_DIR)/skills/skills.wasm extensions/skills
 	cp extensions/skills/skills.json $(EXT_DIR)/skills/
 	$(WASM_BUILD) $(EXT_DIR)/tasks/tasks.wasm extensions/tasks
 	cp extensions/tasks/tasks.json $(EXT_DIR)/tasks/
 	$(WASM_BUILD) $(EXT_DIR)/lsp/lsp.wasm extensions/lsp
 	cp extensions/lsp/extension.json $(EXT_DIR)/lsp/lsp.json
-	$(WASM_BUILD) $(EXT_DIR)/memory/memory.wasm extensions/memory
-	cp extensions/memory/memory.json $(EXT_DIR)/memory/memory.json
 	$(WASM_BUILD) $(EXT_DIR)/permissions/permissions.wasm extensions/permissions
 	$(WASM_BUILD) $(EXT_DIR)/mcp-bridge/mcp-bridge.wasm extensions/mcp-bridge
 	cp extensions/permissions/extension.yaml $(EXT_DIR)/permissions/
@@ -350,4 +348,4 @@ clean:
 	rm -f $(BUILTINS)/*.wasm
 
 clean-extensions:
-	rm -rf $(EXT_DIR)/memory $(EXT_DIR)/permissions $(EXT_DIR)/mcp-bridge $(EXT_DIR)/otel-traces
+	rm -rf $(EXT_DIR)/permissions $(EXT_DIR)/mcp-bridge $(EXT_DIR)/otel-traces

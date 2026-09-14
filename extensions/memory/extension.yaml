@@ -1,3 +1,0 @@
-name: memory
-enabled: true
-wasm: memory.wasm

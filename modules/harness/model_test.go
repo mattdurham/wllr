@@ -896,12 +896,12 @@ func TestStatusBarCtxPercent(t *testing.T) {
 	if ctx == "" {
 		t.Fatal("expected live.statuses[ctx] to be present after StreamDoneMsg with non-zero usage")
 	}
-	if ctx != "50000/150000" {
-		t.Errorf("live.statuses[ctx] = %q, want %q", ctx, "50000/150000")
+	if ctx != "50000/200000" {
+		t.Errorf("live.statuses[ctx] = %q, want %q", ctx, "50000/200000")
 	}
-	// The legacy key keeps showing remaining-only for old statusline builds.
-	if rem := m.live.getStatus("ctx rem"); rem != "150000" {
-		t.Errorf("live.statuses[ctx rem] = %q, want %q", rem, "150000")
+	// The legacy key keeps showing the maximum for old statusline builds.
+	if max := m.live.getStatus("ctx rem"); max != "200000" {
+		t.Errorf("live.statuses[ctx rem] = %q, want %q", max, "200000")
 	}
 }
 

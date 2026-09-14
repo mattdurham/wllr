@@ -1071,16 +1071,12 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 			// Update context usage from real API token counts.
 			cu := m.agentPool.MainAgentContextUsage()
 			if cu.ContextWindow > 0 {
-				rem := cu.ContextWindow - cu.InputTokens
 				if cu.InputTokens < 0 {
 					cu.InputTokens = 0
 				}
-				if rem < 0 {
-					rem = 0
-				}
-				m.live.setStatus("ctx", fmt.Sprintf("%d/%d", cu.InputTokens, rem))
+				m.live.setStatus("ctx", fmt.Sprintf("%d/%d", cu.InputTokens, cu.ContextWindow))
 				// Keep the legacy key for older copies of the bundled statusline wasm.
-				m.live.setStatus("ctx rem", fmt.Sprintf("%d", rem))
+				m.live.setStatus("ctx rem", fmt.Sprintf("%d", cu.ContextWindow))
 			} else {
 				m.live.setStatus("ctx", "")
 				m.live.setStatus("ctx rem", "")

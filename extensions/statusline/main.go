@@ -92,11 +92,7 @@ func init() {
 			if inputTokens < 0 {
 				inputTokens = 0
 			}
-			remaining := ctxWindow - inputTokens
-			if remaining < 0 {
-				remaining = 0
-			}
-			desired = fmt.Sprintf("  ctx:%d/%d", inputTokens, remaining)
+			desired = fmt.Sprintf("  ctx:%d/%d", inputTokens, ctxWindow)
 		}
 		changed := desired != lastCtx || compactions != lastCompactions
 		lastCtx = desired
@@ -207,9 +203,9 @@ func renderContext(info StatusInfo) string {
 	if info.Statuses == nil {
 		return ""
 	}
-	// Prefer the new "ctx" key ("used/remaining" context tokens); fall back to
-	// the legacy "ctx rem" key
-	// (remaining only) for hosts built before the ctx key existed.
+	// Prefer the new "ctx" key ("used/max" context tokens); fall back to
+	// the legacy "ctx rem" key (maximum only) for hosts built before the ctx
+	// key existed.
 	value := strings.TrimSpace(info.Statuses["ctx"])
 	if value == "" {
 		remaining := strings.TrimSpace(info.Statuses["ctx rem"])

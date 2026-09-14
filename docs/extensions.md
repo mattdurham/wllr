@@ -301,14 +301,6 @@ Registered by the installed `skills` extension.
 | `list_skills` | No fields. | JSON array of skill metadata objects with `name`, `description`, and `category` when set. |
 | `get_skill` | `name` string, required. | Skill body text with frontmatter stripped. |
 
-### Memory tool
-
-Registered by the installed `memory` extension.
-
-| Tool | Inputs | Output |
-|------|--------|--------|
-| `memory_install` | No fields. | JSON object on success: `{"installed":true,"version":"...","path":"..."}`. On failure, JSON object: `{"error":"..."}` marked as an error result. |
-
 ### LSP tools
 
 Registered by the installed `lsp` extension. These are best-effort code

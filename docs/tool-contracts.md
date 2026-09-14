@@ -285,15 +285,6 @@ fatal.
 Use before renames or shared API edits. This tool previews matches only; apply
 edits with normal file-editing tools afterward.
 
-## Memory Extension
-
-### `memory_install`
-
-Input: no fields.
-
-Output: JSON object `{ "installed": true, "version": string, "path": string }`.
-OS detection or install failure is fatal and returns JSON with `error`.
-
 ## Skills Extension
 
 ### `list_skills`

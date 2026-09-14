@@ -16,7 +16,6 @@ extensions/context	tinygo	verified with Docker TinyGo builder
 extensions/skills	tinygo	verified with Docker TinyGo builder
 extensions/tasks	tinygo	verified with Docker TinyGo builder
 extensions/lsp	tinygo	verified with Docker TinyGo builder
-extensions/memory	tinygo	verified with Docker TinyGo builder
 extensions/permissions	tinygo	verified with Docker TinyGo builder
 extensions/mcp-bridge	tinygo	verified with Docker TinyGo builder
 extensions/otel-traces	tinygo	verified with Docker TinyGo builder
