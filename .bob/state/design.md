@@ -26,6 +26,22 @@
 - Automatically discovering context limits by sending trial requests.
 - Changing worktree or task-ledger behavior.
 
+## In-turn context growth (2026-09-20)
+
+**Observed failure:** A provider rejected a later tool-loop request at 262,202
+tokens against a 262,144-token window. The existing preflight runs once before
+Fantasy's multi-step tool loop; its reactive retry can only compact persisted
+history, not the tool results accumulated inside that loop.
+
+**Design:** Use Fantasy's per-step preparation hook to check the previous
+provider-reported input usage plus the newest step messages before every next
+request. When the configured threshold (capped at a safety level) is reached,
+summarize the active transcript with the same model. Send that summary as a
+user message and retain subsequent step messages verbatim. Repeat when needed
+within the same turn. Keep the original stored history behavior. Abort the turn
+with an explicit compaction error if summarization fails; do not send an
+oversized request or replay already executed tools.
+
 ## Context Usage Metric Correction (2026-08-27)
 
 Fantasy's `AgentResult.TotalUsage` sums input tokens across every provider
@@ -39,3 +55,29 @@ telemetry and is not used for compaction thresholds or the context statusline.
 Failed and cancelled turns continue to clear the stored usage. The public
 `ContextUsage` wire shape is unchanged; this corrects the meaning of its
 `InputTokens` field to match the existing specification.
+
+## Ordered Task Runner Design (2026-09-17)
+
+**Goal:** Let a user create an ordered durable task list whose tasks are each
+performed by a fresh sub-agent, with explicit completion and user-visible review
+pauses.
+
+**Architecture:** Add an optional `task-runner` WASM extension. It uses the
+existing task ledger for durable task state and the existing agent host calls
+for child lifecycle. The runner owns one active child at a time. A child must
+call `mark_task_completed` or `request_task_review`; completion reports the
+task, requests graceful shutdown, and starts the next task only after the
+shutdown acknowledgement. Review reports a blocked task and calls `Notify`,
+which makes the issue visible in the main chat. Runner state is persisted in
+the extension store so restart/compaction does not lose the active list.
+
+**Contract:** Tasks remain in the existing `pending`, `in_progress`,
+`completed`, `blocked`, `failed`, or `cancelled` ledger states. Review is a
+runner workflow state represented by `blocked` plus a structured review reason;
+this avoids changing the ledger ABI for the first implementation. Task
+prompts include the task identity, description, completion contract, and
+review contract. The runner requires the tool caller's `agent_id` from the
+`before_tool_call` payload and rejects stale or non-owned completions.
+
+**Non-goals:** Worktree creation, arbitrary parallel scheduling, automatic
+retries, or changing the existing task ledger status vocabulary.

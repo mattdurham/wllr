@@ -69,14 +69,70 @@ func ledgerCall(method string, params any, out any) (string, bool) {
 }
 
 func init() {
-	RegisterToolWithOutput("tasklist_create", "Create a durable task list.", json.RawMessage(`{"type":"object","properties":{"name":{"type":"string"},"description":{"type":"string"},"owner_agent_id":{"type":"string"}},"required":["name"]}`), json.RawMessage(`{"type":"object"}`))
-	RegisterToolWithOutput("tasks_create", "Create a durable task; workspace_mode is metadata only.", json.RawMessage(`{"type":"object","properties":{"list_id":{"type":"string"},"title":{"type":"string"},"description":{"type":"string"},"priority":{"type":"integer"},"parent_task_id":{"type":"string"},"owner_agent_id":{"type":"string"},"workspace_mode":{"type":"string","enum":["shared","worktree","readonly"]},"depends_on":{"type":"array","items":{"type":"string"}}},"required":["list_id","title"]}`), json.RawMessage(`{"type":"object"}`))
-	RegisterToolWithOutput("tasks_update", "CAS-update a durable task; pass the returned version as expected_version.", json.RawMessage(`{"type":"object","properties":{"list_id":{"type":"string"},"task_id":{"type":"string"},"expected_version":{"type":"integer"},"title":{"type":"string"},"description":{"type":"string"},"priority":{"type":"integer"},"assignee_agent_id":{"type":"string"},"workspace_mode":{"type":"string","enum":["shared","worktree","readonly"]}},"required":["list_id","task_id","expected_version"]}`), json.RawMessage(`{"type":"object"}`))
-	RegisterToolWithOutput("tasks_list", "List durable tasks with a bounded cursor.", json.RawMessage(`{"type":"object","properties":{"list_id":{"type":"string"},"cursor":{"type":"integer"},"limit":{"type":"integer"},"status":{"type":"string"}},"required":["list_id"]}`), json.RawMessage(`{"type":"object"}`))
-	RegisterToolWithOutput("tasks_get", "Get the authoritative durable task record.", json.RawMessage(`{"type":"object","properties":{"list_id":{"type":"string"},"task_id":{"type":"string"}},"required":["list_id","task_id"]}`), json.RawMessage(`{"type":"object"}`))
-	RegisterToolWithOutput("tasks_claim", "Claim the next eligible task atomically.", json.RawMessage(`{"type":"object","properties":{"list_id":{"type":"string"},"agent_id":{"type":"string"}},"required":["list_id","agent_id"]}`), json.RawMessage(`{"type":"object"}`))
-	RegisterToolWithOutput("tasks_report", "Report a claimed task result exactly once.", json.RawMessage(`{"type":"object","properties":{"list_id":{"type":"string"},"task_id":{"type":"string"},"attempt_id":{"type":"string"},"agent_id":{"type":"string"},"status":{"type":"string","enum":["completed","blocked","failed","cancelled"]},"result":{},"error":{"type":"string"},"reason":{"type":"string"}},"required":["list_id","task_id","attempt_id","agent_id","status"]}`), json.RawMessage(`{"type":"object"}`))
-	RegisterToolWithOutput("tasks_events_after", "Replay task events after a cursor; use this after every wake or compaction.", json.RawMessage(`{"type":"object","properties":{"list_id":{"type":"string"},"cursor":{"type":"integer"},"limit":{"type":"integer"}},"required":["list_id","cursor"]}`), json.RawMessage(`{"type":"object"}`))
+	RegisterToolWithOutput(
+		"tasklist_create",
+		"Create a durable task list.",
+		json.RawMessage(
+			`{"type":"object","properties":{"name":{"type":"string"},"description":{"type":"string"},"owner_agent_id":{"type":"string"}},"required":["name"]}`,
+		),
+		json.RawMessage(`{"type":"object"}`),
+	)
+	RegisterToolWithOutput(
+		"tasks_create",
+		"Create a durable task; workspace_mode is metadata only.",
+		json.RawMessage(
+			`{"type":"object","properties":{"list_id":{"type":"string"},"title":{"type":"string"},"description":{"type":"string"},"priority":{"type":"integer"},"parent_task_id":{"type":"string"},"owner_agent_id":{"type":"string"},"workspace_mode":{"type":"string","enum":["shared","worktree","readonly"]},"depends_on":{"type":"array","items":{"type":"string"}}},"required":["list_id","title"]}`,
+		),
+		json.RawMessage(`{"type":"object"}`),
+	)
+	RegisterToolWithOutput(
+		"tasks_update",
+		"CAS-update a durable task; pass the returned version as expected_version.",
+		json.RawMessage(
+			`{"type":"object","properties":{"list_id":{"type":"string"},"task_id":{"type":"string"},"expected_version":{"type":"integer"},"title":{"type":"string"},"description":{"type":"string"},"priority":{"type":"integer"},"assignee_agent_id":{"type":"string"},"workspace_mode":{"type":"string","enum":["shared","worktree","readonly"]}},"required":["list_id","task_id","expected_version"]}`,
+		),
+		json.RawMessage(`{"type":"object"}`),
+	)
+	RegisterToolWithOutput(
+		"tasks_list",
+		"List durable tasks with a bounded cursor.",
+		json.RawMessage(
+			`{"type":"object","properties":{"list_id":{"type":"string"},"cursor":{"type":"integer"},"limit":{"type":"integer"},"status":{"type":"string"}},"required":["list_id"]}`,
+		),
+		json.RawMessage(`{"type":"object"}`),
+	)
+	RegisterToolWithOutput(
+		"tasks_get",
+		"Get the authoritative durable task record.",
+		json.RawMessage(
+			`{"type":"object","properties":{"list_id":{"type":"string"},"task_id":{"type":"string"}},"required":["list_id","task_id"]}`,
+		),
+		json.RawMessage(`{"type":"object"}`),
+	)
+	RegisterToolWithOutput(
+		"tasks_claim",
+		"Claim the next eligible task atomically.",
+		json.RawMessage(
+			`{"type":"object","properties":{"list_id":{"type":"string"},"agent_id":{"type":"string"}},"required":["list_id","agent_id"]}`,
+		),
+		json.RawMessage(`{"type":"object"}`),
+	)
+	RegisterToolWithOutput(
+		"tasks_report",
+		"Report a claimed task result exactly once.",
+		json.RawMessage(
+			`{"type":"object","properties":{"list_id":{"type":"string"},"task_id":{"type":"string"},"attempt_id":{"type":"string"},"agent_id":{"type":"string"},"status":{"type":"string","enum":["completed","blocked","failed","cancelled"]},"result":{},"error":{"type":"string"},"reason":{"type":"string"}},"required":["list_id","task_id","attempt_id","agent_id","status"]}`,
+		),
+		json.RawMessage(`{"type":"object"}`),
+	)
+	RegisterToolWithOutput(
+		"tasks_events_after",
+		"Replay task events after a cursor; use this after every wake or compaction.",
+		json.RawMessage(
+			`{"type":"object","properties":{"list_id":{"type":"string"},"cursor":{"type":"integer"},"limit":{"type":"integer"}},"required":["list_id","cursor"]}`,
+		),
+		json.RawMessage(`{"type":"object"}`),
+	)
 	OnToolCall(func(_ string, name string, input json.RawMessage) (string, bool) {
 		var params map[string]any
 		if err := json.Unmarshal(input, &params); err != nil {
@@ -133,7 +189,16 @@ func claimNextTask(params map[string]any) (string, bool) {
 			continue
 		}
 		var claimed taskResponse
-		result, failed := ledgerCall("tasks_claim", map[string]any{"list_id": listID, "task_id": task.TaskID, "agent_id": agentID, "expected_version": task.Version}, &claimed)
+		result, failed := ledgerCall(
+			"tasks_claim",
+			map[string]any{
+				"list_id":          listID,
+				"task_id":          task.TaskID,
+				"agent_id":         agentID,
+				"expected_version": task.Version,
+			},
+			&claimed,
+		)
 		if !failed {
 			return result, false
 		}

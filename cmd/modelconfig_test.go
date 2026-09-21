@@ -304,7 +304,13 @@ func TestSupportedThinkingModesForModel(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			modes := supportedThinkingModesForModel(tt.provider, tt.model)
 			if len(modes) != tt.wantModes {
-				t.Errorf("supportedThinkingModesForModel(%q, %q) = %d modes, want %d", tt.provider, tt.model, len(modes), tt.wantModes)
+				t.Errorf(
+					"supportedThinkingModesForModel(%q, %q) = %d modes, want %d",
+					tt.provider,
+					tt.model,
+					len(modes),
+					tt.wantModes,
+				)
 			}
 
 			hasNone := false

@@ -221,6 +221,9 @@ The following scenarios are not currently covered and should be added:
 
 ### Missing / Recommended Tests
 
+OpenRouter tests cover masked key entry, asynchronous catalog display, adding
+a model, and typing/backspace filtering in the searchable picker.
+
 | Priority | Test | Description | Success Criteria |
 |---|---|---|---|
 | High | `TestConsoleView_Append_LargeCount` | Append 300 lines without panic; ring buffer wraps correctly | Ring stable at 200 entries |

@@ -1325,12 +1325,12 @@ func TestHost_HandleAgentSpawn_CallbackInvoked(t *testing.T) {
 	defer func() { _ = h.Close(ctx) }()
 
 	type spawnArgs struct {
-		id, name, systemPrompt, modelName, initialPrompt string
-		thinkingBudget                                   int
+		id, name, systemPrompt, modelName, endpoint, initialPrompt string
+		thinkingBudget                                             int
 	}
 	got := make(chan spawnArgs, 1)
 	h.SetAgentBridge(&testAgentBridge{onSpawn: func(_ context.Context, req SpawnRequest) error {
-		got <- spawnArgs{req.ID, req.Name, req.SystemPrompt, req.ModelName, req.InitialPrompt, req.ThinkingBudget}
+		got <- spawnArgs{req.ID, req.Name, req.SystemPrompt, req.ModelName, req.Endpoint, req.InitialPrompt, req.ThinkingBudget}
 		return nil
 	}})
 
@@ -1342,7 +1342,9 @@ func TestHost_HandleAgentSpawn_CallbackInvoked(t *testing.T) {
 
 	resp := h.routeHostCall(ctx, ext.module, ext, sdk.HostCallRequest{
 		Method: sdk.MethodAgentSpawn,
-		Params: []byte(`{"id":"a1","name":"worker","system_prompt":"you are helpful","model_name":"claude-3"}`),
+		Params: []byte(
+			`{"id":"a1","name":"worker","system_prompt":"you are helpful","model_name":"claude-3","endpoint":"http://127.0.0.1:11234/v1"}`,
+		),
 	})
 	if resp.Error != "" {
 		t.Fatalf("agent_spawn: %s", resp.Error)
@@ -1351,7 +1353,7 @@ func TestHost_HandleAgentSpawn_CallbackInvoked(t *testing.T) {
 	select {
 	case args := <-got:
 		if args.id != "a1" || args.name != "worker" || args.systemPrompt != "you are helpful" ||
-			args.modelName != "claude-3" {
+			args.modelName != "claude-3" || args.endpoint != "http://127.0.0.1:11234/v1" {
 			t.Errorf(
 				"AgentBridge.Spawn got %+v, want id=a1 name=worker systemPrompt='you are helpful' modelName=claude-3",
 				args,

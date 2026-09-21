@@ -11,11 +11,23 @@ func TestCheckCommandPermission(t *testing.T) {
 	}{
 		{name: "empty config remains permissive", command: "sed -i file", allow: true},
 		{name: "denies executable", command: "sed -i file", rules: ExecRules{DenyCommands: []string{"sed"}}},
-		{name: "denies executable path", command: "/usr/bin/sed -i file", rules: ExecRules{DenyCommands: []string{"sed"}}},
-		{name: "denies command in pipeline", command: "cat file | sed -n 1p", rules: ExecRules{DenyCommands: []string{"sed"}}},
+		{
+			name:    "denies executable path",
+			command: "/usr/bin/sed -i file",
+			rules:   ExecRules{DenyCommands: []string{"sed"}},
+		},
+		{
+			name:    "denies command in pipeline",
+			command: "cat file | sed -n 1p",
+			rules:   ExecRules{DenyCommands: []string{"sed"}},
+		},
 		{name: "allowlist", command: "go test ./...", rules: ExecRules{AllowCommands: []string{"go"}}, allow: true},
 		{name: "allowlist rejects command", command: "sed -n 1p file", rules: ExecRules{AllowCommands: []string{"go"}}},
-		{name: "optional shell operator restriction", command: "go test ./... && go vet ./...", rules: ExecRules{AllowCommands: []string{"go"}, DenyShellOperators: true}},
+		{
+			name:    "optional shell operator restriction",
+			command: "go test ./... && go vet ./...",
+			rules:   ExecRules{AllowCommands: []string{"go"}, DenyShellOperators: true},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

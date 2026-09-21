@@ -124,7 +124,7 @@ func init() {
 		"create_agent",
 		`Create a new agent. The agent ID is {your_agent_id}/{name} (e.g. main creating "researcher" → id="main/researcher"). The returned agent_id is what you pass to send_message and shutdown_agent.`,
 		json.RawMessage(
-			`{"type":"object","properties":{"name":{"type":"string","description":"Agent name"},"system_prompt":{"type":"string","description":"System prompt for the agent"},"prompt":{"type":"string","description":"Initial prompt to send"},"model":{"type":"string","description":"Model name (optional)"},"thinking_budget":{"type":"integer","description":"Extended thinking token budget (optional, Anthropic only). Enables deeper reasoning before responding."}},"required":["name","system_prompt","prompt"]}`,
+			`{"type":"object","properties":{"name":{"type":"string","description":"Agent name"},"system_prompt":{"type":"string","description":"System prompt for the agent"},"prompt":{"type":"string","description":"Initial prompt to send"},"model":{"type":"string","description":"Model name (optional; defaults to the configured model; local models must be configured)"},"endpoint":{"type":"string","description":"Optional local endpoint URL; must match the selected model's configured base_url"},"thinking_budget":{"type":"integer","description":"Extended thinking token budget (optional, Anthropic only). Enables deeper reasoning before responding."}},"required":["name","system_prompt","prompt"]}`,
 		),
 		json.RawMessage(
 			`{"type":"object","description":"Host agent creation result including the new agent_id on success"}`,
@@ -208,7 +208,7 @@ func onSessionStart() {
 
 ### Tool reference
 
-**create_agent(name, system_prompt, prompt, model?)**
+**create_agent(name, system_prompt, prompt, model?, endpoint?)**
 Spawn a sub-agent and send its first task. The agent starts immediately.
 Its output does NOT appear in your chat — it works silently in the background.
 - name: short label shown in /agents status (e.g. "researcher", "coder-1")
@@ -219,6 +219,7 @@ Its output does NOT appear in your chat — it works silently in the background.
   Sub-agents may call send_message("main", result) to pass structured results
   back to the orchestrator for richer output.
 - model: optional; defaults to the current session model
+- endpoint: optional for local models; must match the selected model's configured base_url
 
 Sub-agents should restate their task when reporting back for clarity:
   GOOD: "I was researching X. I found that Y and Z."
@@ -604,6 +605,7 @@ func handleCreateAgent(p beforeToolCallPayload) {
 		SystemPrompt   string `json:"system_prompt"`
 		Prompt         string `json:"prompt"`
 		Model          string `json:"model"`
+		Endpoint       string `json:"endpoint"`
 		ThinkingBudget int    `json:"thinking_budget"`
 	}
 	if err := json.Unmarshal(p.Input, &input); err != nil || input.Name == "" {
@@ -636,6 +638,7 @@ func handleCreateAgent(p beforeToolCallPayload) {
 		Name           string `json:"name"`
 		SystemPrompt   string `json:"system_prompt"`
 		ModelName      string `json:"model_name"`
+		Endpoint       string `json:"endpoint"`
 		InitialPrompt  string `json:"initial_prompt"`
 		ThinkingBudget int    `json:"thinking_budget"`
 		CallerID       string `json:"caller_id"`
@@ -645,6 +648,7 @@ func handleCreateAgent(p beforeToolCallPayload) {
 		Name:           input.Name,
 		SystemPrompt:   systemPrompt,
 		ModelName:      input.Model,
+		Endpoint:       input.Endpoint,
 		InitialPrompt:  input.Prompt,
 		ThinkingBudget: input.ThinkingBudget,
 		CallerID:       scope, // the calling agent's ID (p.AgentID or "main")

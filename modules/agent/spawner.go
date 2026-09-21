@@ -56,7 +56,7 @@ func (s *Spawner) Spawn(ctx context.Context, req extension.SpawnRequest) error {
 		return fmt.Errorf("no agent pool")
 	}
 
-	lm, err := s.pool.LanguageModelForModel(ctx, req.ModelName)
+	lm, err := s.pool.LanguageModelForModelAtEndpoint(ctx, req.ModelName, req.Endpoint)
 	if err != nil {
 		return fmt.Errorf("spawn agent %q: get model %q: %w", req.ID, req.ModelName, err)
 	}
@@ -111,7 +111,11 @@ func (s *Spawner) Spawn(ctx context.Context, req extension.SpawnRequest) error {
 		// Surface the error to the actual creator so nested agents are notified too.
 		target := a.lifecycleTarget()
 		if targetAgent := pool.Get(target); targetAgent != nil {
-			msg, encodeErr := a.lifecycleMessage(lifecycleEventFailed, "child turn failed; inspect status and decide whether to retry or recover", e)
+			msg, encodeErr := a.lifecycleMessage(
+				lifecycleEventFailed,
+				"child turn failed; inspect status and decide whether to retry or recover",
+				e,
+			)
 			if encodeErr != nil {
 				slog.Error("sub-agent: failed to encode error notification", "agent", subID, "err", encodeErr)
 			} else if deliverErr := pool.Deliver(target, sdk.Message{

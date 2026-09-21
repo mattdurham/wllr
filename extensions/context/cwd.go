@@ -153,7 +153,9 @@ func dynamicPrompt(tools []promptTool, commands []promptCommand) string {
 		sort.Strings(names)
 		b.WriteString("Available tools: " + strings.Join(names, ", "))
 		if hasCodeIntelligence(tools) {
-			b.WriteString("\n\n### Code Intelligence\n\n- For coding work, LSP tools are the primary tools for diagnostics, linting, code navigation, finding references, and refactor reconnaissance.\n- At the start of repo/code work, call lsp_capabilities unless you already know the available LSP backends and output contracts from this session.\n- Before broad grep, rg, find, or large read_file sweeps, use lsp_symbols, lsp_definition, or lsp_references when the question is about code structure, definitions, call sites, or usages.\n- Before renames or shared API refactors, use lsp_refactor_preview; use exec/manual search as a fallback when LSP output is unavailable, incomplete, or unrelated.")
+			b.WriteString(
+				"\n\n### Code Intelligence\n\n- For coding work, LSP tools are the primary tools for diagnostics, linting, code navigation, finding references, and refactor reconnaissance.\n- At the start of repo/code work, call lsp_capabilities unless you already know the available LSP backends and output contracts from this session.\n- Before broad grep, rg, find, or large read_file sweeps, use lsp_symbols, lsp_definition, or lsp_references when the question is about code structure, definitions, call sites, or usages.\n- Before renames or shared API refactors, use lsp_refactor_preview; use exec/manual search as a fallback when LSP output is unavailable, incomplete, or unrelated.",
+			)
 		}
 	}
 	if len(commands) > 0 {

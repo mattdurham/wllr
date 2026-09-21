@@ -126,6 +126,13 @@ type Model struct {
 	// active provider. Nil means model selection is unavailable. Set by cmd/main.go.
 	ModelListFn func() []ModelChoice
 
+	// OpenRouter setup callbacks fetch the remote catalog, store an API key,
+	// and pin a selected model in the regular model picker.
+	HasOpenRouterKeyFn      func() bool
+	SaveOpenRouterKeyFn     func(key string) error
+	FetchOpenRouterModelsFn func() ([]OpenRouterModelChoice, error)
+	AddOpenRouterModelFn    func(OpenRouterModelChoice) error
+
 	// ProviderListFn returns providers selectable in the first-run setup wizard.
 	// Nil means provider selection is unavailable. Set by cmd/main.go.
 	ProviderListFn func() []ProviderChoice
@@ -230,6 +237,7 @@ type Model struct {
 	localSetupModels      []LocalModelChoice
 	localSetupManualStep  int
 	localSetupManualEntry LocalModelEntry
+	openRouterCatalog     []OpenRouterModelChoice
 
 	// Modal overlay state (non-empty when modal is open).
 	modalContent string
@@ -387,13 +395,20 @@ func (m *Model) SetProgram(p *tea.Program) {
 		// Wire context-usage dispatcher so agent turns forward EventContextUsage
 		// to WASM extensions without a circular import between agent and extension.
 		if pool != nil {
-			pool.SetContextUsageDispatcher(func(cu sdk.ContextUsage, compact bool, thresholdPct float64, compactions int) {
-				payload, _ := json.Marshal(
-					sdk.ContextUsagePayload{Usage: cu, Compacted: compact, Compactions: compactions, ThresholdPct: thresholdPct},
-				)
-				evt := sdk.Event{Type: sdk.EventContextUsage, Payload: payload}
-				_, _ = extHostRef.DispatchEvent(context.Background(), evt)
-			})
+			pool.SetContextUsageDispatcher(
+				func(cu sdk.ContextUsage, compact bool, thresholdPct float64, compactions int) {
+					payload, _ := json.Marshal(
+						sdk.ContextUsagePayload{
+							Usage:        cu,
+							Compacted:    compact,
+							Compactions:  compactions,
+							ThresholdPct: thresholdPct,
+						},
+					)
+					evt := sdk.Event{Type: sdk.EventContextUsage, Payload: payload}
+					_, _ = extHostRef.DispatchEvent(context.Background(), evt)
+				},
+			)
 			// Drive the TUI streaming indicator when a Deliver (e.g. a sub-agent's
 			// idle notification or result) wakes the main agent off the bubbletea loop.
 			pool.SetWakeNotifier(func(id string) {
@@ -655,7 +670,11 @@ func (m Model) Init() tea.Cmd {
 	// no choice is recorded yet, open the prompt once at startup.
 	if m.pendingAuthProvider != "" {
 		provider := m.pendingAuthProvider
-		cmds = append(cmds, func() tea.Msg { return showAuthPromptMsg{Provider: provider} })
+		if provider == providerOpenRouter {
+			cmds = append(cmds, func() tea.Msg { return showOpenRouterSetupMsg{} })
+		} else {
+			cmds = append(cmds, func() tea.Msg { return showAuthPromptMsg{Provider: provider} })
+		}
 	}
 	if m.pendingSetupWizard {
 		cmds = append(cmds, func() tea.Msg { return showLoginProviderPickerMsg{} })
@@ -883,6 +902,9 @@ func (m Model) updateKeyPressPicker(kp tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		// Core-owned pickers (callback prefixed "__wllr:") route to a harness
 		// handler instead of dispatching EventOnCommand to a WASM extension.
 		if callback == modelPickerCallback {
+			if id == OpenRouterBrowseModelID {
+				return m, func() tea.Msg { return showOpenRouterBrowseMsg{} }, true
+			}
 			return m, func() tea.Msg { return setModelMsg{Model: id} }, true
 		}
 		if callback == thinkingPickerCallback {
@@ -900,11 +922,18 @@ func (m Model) updateKeyPressPicker(kp tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 				if choice.ID == id {
 					chosen := choice
 					return m, func() tea.Msg {
-						return localModelPickedMsg{ID: chosen.ID, Name: chosen.Name, ContextWindow: chosen.ContextWindow}
+						return localModelPickedMsg{
+							ID:            chosen.ID,
+							Name:          chosen.Name,
+							ContextWindow: chosen.ContextWindow,
+						}
 					}, true
 				}
 			}
 			return m, nil, true
+		}
+		if callback == openRouterCatalogCallback {
+			return m, func() tea.Msg { return openRouterModelPickedMsg{ID: id} }, true
 		}
 		extHost := m.extHost
 		return m, func() tea.Msg {
@@ -943,6 +972,9 @@ func (m Model) updateKeyPressTextInput(kp tea.KeyPressMsg) (Model, tea.Cmd, bool
 			return m, func() tea.Msg {
 				return contextWindowEnteredMsg{Provider: provider, Model: model, Value: value}
 			}, true
+		}
+		if callback == openRouterKeyCallback {
+			return m, func() tea.Msg { return openRouterKeyEnteredMsg{Key: value} }, true
 		}
 		extHost := m.extHost
 		return m, func() tea.Msg {
@@ -1234,6 +1266,10 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 		return m, nil, true
 
 	case loginMsg:
+		if m.activeProvider == providerOpenRouter {
+			m.openOpenRouterKeyPrompt()
+			return m, nil, true
+		}
 		if m.activeProvider == providerLocal && !m.hasUsableLocalModel() {
 			m.openLocalModelBaseURLPrompt()
 			return m, nil, true
@@ -1247,6 +1283,47 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 	case showModelPickerMsg:
 		m.openModelPicker()
 		return m, nil, true
+
+	case showOpenRouterSetupMsg:
+		if m.HasOpenRouterKeyFn != nil && m.HasOpenRouterKeyFn() {
+			return m, m.fetchOpenRouterCatalogCmd(), true
+		}
+		m.openOpenRouterKeyPrompt()
+		return m, nil, true
+
+	case openRouterKeyEnteredMsg:
+		if strings.TrimSpace(msg.Key) == "" {
+			m.pushNotification("OpenRouter API key is required")
+			m.openOpenRouterKeyPrompt()
+			return m, nil, true
+		}
+		if m.SaveOpenRouterKeyFn == nil {
+			m.pushNotification("OpenRouter key storage is unavailable")
+			return m, nil, true
+		}
+		if err := m.SaveOpenRouterKeyFn(strings.TrimSpace(msg.Key)); err != nil {
+			m.pushNotification(fmt.Sprintf("⚠ could not save OpenRouter key: %v", err))
+			return m, nil, true
+		}
+		return m, m.fetchOpenRouterCatalogCmd(), true
+
+	case showOpenRouterBrowseMsg:
+		if m.HasOpenRouterKeyFn == nil || !m.HasOpenRouterKeyFn() {
+			m.openOpenRouterKeyPrompt()
+			return m, nil, true
+		}
+		return m, m.fetchOpenRouterCatalogCmd(), true
+
+	case openRouterCatalogResultMsg:
+		if msg.Err != nil {
+			m.pushNotification(fmt.Sprintf("⚠ could not list OpenRouter models: %v", msg.Err))
+			return m, nil, true
+		}
+		m.openOpenRouterCatalog(msg.Models)
+		return m, nil, true
+
+	case openRouterModelPickedMsg:
+		return m, m.applyOpenRouterModelPick(msg.ID), true
 
 	case contextWindowEnteredMsg:
 		if msg.Value == "" {

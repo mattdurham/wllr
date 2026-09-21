@@ -19,16 +19,18 @@ import (
 	fantasyanthropicprovider "charm.land/fantasy/providers/anthropic"
 	fantasygoogleprovider "charm.land/fantasy/providers/google"
 	fantasyopenapiprovider "charm.land/fantasy/providers/openai"
+	fantasyopenrouterprovider "charm.land/fantasy/providers/openrouter"
 	"github.com/mattdurham/wllr/modules/extension"
 	"github.com/mattdurham/wllr/modules/sdk"
 )
 
 const (
 	// providerAnthropic is the canonical provider name for Anthropic.
-	providerAnthropic = "anthropic"
-	providerOpenAI    = "openai"
-	providerGemini    = "gemini"
-	providerLocal     = "local"
+	providerAnthropic  = "anthropic"
+	providerOpenAI     = "openai"
+	providerGemini     = "gemini"
+	providerOpenRouter = "openrouter"
+	providerLocal      = "local"
 
 	defaultAnthropicModel = "claude-sonnet-4-6"
 	defaultOpenAIModel    = "gpt-5.5"
@@ -80,6 +82,37 @@ func newAnthropicProvider(apiKey string) (fantasy.Provider, error) {
 	return fantasyanthropicprovider.New(opts...)
 }
 
+// subagentLanguageModel binds local sub-agents to the endpoint and credentials
+// of their configured model. An explicit endpoint must match that entry.
+func subagentLanguageModel(
+	ctx context.Context,
+	cfg *Config,
+	currentProvider fantasy.Provider,
+	model, endpoint string,
+) (fantasy.LanguageModel, error) {
+	if cfg.Provider != providerLocal {
+		if endpoint != "" {
+			return nil, fmt.Errorf("endpoint is only supported for configured local models")
+		}
+		return currentProvider.LanguageModel(ctx, model)
+	}
+	entry, ok := cfg.localModelByID(model)
+	if !ok || entry.BaseURL == "" {
+		return nil, fmt.Errorf("local model %q is not configured in wllr.local_models", model)
+	}
+	if endpoint != "" && endpoint != entry.BaseURL {
+		return nil, fmt.Errorf("endpoint %q does not match configured endpoint for local model %q", endpoint, model)
+	}
+	provider, err := fantasyopenapiprovider.New(
+		fantasyopenapiprovider.WithAPIKey(entry.APIKey),
+		fantasyopenapiprovider.WithBaseURL(entry.BaseURL),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create local model provider: %w", err)
+	}
+	return provider.LanguageModel(ctx, model)
+}
+
 // buildProvider constructs a fantasy.Provider and fetches the configured
 // LanguageModel from it. Returns an error if the provider name is unknown
 // or if the provider or model cannot be created.
@@ -105,6 +138,10 @@ func buildProvider(ctx context.Context, cfg *Config) (fantasy.Provider, fantasy.
 	case providerGemini:
 		prov, provErr = fantasygoogleprovider.New(
 			fantasygoogleprovider.WithGeminiAPIKey(cfg.GeminiAPIKey),
+		)
+	case providerOpenRouter:
+		prov, provErr = fantasyopenrouterprovider.New(
+			fantasyopenrouterprovider.WithAPIKey(cfg.OpenRouterAPIKey),
 		)
 	case providerLocal:
 		if !cfg.applyLocalModelSelection(cfg.Model) {
@@ -266,7 +303,14 @@ func registerNativeTools(h *extension.Host) {
 				result, _ := json.Marshal(editFileResult{
 					Success: false,
 					Message: fmt.Sprintf("edit_file: ambiguous match at edit %d (%d occurrences)", i, len(occurrences)),
-					Errors:  []string{fmt.Sprintf("edit[%d]: oldText found %d times, must match exactly once: %q", i, len(occurrences), edit.OldText)},
+					Errors: []string{
+						fmt.Sprintf(
+							"edit[%d]: oldText found %d times, must match exactly once: %q",
+							i,
+							len(occurrences),
+							edit.OldText,
+						),
+					},
 				})
 				return string(result), false
 			}

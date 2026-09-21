@@ -462,3 +462,36 @@ The user chose the simple "always notify" design over per-turn suppression or an
 **Rationale:** Compaction successes were previously invisible — only failures logged, and the summarization LLM call's token cost was discarded. Operators could not tell how often autocompaction fires, what it costs, or which trigger (heuristic estimate vs usage threshold vs reactive context-limit retry) fired.
 
 **Consequence:** `didCompact` is derived from `Summary != ""` rather than assumed true, so no-op compactions (history fit the budget, or no valid user boundary) never count, never log, and never set `Compacted` in the `EventContextUsage` payload. The counter is turn-goroutine-local (one turn at a time — no lock needed) and monotonic for the session lifetime. `EventContextUsage` gains an additive `compactions` field (omitempty) for extension charts. The `compaction_summary` stream is a separate `fantasy.NewAgent(lm)` call — its usage is reported from `res.TotalUsage` and is not folded into the turn's `lastUsage`, so compaction cost does not skew the percentage trigger.
+
+---
+
+## 32. Configured endpoints for local sub-agents
+
+*Added: 2026-09-19*
+
+**Decision:** The pool passes its current provider to the optional model factory on every model request, including requests without an endpoint. The command layer uses the requested local model's `wllr.local_models` entry to select its endpoint and API key. An explicit endpoint must match that entry.
+
+**Rationale:** Local models can have different configured endpoints and credentials. Reusing the main agent's provider for a different local model would send the request to the wrong server, while accepting a free-form endpoint would bypass the configured model list.
+
+**Consequence:** Unknown local model names and mismatched endpoints fail at spawn time. A configured local model can be selected by name alone. Non-local models continue to use the pool's current provider.
+
+---
+
+## 33. In-turn compaction for long tool loops
+
+*Added: 2026-09-20*
+
+**Decision:** Use Fantasy's `PrepareStep` hook to summarize the active message
+transcript when the next provider step is nearing the model window. Keep a
+rolling summary plus messages produced after it, without replaying tool calls.
+
+**Rationale:** A turn can execute many tools after its initial compaction check.
+Those tool results live inside Fantasy until the turn finishes, so compacting
+the agent's persisted history after a context error cannot shrink that active
+transcript. The previous provider usage plus a conservative estimate of newly
+appended tool results provides a timely trigger.
+
+**Consequence:** The summary request is bounded and charged separately from
+the turn. A failure stops the turn before the next provider call. The summary
+is used within the current tool loop; the ordinary history recording path
+continues to own future-turn context.

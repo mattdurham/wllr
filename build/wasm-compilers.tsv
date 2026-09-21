@@ -15,6 +15,7 @@ extensions/statusline	tinygo	verified with Docker TinyGo builder
 extensions/context	tinygo	verified with Docker TinyGo builder
 extensions/skills	tinygo	verified with Docker TinyGo builder
 extensions/tasks	tinygo	verified with Docker TinyGo builder
+extensions/task-runner	tinygo	verified with Docker TinyGo builder
 extensions/lsp	tinygo	verified with Docker TinyGo builder
 extensions/permissions	tinygo	verified with Docker TinyGo builder
 extensions/mcp-bridge	tinygo	verified with Docker TinyGo builder

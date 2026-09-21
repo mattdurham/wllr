@@ -175,13 +175,6 @@ func OnSessionStart(fn func()) {
 	_sdkOn("session_start", func(_ json.RawMessage) { fn() })
 }
 
-// OnRawSessionStart registers a handler that receives the raw session_start
-// payload. Use this when the handler needs payload fields such as cwd and
-// started_at, which the host injects for extensions.
-func OnRawSessionStart(fn func(data []byte)) {
-	_sdkOn("session_start", func(payload json.RawMessage) { fn(payload) })
-}
-
 // OnShutdown registers a handler called when the host is shutting down.
 func OnShutdown(fn func(reason string)) {
 	_sdkOn("shutdown", func(payload json.RawMessage) {
@@ -225,6 +218,11 @@ func OnMessageEnd(fn func(role, content string)) {
 // Prefer OnToolCall for most cases.
 func OnBeforeToolCall(fn func(payload json.RawMessage)) {
 	_sdkOn("before_tool_call", fn)
+}
+
+// OnTick registers a handler called once per second by the host.
+func OnTick(fn func()) {
+	_sdkOn("tick", func(json.RawMessage) { fn() })
 }
 
 // OnAfterToolCall registers a handler called after a tool call completes.
@@ -333,50 +331,6 @@ func GetEnv(name string) (string, error) {
 	return r.Value, nil
 }
 
-// HostInfo returns host ground truth: the real working directory, current
-// time (RFC3339Nano), and os/arch. The WASM sandbox has no working directory
-// (guest os.Getwd returns "/") and its clock may be stale, so use these
-// values instead of the guest's own os calls when writing pathed or
-// timestamped artifacts.
-func HostInfo() (cwd, now string, err error) {
-	raw := _sdkCallResult("host_info", nil)
-	if raw == nil {
-		return "", "", fmt.Errorf("host_info: no response")
-	}
-	var r struct {
-		CWD string `json:"cwd"`
-		Now string `json:"now"`
-	}
-	if e := json.Unmarshal(raw, &r); e != nil {
-		return "", "", e
-	}
-	return r.CWD, r.Now, nil
-}
-
-// HostSession is one entry returned by ListSessions.
-type HostSession struct {
-	Path      string `json:"path"`
-	Timestamp string `json:"timestamp"`
-	Preview   string `json:"preview,omitempty"`
-}
-
-// ListSessions lists session files under base (default ~/.wllr/sessions) with
-// real host mtimes, newest first, up to limit entries, excluding the current
-// file. Listing is done host-side because the WASM sandbox cannot reliably
-// stat or enumerate the host filesystem. Requires the file_read permission.
-func ListSessions(base, exclude string, limit int) ([]HostSession, error) {
-	params := map[string]any{"base": base, "exclude": exclude, "limit": limit}
-	raw := _sdkCallResult("list_sessions", params)
-	if raw == nil {
-		return nil, fmt.Errorf("list_sessions: no response")
-	}
-	var out []HostSession
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // StoreSet stores a key-value pair in the extension's private store.
 func StoreSet(key, value string) {
 	_sdkCall("store_set", map[string]string{"key": key, "value": value})
@@ -430,13 +384,20 @@ func _sdkCall(method string, params any) {
 // _sdkCallResult fires a host_call and returns the raw response Result field,
 // or nil on error or empty response.
 func _sdkCallResult(method string, params any) json.RawMessage {
+	raw, _ := _sdkCallResultWithError(method, params)
+	return raw
+}
+
+// _sdkCallResultWithError preserves host errors so facade tools can return the
+// same actionable failure instead of silently converting it to an empty result.
+func _sdkCallResultWithError(method string, params any) (json.RawMessage, string) {
 	type request struct {
 		Method string `json:"method"`
 		Params any    `json:"params,omitempty"`
 	}
 	reqBytes, err := json.Marshal(request{Method: method, Params: params})
 	if err != nil {
-		return nil
+		return nil, err.Error()
 	}
 	buf := make([]byte, len(reqBytes))
 	copy(buf, reqBytes)
@@ -450,7 +411,7 @@ func _sdkCallResult(method string, params any) json.RawMessage {
 	)
 
 	if respPtr == 0 || respLen == 0 {
-		return nil
+		return nil, "host_call: no response"
 	}
 	respBytes := make([]byte, respLen)
 	copy(respBytes, unsafe.Slice((*byte)(unsafe.Pointer(uintptr(respPtr))), respLen))
@@ -460,8 +421,11 @@ func _sdkCallResult(method string, params any) json.RawMessage {
 		Error  string          `json:"error,omitempty"`
 		Result json.RawMessage `json:"result,omitempty"`
 	}
-	if err := json.Unmarshal(respBytes, &resp); err != nil || resp.Error != "" {
-		return nil
+	if err := json.Unmarshal(respBytes, &resp); err != nil {
+		return nil, err.Error()
 	}
-	return resp.Result
+	if resp.Error != "" {
+		return nil, resp.Error
+	}
+	return resp.Result, ""
 }

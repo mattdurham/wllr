@@ -134,7 +134,9 @@ func discoverLocalModels(ctx context.Context, cfg *Config) []modelInfo {
 			// model swap that did not update the config), surface it — an
 			// endpoint that exposes nothing (0) is not a conflict, just the
 			// normal case where the config value fills in.
-			if configured, ok := configuringByID[id]; ok && configured.ContextWindow > 0 && contextWindowFromOpenAIModel(remote) > 0 && configured.ContextWindow != contextWindowFromOpenAIModel(remote) {
+			if configured, ok := configuringByID[id]; ok && configured.ContextWindow > 0 &&
+				contextWindowFromOpenAIModel(remote) > 0 &&
+				configured.ContextWindow != contextWindowFromOpenAIModel(remote) {
 				slog.Warn(
 					"wllr: local model context window differs from configured value; using configured",
 					"model", id,
@@ -468,7 +470,10 @@ var localModelsDiscoveryPathSuffixes = []string{
 // (no attempt got as far as a response); a bad/empty response from at least
 // one reachable attempt is reported as queryLocalModelsBadResponse so an
 // unreachable host is never masked by a later attempt's connection failure.
-func probeLocalModelsEndpoint(ctx context.Context, baseURL, apiKey string) ([]openAIModel, string, queryLocalModelsResult) {
+func probeLocalModelsEndpoint(
+	ctx context.Context,
+	baseURL, apiKey string,
+) ([]openAIModel, string, queryLocalModelsResult) {
 	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if base == "" {
 		return nil, "", queryLocalModelsUnreachable

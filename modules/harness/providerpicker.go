@@ -45,6 +45,9 @@ func (m *Model) applyLoginProviderSelection(provider string) tea.Cmd {
 	if provider == providerLocal {
 		return func() tea.Msg { return showLocalModelSetupMsg{} }
 	}
+	if provider == providerOpenRouter {
+		return func() tea.Msg { return showOpenRouterSetupMsg{} }
+	}
 	requiresLogin := false
 	model := ""
 	if m.SelectProviderFn != nil {

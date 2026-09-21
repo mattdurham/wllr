@@ -152,7 +152,11 @@ Output:
 ### `create_agent`
 
 Input: `name`, `system_prompt`, and `prompt` strings are required. Optional
-fields are `model` string and `thinking_budget` integer.
+fields are `model` and `endpoint` strings, plus `thinking_budget` integer.
+An empty model uses the current session model. For the local provider, a named
+model must exist in `wllr.local_models`; its configured `base_url` and `api_key`
+are used automatically. If `endpoint` is supplied, it must match that model's
+configured `base_url`. Other providers reject `endpoint`.
 
 Output: JSON object `{ "agent_id": string, "status": "created" }`. Fatal
 errors include missing `name` or host spawn failure.
@@ -433,6 +437,37 @@ Input: `list_id`, non-negative `cursor`, and optional bounded `limit`.
 Output: `{ "events": [Event, ...], "cursor": integer, "next_cursor": integer }`.
 Events have unique `event_id` values. Cursor zero replays from the beginning and
 is the authoritative missed-wake reconciliation path.
+
+## Task Runner Extension
+
+The optional `task-runner` extension executes one claimed task at a time in a
+fresh child agent. Completion requests graceful shutdown and the next child is
+started only after the previous child leaves the live agent list. Review is
+stored as a blocked task and notified in the main chat.
+
+### `task_runner_create`
+
+Input: `name` and ordered `tasks` are required. Each task has a required
+`title` and optional `description`. Creates the list and starts its first task.
+
+### `task_runner_start`
+
+Input: `list_id` required. Starts the next pending task in an existing list.
+
+### `mark_task_completed`
+
+Child-only input: `task_id` and structured `result` are required; optional
+`summary` is informational. The caller must be the active child.
+
+### `request_task_review`
+
+Child-only input: `task_id` and `reason` are required; optional `details` are
+shown to the user. The task is reported blocked, the child is shut down, and
+the main chat receives a review notification.
+
+### `task_runner_status`
+
+No input. Output includes persisted list, task, child, and runner phase.
 
 ## Sigil Extension
 

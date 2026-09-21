@@ -11,7 +11,10 @@ the tool call as failed with plain-text messages such as
 
 ## Tools
 
-- `create_agent` creates a scoped child agent ID and starts its first turn.
+- `create_agent` creates a scoped child agent ID and starts its first turn. Its
+  optional `model` field selects a model. For local models, the configured
+  `wllr.local_models` entry supplies the endpoint and API key. The optional
+  `endpoint` must match that entry; omitted fields use the current defaults.
 - `shutdown_agent` queues a shutdown request for a child agent.
 - `list_agents` returns live agents with running and pending-message state.
 - `create_team`, `add_to_team`, `get_team`, and `shutdown_team` manage teams.

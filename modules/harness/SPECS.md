@@ -518,6 +518,13 @@ Returns the current set of registered tools from `extHost.RegisteredTools()` as 
 
 Flow: `/model` with no arg (or `/models`) emits `showModelPickerMsg` → `openModelPicker()` builds picker items from `ModelListFn` (marking the current model and indicating missing context metadata) and opens the picker with the reserved `modelPickerCallback` (`"__wllr:model"`). On selection, `updateKeyPressPicker` recognises the core callback and emits `setModelMsg{Model: id}` (rather than dispatching `EventOnCommand` to a WASM extension); the `setModelMsg` handler calls `applyModelSelection` → `SelectModelFn` + status update + `EventModelChanged`. If selection returns `ErrContextWindowRequired`, a required core text input collects a positive token count, calls `SetContextWindowFn`, and retries selection. `/model <name>` follows the same validation path.
 
+For OpenRouter, the normal picker lists saved models first and a Browse entry
+last. Browse fetches the remote catalog asynchronously and opens `PickerView`
+in search mode. Typing filters by name, ID, or sublabel; backspace removes a
+character and Ctrl+U clears the query. Selecting a catalog entry invokes
+`AddOpenRouterModelFn`, which persists it before switching the active model.
+The API key prompt uses `TextInputView.OpenSecret` and password echo mode.
+
 Startup uses the same required context-window prompt when `SetPendingContextWindow(provider, model)` is set. Empty, zero, negative, and non-numeric values are rejected; the model is not applied until persistence and selection succeed.
 
 **Invariant:** picker callbacks prefixed `"__wllr:"` are core-owned and route to harness handlers, never to `EventOnCommand`. Extension command names cannot collide (the prefix is reserved). Reserved callbacks: `"__wllr:model"`, `"__wllr:thinking"`.
@@ -557,6 +564,11 @@ Flow mirrors the model picker: `/thinking` with no arg emits `showThinkingPicker
 Flow: when `pendingAuthProvider != ""`, `Init()` emits `showAuthPromptMsg{Provider}` → `openAuthPrompt()` opens a two-item picker ("Set up OAuth / login" = `"oauth"`, "Use an API key" = `"api_key"`) with the reserved `authPickerCallback` (`"__wllr:auth"`). On selection, `updateKeyPressPicker` emits `recordAuthMsg{Provider, Method}`; the handler calls `applyAuthChoice` → `RecordAuthFn` + a notification, and clears `authPromptProvider`.
 
 Provider setup flow: when `pendingSetupWizard` is true, or when `/login` is run, the harness emits `showLoginProviderPickerMsg{}`. `openLoginProviderPicker()` displays provider choices from `ProviderListFn` with the reserved `loginProviderPickerCallback` (`"__wllr:login_provider"`). Cloud selection calls `SelectProviderFn`, updates active provider/model state, dispatches `EventModelChanged`, and starts OAuth. Local selection always opens `showLocalModelSetupMsg{}` so the endpoint/model wizard can add or switch a local model; `/model` remains the shortcut for choosing among already configured local models.
+
+OpenRouter selection enters the OpenRouter setup flow. A missing key opens a
+masked text input; a stored key proceeds to remote catalog discovery. The
+selection becomes active only after a catalog model is saved. `/login auth` while
+OpenRouter is active opens the key prompt to replace its credential.
 
 Local model replacement flow: when the configured local model is not advertised by its endpoint, startup selects an available replacement so provider construction can continue, then sets `pendingModelPicker`. `Init()` emits `showModelPickerMsg{}` and the existing model picker opens with an explicit unavailable-model message so the user can confirm or choose another available model; selecting a model uses `SelectModelFn` and persists the choice. The pending flag is consumed when that picker opens.
 

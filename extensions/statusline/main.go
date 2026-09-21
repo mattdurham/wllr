@@ -143,7 +143,10 @@ func patchAll() {
 		nodes = append(nodes, UINode{ID: ctxID, Type: "text", Text: lastCtx, Props: &muted})
 	}
 	if lastCompactions > 0 {
-		nodes = append(nodes, UINode{ID: compactID, Type: "text", Text: renderCompactions(lastCompactions), Props: &muted})
+		nodes = append(
+			nodes,
+			UINode{ID: compactID, Type: "text", Text: renderCompactions(lastCompactions), Props: &muted},
+		)
 	}
 	UIPatch(areaID, OpSetRoot(UIHStack(rootID, nodes...)))
 }

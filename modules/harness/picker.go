@@ -28,7 +28,17 @@ func (p *PickerView) Open(title string, items []sdk.ShowPickerItem, callback str
 	p.Callback = callback
 	p.selectedIdx = 0
 	p.scrollOffset = 0
+	p.searchable = false
+	p.query = ""
+	p.filtered = nil
 	p.active = true
+}
+
+// OpenSearch opens a picker whose items can be narrowed by typing.
+func (p *PickerView) OpenSearch(title string, items []sdk.ShowPickerItem, callback string) {
+	p.Open(title, items, callback)
+	p.searchable = true
+	p.filterItems()
 }
 
 // Close deactivates the picker.
@@ -36,6 +46,9 @@ func (p *PickerView) Close() {
 	p.active = false
 	p.Items = nil
 	p.Callback = ""
+	p.query = ""
+	p.filtered = nil
+	p.searchable = false
 }
 
 // IsActive reports whether the picker overlay is currently shown.
@@ -52,14 +65,22 @@ func (p *PickerView) SetSize(width, height int) {
 //   - cancelled=true when the user presses Esc
 //   - otherwise (false, "", false) meaning key was consumed but no action yet
 func (p *PickerView) HandleKey(kp tea.KeyPressMsg) (selected bool, id string, cancelled bool) {
+	count := len(p.Items)
+	if p.searchable {
+		count = len(p.filtered)
+	}
 	switch kp.String() {
 	case keyEsc:
 		return false, "", true
 	case "enter":
-		if len(p.Items) == 0 {
-			return false, "", true
+		if count == 0 {
+			return false, "", false
 		}
-		return true, p.Items[p.selectedIdx].ID, false
+		idx := p.selectedIdx
+		if p.searchable {
+			idx = p.filtered[idx]
+		}
+		return true, p.Items[idx].ID, false
 	case "up":
 		if p.selectedIdx > 0 {
 			p.selectedIdx--
@@ -68,15 +89,42 @@ func (p *PickerView) HandleKey(kp tea.KeyPressMsg) (selected bool, id string, ca
 			}
 		}
 	case "down":
-		if p.selectedIdx < len(p.Items)-1 {
+		if p.selectedIdx < count-1 {
 			p.selectedIdx++
 			visible := p.visibleRows()
 			if p.selectedIdx >= p.scrollOffset+visible {
 				p.scrollOffset = p.selectedIdx - visible + 1
 			}
 		}
+	case "backspace":
+		if p.searchable && p.query != "" {
+			p.query = string([]rune(p.query)[:len([]rune(p.query))-1])
+			p.filterItems()
+		}
+	case "ctrl+u":
+		if p.searchable {
+			p.query = ""
+			p.filterItems()
+		}
+	default:
+		if p.searchable && kp.Text != "" {
+			p.query += kp.Text
+			p.filterItems()
+		}
 	}
 	return false, "", false
+}
+
+func (p *PickerView) filterItems() {
+	p.filtered = p.filtered[:0]
+	query := strings.ToLower(strings.TrimSpace(p.query))
+	for i, item := range p.Items {
+		if query == "" || strings.Contains(strings.ToLower(item.Label+" "+item.ID+" "+item.Sublabel), query) {
+			p.filtered = append(p.filtered, i)
+		}
+	}
+	p.selectedIdx = 0
+	p.scrollOffset = 0
 }
 
 // visibleRows returns how many items fit in the content area.
@@ -121,14 +169,22 @@ func (p *PickerView) View() string {
 	)
 
 	visible := p.visibleRows()
+	count := len(p.Items)
+	if p.searchable {
+		count = len(p.filtered)
+	}
 	end := p.scrollOffset + visible
-	if end > len(p.Items) {
-		end = len(p.Items)
+	if end > count {
+		end = count
 	}
 
 	rendered := 0
 	for i := p.scrollOffset; i < end; i++ {
-		item := p.Items[i]
+		idx := i
+		if p.searchable {
+			idx = p.filtered[i]
+		}
+		item := p.Items[idx]
 		selected := i == p.selectedIdx
 
 		label := item.Label
@@ -194,6 +250,9 @@ func (p *PickerView) View() string {
 
 	// Footer hint.
 	hint := " ↑↓ navigate · enter select · esc cancel "
+	if p.searchable {
+		hint = " search: " + p.query + " · ↑↓ · enter · esc "
+	}
 	hintRunes := len([]rune(hint))
 	botFill := innerWidth - hintRunes
 	if botFill < 0 {

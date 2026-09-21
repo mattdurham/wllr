@@ -677,3 +677,12 @@ the bundled prompt WASM extension.
 - The fix applies to both regular rendering and fast-path append rendering (`RenderAppendTextNode`)
 - Node mutations via `applyOp` can still store trailing newlines (which are then trimmed at render time)
 - The fix is consistent across all scene areas, not just the chat area
+
+## OpenRouter setup and searchable catalog (2026-09-19)
+
+The provider wizard routes OpenRouter to a masked API key prompt and remote
+catalog picker instead of the OAuth branch. The general picker gets an opt-in
+search mode so other picker behavior remains unchanged. The everyday `/models`
+picker contains only persisted OpenRouter choices plus a Browse entry; the
+remote catalog is fetched when Browse is chosen. This avoids loading a large
+remote list on every ordinary model switch.

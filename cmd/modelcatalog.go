@@ -104,16 +104,26 @@ var modelCatalog = map[string][]modelInfo{
 			{ID: "32768", Name: "High", Description: "Extended thinking (32K tokens)"},
 			{ID: "65536", Name: "X-High", Description: "Extended thinking (64K tokens)"},
 		}},
-		{ID: "claude-sonnet-4-5-20250929", Name: "Claude Sonnet 4.5", ContextWindow: 200000, ThinkingModes: []thinkingMode{
-			{ID: "2048", Name: "Low", Description: "Extended thinking (2K tokens)"},
-			{ID: "4096", Name: "Medium-Low", Description: "Extended thinking (4K tokens)"},
-			{ID: "16384", Name: "Medium", Description: "Extended thinking (16K tokens)"},
-			{ID: "32768", Name: "High", Description: "Extended thinking (32K tokens)"},
-			{ID: "65536", Name: "X-High", Description: "Extended thinking (64K tokens)"},
-		}},
-		{ID: "claude-haiku-4-5-20251001", Name: "Claude Haiku 4.5", ContextWindow: 200000, ThinkingModes: []thinkingMode{
-			{ID: "none", Name: "None", Description: "No extended thinking"},
-		}},
+		{
+			ID:            "claude-sonnet-4-5-20250929",
+			Name:          "Claude Sonnet 4.5",
+			ContextWindow: 200000,
+			ThinkingModes: []thinkingMode{
+				{ID: "2048", Name: "Low", Description: "Extended thinking (2K tokens)"},
+				{ID: "4096", Name: "Medium-Low", Description: "Extended thinking (4K tokens)"},
+				{ID: "16384", Name: "Medium", Description: "Extended thinking (16K tokens)"},
+				{ID: "32768", Name: "High", Description: "Extended thinking (32K tokens)"},
+				{ID: "65536", Name: "X-High", Description: "Extended thinking (64K tokens)"},
+			},
+		},
+		{
+			ID:            "claude-haiku-4-5-20251001",
+			Name:          "Claude Haiku 4.5",
+			ContextWindow: 200000,
+			ThinkingModes: []thinkingMode{
+				{ID: "none", Name: "None", Description: "No extended thinking"},
+			},
+		},
 		{ID: "claude-opus-4-1-20250805", Name: "Claude Opus 4.1", ContextWindow: 200000, ThinkingModes: []thinkingMode{
 			{ID: "2048", Name: "Low", Description: "Extended thinking (2K tokens)"},
 			{ID: "4096", Name: "Medium-Low", Description: "Extended thinking (4K tokens)"},
@@ -346,13 +356,18 @@ var modelCatalog = map[string][]modelInfo{
 			{ID: "32768", Name: "High", Description: "Extended thinking (32K tokens)"},
 			{ID: "65536", Name: "X-High", Description: "Extended thinking (64K tokens)"},
 		}},
-		{ID: "gemini-3.1-pro-preview-customtools", Name: "Gemini 3.1 Pro", ContextWindow: 1048576, ThinkingModes: []thinkingMode{
-			{ID: "512", Name: "Minimal", Description: "Extended thinking (512 tokens)"},
-			{ID: "4096", Name: "Low", Description: "Extended thinking (4K tokens)"},
-			{ID: "16384", Name: "Medium", Description: "Extended thinking (16K tokens)"},
-			{ID: "32768", Name: "High", Description: "Extended thinking (32K tokens)"},
-			{ID: "65536", Name: "X-High", Description: "Extended thinking (64K tokens)"},
-		}},
+		{
+			ID:            "gemini-3.1-pro-preview-customtools",
+			Name:          "Gemini 3.1 Pro",
+			ContextWindow: 1048576,
+			ThinkingModes: []thinkingMode{
+				{ID: "512", Name: "Minimal", Description: "Extended thinking (512 tokens)"},
+				{ID: "4096", Name: "Low", Description: "Extended thinking (4K tokens)"},
+				{ID: "16384", Name: "Medium", Description: "Extended thinking (16K tokens)"},
+				{ID: "32768", Name: "High", Description: "Extended thinking (32K tokens)"},
+				{ID: "65536", Name: "X-High", Description: "Extended thinking (64K tokens)"},
+			},
+		},
 		{ID: "gemini-3-pro-preview", Name: "Gemini 3 Pro", ContextWindow: 1048576, ThinkingModes: []thinkingMode{
 			{ID: "512", Name: "Minimal", Description: "Extended thinking (512 tokens)"},
 			{ID: "4096", Name: "Low", Description: "Extended thinking (4K tokens)"},
@@ -484,6 +499,11 @@ func contextWindowForSelection(provider, id string, cfg *Config) int64 {
 			return cfg.ContextWindow
 		}
 		return cfg.LocalContextWindow
+	}
+	if provider == providerOpenRouter && cfg != nil {
+		if model, ok := cfg.openRouterModel(id); ok {
+			return model.ContextWindow
+		}
 	}
 	return contextWindowFromCatalog(provider, id)
 }

@@ -42,7 +42,10 @@ func TestHostTaskHandlersAndCommitBeforeNotify(t *testing.T) {
 	}
 	var task sdk.TaskRecordResponse
 	json.Unmarshal(tr.Result, &task)
-	cr := call(sdk.MethodTasksClaim, sdk.TasksClaimRequest{ListID: l.List.ListID, TaskID: task.Task.TaskID, AgentID: "worker"})
+	cr := call(
+		sdk.MethodTasksClaim,
+		sdk.TasksClaimRequest{ListID: l.List.ListID, TaskID: task.Task.TaskID, AgentID: "worker"},
+	)
 	if cr.Error != "" {
 		t.Fatal(cr.Error)
 	}
@@ -61,7 +64,12 @@ func TestHostTaskHandlersRejectTrailingJSON(t *testing.T) {
 	h := NewHost(nil)
 	defer h.Close(context.Background())
 	h.SetTaskLedgerDirectory(t.TempDir())
-	r := h.routeHostCall(context.Background(), nil, nil, sdk.HostCallRequest{Method: sdk.MethodTasklistCreate, Params: []byte(`{"name":"x"}{}`)})
+	r := h.routeHostCall(
+		context.Background(),
+		nil,
+		nil,
+		sdk.HostCallRequest{Method: sdk.MethodTasklistCreate, Params: []byte(`{"name":"x"}{}`)},
+	)
 	if r.Error == "" {
 		t.Fatal("expected malformed parameter error")
 	}

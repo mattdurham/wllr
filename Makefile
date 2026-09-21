@@ -33,7 +33,8 @@
 #   (read_file, write_file, exec, get_env are native Go — no WASM build needed)
 #
 # Installed extensions (loaded from ~/.wllr/extensions/ at runtime):
-#   context, skills, tasks, lsp, memory, permissions, mcp-bridge, otel-traces
+#   context, skills, tasks, task-runner, lsp, memory, permissions, mcp-bridge,
+#   otel-traces
 
 DIST_DIR    := dist
 BINARY      := $(DIST_DIR)/wllr
@@ -89,11 +90,13 @@ extensions: builtins optional-extensions
 
 optional-extensions:
 	mkdir -p $(EXT_DIR)/websearch
-	mkdir -p $(EXT_DIR)/context $(EXT_DIR)/skills $(EXT_DIR)/tasks $(EXT_DIR)/lsp $(EXT_DIR)/permissions $(EXT_DIR)/mcp-bridge $(EXT_DIR)/otel-traces $(EXT_DIR)/websearch
+	mkdir -p $(EXT_DIR)/context $(EXT_DIR)/skills $(EXT_DIR)/tasks $(EXT_DIR)/task-runner $(EXT_DIR)/lsp $(EXT_DIR)/permissions $(EXT_DIR)/mcp-bridge $(EXT_DIR)/otel-traces $(EXT_DIR)/websearch
 	$(WASM_BUILD) $(EXT_DIR)/skills/skills.wasm extensions/skills
 	cp extensions/skills/skills.json $(EXT_DIR)/skills/
 	$(WASM_BUILD) $(EXT_DIR)/tasks/tasks.wasm extensions/tasks
 	cp extensions/tasks/tasks.json $(EXT_DIR)/tasks/
+	$(WASM_BUILD) $(EXT_DIR)/task-runner/task-runner.wasm extensions/task-runner
+	cp extensions/task-runner/task-runner.json $(EXT_DIR)/task-runner/
 	$(WASM_BUILD) $(EXT_DIR)/lsp/lsp.wasm extensions/lsp
 	cp extensions/lsp/extension.json $(EXT_DIR)/lsp/lsp.json
 	$(WASM_BUILD) $(EXT_DIR)/permissions/permissions.wasm extensions/permissions

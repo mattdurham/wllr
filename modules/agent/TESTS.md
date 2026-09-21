@@ -1,5 +1,10 @@
 # agent — Test Specifications
 
+Sub-agent spawn tests verify that model requests, including an optional endpoint,
+reach the pool's model factory. Command-layer tests verify that configured local
+models select their own endpoint and credentials and reject unknown models or
+mismatched endpoint overrides.
+
 ## Existing Tests
 
 ### agent_test.go
@@ -85,6 +90,15 @@
 | `TestIdleNotification_WakesCreator` | Structured lifecycle protocol | Child idles with creator | Creator receives `agent_idle` JSON containing child and creator IDs and is woken |
 | `TestSpawner_FailureNotificationTargetsCreator` | Nested child failure | Child with non-main creator fails | Creator receives `agent_failed` JSON with error, not hard-coded `main` |
 | `TestIdleNotification_SuppressedDuringShutdown`, `TestDeliver_ShutdownRequestToIdleAgent` | Shutdown acknowledgement | Child processes shutdown request | Creator receives `AGENT_SHUTDOWN` through wake-enabled delivery |
+
+### toolloopcompaction_test.go
+
+| Test | Scenario | Setup | Assertions |
+|------|----------|-------|------------|
+| `TestStreamTurnCompactsGrowingToolTranscript` | Real Fantasy tool loop approaches its context window | Mock provider reports 190k input tokens, tool returns a large result | One bounded summary call runs; next provider call receives the summary without the large tool result |
+| `TestToolLoopCompactorSummarizesBeforeNextStep` | Tool output grows the active prompt beyond the threshold | Provider usage near 80%, large new tool result | Next step receives a summary; following step retains later result without summarizing again |
+| `TestToolLoopCompactorStopsOnSummaryFailure` | Summarizer returns no text | Usage above threshold | PrepareStep returns an explicit error instead of sending an oversized request |
+| `TestToolLoopCompactorUsesMessageSizeWhenProviderOmitsUsage` | Compatible endpoint reports zero usage | Large provider-facing prompt | Bounded message-size estimate still triggers compaction |
 
 ### compactionobs_test.go
 

@@ -10,16 +10,21 @@ import (
 )
 
 // SpawnRequest carries the parameters for spawning a sub-agent.
-// All fields have safe zero values: ModelName="" falls back to the pool's default
-// model; ThinkingBudget=0 disables extended thinking; InitialPrompt="" skips the
-// first turn; SystemPrompt="" uses only the agent-identity suffix injected by Spawner.
+// All fields have safe zero values: ModelName="" uses the pool's default model;
+// Endpoint="" lets the model resolver select its configured endpoint;
+// ThinkingBudget=0 disables extended
+// thinking; InitialPrompt="" skips the first turn; SystemPrompt="" uses only
+// the agent-identity suffix injected by Spawner.
 type SpawnRequest struct {
 	ID           string
 	Name         string
 	SystemPrompt string
 	// ModelName selects the language model. Empty string falls back to the pool's
 	// default model name.
-	ModelName     string
+	ModelName string
+	// Endpoint optionally names the local model's configured endpoint. Empty
+	// string lets the model resolver select the endpoint from the model name.
+	Endpoint      string
 	InitialPrompt string
 	// CallerID is the agent ID that issued the create_agent call (i.e. the parent agent).
 	// Empty string for agents spawned directly by the host or in tests.

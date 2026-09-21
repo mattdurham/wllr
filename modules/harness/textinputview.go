@@ -32,10 +32,17 @@ func (t *TextInputView) Open(title, placeholder, initialValue, callback string) 
 	t.active = true
 }
 
+// OpenSecret opens a masked input for credentials.
+func (t *TextInputView) OpenSecret(title, callback string) {
+	t.Open(title, "", "", callback)
+	t.input.EchoMode = textinput.EchoPassword
+}
+
 // Close deactivates the text input overlay.
 func (t *TextInputView) Close() {
 	t.active = false
 	t.Callback = ""
+	t.input.SetValue("")
 }
 
 // IsActive reports whether the text input overlay is currently shown.
@@ -104,7 +111,15 @@ func (t *TextInputView) View() string {
 	if lineRunes < contentWidth {
 		line += strings.Repeat(" ", contentWidth-lineRunes)
 	}
-	sb.WriteString(pickerBorderStyle.Render("│") + " " + pickerLabelStyle.Render(line) + " " + pickerBorderStyle.Render("│") + "\n")
+	sb.WriteString(
+		pickerBorderStyle.Render(
+			"│",
+		) + " " + pickerLabelStyle.Render(
+			line,
+		) + " " + pickerBorderStyle.Render(
+			"│",
+		) + "\n",
+	)
 
 	// Fill remaining rows with empty lines.
 	visible := t.height - 3

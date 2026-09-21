@@ -213,7 +213,7 @@ Registered by the bundled `agents` extension.
 
 | Tool | Inputs | Output |
 |------|--------|--------|
-| `create_agent` | `name` string, required; `system_prompt` string, required; `prompt` string, required; `model` string, optional; `thinking_budget` integer, optional. | JSON result from host agent spawn/delivery. Includes the new agent ID on success. |
+| `create_agent` | `name`, `system_prompt`, and `prompt` strings required; `model` and `endpoint` strings optional; `thinking_budget` integer optional. For local models, `model` selects its `wllr.local_models` entry and configured endpoint; an explicit `endpoint` must match that entry. | JSON result from host agent spawn/delivery. Includes the new agent ID on success. |
 | `shutdown_agent` | `agent_id` string, required. | JSON object with `status: "shutdown_requested"`, `agent_id`, `stopped: false`, and, when available, current running, queue, activity, and shutdown-request state. |
 | `list_agents` | No fields. | JSON object containing live agents with IDs, names, running state, pending message counts, recent activity age, turn duration, last/active tool names, and shutdown-request state. |
 | `send_message` | `agent_id` string, required; `message` string, required. | JSON result from host agent delivery. The recipient is woken immediately. |
@@ -255,6 +255,15 @@ Task fields use these string enums:
 | `tasks_claim` | `list_id`, `agent_id` required. | `{task:{...,attempt_id,version}}`, or `{task:null}`. |
 | `tasks_report` | `list_id`, `task_id`, `attempt_id`, `agent_id`, terminal `status` required; completed requires structured `result`, others require `reason` or `error`. | Updated terminal `{task:{...}}`. |
 | `tasks_events_after` | `list_id`, `cursor` required; optional bounded `limit`. | `{events:[...],cursor,next_cursor}`; deduplicate by `event_id`. |
+
+### Ordered task runner
+
+The optional `task-runner` extension coordinates durable tasks with fresh
+sub-agents. It runs tasks serially, requires explicit completion evidence, and
+waits for graceful child shutdown before starting the next task.
+`request_task_review` reports a blocked task and sends reason/details to the
+main chat. Use `task_runner_create`, `task_runner_start`,
+`task_runner_status`, `/task-runner status`, or `/task-runner stop` as needed.
 
 ### Plan tools
 

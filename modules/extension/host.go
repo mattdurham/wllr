@@ -1114,6 +1114,7 @@ func (h *Host) handleAgentSpawn(req sdk.HostCallRequest) sdk.HostCallResponse {
 		Name           string `json:"name"`
 		SystemPrompt   string `json:"system_prompt"`
 		ModelName      string `json:"model_name"`
+		Endpoint       string `json:"endpoint"`
 		InitialPrompt  string `json:"initial_prompt"`
 		CallerID       string `json:"caller_id"`
 		ThinkingBudget int    `json:"thinking_budget"`
@@ -1126,6 +1127,7 @@ func (h *Host) handleAgentSpawn(req sdk.HostCallRequest) sdk.HostCallResponse {
 		Name:           params.Name,
 		SystemPrompt:   params.SystemPrompt,
 		ModelName:      params.ModelName,
+		Endpoint:       params.Endpoint,
 		InitialPrompt:  params.InitialPrompt,
 		ThinkingBudget: params.ThinkingBudget,
 		CallerID:       params.CallerID,
@@ -1650,7 +1652,15 @@ func (h *Host) loadExtension(
 	if trusted {
 		trust = "trusted"
 	}
-	h.logger.Debug("extension: load", "extension", extensionDisplayName(name), "trust", trust, "permissions", len(perms))
+	h.logger.Debug(
+		"extension: load",
+		"extension",
+		extensionDisplayName(name),
+		"trust",
+		trust,
+		"permissions",
+		len(perms),
+	)
 
 	ext := &Extension{
 		name:          extensionDisplayName(name),

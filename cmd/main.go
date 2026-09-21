@@ -58,14 +58,20 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 	localModelReplaced := resolveLocalProviderConfig(ctx, cfg)
 
 	missingAuthEnv, missingAuth := missingProviderAuth(cfg)
+	_, knownOpenRouterModel := cfg.openRouterModel(cfg.Model)
+	needsOpenRouterModel := cfg.Provider == providerOpenRouter && !knownOpenRouterModel
 	if missingAuth && *execPrompt != "" {
 		fmt.Fprintf(os.Stderr, "wllr: %v\n", missingAuthError(cfg.Provider, missingAuthEnv))
+		os.Exit(1)
+	}
+	if needsOpenRouterModel && *execPrompt != "" {
+		fmt.Fprintln(os.Stderr, "wllr: choose an OpenRouter model in the interactive setup before using --exec")
 		os.Exit(1)
 	}
 
 	var fantasyProv fantasy.Provider
 	var langModel fantasy.LanguageModel
-	if !missingAuth {
+	if !missingAuth && !needsOpenRouterModel {
 		fantasyProv, langModel, err = buildProvider(ctx, cfg)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "wllr: %v\n", err)
@@ -78,17 +84,37 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 	if fantasyProv != nil {
 		pool.SetProvider(fantasyProv)
 	}
+	pool.SetModelFactory(
+		func(modelCtx context.Context, currentProvider fantasy.Provider, model, endpoint string) (fantasy.LanguageModel, error) {
+			lm, modelErr := subagentLanguageModel(modelCtx, cfg, currentProvider, model, endpoint)
+			if modelErr == nil && cfg.Provider == providerLocal {
+				if entry, ok := cfg.localModelByID(model); ok && entry.ContextWindow > 0 {
+					pool.SetModelContextWindow(model, entry.ContextWindow)
+				}
+			}
+			return lm, modelErr
+		},
+	)
 	pool.SetProviderName(cfg.Provider)
 	pool.SetDefaultModelName(cfg.Model)
 	if cfg.ContextWindow <= 0 {
 		cfg.ContextWindow = contextWindowForSelection(cfg.Provider, cfg.Model, cfg)
 	}
 	if cfg.ContextWindow <= 0 && *execPrompt != "" {
-		fmt.Fprintf(os.Stderr, "wllr: context window for model %q is unknown; set WLLR_CONTEXT_WINDOW or configure it in interactive mode\n", cfg.Model)
+		fmt.Fprintf(
+			os.Stderr,
+			"wllr: context window for model %q is unknown; set WLLR_CONTEXT_WINDOW or configure it in interactive mode\n",
+			cfg.Model,
+		)
 		os.Exit(1)
 	}
 	if cfg.ContextWindow > 0 {
 		pool.SetModelContextWindow(cfg.Model, cfg.ContextWindow)
+	}
+	for _, model := range cfg.OpenRouterModels {
+		if model.ContextWindow > 0 {
+			pool.SetModelContextWindow(model.ID, model.ContextWindow)
+		}
 	}
 
 	if _, spawnErr := pool.Spawn(agent.MainAgentID, langModel, agent.SpawnOpts{ModelName: cfg.Model, ContextWindow: cfg.ContextWindow, TurnTimeout: -1}); spawnErr != nil {
@@ -116,7 +142,7 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 	// OnRegisterCommand (wired in harness.New) is set when _init and
 	// session_start handlers call register_command.
 	m := harness.New(pool, agent.MainAgentID, h)
-	if cfg.ContextWindow <= 0 && *execPrompt == "" {
+	if cfg.ContextWindow <= 0 && *execPrompt == "" && !needsOpenRouterModel {
 		m.SetPendingContextWindow(cfg.Provider, cfg.Model)
 	}
 
@@ -170,6 +196,7 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 		return []harness.ProviderChoice{
 			{ID: providerOpenAI, Name: "ChatGPT", Sublabel: "sign in with a ChatGPT account"},
 			{ID: providerAnthropic, Name: "Anthropic", Sublabel: "sign in with a Claude account"},
+			{ID: providerOpenRouter, Name: "OpenRouter", Sublabel: "use an API key and choose models"},
 			{ID: providerLocal, Name: "Local model", Sublabel: localProviderSublabel(cfg)},
 		}
 	}
@@ -234,17 +261,65 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 			catalog = modelsForOpenAIAuth()
 		case providerLocal:
 			catalog = localModels(ctx, cfg)
+		case providerOpenRouter:
+			out := make([]harness.ModelChoice, 0, len(cfg.OpenRouterModels)+1)
+			for _, model := range cfg.OpenRouterModels {
+				if model.ID == "" {
+					continue
+				}
+				name := model.Name
+				if name == "" {
+					name = model.ID
+				}
+				cw := contextWindowForSelection(providerOpenRouter, model.ID, cfg)
+				out = append(
+					out,
+					harness.ModelChoice{
+						ID:                 model.ID,
+						Name:               name,
+						Sublabel:           model.ID,
+						ContextWindow:      cw,
+						ContextWindowKnown: cw > 0,
+					},
+				)
+			}
+			return append(
+				out,
+				harness.ModelChoice{
+					ID:                 harness.OpenRouterBrowseModelID,
+					Name:               "Browse OpenRouter models…",
+					Sublabel:           "type to search and add a model",
+					ContextWindowKnown: true,
+				},
+			)
 		default:
 			catalog = modelsForProvider(currentProvider)
 		}
 		out := make([]harness.ModelChoice, 0, len(catalog))
 		for _, mi := range catalog {
 			cw := contextWindowForSelection(currentProvider, mi.ID, cfg)
-			out = append(out, harness.ModelChoice{ID: mi.ID, Name: mi.Name, Sublabel: modelChoiceSublabel(mi), ContextWindow: cw, ContextWindowKnown: cw > 0})
+			out = append(
+				out,
+				harness.ModelChoice{
+					ID:                 mi.ID,
+					Name:               mi.Name,
+					Sublabel:           modelChoiceSublabel(mi),
+					ContextWindow:      cw,
+					ContextWindowKnown: cw > 0,
+				},
+			)
 		}
 		return out
 	}
 	m.SelectModelFn = func(modelID string) error {
+		if currentProvider == providerOpenRouter {
+			if _, ok := cfg.openRouterModel(modelID); !ok {
+				return fmt.Errorf(
+					"OpenRouter model %q is not in your saved models; use Browse OpenRouter models in /models",
+					modelID,
+				)
+			}
+		}
 		contextWindow := contextWindowForSelection(currentProvider, modelID, cfg)
 		if contextWindow <= 0 {
 			return fmt.Errorf("%w: %s", harness.ErrContextWindowRequired, modelID)
@@ -270,6 +345,7 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 		if main := pool.Get(agent.MainAgentID); main != nil {
 			main.SetModel(lm, modelID, contextWindow)
 		}
+		cfg.Model = modelID
 		pool.SetDefaultModelName(modelID)
 		pool.SetModelContextWindow(modelID, contextWindow)
 		if saveErr := saveModel(modelID); saveErr != nil {
@@ -286,6 +362,63 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 			return err
 		}
 		pool.SetModelContextWindow(modelID, tokens)
+		return nil
+	}
+	m.HasOpenRouterKeyFn = func() bool { return cfg.OpenRouterAPIKey != "" }
+	m.SaveOpenRouterKeyFn = func(key string) error {
+		if err := saveAuthCredential(providerOpenRouter, authCredential{Type: authTypeAPIKey, Key: key}); err != nil {
+			return err
+		}
+		cfg.OpenRouterAPIKey = key
+		return nil
+	}
+	m.FetchOpenRouterModelsFn = func() ([]harness.OpenRouterModelChoice, error) {
+		models, fetchErr := fetchOpenRouterModels(
+			context.Background(),
+			nil,
+			"https://openrouter.ai/api/v1/models",
+			cfg.OpenRouterAPIKey,
+		)
+		if fetchErr != nil {
+			return nil, fetchErr
+		}
+		out := make([]harness.OpenRouterModelChoice, 0, len(models))
+		for _, model := range models {
+			out = append(
+				out,
+				harness.OpenRouterModelChoice{ID: model.ID, Name: model.Name, ContextWindow: model.ContextWindow},
+			)
+		}
+		return out, nil
+	}
+	m.AddOpenRouterModelFn = func(choice harness.OpenRouterModelChoice) error {
+		model := openRouterModelConfig{ID: choice.ID, Name: choice.Name, ContextWindow: choice.ContextWindow}
+		candidate := *cfg
+		candidate.Provider, candidate.Model = providerOpenRouter, model.ID
+		prov, lm, buildErr := buildProvider(ctx, &candidate)
+		if buildErr != nil {
+			return buildErr
+		}
+		if err := cfg.pinOpenRouterModel(model); err != nil {
+			return err
+		}
+		if err := saveProvider(providerOpenRouter); err != nil {
+			return err
+		}
+		if err := saveModel(model.ID); err != nil {
+			return err
+		}
+		cfg.Provider, cfg.Model = providerOpenRouter, model.ID
+		currentProvider = providerOpenRouter
+		pool.SetProvider(prov)
+		pool.SetProviderName(providerOpenRouter)
+		pool.SetDefaultModelName(model.ID)
+		window := contextWindowForSelection(providerOpenRouter, model.ID, cfg)
+		pool.SetModelContextWindow(model.ID, window)
+		if main := pool.Get(agent.MainAgentID); main != nil {
+			main.SetModel(lm, model.ID, window)
+		}
+		m.SetThinkingForModel(startupThinkingMode(ctx, cfg, providerOpenRouter))
 		return nil
 	}
 	if localModelReplaced {
@@ -466,7 +599,9 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 		}
 		return input, input != ""
 	}
-	if missingAuth && !cfg.ModelConfigured && !cfg.ProviderConfigured {
+	if cfg.Provider == providerOpenRouter && (missingAuth || needsOpenRouterModel) {
+		m.SetPendingAuthProvider(providerOpenRouter)
+	} else if missingAuth && !cfg.ModelConfigured && !cfg.ProviderConfigured {
 		m.SetPendingSetupWizard()
 	} else if missingAuth && !hasAuthRecord(currentProvider) {
 		m.SetPendingAuthProvider(currentProvider)
@@ -694,7 +829,13 @@ func startMCPBridge(ctx context.Context, h *extension.Host) func() {
 // runExecMode runs a single prompt non-interactively and exits.
 // It builds a one-shot fantasy agent, streams the response to stdout, and calls
 // os.Exit(1) on error.
-func runExecMode(ctx context.Context, h *extension.Host, pool *agent.AgentPool, langModel fantasy.LanguageModel, prompt string) {
+func runExecMode(
+	ctx context.Context,
+	h *extension.Host,
+	pool *agent.AgentPool,
+	langModel fantasy.LanguageModel,
+	prompt string,
+) {
 	fantasyTools := tools.BuildFantasyTools(h, "exec", func(level int, msg string) {
 		slog.Log(
 			ctx,
@@ -712,7 +853,14 @@ func runExecMode(ctx context.Context, h *extension.Host, pool *agent.AgentPool, 
 		promptTools = append(promptTools, sdk.PromptTool{Name: tool.Name})
 	}
 	wd, _ := os.Getwd()
-	payload, _ := json.Marshal(sdk.SessionStartPayload{Reason: "exec", Tools: promptTools, CWD: wd, StartedAt: time.Now().Format(time.RFC3339Nano)})
+	payload, _ := json.Marshal(
+		sdk.SessionStartPayload{
+			Reason:    "exec",
+			Tools:     promptTools,
+			CWD:       wd,
+			StartedAt: time.Now().Format(time.RFC3339Nano),
+		},
+	)
 	_, _ = h.DispatchEvent(ctx, sdk.Event{Type: sdk.EventSessionStart, Payload: payload})
 	if pool != nil {
 		if sp := pool.BaseSystemPrompt(); sp != "" {

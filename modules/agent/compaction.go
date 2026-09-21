@@ -28,6 +28,9 @@ const (
 	// CompactionTriggerReactive is set when the provider rejected the request
 	// as context-too-long and the turn is compacted and retried.
 	CompactionTriggerReactive = "reactive"
+	// CompactionTriggerToolLoop is set when a long tool loop is summarized
+	// before its next provider request.
+	CompactionTriggerToolLoop = "tool_loop"
 )
 
 // builtInContextWindows covers model families whose limits are known without

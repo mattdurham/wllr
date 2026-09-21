@@ -174,7 +174,11 @@ func TestCompactHistory_LongHistory_ReturnsSummaryPlusRecent(t *testing.T) {
 
 	// Result should be: anchor + summary + recent messages (fewer than total).
 	if len(result.History) >= len(history) {
-		t.Errorf("expected fewer messages after compaction, got %d (same as input %d)", len(result.History), len(history))
+		t.Errorf(
+			"expected fewer messages after compaction, got %d (same as input %d)",
+			len(result.History),
+			len(history),
+		)
 	}
 	if len(result.History) < 3 {
 		t.Errorf("expected at least 3 messages (anchor + summary + 1 recent), got %d", len(result.History))

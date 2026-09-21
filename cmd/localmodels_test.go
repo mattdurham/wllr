@@ -152,7 +152,10 @@ func TestApplyLocalModelChoiceWindowlessModelClearsInheritedWindow(t *testing.T)
 		t.Fatal("applyLocalModelChoice returned false")
 	}
 	if cfg.ContextWindow != 0 {
-		t.Fatalf("ContextWindow = %d, want 0 (window-less model must not inherit the previous window)", cfg.ContextWindow)
+		t.Fatalf(
+			"ContextWindow = %d, want 0 (window-less model must not inherit the previous window)",
+			cfg.ContextWindow,
+		)
 	}
 	if cfg.LocalContextWindow != 0 {
 		t.Fatalf("LocalContextWindow = %d, want 0", cfg.LocalContextWindow)
@@ -222,7 +225,10 @@ func TestQueryLocalModels_EmptyDataList(t *testing.T) {
 
 	models, result := queryLocalModels(context.Background(), server.URL+"/models", "")
 	if result != queryLocalModelsOK {
-		t.Fatalf("expected queryLocalModelsOK even with empty data (the endpoint responded successfully), got %v", result)
+		t.Fatalf(
+			"expected queryLocalModelsOK even with empty data (the endpoint responded successfully), got %v",
+			result,
+		)
 	}
 	if len(models) != 0 {
 		t.Fatalf("len(models) = %d, want 0", len(models))
@@ -242,7 +248,11 @@ func TestContextWindowFromOpenAIModel_FallbackChain(t *testing.T) {
 		model openAIModel
 		want  int64
 	}{
-		{"context_length wins", openAIModel{ContextLength: 100, MaxContextLength: 200, MaxModelLength: 300, NumContext: 400}, 100},
+		{
+			"context_length wins",
+			openAIModel{ContextLength: 100, MaxContextLength: 200, MaxModelLength: 300, NumContext: 400},
+			100,
+		},
 		{"max_context_length fallback", openAIModel{MaxContextLength: 200, MaxModelLength: 300, NumContext: 400}, 200},
 		{"max_model_len fallback", openAIModel{MaxModelLength: 300, NumContext: 400}, 300},
 		{"num_ctx fallback", openAIModel{NumContext: 400}, 400},
@@ -346,7 +356,10 @@ func TestResolveLocalProviderConfigClearsStaleWindowOnFallback(t *testing.T) {
 		t.Fatalf("model = %q, want replacement-model", cfg.Model)
 	}
 	if cfg.ContextWindow != 0 {
-		t.Fatalf("ContextWindow = %d, want 0 (window-less replacement must not inherit the previous model's window)", cfg.ContextWindow)
+		t.Fatalf(
+			"ContextWindow = %d, want 0 (window-less replacement must not inherit the previous model's window)",
+			cfg.ContextWindow,
+		)
 	}
 	if cfg.LocalContextWindow != 0 {
 		t.Fatalf("LocalContextWindow = %d, want 0", cfg.LocalContextWindow)
@@ -447,7 +460,10 @@ func TestDiscoverLocalModelsConfiguredWindowWinsOverEndpoint(t *testing.T) {
 		t.Fatalf("len(models) = %d, want 1: %+v", len(models), models)
 	}
 	if models[0].ContextWindow != 262144 {
-		t.Fatalf("ContextWindow = %d, want 262144 (explicit config wins over the endpoint's value)", models[0].ContextWindow)
+		t.Fatalf(
+			"ContextWindow = %d, want 262144 (explicit config wins over the endpoint's value)",
+			models[0].ContextWindow,
+		)
 	}
 }
 

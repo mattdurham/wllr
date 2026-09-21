@@ -67,7 +67,13 @@ func openTaskLedger(dir string, notify func(string, sdk.TaskEvent) error, recove
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create task ledger directory: %w", err)
 	}
-	l := &TaskLedger{dir: dir, lists: map[string]sdk.TaskList{}, tasks: map[string]sdk.TaskRecord{}, events: map[string][]sdk.TaskEvent{}, notify: notify}
+	l := &TaskLedger{
+		dir:    dir,
+		lists:  map[string]sdk.TaskList{},
+		tasks:  map[string]sdk.TaskRecord{},
+		events: map[string][]sdk.TaskEvent{},
+		notify: notify,
+	}
 	if err := l.loadSnapshot(); err != nil {
 		return nil, err
 	}
@@ -168,6 +174,7 @@ func opaqueID(prefix string) (string, error) {
 	}
 	return prefix + "_" + hex.EncodeToString(b), nil
 }
+
 func (l *TaskLedger) commitLocked() (err error) {
 	rec := taskJournalRecord{1, l.sequence, l.lists, l.tasks, l.events, ""}
 	raw, _ := json.Marshal(rec)
@@ -248,8 +255,18 @@ func (l *TaskLedger) CreateList(req sdk.TasklistCreateRequest) (sdk.TaskList, er
 	if err != nil {
 		return sdk.TaskList{}, err
 	}
-	out := sdk.TaskList{ListID: id, Name: req.Name, Description: req.Description, OwnerAgentID: req.OwnerAgentID, Version: 1}
-	err = l.mutate(id, sdk.TaskEvent{ListID: id, Event: "list_created", ActorAgentID: req.OwnerAgentID}, func() { l.lists[id] = out })
+	out := sdk.TaskList{
+		ListID:       id,
+		Name:         req.Name,
+		Description:  req.Description,
+		OwnerAgentID: req.OwnerAgentID,
+		Version:      1,
+	}
+	err = l.mutate(
+		id,
+		sdk.TaskEvent{ListID: id, Event: "list_created", ActorAgentID: req.OwnerAgentID},
+		func() { l.lists[id] = out },
+	)
 	return out, err
 }
 
@@ -269,8 +286,27 @@ func (l *TaskLedger) CreateTask(req sdk.TasksCreateRequest) (sdk.TaskRecord, err
 	if mode == "" {
 		mode = sdk.TaskWorkspaceShared
 	}
-	out := sdk.TaskRecord{TaskID: id, ListID: req.ListID, ParentTaskID: req.ParentTaskID, OwnerAgentID: req.OwnerAgentID, AssigneeAgentID: req.AssigneeAgentID, Title: req.Title, Description: req.Description, Status: sdk.TaskPending, Priority: req.Priority, DependsOn: append([]string(nil), req.DependsOn...), WorkspaceMode: mode, CreatedAt: now, UpdatedAt: now, Version: 1}
-	err = l.mutate(req.ListID, sdk.TaskEvent{ListID: req.ListID, TaskID: id, Event: "task_created", ActorAgentID: req.OwnerAgentID}, func() { l.tasks[id] = out })
+	out := sdk.TaskRecord{
+		TaskID:          id,
+		ListID:          req.ListID,
+		ParentTaskID:    req.ParentTaskID,
+		OwnerAgentID:    req.OwnerAgentID,
+		AssigneeAgentID: req.AssigneeAgentID,
+		Title:           req.Title,
+		Description:     req.Description,
+		Status:          sdk.TaskPending,
+		Priority:        req.Priority,
+		DependsOn:       append([]string(nil), req.DependsOn...),
+		WorkspaceMode:   mode,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		Version:         1,
+	}
+	err = l.mutate(
+		req.ListID,
+		sdk.TaskEvent{ListID: req.ListID, TaskID: id, Event: "task_created", ActorAgentID: req.OwnerAgentID},
+		func() { l.tasks[id] = out },
+	)
 	return out, err
 }
 
@@ -322,7 +358,16 @@ func (l *TaskLedger) Claim(req sdk.TasksClaimRequest) (sdk.TaskRecord, error) {
 		l.mu.Unlock()
 		return sdk.TaskRecord{}, err
 	}
-	ev := sdk.TaskEvent{EventID: eventID, ListID: t.ListID, TaskID: t.TaskID, AttemptID: attempt, Event: "task_claimed", Version: l.sequence, ActorAgentID: req.AgentID, CreatedAt: time.Now().UTC()}
+	ev := sdk.TaskEvent{
+		EventID:      eventID,
+		ListID:       t.ListID,
+		TaskID:       t.TaskID,
+		AttemptID:    attempt,
+		Event:        "task_claimed",
+		Version:      l.sequence,
+		ActorAgentID: req.AgentID,
+		CreatedAt:    time.Now().UTC(),
+	}
 	l.events[req.ListID] = append(l.events[req.ListID], ev)
 	err = l.commitLocked()
 	l.mu.Unlock()
@@ -367,7 +412,15 @@ func (l *TaskLedger) UpdateCAS(req sdk.TasksUpdateRequest) (sdk.TaskRecord, erro
 		l.mu.Unlock()
 		return sdk.TaskRecord{}, err
 	}
-	ev := sdk.TaskEvent{EventID: eventID, ListID: t.ListID, TaskID: t.TaskID, Event: "task_updated", Version: l.sequence, ActorAgentID: req.AgentID, CreatedAt: time.Now().UTC()}
+	ev := sdk.TaskEvent{
+		EventID:      eventID,
+		ListID:       t.ListID,
+		TaskID:       t.TaskID,
+		Event:        "task_updated",
+		Version:      l.sequence,
+		ActorAgentID: req.AgentID,
+		CreatedAt:    time.Now().UTC(),
+	}
 	l.events[req.ListID] = append(l.events[req.ListID], ev)
 	err = l.commitLocked()
 	l.mu.Unlock()
@@ -416,7 +469,16 @@ func (l *TaskLedger) Report(req sdk.TasksReportRequest) (sdk.TaskRecord, error) 
 		l.mu.Unlock()
 		return sdk.TaskRecord{}, err
 	}
-	ev := sdk.TaskEvent{EventID: eventID, ListID: t.ListID, TaskID: t.TaskID, AttemptID: t.AttemptID, Event: "task_reported", Version: l.sequence, ActorAgentID: req.AgentID, CreatedAt: time.Now().UTC()}
+	ev := sdk.TaskEvent{
+		EventID:      eventID,
+		ListID:       t.ListID,
+		TaskID:       t.TaskID,
+		AttemptID:    t.AttemptID,
+		Event:        "task_reported",
+		Version:      l.sequence,
+		ActorAgentID: req.AgentID,
+		CreatedAt:    time.Now().UTC(),
+	}
 	l.events[req.ListID] = append(l.events[req.ListID], ev)
 	err = l.commitLocked()
 	l.mu.Unlock()

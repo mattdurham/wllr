@@ -372,7 +372,9 @@ func (b *harnessUIBridge) ShowTextInput(title, placeholder, initialValue, callba
 	if b.prog == nil {
 		return
 	}
-	b.prog.Send(ShowTextInputMsg{Title: title, Placeholder: placeholder, InitialValue: initialValue, Callback: callback})
+	b.prog.Send(
+		ShowTextInputMsg{Title: title, Placeholder: placeholder, InitialValue: initialValue, Callback: callback},
+	)
 }
 
 func (b *harnessUIBridge) Abort() {

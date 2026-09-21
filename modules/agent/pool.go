@@ -18,6 +18,11 @@ import (
 	"github.com/mattdurham/wllr/modules/sdk"
 )
 
+// ModelFactory creates a language model for a model name and optional endpoint.
+// The provider is the pool's current provider; endpoint is empty when the
+// configured endpoint should be selected by the factory.
+type ModelFactory func(ctx context.Context, provider fantasy.Provider, model, endpoint string) (fantasy.LanguageModel, error)
+
 // MainAgentID is the conventional ID of the primary agent the user interacts with.
 // All sub-agents derive their IDs from this (e.g. "main/coder", "main/team/worker").
 const MainAgentID = "main"
@@ -106,7 +111,9 @@ func (p *AgentPool) SetCompactConfig(cfg CompactConfig) {
 // EventContextUsage to WASM extensions from the harness layer without creating
 // a circular import between the agent and extension packages.
 // Thread-safe; may be called before or after agents are spawned.
-func (p *AgentPool) SetContextUsageDispatcher(fn func(cu sdk.ContextUsage, compact bool, thresholdPct float64, compactions int)) {
+func (p *AgentPool) SetContextUsageDispatcher(
+	fn func(cu sdk.ContextUsage, compact bool, thresholdPct float64, compactions int),
+) {
 	p.dispatchMu.Lock()
 	p.contextUsageDispatcher = fn
 	p.dispatchMu.Unlock()
@@ -397,15 +404,41 @@ func (p *AgentPool) ProviderName() string {
 // pool's stored provider. Returns an error if no provider has been set or if
 // the provider cannot satisfy the request.
 func (p *AgentPool) LanguageModelForModel(ctx context.Context, model string) (fantasy.LanguageModel, error) {
-	if p.provider == nil {
+	return p.LanguageModelForModelAtEndpoint(ctx, model, "")
+}
+
+// SetModelFactory installs the resolver used for sub-agent model requests.
+// A nil factory restores the pool's default provider path.
+func (p *AgentPool) SetModelFactory(factory ModelFactory) {
+	p.mu.Lock()
+	p.modelFactory = factory
+	p.mu.Unlock()
+}
+
+// LanguageModelForModelAtEndpoint resolves a model using an optional endpoint.
+// The configured factory, when present, selects how an empty endpoint is handled.
+func (p *AgentPool) LanguageModelForModelAtEndpoint(
+	ctx context.Context,
+	model, endpoint string,
+) (fantasy.LanguageModel, error) {
+	p.mu.RLock()
+	provider := p.provider
+	factory := p.modelFactory
+	defaultModel := p.defaultModelName
+	p.mu.RUnlock()
+	if model == "" {
+		model = defaultModel
+	}
+	if provider == nil {
 		return nil, errors.New("agent: no provider configured on pool")
 	}
-	if model == "" {
-		p.mu.RLock()
-		model = p.defaultModelName
-		p.mu.RUnlock()
+	if factory != nil {
+		return factory(ctx, provider, model, endpoint)
 	}
-	return p.provider.LanguageModel(ctx, model)
+	if endpoint != "" {
+		return nil, errors.New("agent: endpoint-specific model factory is not configured")
+	}
+	return provider.LanguageModel(ctx, model)
 }
 
 // EnsureMainAgent recreates the primary agent when a fatal model failure has

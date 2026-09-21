@@ -241,7 +241,11 @@ func TestDiscoverLocalModels_AttachesReasoningFromAppAPI(t *testing.T) {
 	}
 	glm := byID["glm-4.5-air"]
 	if !glm.ReasoningDeclared || len(glm.ThinkingModes) != 0 {
-		t.Errorf("glm-4.5-air (no reasoning cap): declared=%v modes=%v, want declared with empty set", glm.ReasoningDeclared, glm.ThinkingModes)
+		t.Errorf(
+			"glm-4.5-air (no reasoning cap): declared=%v modes=%v, want declared with empty set",
+			glm.ReasoningDeclared,
+			glm.ThinkingModes,
+		)
 	}
 	unk := byID["unknown-thing"]
 	if unk.ReasoningDeclared {
@@ -259,7 +263,10 @@ func TestDiscoverLocalModels_RespectsExplicitConfigModes(t *testing.T) {
 			_, _ = fmt.Fprint(w, `{"data":[{"id":"qwen/qwen3.8-27b"}]}`)
 		case "/api/v1/models":
 			// App API claims a wider set — explicit config must win.
-			_, _ = fmt.Fprint(w, `{"models":[{"key":"qwen/qwen3.8-27b","capabilities":{"reasoning":{"allowed_options":["off","low","medium","xhigh","on"],"default":"xhigh"}}}]}`)
+			_, _ = fmt.Fprint(
+				w,
+				`{"models":[{"key":"qwen/qwen3.8-27b","capabilities":{"reasoning":{"allowed_options":["off","low","medium","xhigh","on"],"default":"xhigh"}}}]}`,
+			)
 		default:
 			t.Errorf("unexpected path %q", r.URL.Path)
 		}
@@ -303,7 +310,10 @@ func TestLocalThinkingInfo_DeclaredEndpoint(t *testing.T) {
 		case "/v1/models":
 			_, _ = fmt.Fprint(w, `{"data":[{"id":"qwen/qwen3.8-27b"}]}`)
 		case "/api/v1/models":
-			_, _ = fmt.Fprint(w, `{"models":[{"key":"qwen/qwen3.8-27b","capabilities":{"reasoning":{"allowed_options":["off","low","medium","xhigh","on"],"default":"xhigh"}}}]}`)
+			_, _ = fmt.Fprint(
+				w,
+				`{"models":[{"key":"qwen/qwen3.8-27b","capabilities":{"reasoning":{"allowed_options":["off","low","medium","xhigh","on"],"default":"xhigh"}}}]}`,
+			)
 		default:
 			t.Errorf("unexpected path %q", r.URL.Path)
 		}
@@ -372,7 +382,9 @@ func TestLocalThinkingInfo_ExplicitConfigWins(t *testing.T) {
 
 	cfg := &Config{
 		Provider: providerLocal, Model: "qwen/qwen3.8-27b", LocalBaseURL: "http://ignored.invalid/v1",
-		LocalModels: []localModelConfig{{ID: "qwen/qwen3.8-27b", BaseURL: "http://ignored.invalid/v1", ThinkingModes: []string{"none", "medium"}}},
+		LocalModels: []localModelConfig{
+			{ID: "qwen/qwen3.8-27b", BaseURL: "http://ignored.invalid/v1", ThinkingModes: []string{"none", "medium"}},
+		},
 	}
 	modes, declared, _ := localThinkingInfo(context.Background(), cfg)
 	if declared {
@@ -414,7 +426,10 @@ func TestStartupThinkingMode(t *testing.T) {
 		case "/v1/models":
 			_, _ = fmt.Fprint(w, `{"data":[{"id":"qwen/qwen3.8-27b"}]}`)
 		case "/api/v1/models":
-			_, _ = fmt.Fprint(w, `{"models":[{"key":"qwen/qwen3.8-27b","capabilities":{"reasoning":{"allowed_options":["off","low","medium","xhigh","on"],"default":"xhigh"}}}]}`)
+			_, _ = fmt.Fprint(
+				w,
+				`{"models":[{"key":"qwen/qwen3.8-27b","capabilities":{"reasoning":{"allowed_options":["off","low","medium","xhigh","on"],"default":"xhigh"}}}]}`,
+			)
 		default:
 			t.Errorf("unexpected path %q", r.URL.Path)
 		}

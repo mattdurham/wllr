@@ -19,6 +19,9 @@ type Config struct {
 	// GeminiAPIKey is the Google Gemini API key (GEMINI_API_KEY).
 	GeminiAPIKey string
 
+	// OpenRouterAPIKey comes from OPENROUTER_API_KEY or the private auth file.
+	OpenRouterAPIKey string
+
 	// LocalAPIKey is the optional API key for the selected configured local model.
 	LocalAPIKey string
 
@@ -38,6 +41,9 @@ type Config struct {
 	// LocalModels are optional explicit OpenAI-compatible local models. They let
 	// one "local" provider expose multiple endpoint/model pairs in the picker.
 	LocalModels []localModelConfig
+
+	// OpenRouterModels are the models pinned in the /models picker.
+	OpenRouterModels []openRouterModelConfig
 
 	// LocalContextWindow is the context window for the selected configured local
 	// model.
@@ -76,12 +82,14 @@ func LoadConfig() (*Config, error) {
 		AnthropicAPIKey:         os.Getenv("ANTHROPIC_API_KEY"),
 		OpenAIAPIKey:            os.Getenv("OPENAI_API_KEY"),
 		GeminiAPIKey:            os.Getenv("GEMINI_API_KEY"),
+		OpenRouterAPIKey:        os.Getenv("OPENROUTER_API_KEY"),
 		ExtensionsDir:           expandTilde(os.Getenv("WLLR_EXTENSIONS_DIR")),
 		Model:                   os.Getenv("WLLR_MODEL"),
 		Provider:                os.Getenv("WLLR_PROVIDER"),
 		ContextWindow:           contextWindow,
 		ContextWindowConfigured: contextWindow > 0,
 		LocalModels:             fileCfg.LocalModels,
+		OpenRouterModels:        fileCfg.OpenRouterModels,
 	}
 
 	// Provider precedence: env WLLR_PROVIDER > persisted selection
@@ -103,7 +111,10 @@ func LoadConfig() (*Config, error) {
 	cfg.ModelConfigured = cfg.Model != ""
 	if cfg.Model == "" {
 		cfg.Model = defaultModelForProvider(cfg.Provider)
-		if cfg.Model == "" && cfg.Provider != providerLocal {
+		if cfg.Provider == providerOpenRouter && len(cfg.OpenRouterModels) > 0 {
+			cfg.Model = cfg.OpenRouterModels[0].ID
+		}
+		if cfg.Model == "" && cfg.Provider != providerLocal && cfg.Provider != providerOpenRouter {
 			cfg.Model = defaultAnthropicModel
 		}
 	}
@@ -125,17 +136,23 @@ func LoadConfig() (*Config, error) {
 			cfg.OpenAIAPIKey = cred.Access
 		}
 	}
+	if cfg.OpenRouterAPIKey == "" {
+		if cred, ok := loadAuthCredential(providerOpenRouter); ok && cred.Type == authTypeAPIKey {
+			cfg.OpenRouterAPIKey = cred.Key
+		}
+	}
 
 	return cfg, nil
 }
 
 type wllrSettings struct {
-	Provider         string             `json:"provider"`
-	Model            string             `json:"model"`
-	LocalModels      []localModelConfig `json:"local_models"`
-	RawContextWindow json.RawMessage    `json:"context_window"`
-	ContextWindows   map[string]int64   `json:"context_windows"`
-	ContextWindow    int64              `json:"-"`
+	Provider         string                  `json:"provider"`
+	Model            string                  `json:"model"`
+	LocalModels      []localModelConfig      `json:"local_models"`
+	OpenRouterModels []openRouterModelConfig `json:"openrouter_models"`
+	RawContextWindow json.RawMessage         `json:"context_window"`
+	ContextWindows   map[string]int64        `json:"context_windows"`
+	ContextWindow    int64                   `json:"-"`
 }
 
 func contextWindowKey(provider, model string) string {
@@ -272,6 +289,8 @@ func missingProviderAuth(cfg *Config) (string, bool) {
 		return "OPENAI_API_KEY", cfg.OpenAIAPIKey == ""
 	case providerGemini:
 		return "GEMINI_API_KEY", cfg.GeminiAPIKey == ""
+	case providerOpenRouter:
+		return "OPENROUTER_API_KEY", cfg.OpenRouterAPIKey == ""
 	default:
 		return "", false
 	}

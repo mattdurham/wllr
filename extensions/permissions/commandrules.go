@@ -44,7 +44,8 @@ func commandNames(command string) []string {
 				fields = fields[1:]
 				continue
 			}
-			if field == "env" || field == "command" || field == "sudo" || field == "--" || strings.HasPrefix(field, "-") {
+			if field == "env" || field == "command" || field == "sudo" || field == "--" ||
+				strings.HasPrefix(field, "-") {
 				fields = fields[1:]
 				continue
 			}

@@ -13,9 +13,10 @@ import (
 // AgentPool manages all live agents and a shared token counter.
 // It is safe for concurrent use from multiple goroutines.
 type AgentPool struct {
-	provider fantasy.Provider
-	agents   map[string]*Agent
-	teams    map[string]*Team
+	provider     fantasy.Provider
+	modelFactory ModelFactory
+	agents       map[string]*Agent
+	teams        map[string]*Team
 	// contextUsageDispatcher, when set, is called after each completed turn on any
 	// agent so the harness can forward EventContextUsage to WASM extensions without
 	// a circular import between the agent and extension packages.

@@ -85,7 +85,9 @@ func TestTaskCASAndReportValidation(t *testing.T) {
 	listID := call(t, ctx, host, "tasklist_create", map[string]any{"name": "cas"})["list"].(map[string]any)["list_id"].(string)
 	task := call(t, ctx, host, "tasks_create", map[string]any{"list_id": listID, "title": "one"})["task"].(map[string]any)
 	_, _ = task["task_id"].(string), task["version"].(float64)
-	raw, _ := json.Marshal(map[string]any{"list_id": listID, "task_id": task["task_id"], "expected_version": 999, "title": "stale"})
+	raw, _ := json.Marshal(
+		map[string]any{"list_id": listID, "task_id": task["task_id"], "expected_version": 999, "title": "stale"},
+	)
 	result, err := host.ExecuteTool(ctx, "test-agent", "stale", "tasks_update", raw)
 	if err != nil {
 		t.Fatal(err)

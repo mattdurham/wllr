@@ -19,17 +19,61 @@ var (
 )
 
 func init() {
-	registerPlanTool("plan_create", "Create a durable plan with optional ordered steps.", `{"type":"object","properties":{"title":{"type":"string"},"description":{"type":"string"},"content":{"type":"string"},"agent_id":{"type":"string","description":"Agent creating the plan (provenance)"},"steps":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"title":{"type":"string"},"description":{"type":"string"},"acceptance_checks":{"type":"array","items":{"type":"string"}}},"required":["title"]}}},"required":["title"]}`)
-	registerPlanTool("plan_get", "Retrieve a plan by ID.", `{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}`)
-	registerPlanTool("plan_list", "List plans, optionally filtered by status.", `{"type":"object","properties":{"status":{"type":"string","enum":["active","paused","completed","archived"]}}}`)
-	registerPlanTool("plan_update", "Update plan metadata or content. Supplied empty strings clear fields. Pass expected_version to fail if another agent changed the plan (optimistic concurrency).", `{"type":"object","properties":{"id":{"type":"string"},"title":{"type":"string"},"description":{"type":"string"},"status":{"type":"string","enum":["active","paused","completed","archived"]},"content":{"type":"string"},"expected_version":{"type":"integer"},"agent_id":{"type":"string","description":"Agent making the update (provenance)"}},"required":["id"]}`)
-	registerPlanTool("plan_step_update", "Update a plan step's status, notes, or description. Pass expected_version to fail if another agent changed the plan (optimistic concurrency).", `{"type":"object","properties":{"plan_id":{"type":"string"},"step_id":{"type":"string"},"status":{"type":"string","enum":["pending","in_progress","completed","blocked"]},"description":{"type":"string"},"notes":{"type":"string"},"expected_version":{"type":"integer"},"agent_id":{"type":"string","description":"Agent making the update (provenance)"}},"required":["plan_id","step_id"]}`)
-	registerPlanTool("plan_evidence", "Record evidence for a plan step.", `{"type":"object","properties":{"plan_id":{"type":"string"},"step_id":{"type":"string"},"evidence":{"type":"string"}},"required":["plan_id","step_id","evidence"]}`)
-	registerPlanTool("plan_assign", "Assign an agent to a plan step (who is responsible for it). Pass expected_version to fail if another agent changed the plan.", `{"type":"object","properties":{"plan_id":{"type":"string"},"step_id":{"type":"string"},"assignee":{"type":"string","description":"Agent ID responsible for completing this step"},"expected_version":{"type":"integer"}},"required":["plan_id","step_id","assignee"]}`)
-	registerPlanTool("plan_checkpoint", "Persist the current plan state and return a resumable checkpoint.", `{"type":"object","properties":{"plan_id":{"type":"string"}}}`)
-	registerPlanTool("plan_complete", "Complete a plan only when every step is completed and each completed step has evidence. Supply override_reason to force completion past unresolved steps or missing evidence (recorded, requires explicit intent).", `{"type":"object","properties":{"plan_id":{"type":"string"},"override_reason":{"type":"string","description":"Explicit reason to force completion despite unresolved steps or missing evidence"}},"required":["plan_id"]}`)
-	registerPlanTool("plan_focus", "Return the active plan and its next incomplete step.", `{"type":"object","properties":{}}`)
-	registerPlanTool("plan_set_active", "Set the active plan by ID.", `{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}`)
+	registerPlanTool(
+		"plan_create",
+		"Create a durable plan with optional ordered steps.",
+		`{"type":"object","properties":{"title":{"type":"string"},"description":{"type":"string"},"content":{"type":"string"},"agent_id":{"type":"string","description":"Agent creating the plan (provenance)"},"steps":{"type":"array","items":{"type":"object","properties":{"id":{"type":"string"},"title":{"type":"string"},"description":{"type":"string"},"acceptance_checks":{"type":"array","items":{"type":"string"}}},"required":["title"]}}},"required":["title"]}`,
+	)
+	registerPlanTool(
+		"plan_get",
+		"Retrieve a plan by ID.",
+		`{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}`,
+	)
+	registerPlanTool(
+		"plan_list",
+		"List plans, optionally filtered by status.",
+		`{"type":"object","properties":{"status":{"type":"string","enum":["active","paused","completed","archived"]}}}`,
+	)
+	registerPlanTool(
+		"plan_update",
+		"Update plan metadata or content. Supplied empty strings clear fields. Pass expected_version to fail if another agent changed the plan (optimistic concurrency).",
+		`{"type":"object","properties":{"id":{"type":"string"},"title":{"type":"string"},"description":{"type":"string"},"status":{"type":"string","enum":["active","paused","completed","archived"]},"content":{"type":"string"},"expected_version":{"type":"integer"},"agent_id":{"type":"string","description":"Agent making the update (provenance)"}},"required":["id"]}`,
+	)
+	registerPlanTool(
+		"plan_step_update",
+		"Update a plan step's status, notes, or description. Pass expected_version to fail if another agent changed the plan (optimistic concurrency).",
+		`{"type":"object","properties":{"plan_id":{"type":"string"},"step_id":{"type":"string"},"status":{"type":"string","enum":["pending","in_progress","completed","blocked"]},"description":{"type":"string"},"notes":{"type":"string"},"expected_version":{"type":"integer"},"agent_id":{"type":"string","description":"Agent making the update (provenance)"}},"required":["plan_id","step_id"]}`,
+	)
+	registerPlanTool(
+		"plan_evidence",
+		"Record evidence for a plan step.",
+		`{"type":"object","properties":{"plan_id":{"type":"string"},"step_id":{"type":"string"},"evidence":{"type":"string"}},"required":["plan_id","step_id","evidence"]}`,
+	)
+	registerPlanTool(
+		"plan_assign",
+		"Assign an agent to a plan step (who is responsible for it). Pass expected_version to fail if another agent changed the plan.",
+		`{"type":"object","properties":{"plan_id":{"type":"string"},"step_id":{"type":"string"},"assignee":{"type":"string","description":"Agent ID responsible for completing this step"},"expected_version":{"type":"integer"}},"required":["plan_id","step_id","assignee"]}`,
+	)
+	registerPlanTool(
+		"plan_checkpoint",
+		"Persist the current plan state and return a resumable checkpoint.",
+		`{"type":"object","properties":{"plan_id":{"type":"string"}}}`,
+	)
+	registerPlanTool(
+		"plan_complete",
+		"Complete a plan only when every step is completed and each completed step has evidence. Supply override_reason to force completion past unresolved steps or missing evidence (recorded, requires explicit intent).",
+		`{"type":"object","properties":{"plan_id":{"type":"string"},"override_reason":{"type":"string","description":"Explicit reason to force completion despite unresolved steps or missing evidence"}},"required":["plan_id"]}`,
+	)
+	registerPlanTool(
+		"plan_focus",
+		"Return the active plan and its next incomplete step.",
+		`{"type":"object","properties":{}}`,
+	)
+	registerPlanTool(
+		"plan_set_active",
+		"Set the active plan by ID.",
+		`{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}`,
+	)
 
 	OnSessionStart(func() { loadPlanState() })
 	OnShutdown(func(_ string) { savePlanState() })
@@ -151,7 +195,9 @@ func planCreate(input json.RawMessage) (string, bool) {
 	if err := savePlanState(); err != nil {
 		return failure("could not persist plan: " + err.Error())
 	}
-	return result(map[string]any{"id": id, "title": plan.Title, "status": plan.Status, "active": true, "message": "plan created"})
+	return result(
+		map[string]any{"id": id, "title": plan.Title, "status": plan.Status, "active": true, "message": "plan created"},
+	)
 }
 
 func planGet(input json.RawMessage) (string, bool) {
@@ -243,7 +289,15 @@ func planUpdate(input json.RawMessage) (string, bool) {
 	if err := savePlanStateLocked(); err != nil {
 		return failure("could not persist plan: " + err.Error())
 	}
-	return result(map[string]any{"id": plan.ID, "title": plan.Title, "status": plan.Status, "version": plan.Version, "message": "plan updated"})
+	return result(
+		map[string]any{
+			"id":      plan.ID,
+			"title":   plan.Title,
+			"status":  plan.Status,
+			"version": plan.Version,
+			"message": "plan updated",
+		},
+	)
 }
 
 func planStepUpdate(input json.RawMessage) (string, bool) {
@@ -311,7 +365,8 @@ func planEvidence(input json.RawMessage) (string, bool) {
 		StepID   string `json:"step_id"`
 		Evidence string `json:"evidence"`
 	}
-	if err := json.Unmarshal(input, &req); err != nil || req.PlanID == "" || req.StepID == "" || strings.TrimSpace(req.Evidence) == "" {
+	if err := json.Unmarshal(input, &req); err != nil || req.PlanID == "" || req.StepID == "" ||
+		strings.TrimSpace(req.Evidence) == "" {
 		return failure("plan_id, step_id, and evidence are required")
 	}
 	planMu.Lock()
@@ -341,7 +396,8 @@ func planAssign(input json.RawMessage) (string, bool) {
 		Assignee        string `json:"assignee"`
 		ExpectedVersion *int   `json:"expected_version"`
 	}
-	if err := json.Unmarshal(input, &req); err != nil || req.PlanID == "" || req.StepID == "" || strings.TrimSpace(req.Assignee) == "" {
+	if err := json.Unmarshal(input, &req); err != nil || req.PlanID == "" || req.StepID == "" ||
+		strings.TrimSpace(req.Assignee) == "" {
 		return failure("plan_id, step_id, and assignee are required")
 	}
 	planMu.Lock()
@@ -410,7 +466,9 @@ func planComplete(input json.RawMessage) (string, bool) {
 	}
 	if missing := incompleteSteps(plan); len(missing) > 0 {
 		if strings.TrimSpace(req.OverrideReason) == "" {
-			out, _ := result(map[string]any{"completed": false, "incomplete_steps": missing, "reason": "steps incomplete"})
+			out, _ := result(
+				map[string]any{"completed": false, "incomplete_steps": missing, "reason": "steps incomplete"},
+			)
 			return out, true
 		}
 		plan.CompletionOverride = req.OverrideReason
@@ -418,7 +476,9 @@ func planComplete(input json.RawMessage) (string, bool) {
 	// Evidence gate: every completed step must carry evidence unless overridden.
 	missingEv := missingEvidence(plan)
 	if len(missingEv) > 0 && strings.TrimSpace(req.OverrideReason) == "" {
-		out, _ := result(map[string]any{"completed": false, "missing_evidence": missingEv, "reason": "evidence required"})
+		out, _ := result(
+			map[string]any{"completed": false, "missing_evidence": missingEv, "reason": "evidence required"},
+		)
 		return out, true
 	}
 	plan.Status = planCompleted

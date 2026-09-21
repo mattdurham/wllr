@@ -14,6 +14,7 @@ Package `agent` manages sub-agents and teams for the bob harness. Each `Agent` w
 - The `tokenCount` field is updated atomically via `sync/atomic`.
 - The `providerName` and `defaultModelName` fields are read/written under `p.mu`.
 - The `baseSystemPrompt` field has its own `baseSystemPromptMu sync.RWMutex`, separate from the main `mu`, because it can be updated independently without touching agent/team maps.
+- The optional `modelFactory` is read and written under `p.mu`; it receives the current provider and resolves model and endpoint requests for sub-agent creation. The factory is invoked even when the endpoint is empty, so it can select a configured endpoint from the model name.
 - Individual `Agent` fields (inbox, cancel, history, onToken, onDone, onToolCall, onTurnStart, toolsFn, systemPrompt) carry their own per-field mutexes. Callers never need to hold pool-level locks when calling agent methods.
 
 **Invariant:** No pool operation blocks on an in-progress agent turn. Pool operations that call `a.Cancel()` release `p.mu` before invoking Cancel to avoid lock ordering issues.
@@ -271,6 +272,22 @@ standalone compaction.
 **Invariant:** `lastSummary` is only written inside the `Submit` goroutine, immediately
 after a successful `compactHistory` call, under `lastSummaryMu.Lock()`.
 
+### Compaction During Tool Loops
+
+Before every provider step after the first, Fantasy's `PrepareStep` hook checks
+the previous step's provider-reported input usage plus its output and a
+conservative estimate of the newest messages, including tool results. The
+full provider-facing message size is used when an endpoint omits usage. The
+threshold is the configured percentage when enabled, capped at 85% of the
+model window and by the output reserve. Reaching it summarizes the active
+provider-facing transcript with the same model, replaces that transcript with
+one user summary message, and retains later tool-step messages verbatim. The
+summary request is bounded by the model window. If summarization fails, the
+turn stops with an explicit error before making another provider request.
+Successful in-turn summaries use the `tool_loop` compaction trigger and count
+toward the session compaction total. Persisted conversation history is recorded
+by the normal turn path after streaming completes.
+
 ### Reactive Fallback
 
 After a turn, if the API returns a context-too-long error (`isContextTooLong`), the agent compacts
@@ -505,6 +522,8 @@ func (s *Spawner) Spawn(ctx context.Context, req extension.SpawnRequest) error
 - Agent-identity system prompt suffix injection (`## Your Agent Identity` section with agent ID).
 - Parent ID derivation from the `/` convention in `req.ID` (e.g. `"main/coder"` → parent `"main"`).
 - Provider-option construction for extended thinking (`ThinkingBudget > 0`).
+- Model resolution through the pool's model factory, including an optional
+  endpoint request. The command layer binds local models to configured entries.
 - Token suppression for sub-agents (sub-agent tokens are never forwarded to the main chat).
 - OnDone wiring: sub-agent errors are logged, the notify function is called, and a failure message is sent to the main agent.
 - ToolsFn wiring: the dynamic tool function is called on each sub-agent turn.

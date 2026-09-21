@@ -1,0 +1,13 @@
+{
+  "name": "task-runner",
+  "version": "1.0.0",
+  "description": "Run durable tasks one at a time with fresh sub-agents",
+  "permissions": [],
+  "tools": [
+    {"name":"task_runner_create","description":"Create an ordered task list and start its first sub-agent.","inputSchema":{"type":"object"}},
+    {"name":"task_runner_start","description":"Start an existing durable task list.","inputSchema":{"type":"object","properties":{"list_id":{"type":"string"}},"required":["list_id"]}},
+    {"name":"mark_task_completed","description":"Complete the current assigned task with evidence.","inputSchema":{"type":"object","properties":{"task_id":{"type":"string"},"result":{},"summary":{"type":"string"}},"required":["task_id","result"]}},
+    {"name":"request_task_review","description":"Pause the current task and request human review.","inputSchema":{"type":"object","properties":{"task_id":{"type":"string"},"reason":{"type":"string"},"details":{"type":"string"}},"required":["task_id","reason"]}},
+    {"name":"task_runner_status","description":"Show ordered task runner state.","inputSchema":{"type":"object"}}
+  ]
+}

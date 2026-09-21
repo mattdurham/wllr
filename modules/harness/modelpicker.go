@@ -35,6 +35,10 @@ func (m *Model) openModelPicker() {
 	}
 	items := make([]sdk.ShowPickerItem, 0, len(choices))
 	for _, c := range choices {
+		if c.ID == OpenRouterBrowseModelID {
+			items = append(items, sdk.ShowPickerItem{ID: c.ID, Label: c.Name, Sublabel: c.Sublabel})
+			continue
+		}
 		sub := c.Sublabel
 		if sub == "" {
 			sub = c.ID

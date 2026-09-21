@@ -126,7 +126,14 @@ func TestObserveCompaction_Summary_IncrementsCounter(t *testing.T) {
 		t.Fatalf("initial CompactionCount = %d, want 0", got)
 	}
 
-	res, err := compactHistory(context.Background(), &compactTestLM{response: "s", inputTok: 1, outputTok: 1}, longHistory(212), "", 0, CompactionTriggerUsage)
+	res, err := compactHistory(
+		context.Background(),
+		&compactTestLM{response: "s", inputTok: 1, outputTok: 1},
+		longHistory(212),
+		"",
+		0,
+		CompactionTriggerUsage,
+	)
 	if err != nil {
 		t.Fatalf("compactHistory: %v", err)
 	}
@@ -146,7 +153,14 @@ func TestObserveCompaction_Summary_IncrementsCounter(t *testing.T) {
 func TestObserveCompaction_NoOp_DoesNotCount(t *testing.T) {
 	a := &Agent{id: "obs-test", modelName: "obs-test"}
 
-	res, err := compactHistory(context.Background(), &compactTestLM{response: "s"}, longHistory(2), "", 0, CompactionTriggerProactive)
+	res, err := compactHistory(
+		context.Background(),
+		&compactTestLM{response: "s"},
+		longHistory(2),
+		"",
+		0,
+		CompactionTriggerProactive,
+	)
 	if err != nil {
 		t.Fatalf("compactHistory: %v", err)
 	}

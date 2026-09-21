@@ -185,6 +185,12 @@ For `provider: "local"`, wllr uses the configured `local_models` entries. Each
 entry supplies the OpenAI-compatible endpoint for that specific model, so `/models`
 can switch between local instances.
 
+For OpenRouter, `/models` shows models saved in `wllr.openrouter_models` first,
+followed by **Browse OpenRouter models…**. The browse picker fetches the live
+catalog from `GET https://openrouter.ai/api/v1/models`; typing filters by model
+name or slug. Selecting a model saves it at the top of the list and switches to
+it. The API's `context_length` is used for compaction.
+
 ### Prompt configuration
 
 The bundled prompt WASM reads optional prompt settings from the `wllr` group in
@@ -242,15 +248,22 @@ opens a setup wizard in the TUI. The wizard lets you choose:
 
 - **ChatGPT** — starts the OpenAI/Codex device-code OAuth flow.
 - **Anthropic** — starts the Claude OAuth flow.
+- **OpenRouter** — prompts for an API key, then opens the searchable model catalog.
 - **Local model** — uses an OpenAI-compatible local endpoint and skips auth.
 
 The wizard persists both `wllr.provider` and a provider-appropriate default
-`wllr.model` in `~/.config/wllr/config.json`.
+`wllr.model` in `~/.config/wllr/config.yaml`.
 
-Run `/login` at any time to reopen this provider wizard and choose **Local
-model**. If no local model is configured, it prompts for the endpoint, discovers
-available models, and lets you select one. Use `/login auth` when you want to
-authenticate the currently active cloud provider directly.
+OpenRouter uses Fantasy's dedicated OpenRouter provider. Its API key can come
+from `OPENROUTER_API_KEY` or the wizard; wizard keys are stored in the private
+`auth.json` file with mode `0600`. `/login auth` while OpenRouter is active prompts
+for a replacement key and then opens model discovery. OpenRouter model choices
+are saved under `wllr.openrouter_models` in `~/.config/wllr/config.yaml`.
+
+Run `/login` at any time to reopen this provider wizard and choose **OpenRouter**
+or **Local model**. If no local model is configured, it prompts for the endpoint,
+discovers available models, and lets you select one. Use `/login auth` to update
+the currently active provider's credentials.
 
 You can also authenticate before starting the TUI:
 

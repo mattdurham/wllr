@@ -9,6 +9,9 @@ type PickerView struct {
 	Title        string
 	Callback     string
 	Items        []sdk.ShowPickerItem
+	searchable   bool
+	query        string
+	filtered     []int
 	selectedIdx  int
 	scrollOffset int
 	width        int

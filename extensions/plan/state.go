@@ -102,7 +102,17 @@ func newPlan(id, title, description, content string, steps []PlanStep, now time.
 		}
 		steps[i].UpdatedAt = now
 	}
-	return &Plan{ID: id, Title: title, Description: description, Content: content, Status: planActive, Steps: steps, CreatedAt: now, UpdatedAt: now, Version: 1}, nil
+	return &Plan{
+		ID:          id,
+		Title:       title,
+		Description: description,
+		Content:     content,
+		Status:      planActive,
+		Steps:       steps,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+		Version:     1,
+	}, nil
 }
 
 func sortedPlans(plans map[string]*Plan) []*Plan {

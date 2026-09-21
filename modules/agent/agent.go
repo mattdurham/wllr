@@ -741,7 +741,17 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 	// or model selection failed to resolve required metadata; never guess.
 	if contextWindow <= 0 {
 		if contextWindow = contextWindowForModel(modelName); contextWindow <= 0 {
-			a.finishTurn(ctx, fmt.Errorf("agent %s: context window for model %q is unknown; configure it before running", a.id, modelName), nil, onDone, inboxMsgs)
+			a.finishTurn(
+				ctx,
+				fmt.Errorf(
+					"agent %s: context window for model %q is unknown; configure it before running",
+					a.id,
+					modelName,
+				),
+				nil,
+				onDone,
+				inboxMsgs,
+			)
 			return
 		}
 	}
@@ -758,7 +768,8 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 		keepRecent = defaultKeepRecentTokens
 	}
 	shouldProactivelyCompact := shouldCompactWithTools(history, sysPrompt, content, tools, contextWindow)
-	usageTriggerFired := compactCfg.Enabled && shouldCompactByUsage(a.LastUsage(), contextWindow, compactCfg.ThresholdPct)
+	usageTriggerFired := compactCfg.Enabled &&
+		shouldCompactByUsage(a.LastUsage(), contextWindow, compactCfg.ThresholdPct)
 	if usageTriggerFired {
 		shouldProactivelyCompact = true
 	}
@@ -833,7 +844,23 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 		return
 	}
 
-	collectedText, usage, err := a.streamTurn(childCtx, fa, streamMsgs, streamPrompt, pool, onToken, onToolCall)
+	onToolLoopCompaction := func(result CompactionResult) {
+		a.observeCompaction(result)
+		didCompact = true
+	}
+	collectedText, usage, err := a.streamTurn(
+		childCtx,
+		fa,
+		lm,
+		streamMsgs,
+		streamPrompt,
+		pool,
+		onToken,
+		onToolCall,
+		contextWindow,
+		compactCfg,
+		onToolLoopCompaction,
+	)
 
 	// Reactive fallback: if the provider still rejects the context, compact and
 	// retry the aborted turn once. This preserves a summary instead of silently
@@ -876,7 +903,19 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 			a.finishTurn(ctx, &ProviderRequestBlockedError{Reason: blockReason}, nil, onDone, inboxMsgs)
 			return
 		}
-		collectedText, usage, err = a.streamTurn(childCtx, fa, streamMsgs, streamPrompt, pool, onToken, onToolCall)
+		collectedText, usage, err = a.streamTurn(
+			childCtx,
+			fa,
+			lm,
+			streamMsgs,
+			streamPrompt,
+			pool,
+			onToken,
+			onToolCall,
+			contextWindow,
+			compactCfg,
+			onToolLoopCompaction,
+		)
 	}
 
 	// Record token usage for the turn. On error or cancellation, store a
@@ -1154,16 +1193,22 @@ func contextUsageFromResult(res *fantasy.AgentResult) fantasy.Usage {
 func (a *Agent) streamTurn(
 	ctx context.Context,
 	fa fantasy.Agent,
+	lm fantasy.LanguageModel,
 	history []sdk.Message,
 	content string,
 	pool *AgentPool,
 	onToken func(string),
 	onToolCall func(id, name, input string),
+	contextWindow int64,
+	compactCfg CompactConfig,
+	onCompaction func(CompactionResult),
 ) (string, fantasy.Usage, error) {
 	var collected string
+	compactor := newToolLoopCompactor(lm, contextWindow, compactCfg, onCompaction)
 	res, err := fa.Stream(ctx, fantasy.AgentStreamCall{
-		Messages: sdkToFantasyMessages(history),
-		Prompt:   content,
+		Messages:    sdkToFantasyMessages(history),
+		Prompt:      content,
+		PrepareStep: compactor.prepare,
 		OnTextDelta: func(_, text string) error {
 			if text == "" {
 				return nil

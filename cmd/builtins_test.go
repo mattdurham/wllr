@@ -47,7 +47,8 @@ func TestBuiltinManifestPermissions_HistoryHasFileRead(t *testing.T) {
 	if !containsPerm(perms, sdk.PermFileRead) {
 		t.Errorf("history built-in should be granted file_read, got %v", perms)
 	}
-	if containsPerm(perms, sdk.PermExec) || containsPerm(perms, sdk.PermNetworkRead) || containsPerm(perms, sdk.PermNetworkWrite) {
+	if containsPerm(perms, sdk.PermExec) || containsPerm(perms, sdk.PermNetworkRead) ||
+		containsPerm(perms, sdk.PermNetworkWrite) {
 		t.Errorf("history built-in must not hold exec/network permissions, got %v", perms)
 	}
 }

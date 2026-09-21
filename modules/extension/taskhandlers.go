@@ -169,7 +169,19 @@ func (h *Host) notifyTask(listID string, event sdk.TaskEvent) error {
 	if to == "" {
 		return nil
 	}
-	b, _ := json.Marshal(sdk.TaskEventEnvelope{EventID: event.EventID, ListID: event.ListID, TaskID: event.TaskID, AttemptID: event.AttemptID, Event: event.Event, Version: event.Version, ActorAgentID: event.ActorAgentID, Snapshot: event.Snapshot, Reference: event.EventID})
+	b, _ := json.Marshal(
+		sdk.TaskEventEnvelope{
+			EventID:      event.EventID,
+			ListID:       event.ListID,
+			TaskID:       event.TaskID,
+			AttemptID:    event.AttemptID,
+			Event:        event.Event,
+			Version:      event.Version,
+			ActorAgentID: event.ActorAgentID,
+			Snapshot:     event.Snapshot,
+			Reference:    event.EventID,
+		},
+	)
 	if err := h.AgentBridge().Deliver(to, sdk.Message{Role: sdk.RoleUser, Content: string(b)}, true); err != nil {
 		h.logger.Warn("extension: task notification failed", "event_id", event.EventID, "err", err)
 	}

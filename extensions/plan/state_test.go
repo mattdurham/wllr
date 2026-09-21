@@ -6,7 +6,14 @@ import (
 )
 
 func TestNewPlanAssignsStepDefaults(t *testing.T) {
-	plan, err := newPlan("plan-1", "Ship it", "description", "content", []PlanStep{{Title: "Test"}}, time.Unix(1, 0).UTC())
+	plan, err := newPlan(
+		"plan-1",
+		"Ship it",
+		"description",
+		"content",
+		[]PlanStep{{Title: "Test"}},
+		time.Unix(1, 0).UTC(),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}

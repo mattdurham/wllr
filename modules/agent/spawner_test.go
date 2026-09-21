@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/fantasy"
 	"github.com/mattdurham/wllr/modules/agent"
 	"github.com/mattdurham/wllr/modules/extension"
 	"github.com/mattdurham/wllr/modules/sdk"
@@ -76,6 +77,50 @@ func TestSpawner_Spawn_PropagatesKnownModelContext(t *testing.T) {
 	}
 	if got := child.ContextWindow(); got != 128_000 {
 		t.Errorf("child context window = %d, want 128000", got)
+	}
+}
+
+func TestSpawner_Spawn_UsesEndpointOverride(t *testing.T) {
+	prov := testutil.NewFakeProvider()
+	pool := agent.NewPool()
+	pool.SetProvider(prov)
+	pool.SetDefaultModelName("default-model")
+	var gotModel, gotEndpoint string
+	pool.SetModelFactory(
+		func(ctx context.Context, _ fantasy.Provider, model, endpoint string) (fantasy.LanguageModel, error) {
+			gotModel, gotEndpoint = model, endpoint
+			return prov.LanguageModel(ctx, model)
+		},
+	)
+
+	mainLM, err := pool.LanguageModelForModel(context.Background(), "default-model")
+	if err != nil {
+		t.Fatalf("main model: %v", err)
+	}
+	if _, err := pool.Spawn("main", mainLM, agent.SpawnOpts{ModelName: "default-model"}); err != nil {
+		t.Fatalf("spawn main: %v", err)
+	}
+
+	spawner := agent.NewSpawner(pool, nil, nil)
+	if err := spawner.Spawn(context.Background(), extension.SpawnRequest{
+		ID:        "main/remote",
+		ModelName: "worker-model",
+		Endpoint:  "http://127.0.0.1:11234/v1",
+	}); err != nil {
+		t.Fatalf("spawn child: %v", err)
+	}
+	if gotModel != "worker-model" || gotEndpoint != "http://127.0.0.1:11234/v1" {
+		t.Fatalf("factory got model=%q endpoint=%q", gotModel, gotEndpoint)
+	}
+	gotEndpoint = "not called"
+	if err := spawner.Spawn(context.Background(), extension.SpawnRequest{
+		ID:        "main/configured",
+		ModelName: "other-model",
+	}); err != nil {
+		t.Fatalf("spawn child without endpoint: %v", err)
+	}
+	if gotModel != "other-model" || gotEndpoint != "" {
+		t.Fatalf("factory without endpoint got model=%q endpoint=%q", gotModel, gotEndpoint)
 	}
 }
 
@@ -265,7 +310,8 @@ func TestSpawner_FailureNotificationTargetsCreator(t *testing.T) {
 		if err := json.Unmarshal([]byte(inbox[0].Content), &event); err != nil {
 			t.Fatalf("decode failure notification: %v", err)
 		}
-		if event.Event != "agent_failed" || event.AgentID != "main/parent/worker" || event.CreatorID != "main/parent" || event.Error == "" {
+		if event.Event != "agent_failed" || event.AgentID != "main/parent/worker" || event.CreatorID != "main/parent" ||
+			event.Error == "" {
 			t.Errorf("failure notification = %+v, want nested creator and error", event)
 		}
 	case <-time.After(5 * time.Second):
