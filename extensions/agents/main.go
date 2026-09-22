@@ -8,6 +8,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"unsafe"
 )
@@ -85,6 +86,21 @@ func truncate(s string, n int) string {
 		return string(r[:n]) + "…"
 	}
 	return s
+}
+
+// agentDepth returns how deep an agent ID sits in the ownership tree. IDs are
+// built as "<scope>/<name>", where the scope is the creator's ID, so the first
+// segment is the root ("main"): "main/a" is depth 1, "main/a/b" is depth 2.
+// A malformed or empty ID reports depth 1 so rendering never underflows.
+func agentDepth(id string) int {
+	if id == "" {
+		return 1
+	}
+	depth := strings.Count(id, "/")
+	if depth < 1 {
+		return 1
+	}
+	return depth
 }
 
 func formatDurationMS(ms int64) string {
@@ -528,53 +544,72 @@ func onAgentsCommand(_ []string) {
 		meta[agentRecords[i].id] = &agentRecords[i]
 	}
 
+	// Order by ID: a parent's ID is a prefix of its descendants' IDs, so a
+	// lexical sort places each parent immediately before its subtree while
+	// keeping siblings alphabetical. A lexical sort is also the only stable
+	// order here — ListAgents iterates a Go map, so without it the list
+	// reshuffled on every invocation.
+	sort.Slice(subAgents, func(i, j int) bool { return subAgents[i].ID < subAgents[j].ID })
+
 	var sb strings.Builder
 	sb.WriteString("Sub-agents\n")
 	sb.WriteString(strings.Repeat("─", 40))
 	sb.WriteString("\n\n")
 	for _, a := range subAgents {
+		// Depth is derived from the ID convention: the first segment is the
+		// root scope ("main"), so "main/x" is depth 1 and "main/x/y" is 2.
+		depth := agentDepth(a.ID)
+		indent := strings.Repeat("   ", depth-1)
+		sb.WriteString(indent)
+		if depth > 1 {
+			sb.WriteString("└─ ")
+		}
 		sb.WriteString(a.ID)
 		if a.Name != "" && a.Name != a.ID {
 			sb.WriteString("  (" + a.Name + ")")
 		}
 		sb.WriteString("\n")
+		body := indent
+		if depth > 1 {
+			body += "   "
+		}
 		if a.IsRunning {
-			sb.WriteString("  Status: running\n")
+			sb.WriteString(body + "Status: running\n")
 			if a.TurnDurationMS > 0 {
-				sb.WriteString(fmt.Sprintf("  Turn running: %s\n", formatDurationMS(a.TurnDurationMS)))
+				sb.WriteString(body + fmt.Sprintf("Turn running: %s\n", formatDurationMS(a.TurnDurationMS)))
 			}
 		} else {
-			sb.WriteString("  Status: idle\n")
+			sb.WriteString(body + "Status: idle\n")
 		}
 		if a.Liveness != "" {
-			sb.WriteString("  Liveness: " + a.Liveness + "\n")
+			sb.WriteString(body + "Liveness: " + a.Liveness + "\n")
 		}
 		if a.Working {
-			sb.WriteString("  Working: true\n")
+			sb.WriteString(body + "Working: true\n")
 		}
 		if a.LastActivityAgeMS > 0 {
-			sb.WriteString(fmt.Sprintf("  Last activity: %s ago\n", formatDurationMS(a.LastActivityAgeMS)))
+			sb.WriteString(body + fmt.Sprintf("Last activity: %s ago\n", formatDurationMS(a.LastActivityAgeMS)))
 		}
 		if a.ActiveTool != "" {
-			sb.WriteString("  Active tool: " + a.ActiveTool + "\n")
+			sb.WriteString(body + "Active tool: " + a.ActiveTool + "\n")
 		} else if a.LastTool != "" {
-			sb.WriteString("  Last tool: " + a.LastTool + "\n")
+			sb.WriteString(body + "Last tool: " + a.LastTool + "\n")
 		}
 		if a.LastToolDoneAgeMS > 0 {
-			sb.WriteString(fmt.Sprintf("  Last tool done: %s ago\n", formatDurationMS(a.LastToolDoneAgeMS)))
+			sb.WriteString(body + fmt.Sprintf("Last tool done: %s ago\n", formatDurationMS(a.LastToolDoneAgeMS)))
 		}
 		if a.ShutdownRequested {
-			sb.WriteString("  Shutdown: requested\n")
+			sb.WriteString(body + "Shutdown: requested\n")
 		}
 		if a.PendingMessages > 0 {
-			sb.WriteString(fmt.Sprintf("  Pending messages: %d\n", a.PendingMessages))
+			sb.WriteString(body + fmt.Sprintf("Pending messages: %d\n", a.PendingMessages))
 		}
 		if r, ok := meta[a.ID]; ok {
 			if r.task != "" {
-				sb.WriteString("  Task: " + r.task + "\n")
+				sb.WriteString(body + "Task: " + r.task + "\n")
 			}
 			if r.lastUpdate != "" {
-				sb.WriteString("  Last: " + r.lastUpdate + "\n")
+				sb.WriteString(body + "Last: " + r.lastUpdate + "\n")
 			}
 		}
 		sb.WriteString("\n")
