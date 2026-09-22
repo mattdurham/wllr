@@ -534,6 +534,24 @@ The API key prompt uses `TextInputView.OpenSecret` and password echo mode.
 
 Startup uses the same required context-window prompt when `SetPendingContextWindow(provider, model)` is set. Empty, zero, negative, and non-numeric values are rejected; the model is not applied until persistence and selection succeed.
 
+### Exec (one-shot) Mode
+
+`SubmitExecPrompt(prompt)` / `SetExecWriter(w)` put the model into a one-shot
+mode used by `wllr --exec`. The prompt is submitted from `Init` (bubbletea runs
+commands on its own goroutine, so a submit during construction would race
+program start), and the program quits when that turn's `StreamDoneMsg` arrives.
+Only the main turn quits the program: a sub-agent finishing must not end the run
+while work continues. The final response is written to the exec writer, because
+the renderer is disabled and there is no transcript to read it from.
+
+**Invariant:** exec mode is not a reduced execution path. `cmd` runs the same
+model and calls the same `SetProgram` wiring as the TUI, with only the renderer
+and input disabled (`tea.WithoutRenderer()`, `tea.WithInput(nil)`). Anything that
+applies interactively — extension events, the tool permission chain, the
+`before_provider_request` chain, session recording, usage observers — therefore
+applies to `--exec` too. Executing outside that wiring would silently bypass
+installed policy, so the two paths must not diverge.
+
 ### Agent Tree and Focus
 
 `AgentTreeView` is the interactive `/agents` surface: ↑↓ move, →← fold/unfold,

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"strings"
@@ -348,6 +349,14 @@ type Model struct {
 	picker PickerView
 
 	agentTree AgentTreeView
+
+	// execMode marks a one-shot run: `wllr --exec` submits a single prompt and
+	// quits when that turn completes. execPrompt holds it until Init is running.
+	execMode   bool
+	execPrompt string
+	// execWriter receives the final response in exec mode, where the renderer
+	// is off and there is no transcript to read it from.
+	execWriter io.Writer
 
 	// focusedAgent is the agent receiving user input and owning the transcript.
 	// Empty means the root agent, which is not special — it is simply the first
@@ -790,6 +799,8 @@ func (m Model) Init() tea.Cmd {
 		m.cmdDispatchSessionStart(),
 		m.dispatchModelChanged(),
 	}
+	// Exec mode submits its queued prompt once the program is running.
+	cmds = append(cmds, m.execQuitOnDone())
 	// First-run auth prompt: if a provider was set as needing an auth choice and
 	// no choice is recorded yet, open the prompt once at startup.
 	if m.pendingAuthProvider != "" {
@@ -1363,6 +1374,8 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 		if responseContent != "" && m.OnMessageEnd != nil {
 			m.OnMessageEnd(string(sdk.RoleAssistant), responseContent)
 		}
+		// Exec mode has no transcript, so emit the response on stdout.
+		m.writeExecResponse(responseContent)
 		cmds = append(cmds, m.cmdDispatchAfterProviderResponse())
 		if responseContent != "" {
 			cmds = append(cmds, m.cmdDispatchMessageEnd(string(sdk.RoleAssistant), responseContent))
@@ -1379,6 +1392,12 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 		m.chatAppendID = ""
 		m.chatAppendText = ""
 		m.refreshWASMChat()
+		// A one-shot `--exec` run ends when its turn does, so the process exits
+		// instead of waiting for input. Only the main turn ends the run: a
+		// sub-agent finishing must not terminate it while work continues.
+		if quit := m.maybeQuitExec(); quit != nil {
+			cmds = append(cmds, quit)
+		}
 		return m, tea.Batch(cmds...), true
 
 	}

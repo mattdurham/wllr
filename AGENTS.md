@@ -165,6 +165,13 @@ Optional installed extensions are built by `make extensions` into
 - `extensions/mcp-bridge/` — MCP subprocess bridge and dynamic MCP tools.
 - `extensions/otel-traces/` — optional OpenTelemetry trace export.
 
+## Non-interactive runs
+
+`wllr --exec "<prompt>"` runs one turn and exits. It uses the same wiring as the
+TUI (pool, extensions, provider-request chain, session recording) with the
+renderer and input disabled — it is not a reduced path, so nothing is bypassed.
+See [docs/exec-mode.md](docs/exec-mode.md).
+
 ## Build And Verification
 
 - `make build` — builds built-in WASM extensions and `dist/wllr`.

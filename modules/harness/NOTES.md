@@ -784,3 +784,21 @@ Focus is a plain agent ID with the empty string meaning the root. Modelling the
 root as "the default" rather than a distinct case is what lets one code path
 serve main and sub-agents, and it is why `submitToAgent` needed only a target
 lookup rather than a branch.
+
+## Exec runs the same program, not a parallel path (2026-09-22)
+
+`--exec` previously built a bare `fantasy.Agent` and returned before any of the
+`SetProgram` wiring. That made it a second, lighter execution path which skipped
+the provider-request interceptor, the usage observers, the agent pool, and
+session recording — so an extension that blocked or rerouted requests had no
+effect in exec mode. A security-relevant hook that quietly does not apply is
+worse than one that is absent, because nothing signals the difference.
+
+Exec now runs the same model through the same program with the renderer and input
+disabled. The renderer is what draws to a TTY and non-nil input is what makes
+bubbletea open one, so `WithoutRenderer()` plus `WithInput(nil)` is what allows
+an unattended run. Quitting on `StreamDoneMsg` supplies the non-interactive part:
+the process ends when the turn does rather than waiting for a keystroke.
+
+Because the renderer is off there is no transcript to read the answer from, so
+the completed response is written to an injected writer.

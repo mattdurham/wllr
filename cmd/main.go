@@ -23,7 +23,6 @@ import (
 	"github.com/mattdurham/wllr/modules/harness"
 	"github.com/mattdurham/wllr/modules/mcp"
 	"github.com/mattdurham/wllr/modules/sdk"
-	"github.com/mattdurham/wllr/modules/tools"
 )
 
 // builtinFS embeds generated built-in WASM modules when they are present.
@@ -216,12 +215,6 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 			names = append(names, t.Tool.Name)
 		}
 		slog.Info("wllr: extensions ready", "tools", names)
-	}
-
-	// --exec mode: run a single prompt non-interactively and exit.
-	if *execPrompt != "" {
-		runExecMode(ctx, h, pool, langModel, *execPrompt)
-		return
 	}
 
 	m.SetExtensionPaths(extPaths)
@@ -810,6 +803,30 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 	// provides browse/rollback UI. The former core session.Journal was redundant
 	// with it and has been removed.
 
+	// --exec mode runs the same program as the TUI, with the renderer off and a
+	// single prompt submitted. Routing through the same path is the point: exec
+	// must not be a lighter-weight variant that silently skips the extension
+	// hooks, provider-request chain, pool, or session recording. It stops as
+	// soon as the turn finishes, which is what makes it non-interactive.
+	if *execPrompt != "" {
+		// No renderer and no input: the renderer is what would draw to a TTY, and
+		// nil input stops bubbletea from opening one to read from. Together they
+		// let the same program run unattended.
+		prog := tea.NewProgram(&m,
+			tea.WithoutRenderer(),
+			tea.WithInput(nil),
+			tea.WithoutSignalHandler(),
+		)
+		m.SetProgram(prog)
+		m.SetExecWriter(os.Stdout)
+		m.SubmitExecPrompt(*execPrompt)
+		if _, err := prog.Run(); err != nil {
+			fmt.Fprintln(os.Stderr, "wllr: "+err.Error())
+			os.Exit(1)
+		}
+		return
+	}
+
 	prog := tea.NewProgram(&m)
 	m.SetProgram(prog)
 
@@ -1012,62 +1029,6 @@ func startMCPBridge(ctx context.Context, h *extension.Host) func() {
 		if closeErr := mcpExt.Close(); closeErr != nil {
 			slog.Warn("wllr: close mcp bridge", "error", closeErr)
 		}
-	}
-}
-
-// runExecMode runs a single prompt non-interactively and exits.
-// It builds a one-shot fantasy agent, streams the response to stdout, and calls
-// os.Exit(1) on error.
-func runExecMode(
-	ctx context.Context,
-	h *extension.Host,
-	pool *agent.AgentPool,
-	langModel fantasy.LanguageModel,
-	prompt string,
-) {
-	fantasyTools := tools.BuildFantasyTools(h, "exec", func(level int, msg string) {
-		slog.Log(
-			ctx,
-			[]slog.Level{slog.LevelDebug, slog.LevelInfo, slog.LevelWarn, slog.LevelError}[min(level, 3)],
-			msg,
-		)
-	})
-	var agentOpts []fantasy.AgentOption
-	if len(fantasyTools) > 0 {
-		agentOpts = append(agentOpts, fantasy.WithTools(fantasyTools...))
-	}
-	tools := h.GetRegisteredTools()
-	promptTools := make([]sdk.PromptTool, 0, len(tools))
-	for _, tool := range tools {
-		promptTools = append(promptTools, sdk.PromptTool{Name: tool.Name})
-	}
-	wd, _ := os.Getwd()
-	payload, _ := json.Marshal(
-		sdk.SessionStartPayload{
-			Reason:    "exec",
-			Tools:     promptTools,
-			CWD:       wd,
-			StartedAt: time.Now().Format(time.RFC3339Nano),
-		},
-	)
-	_, _ = h.DispatchEvent(ctx, sdk.Event{Type: sdk.EventSessionStart, Payload: payload})
-	if pool != nil {
-		if sp := pool.BaseSystemPrompt(); sp != "" {
-			agentOpts = append(agentOpts, fantasy.WithSystemPrompt(sp))
-		}
-	}
-	fa := fantasy.NewAgent(langModel, agentOpts...)
-	_, execErr := fa.Stream(ctx, fantasy.AgentStreamCall{
-		Prompt: prompt,
-		OnTextDelta: func(_, text string) error {
-			fmt.Print(text)
-			return nil
-		},
-	})
-	fmt.Println()
-	if execErr != nil {
-		fmt.Fprintf(os.Stderr, "wllr: %v\n", execErr)
-		os.Exit(1)
 	}
 }
 
