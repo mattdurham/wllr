@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -533,28 +534,75 @@ func (p *AgentPool) Get(id string) *Agent {
 	return p.agents[id]
 }
 
-// Close cancels the agent's active context and removes it from the pool.
-// Returns ErrAgentNotFound if id is unknown.
+// Close cancels the agent's active context and removes it and every agent
+// beneath it from the pool. Returns ErrAgentNotFound if id is unknown.
+//
+// Closing cascades because an agent's descendants exist only to serve it:
+// leaving them running after their parent is gone produces orphaned work whose
+// results have nowhere to go. This applies to the root agent too, so stopping
+// the root stops the whole fleet.
 func (p *AgentPool) Close(id string) error {
 	p.mu.Lock()
-	a, exists := p.agents[id]
+	root, exists := p.agents[id]
 	if !exists {
 		p.mu.Unlock()
 		return ErrAgentNotFound
 	}
-	delete(p.agents, id)
+	// Collect the subtree before mutating the map. Descendants are those whose
+	// ID sits under "<id>/", which is the same convention spawn uses to derive
+	// child IDs.
+	doomed := []*Agent{root}
+	for agentID, a := range p.agents {
+		if agentID != id && isDescendantID(agentID, id) {
+			doomed = append(doomed, a)
+		}
+	}
+	closed := make([]string, 0, len(doomed))
+	for _, a := range doomed {
+		delete(p.agents, a.id)
+		closed = append(closed, a.id)
+	}
 	live := int64(len(p.agents))
 	p.mu.Unlock()
-	// Reported outside the lock: the observer is host code.
-	p.observeLifecycle(AgentLifecycle{
-		AgentID: id,
-		Main:    id == MainAgentID,
-		Live:    live,
-		Spawned: false,
-	})
-	// Cancel any running turn.
-	a.Cancel()
+
+	// Report and cancel outside the lock: the observer is host code and Cancel
+	// must not run under the pool mutex.
+	for _, a := range doomed {
+		p.observeLifecycle(AgentLifecycle{
+			AgentID: a.id,
+			Main:    a.id == MainAgentID,
+			Live:    live,
+			Spawned: false,
+		})
+		a.Cancel()
+	}
 	return nil
+}
+
+// isDescendantID reports whether agentID names an agent beneath ancestorID.
+// IDs are built as "<scope>/<name>", so a descendant's ID is prefixed by
+// "<ancestor>/". A bare prefix match would wrongly treat "main/x2" as a child
+// of "main/x", hence the separator.
+func isDescendantID(agentID, ancestorID string) bool {
+	if ancestorID == "" {
+		return false
+	}
+	return strings.HasPrefix(agentID, ancestorID+"/")
+}
+
+// Descendants returns the IDs of every agent beneath id, excluding id itself.
+// Used by callers that need to report what a close or cancel will affect.
+func (p *AgentPool) Descendants(id string) []string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	var out []string
+	for agentID := range p.agents {
+		if isDescendantID(agentID, id) {
+			out = append(out, agentID)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // SendMessage appends msg to the named agent's inbox for delivery before its next turn.
@@ -680,14 +728,28 @@ func (p *AgentPool) SetAgentHistory(id string, history []sdk.Message) error {
 
 // Cancel cancels the active turn of the named agent.
 // Returns ErrAgentNotFound if id is unknown. No-op if no turn is running.
+// Cancel stops the named agent's in-flight turn and every descendant's, for
+// the same reason Close cascades: work beneath a stopped agent can never
+// deliver its result. The agents stay in the pool so they can be inspected or
+// reused; only their running turns stop.
 func (p *AgentPool) Cancel(id string) error {
 	p.mu.RLock()
-	a, exists := p.agents[id]
-	p.mu.RUnlock()
-	if !exists {
+	targets := make([]*Agent, 0, 1)
+	if a, ok := p.agents[id]; ok {
+		targets = append(targets, a)
+	} else {
+		p.mu.RUnlock()
 		return ErrAgentNotFound
 	}
-	a.Cancel()
+	for agentID, a := range p.agents {
+		if isDescendantID(agentID, id) {
+			targets = append(targets, a)
+		}
+	}
+	p.mu.RUnlock()
+	for _, a := range targets {
+		a.Cancel()
+	}
 	return nil
 }
 

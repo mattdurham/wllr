@@ -577,3 +577,23 @@ live output while leaving the main transcript untouched.
 windows are independent and a slow agent cannot delay a fast one. The batcher's
 program field is optional: a nil program marks dispatch-only operation, which is
 how sub-agent text reaches extensions without emitting a main-chat `TokenMsg`.
+
+## 37. Close and Cancel cascade to descendants
+
+*Added: 2026-09-22*
+
+**Decision:** `Close(id)` removes `id` and its whole subtree; `Cancel(id)` stops
+the in-flight turn of `id` and every descendant, leaving the agents in the pool.
+
+**Rationale:** Previously both acted on a single agent, so stopping a parent
+orphaned its children — they kept running work whose result had nowhere to go,
+since their lifecycle target was gone. The agent tree is a hierarchy in which a
+child exists only to serve its parent, so stopping the parent must stop the
+subtree. Applying this to the root as well keeps the model uniform: the root is
+the top node, not a privileged one.
+
+**Consequence:** Descendants are identified by the same `"<parent>/<name>"`
+convention `Spawn` uses to derive child IDs, tested with the separator so
+`main/x2` is not treated as a child of `main/x`. `Descendants(id)` exposes the
+set without acting on it, for callers that need to report the impact. Lifecycle
+observers fire once per affected agent, so metrics see each removal.

@@ -242,6 +242,14 @@ const (
 	// PermFileRead. Result: [{"path", "timestamp", "preview"}].
 	MethodListSessions = "list_sessions"
 
+	// MethodShowAgentTree opens the interactive agent tree overlay. After the
+	// user focuses an agent the harness fires EventOnCommand{name: callback,
+	// args: [agent_id]} so the extension can switch its transcript.
+	MethodShowAgentTree = "show_agent_tree"
+	// MethodSetFocusedAgent tells the harness which agent the input box and
+	// transcript target. An empty id means the root agent. The harness routes
+	// subsequent user input to that agent instead of always the main one.
+	MethodSetFocusedAgent = "set_focused_agent"
 	// MethodShowPicker opens an interactive TUI list picker. After the user
 	// selects an item the harness fires EventOnCommand{name: callback, args: [id]}.
 	MethodShowPicker = "show_picker"

@@ -227,40 +227,56 @@ func (t *AgentTreeView) ensureVisible() {
 	}
 }
 
-// HandleKey processes a key press. It returns the focused agent's ID when the
-// user confirms, whether the overlay was cancelled, and whether a node was
-// folded or unfolded (so the caller can re-render without re-fetching nodes).
-func (t *AgentTreeView) HandleKey(kp tea.KeyPressMsg) (focused string, cancelled, folded bool) {
+// AgentTreeKeyResult reports what a key press did to the tree.
+type AgentTreeKeyResult struct {
+	// Focused is the agent to switch to, set when the user confirms with enter.
+	Focused string
+	// Closed is set when the user dismissed the tree with q.
+	Closed bool
+	// Folded is set when a node was expanded or collapsed, so the caller can
+	// re-render without re-fetching nodes.
+	Folded bool
+	// Handled is false when the key is not the tree's. esc is deliberately not
+	// handled: it keeps its global meaning of "cancel the current ask", so the
+	// caller lets it fall through rather than closing the tree.
+	Handled bool
+}
+
+// HandleKey processes a key press, reporting whether the tree consumed it.
+func (t *AgentTreeView) HandleKey(kp tea.KeyPressMsg) AgentTreeKeyResult {
 	rows := t.rows()
 	switch kp.String() {
-	case keyEsc, "q":
-		return "", true, false
+	case "q":
+		return AgentTreeKeyResult{Closed: true, Handled: true}
 	case "enter":
 		if node, ok := t.Highlighted(); ok {
-			return node.ID, false, false
+			return AgentTreeKeyResult{Focused: node.ID, Handled: true}
 		}
-		return "", false, false
+		return AgentTreeKeyResult{Handled: true}
 	case "up":
 		if t.cursor > 0 {
 			t.cursor--
 			t.ensureVisible()
 		}
+		return AgentTreeKeyResult{Handled: true}
 	case "down":
 		if t.cursor < len(rows)-1 {
 			t.cursor++
 			t.ensureVisible()
 		}
+		return AgentTreeKeyResult{Handled: true}
 	case "right", "l":
 		t.expand()
-		return "", false, true
+		return AgentTreeKeyResult{Folded: true, Handled: true}
 	case "left", "h":
 		t.collapse()
-		return "", false, true
+		return AgentTreeKeyResult{Folded: true, Handled: true}
 	case " ":
 		t.toggle()
-		return "", false, true
+		return AgentTreeKeyResult{Folded: true, Handled: true}
 	}
-	return "", false, false
+	// Anything else (notably esc) is left for the caller.
+	return AgentTreeKeyResult{}
 }
 
 var (
@@ -283,7 +299,7 @@ func (t *AgentTreeView) View() string {
 	content := inner - 2
 
 	var sb strings.Builder
-	title := " Agents  (↑↓ move · →← fold · enter focus · esc close) "
+	title := " Agents  (↑↓ move · →← fold · enter focus · q=quit) "
 	sb.WriteString(treeBorderStyle.Render("╭") +
 		treeTitleStyle.Render(truncateRunes(title, inner)) +
 		treeBorderStyle.Render(strings.Repeat("─", max(0, inner-lipgloss.Width(title)))+"╮") + "\n")

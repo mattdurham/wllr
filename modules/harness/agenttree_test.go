@@ -63,13 +63,13 @@ func TestAgentTree_CollapseHidesSubtreeKeepsParent(t *testing.T) {
 func TestAgentTree_ExpandRevealsSubtree(t *testing.T) {
 	tree := newTree()
 	tree.cursor = 1 // main/planner
-	if _, _, folded := tree.HandleKey(tea.KeyPressMsg{Code: tea.KeyLeft}); !folded {
+	if r := tree.HandleKey(tea.KeyPressMsg{Code: tea.KeyLeft}); !r.Folded || !r.Handled {
 		t.Fatal("left on a parent should fold")
 	}
 	if got := len(tree.rows()); got != 3 {
 		t.Fatalf("rows = %d, want 3 after fold", got)
 	}
-	if _, _, folded := tree.HandleKey(tea.KeyPressMsg{Code: tea.KeyRight}); !folded {
+	if r := tree.HandleKey(tea.KeyPressMsg{Code: tea.KeyRight}); !r.Folded || !r.Handled {
 		t.Fatal("right on a parent should unfold")
 	}
 	if got := len(tree.rows()); got != 4 {
@@ -98,7 +98,7 @@ func TestAgentTree_CollapseClampsCursor(t *testing.T) {
 func TestAgentTree_LeafDoesNotFold(t *testing.T) {
 	tree := newTree()
 	tree.cursor = 3 // main/zebra, a leaf
-	if _, _, folded := tree.HandleKey(tea.KeyPressMsg{Code: tea.KeySpace}); folded {
+	if r := tree.HandleKey(tea.KeyPressMsg{Code: tea.KeySpace}); r.Folded {
 		t.Error("leaf should not report a fold")
 	}
 }
@@ -107,19 +107,31 @@ func TestAgentTree_LeafDoesNotFold(t *testing.T) {
 func TestAgentTree_EnterFocusesHighlighted(t *testing.T) {
 	tree := newTree()
 	tree.cursor = 1
-	id, cancelled, _ := tree.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if cancelled {
-		t.Fatal("enter should not cancel")
+	r := tree.HandleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !r.Handled {
+		t.Fatal("enter should be handled")
 	}
-	if id != "main/planner" {
-		t.Fatalf("focused %q, want main/planner", id)
+	if r.Focused != "main/planner" {
+		t.Fatalf("focused %q, want main/planner", r.Focused)
 	}
 }
 
-func TestAgentTree_EscCancels(t *testing.T) {
+// esc deliberately falls through: it keeps its global meaning of cancelling the
+// current ask, so the tree must not swallow it.
+func TestAgentTree_EscIsNotHandled(t *testing.T) {
 	tree := newTree()
-	if _, cancelled, _ := tree.HandleKey(tea.KeyPressMsg{Code: tea.KeyEsc}); !cancelled {
-		t.Error("esc should cancel")
+	r := tree.HandleKey(tea.KeyPressMsg{Code: tea.KeyEsc})
+	if r.Handled || r.Closed || r.Focused != "" {
+		t.Fatalf("esc must fall through to the caller, got %+v", r)
+	}
+}
+
+// q closes the overlay, per the header hint.
+func TestAgentTree_QCloses(t *testing.T) {
+	tree := newTree()
+	r := tree.HandleKey(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	if !r.Closed || !r.Handled {
+		t.Fatalf("q should close the tree, got %+v", r)
 	}
 }
 

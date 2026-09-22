@@ -37,6 +37,16 @@ Package `agent` manages sub-agents and teams for the bob harness. Each `Agent` w
   than the session model, which the single-provider `modelFactory` cannot express.
 - Individual `Agent` fields (inbox, cancel, history, onToken, onDone, onToolCall, onTurnStart, toolsFn, systemPrompt) carry their own per-field mutexes. Callers never need to hold pool-level locks when calling agent methods.
 
+**Invariant:** `Close(id)` and `Cancel(id)` cascade to every descendant of `id`,
+where a descendant is any agent whose ID is prefixed by `"<id>/"`. An agent's
+descendants exist only to serve it, so leaving them running after their parent
+stops produces orphaned work whose result has nowhere to go. This applies to the
+root agent too: stopping the root stops the whole fleet, because the root is
+only the top of the tree rather than a special case. `Close` removes the subtree
+from the pool; `Cancel` stops the turns and keeps the agents. The separator in
+the prefix test matters — a bare prefix match would treat `main/x2` as a child of
+`main/x`. `Descendants(id)` reports the subtree without acting on it.
+
 **Invariant:** No pool operation blocks on an in-progress agent turn. Pool operations that call `a.Cancel()` release `p.mu` before invoking Cancel to avoid lock ordering issues.
 
 ---
