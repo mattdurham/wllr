@@ -43,7 +43,23 @@ func agentCall(method string, params any) string {
 	resp := make([]byte, respLen)
 	mem := (*[1 << 28]byte)(unsafe.Pointer(uintptr(respPtr)))
 	copy(resp, mem[:respLen])
-	return string(resp)
+
+	// The host replies with a host_call envelope ({result: ...} or {error: ...}),
+	// not the payload itself. Callers unmarshal the payload, so unwrap here:
+	// returning the envelope made every agent_list read decode to zero agents,
+	// which is why /agents reported "No sub-agents running." while sub-agents
+	// were live in the pool.
+	var envelope struct {
+		Error  string          `json:"error,omitempty"`
+		Result json.RawMessage `json:"result,omitempty"`
+	}
+	if err := json.Unmarshal(resp, &envelope); err != nil {
+		return ""
+	}
+	if envelope.Error != "" {
+		return ""
+	}
+	return string(envelope.Result)
 }
 
 // ─── Agent registry ───────────────────────────────────────────────────────────

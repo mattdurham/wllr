@@ -899,10 +899,14 @@ func (m Model) updateKeyPress(msg tea.Msg) (Model, tea.Cmd, bool) {
 		return m, nil, false
 	}
 
+	// Esc during an active main-agent turn cancels it, and that takes precedence
+	// over closing an open overlay (see
+	// TestModel_Esc_DuringStream_CancelsBeforeModalClose). Sub-agents are not
+	// cancelled: esc means "stop what I asked you for", not "abandon everything
+	// I delegated". Their lifecycle is shutdown_agent / shutdown_team.
 	if kp.String() == keyEsc {
-		active := m.hasActiveTurn()
-		m.requestTurnCancel()
-		if active {
+		if m.mainTurnActive() {
+			m.cancelMainTurn()
 			m.live.setStatus("stream", "cancelling…")
 			return m, nil, true
 		}
@@ -946,29 +950,37 @@ func (m Model) updateKeyPress(msg tea.Msg) (Model, tea.Cmd, bool) {
 	return m, nil, false
 }
 
-func (m Model) hasActiveTurn() bool {
+// mainTurnActive reports whether the primary agent has a turn in flight. It
+// deliberately ignores sub-agents, which esc does not cancel.
+func (m Model) mainTurnActive() bool {
 	if m.streaming {
 		return true
 	}
 	if m.agentPool == nil {
 		return false
 	}
-	for _, id := range m.agentPool.ListAgents() {
-		if a := m.agentPool.Get(id); a != nil && a.IsRunning() {
-			return true
-		}
+	if main := m.agentPool.Get(agent.MainAgentID); main != nil {
+		return main.IsRunning()
 	}
 	return false
 }
 
 func (m Model) cancelActiveTurn() {
-	m.requestTurnCancel()
+	m.cancelMainTurn()
 	m.live.setStatus("stream", "cancelling…")
 }
 
-func (m Model) requestTurnCancel() {
-	if m.agentPool != nil {
-		m.agentPool.CancelAll()
+// cancelMainTurn cancels only the primary agent's in-flight turn. Sub-agents
+// are deliberately left running: esc in the main UI means "stop what I asked
+// you for", not "abandon every agent I have delegated to". Sub-agents are
+// stopped through shutdown_agent / shutdown_team, which is where their
+// lifecycle belongs.
+func (m Model) cancelMainTurn() {
+	if m.agentPool == nil {
+		return
+	}
+	if main := m.agentPool.Get(agent.MainAgentID); main != nil {
+		main.Cancel()
 	}
 }
 

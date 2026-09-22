@@ -29,7 +29,7 @@
 #   make precommit        — run build and all quality checks (REQUIRED before commit)
 #
 # Built-in extensions (embedded in the binary):
-#   agents, history, logging, plan, prompt, queue, sigil, statusline
+#   agents, history, logging, plan, prompt, queue, statusline
 #   (read_file, write_file, exec, get_env are native Go — no WASM build needed)
 #
 # Installed extensions (loaded from ~/.wllr/extensions/ at runtime):
@@ -80,7 +80,6 @@ builtins: $(DIST_DIR) $(BUILTINS)
 	$(WASM_BUILD) $(BUILTINS)/plan.wasm extensions/plan
 	$(WASM_BUILD) $(BUILTINS)/prompt.wasm extensions/context
 	$(WASM_BUILD) $(BUILTINS)/queue.wasm extensions/queue
-	$(WASM_BUILD) $(BUILTINS)/sigil.wasm extensions/sigil
 	$(WASM_BUILD) $(DIST_DIR)/statusline.wasm extensions/statusline
 	cp $(DIST_DIR)/statusline.wasm $(BUILTINS)/statusline.wasm
 	@echo "Built built-in extensions"

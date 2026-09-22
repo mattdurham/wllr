@@ -925,14 +925,14 @@ func registerAgentStatusTool(h *extension.Host, pool *agent.AgentPool) {
 //   - agents, statusline drive the TUI scene graph (ui_patch) -> require ui
 //   - logging appends to a log file (append_file) -> requires file_write
 //   - history uses list_sessions (host-side picker data) -> requires file_read
-//   - queue, sigil use only unrestricted host calls (store,
+//   - queue uses only unrestricted host calls (store,
 //     modal, notify, register_command, agent_list/mailbox) -> require none
 //   - plan drives a compact sidebar widget (ui_patch) -> requires ui
 //
 // Loading fails closed: a missing, unreadable, or malformed manifest yields
 // zero permissions (and a warning), never an implicit all-permissions grant.
 func loadBuiltinExtensions(ctx context.Context, h *extension.Host) {
-	for _, name := range []string{"agents", "history", "logging", "plan", "prompt", "queue", "sigil", "statusline"} {
+	for _, name := range []string{"agents", "history", "logging", "plan", "prompt", "queue", "statusline"} {
 		filename := name + ".wasm"
 		data, err := builtinFS.ReadFile("builtins/" + filename)
 		if err != nil {

@@ -22,7 +22,7 @@ Current grants (least privilege, from actual runtime host-call usage):
 - `agents`, `statusline`, `plan` -> `["ui"]` (drive the TUI scene graph)
 - `logging` -> `["file_write"]` (append_file)
 - `history` -> `["file_read"]` (list_sessions for the /history picker)
-- `queue`, `sigil` -> `[]` (unrestricted host calls only)
+- `queue` -> `[]` (unrestricted host calls only)
 
 Keep these manifests in sync with the actual host calls each built-in makes;
 `make clean` removes only the generated `.wasm` files, never these manifests.

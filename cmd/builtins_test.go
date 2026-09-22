@@ -31,7 +31,7 @@ func TestBuiltinManifestPermissions_Granted(t *testing.T) {
 }
 
 func TestBuiltinManifestPermissions_None(t *testing.T) {
-	for _, name := range []string{"queue", "sigil"} {
+	for _, name := range []string{"queue"} {
 		perms := builtinManifestPermissions(name)
 		if len(perms) != 0 {
 			t.Errorf("%s built-in should be granted no permissions, got %v", name, perms)

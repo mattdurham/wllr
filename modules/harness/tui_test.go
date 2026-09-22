@@ -353,3 +353,54 @@ func TestModel_Dropdown_EscCloses(t *testing.T) {
 		t.Errorf("dropdown should be closed after esc, got %d suggestions", len(m.suggestions))
 	}
 }
+
+// TestModel_Esc_CancelsMainButNotSubagents pins the esc contract: esc stops the
+// primary agent's turn, but leaves delegated sub-agents running. Canceling
+// them too would abandon work the user never asked to stop (previously esc
+// reached CancelAll, which cancelled every agent in the pool).
+func TestModel_Esc_CancelsMainButNotSubagents(t *testing.T) {
+	mainLM := &blockingLM{started: make(chan struct{})}
+	subLM := &blockingLM{started: make(chan struct{})}
+
+	pool := agent.NewPool()
+	main, err := pool.Spawn(agent.MainAgentID, mainLM, agent.SpawnOpts{TurnTimeout: -1})
+	if err != nil {
+		t.Fatalf("spawn main: %v", err)
+	}
+	sub, err := pool.Spawn("main/coder", subLM, agent.SpawnOpts{TurnTimeout: -1})
+	if err != nil {
+		t.Fatalf("spawn sub: %v", err)
+	}
+
+	main.Submit(context.Background(), "block")
+	sub.Submit(context.Background(), "block")
+	for name, started := range map[string]chan struct{}{
+		"main": mainLM.started,
+		"sub":  subLM.started,
+	} {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatalf("timeout waiting for %s to start", name)
+		}
+	}
+
+	// The returned model is not needed here; the assertion is on the agents,
+	// which share the pool and so observe the cancellation directly.
+	_, _ = callUpdate(New(pool, agent.MainAgentID, nil), keyMsg(tea.KeyEsc, 0))
+
+	// The main agent's turn is cancelled...
+	deadline := time.After(2 * time.Second)
+	for main.IsRunning() {
+		select {
+		case <-deadline:
+			t.Fatal("main agent should stop after esc")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	// ...but the sub-agent keeps running.
+	if !sub.IsRunning() {
+		t.Fatal("esc must not cancel sub-agents; it cancelled main/coder")
+	}
+}
