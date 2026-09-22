@@ -10,6 +10,14 @@ import (
 	"time"
 )
 
+// openRouterModelsURL lists the models the account can use, not the global
+// catalog: OpenRouter applies the account's guardrails and data policy
+// server-side, so this endpoint already excludes models a request would be
+// rejected for. The global /models endpoint advertises models the account
+// cannot run (its endpoints even report a healthy status), so using it here
+// would offer choices that fail only once the user tries them.
+const openRouterModelsURL = "https://openrouter.ai/api/v1/models/user"
+
 type openRouterModelConfig struct {
 	ID            string `json:"id"`
 	Name          string `json:"name"`

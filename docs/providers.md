@@ -274,7 +274,7 @@ can switch between local instances.
 
 For OpenRouter, `/models` shows models saved in `wllr.openrouter_models` first,
 followed by **Browse OpenRouter models…**. The browse picker fetches the live
-catalog from `GET https://openrouter.ai/api/v1/models`; typing filters by model
+catalog from `GET https://openrouter.ai/api/v1/models/user`; typing filters by model
 name or slug. Selecting a model saves it at the top of the list and switches to
 it. The API's `context_length` is used for compaction.
 

@@ -557,7 +557,7 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 		models, fetchErr := fetchOpenRouterModels(
 			context.Background(),
 			nil,
-			"https://openrouter.ai/api/v1/models",
+			openRouterModelsURL,
 			cfg.OpenRouterAPIKey,
 		)
 		if fetchErr != nil {
