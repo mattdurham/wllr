@@ -390,7 +390,7 @@ func TestOpenModelPicker_ShowsTierTags(t *testing.T) {
 	m := newTestModel()
 	m.width = 80
 	m.height = 24
-	m.TagModelTierFn = func(string, string) error { return nil }
+	m.TagModelTierFn = func(string, string, string) error { return nil }
 	m.ModelListFn = func() []ModelChoice {
 		return []ModelChoice{
 			{ID: "m1", Name: "Model One", Sublabel: "s", ContextWindowKnown: true, Tiers: []string{"high"}},

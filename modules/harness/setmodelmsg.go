@@ -10,3 +10,11 @@ type setModelMsg struct {
 	// both model and thinking.
 	Thinking string
 }
+
+// setProviderModelMsg selects a model owned by a specific provider, switching
+// provider when it differs from the active one. Emitted by the model picker for
+// provider-qualified rows, since the list spans providers.
+type setProviderModelMsg struct {
+	Provider string
+	Model    string
+}

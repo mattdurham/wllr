@@ -5,6 +5,7 @@ import (
 	fantasyanthropicprovider "charm.land/fantasy/providers/anthropic"
 	fantasygoogleprovider "charm.land/fantasy/providers/google"
 	fantasyopenapiprovider "charm.land/fantasy/providers/openai"
+	fantasyopenrouterprovider "charm.land/fantasy/providers/openrouter"
 )
 
 // Thinking levels are a provider-agnostic tier that maps to each provider's
@@ -155,4 +156,139 @@ func providerOptionsForThinking(provider string, level thinkingLevel) fantasy.Pr
 	default:
 		return nil
 	}
+}
+
+// OpenRouter provider-routing options.
+//
+// OpenRouter routes one model across several upstream providers and lets the
+// request express a preference. Fantasy exposes this as ProviderOptions.Provider
+// .Sort, whose value is one of "price", "throughput", or "latency"; OpenRouter
+// also documents the ":floor" and ":nitro" shortcuts, which force the
+// cheapest/least-expensive and the fastest provider respectively.
+//
+// This is separate from the model choice: the same OpenRouter model can be
+// served by different upstreams at different prices and speeds.
+const (
+	// openRouterSpeedDefault lets OpenRouter route with its own default
+	// (currently a balanced price/uptime preference). No sort is sent.
+	openRouterSpeedDefault = "default"
+	// openRouterSpeedFloor prefers the lowest price.
+	openRouterSpeedFloor = "floor"
+	// openRouterSpeedNitro prefers the highest throughput.
+	openRouterSpeedNitro = "nitro"
+	// openRouterSpeedPrice and the two below are the explicit sort keys.
+	openRouterSpeedPrice      = "price"
+	openRouterSpeedThroughput = "throughput"
+	openRouterSpeedLatency    = "latency"
+)
+
+// openRouterSpeedOptions is the selectable set, in picker order, for the
+// active provider's routing preference. ID is stored in config; Label is shown
+// in the picker; Sort is the OpenRouter value sent ("" sends nothing).
+type openRouterSpeedOption struct {
+	ID          string
+	Label       string
+	Description string
+	Sort        string
+}
+
+// openRouterSpeedOptions lists the routing preferences offered by
+// /openrouter-speed. "default" is first so a user can return to OpenRouter's
+// own routing after picking a preference.
+var openRouterSpeedOptions = []openRouterSpeedOption{
+	{ID: openRouterSpeedDefault, Label: "Default", Description: "OpenRouter's own balanced routing"},
+	{ID: openRouterSpeedFloor, Label: "Floor", Description: "cheapest available provider (price)", Sort: openRouterSpeedPrice},
+	{ID: openRouterSpeedNitro, Label: "Nitro", Description: "fastest provider (throughput)", Sort: openRouterSpeedThroughput},
+	{ID: openRouterSpeedPrice, Label: "Price", Description: "sort by price", Sort: openRouterSpeedPrice},
+	{ID: openRouterSpeedThroughput, Label: "Throughput", Description: "sort by tokens/sec", Sort: openRouterSpeedThroughput},
+	{ID: openRouterSpeedLatency, Label: "Latency", Description: "sort by time to first token", Sort: openRouterSpeedLatency},
+}
+
+// openRouterSpeedSort maps a stored option ID to the OpenRouter sort value.
+// An unknown or "default" ID yields "" (send no sort).
+func openRouterSpeedSort(id string) string {
+	for _, o := range openRouterSpeedOptions {
+		if o.ID == id {
+			return o.Sort
+		}
+	}
+	return ""
+}
+
+// isValidOpenRouterSpeed reports whether id is a known routing option.
+func isValidOpenRouterSpeed(id string) bool {
+	if id == "" {
+		return true
+	}
+	for _, o := range openRouterSpeedOptions {
+		if o.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// savedOpenRouterSpeed returns the persisted OpenRouter routing preference, or
+// "" when none is stored (meaning OpenRouter's default routing).
+func savedOpenRouterSpeed() string {
+	id := savedWllrField("openrouter_speed")
+	if !isValidOpenRouterSpeed(id) {
+		return ""
+	}
+	return id
+}
+
+// saveOpenRouterSpeed persists the OpenRouter routing preference. The default
+// clears the field so an unset preference stays unset in the config.
+func saveOpenRouterSpeed(id string) error {
+	if id == "" || id == openRouterSpeedDefault {
+		return removeWllrField("openrouter_speed")
+	}
+	return saveWllrField("openrouter_speed", id)
+}
+
+// openRouterProviderOptions builds the OpenRouter provider options for the
+// stored routing preference. Returns nil when there is nothing to apply, so a
+// default preference clears any previously-set routing.
+func openRouterProviderOptions() fantasy.ProviderOptions {
+	sortKey := openRouterSpeedSort(savedOpenRouterSpeed())
+	if sortKey == "" {
+		return nil
+	}
+	return fantasy.ProviderOptions{
+		fantasyopenrouterprovider.Name: &fantasyopenrouterprovider.ProviderOptions{
+			Provider: &fantasyopenrouterprovider.Provider{Sort: &sortKey},
+		},
+	}
+}
+
+// providerOptionsForRuntime returns the provider options applied to the main
+// agent: the reasoning selection plus any provider-routing preference. These
+// occupy distinct fantasy keys (the reasoning struct vs the OpenRouter routing
+// struct), so they merge instead of replacing one another — otherwise setting a
+// speed would silently clear the reasoning mode and vice versa.
+func providerOptionsForRuntime(provider, modeID string) fantasy.ProviderOptions {
+	out := fantasy.ProviderOptions{}
+	for k, v := range providerOptionsForThinkingMode(provider, modeID) {
+		out[k] = v
+	}
+	if provider == providerOpenRouter {
+		for k, v := range openRouterProviderOptions() {
+			out[k] = v
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// speedDisplayFor returns the routing preference to show in the status bar for
+// a provider: the stored value for OpenRouter, empty for everyone else (no
+// other provider has a routing preference).
+func speedDisplayFor(provider string) string {
+	if provider != providerOpenRouter {
+		return ""
+	}
+	return savedOpenRouterSpeed()
 }

@@ -710,3 +710,45 @@ a different provider and the status bar and `EventModelChanged` must reflect it.
 The `/model tiers` listing is a plain modal rather than a picker: it is
 read-only output, and the existing modal already handles long lists with
 scrolling.
+
+## Cross-provider model list and the add-model flow (2026-09-22)
+
+`/models` shows the models the user actually has, not the active provider's
+catalog. That made two things necessary. First, a picker row can no longer be
+identified by model ID alone — the same ID can exist on two providers — so rows
+carry a provider-qualified key (`provider\x1fmodel`) and selection switches
+provider when the owner differs from the active one. The separator is a unit
+separator because it cannot appear in a provider name or model ID.
+
+Second, option (a) — "only what you have configured" — meant anthropic, openai,
+and gemini had no way to be on the list at all: their model sets were static
+catalogs with nothing to pin, unlike `local_models` and `openrouter_models`. A
+`saved_models` list was added for exactly those providers rather than
+generalising the existing stores, because the existing ones carry data the
+catalog providers do not have (local endpoints and API keys; OpenRouter's live
+catalog pin). Each model therefore has one owning store, and the list merges
+them.
+
+Adding is the `a` key rather than an inline catalog, so the list stays a list of
+what you have and the catalogs stay behind an explicit intent. A provider that
+is not configured detours through the existing login flow with the provider
+recorded, so the wizard resumes instead of dropping the user.
+
+## OpenRouter provider routing (2026-09-22)
+
+`/openrouter-speed` sets OpenRouter's provider-routing preference (`floor`,
+`nitro`, or an explicit `price`/`throughput`/`latency` sort). This is orthogonal
+to the model: the same OpenRouter model is served by several upstreams at
+different prices and speeds, so it is a separate command and a separate config
+field (`wllr.openrouter_speed`) rather than part of the model selection.
+
+The value is applied through fantasy's OpenRouter `ProviderOptions.Provider.Sort`,
+which is the same key the request uses for reasoning. Both are written into one
+`fantasy.ProviderOptions` map by `providerOptionsForRuntime`, because writing
+each independently would clear the other — the reasoning path and the routing
+path target the same provider entry.
+
+`default` clears the field instead of storing "default", so an unset preference
+stays unset and nothing is sent. The startup apply is deliberately not gated on a
+reasoning level existing: OpenRouter routing is valid on its own, and gating it
+would silently drop a configured preference.

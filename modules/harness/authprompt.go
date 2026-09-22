@@ -96,6 +96,19 @@ func (m *Model) applyAuthChoice(method string) {
 		m.pushNotification(fmt.Sprintf("%s set to use an API key.", provider))
 	}
 	// OAuth: begin the interactive login flow (start handled by beginOAuthLogin).
+	// The add-model flow resumes once the provider becomes usable; see
+	// resumePendingAddModel and completeOAuthFromCallback.
+}
+
+// applyAuthChoiceCmd is the command-returning form of applyAuthChoice, used when
+// a completed choice should continue a pending add-model flow.
+func (m *Model) applyAuthChoiceCmd(method string) tea.Cmd {
+	provider := m.authPromptProvider
+	m.applyAuthChoice(method)
+	if provider != "" && m.pendingAddModelProvider == provider {
+		return m.resumePendingAddModel()
+	}
+	return nil
 }
 
 // beginOAuthLogin starts the OAuth login for a provider: it asks BeginOAuthFn
@@ -145,12 +158,18 @@ func (m *Model) completeOAuthFromCallback(msg oauthCallbackMsg) tea.Cmd {
 	m.modalScroll = 0
 	fn := m.CompleteOAuthFn
 	input := msg.Input
+	// A pending add-model flow resumes after login succeeds; the resume message
+	// re-enters the add flow with the provider now usable.
+	resume := m.pendingAddModelProvider == provider
 	return func() tea.Msg {
 		if fn == nil {
 			return NotifyMsg{Text: "OAuth completion is not available."}
 		}
 		if err := fn(provider, input); err != nil {
 			return NotifyMsg{Text: fmt.Sprintf("⚠ OAuth login failed: %v", err)}
+		}
+		if resume {
+			return resumeAddModelMsg{Provider: provider}
 		}
 		return NotifyMsg{Text: fmt.Sprintf("✓ Logged in to %s.", provider)}
 	}

@@ -4,6 +4,8 @@ package harness
 
 const (
 	commandHelp   = "help"
+	commandModel  = "model"
+	commandModels = "models"
 	keyEsc        = "esc"
 	borderRounded = "rounded"
 )

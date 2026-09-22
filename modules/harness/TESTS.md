@@ -252,3 +252,12 @@ a model, and typing/backspace filtering in the searchable picker.
 | Medium | `TestApplyModelSelection_PlainModelStillWorks` | `/model claude-haiku-4-5` | resolves as a model ID via `SelectModelFn` |
 | Medium | `TestBuiltinModelTiers_ListsTiers` | `/model tiers`, `/models tiers` | emits `showModelTiersMsg` |
 | Low | `TestOpenModelPicker_ShowsTierTags` | model with `Tiers: ["high"]` | sublabel ends with `tier: high`; title shows the `h=high` hint |
+
+## OpenRouter Provider Routing (openrouterspeed_test.go)
+
+| Level | Test | Scenario | Assertion |
+|-------|------|----------|-----------|
+| High | `TestOpenRouterSpeedCommand` | `/openrouter-speed` with and without an arg | emits `showOpenRouterSpeedPickerMsg` / `setOpenRouterSpeedMsg{ID}` |
+| High | `TestOpenRouterSpeedPickerMarksCurrentAndApplies` | picker with a current value, then select another | current is marked; selection applies and updates `ActiveSpeed` |
+| Medium | `TestOpenRouterSpeedUnavailableExplainsWhy` | empty option list | picker does not open; the reason is surfaced |
+| High | `TestModelPicker_EnterSelectsWithoutTagging` | Enter on the model picker | selects the highlighted model; never tags |

@@ -217,6 +217,30 @@ applied; set `context_window` explicitly to avoid depending on the endpoint.
   model. An explicit `model` in `create_agent` always wins, and if no `low`
   tier is configured sub-agents fall back to the session model.
 
+### OpenRouter provider routing
+
+OpenRouter routes one model across several upstream providers and lets a request
+express a preference. `/openrouter-speed` sets that preference:
+
+```
+/openrouter-speed          # open the picker
+/openrouter-speed nitro    # fastest provider (throughput)
+```
+
+| Option       | Sent as      | Meaning                                  |
+|--------------|--------------|------------------------------------------|
+| `default`    | *(nothing)*  | OpenRouter's own balanced routing        |
+| `floor`      | `price`      | cheapest available provider              |
+| `nitro`      | `throughput` | fastest provider                         |
+| `price`      | `price`      | sort by price                            |
+| `throughput` | `throughput` | sort by tokens/sec                       |
+| `latency`    | `latency`    | sort by time to first token              |
+
+The choice is stored as `wllr.openrouter_speed` and applies only while OpenRouter
+is the active provider; other providers report that routing is unavailable.
+Selecting `default` removes the stored value. This is independent of the model
+choice, and it merges with the reasoning selection rather than replacing it.
+
 ### Selecting a thinking level
 
 Run `/thinking` (no argument) to open a picker of reasoning levels, or

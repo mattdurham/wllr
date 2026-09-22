@@ -10,9 +10,7 @@ import (
 )
 
 const (
-	providerOpenRouter = "openrouter"
-	// OpenRouterBrowseModelID is the special /models choice that opens discovery.
-	OpenRouterBrowseModelID   = "__wllr:openrouter_browse"
+	providerOpenRouter        = "openrouter"
 	openRouterKeyCallback     = "__wllr:openrouter_key"
 	openRouterCatalogCallback = "__wllr:openrouter_catalog"
 )
@@ -26,7 +24,6 @@ type OpenRouterModelChoice struct {
 
 type (
 	showOpenRouterSetupMsg     struct{}
-	showOpenRouterBrowseMsg    struct{}
 	openRouterKeyEnteredMsg    struct{ Key string }
 	openRouterCatalogResultMsg struct {
 		Models []OpenRouterModelChoice

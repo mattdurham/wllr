@@ -271,6 +271,7 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 		// agent options or status). Runs before the switch because every case
 		// below returns.
 		m.SetThinkingForModel(startupThinkingMode(ctx, cfg, provider))
+		m.SetSpeedDisplay(speedDisplayFor(provider))
 		switch provider {
 		case providerOpenAI, providerAnthropic:
 			return modelID, true, nil
@@ -288,64 +289,12 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 			return "", false, fmt.Errorf("unknown provider %q", provider)
 		}
 	}
+	// The /models list shows the models the user actually has: local endpoint
+	// entries, pinned OpenRouter models, and saved catalog models for
+	// anthropic/openai/gemini. It spans providers so any model can be tagged or
+	// selected; the add-model flow (`a`) is how new ones are introduced.
 	m.ModelListFn = func() []harness.ModelChoice {
-		var catalog []modelInfo
-		switch currentProvider {
-		case providerOpenAI:
-			catalog = modelsForOpenAIAuth()
-		case providerLocal:
-			catalog = localModels(ctx, cfg)
-		case providerOpenRouter:
-			out := make([]harness.ModelChoice, 0, len(cfg.OpenRouterModels)+1)
-			for _, model := range cfg.OpenRouterModels {
-				if model.ID == "" {
-					continue
-				}
-				name := model.Name
-				if name == "" {
-					name = model.ID
-				}
-				cw := contextWindowForSelection(providerOpenRouter, model.ID, cfg)
-				out = append(
-					out,
-					harness.ModelChoice{
-						ID:                 model.ID,
-						Name:               name,
-						Sublabel:           model.ID,
-						ContextWindow:      cw,
-						ContextWindowKnown: cw > 0,
-						Tiers:              tiersForModel(providerOpenRouter, model.ID),
-					},
-				)
-			}
-			return append(
-				out,
-				harness.ModelChoice{
-					ID:                 harness.OpenRouterBrowseModelID,
-					Name:               "Browse OpenRouter models…",
-					Sublabel:           "type to search and add a model",
-					ContextWindowKnown: true,
-				},
-			)
-		default:
-			catalog = modelsForProvider(currentProvider)
-		}
-		out := make([]harness.ModelChoice, 0, len(catalog))
-		for _, mi := range catalog {
-			cw := contextWindowForSelection(currentProvider, mi.ID, cfg)
-			out = append(
-				out,
-				harness.ModelChoice{
-					ID:                 mi.ID,
-					Name:               mi.Name,
-					Sublabel:           modelChoiceSublabel(mi),
-					ContextWindow:      cw,
-					ContextWindowKnown: cw > 0,
-					Tiers:              tiersForModel(currentProvider, mi.ID),
-				},
-			)
-		}
-		return out
+		return savedModelChoices(ctx, cfg, currentProvider, cfg.Model)
 	}
 	m.SelectModelFn = func(modelID string) error {
 		if currentProvider == providerOpenRouter {
@@ -393,16 +342,65 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 		m.SetThinkingForModel(startupThinkingMode(ctx, cfg, currentProvider))
 		return nil
 	}
+	// Add-model flow: `a` in /models lists providers, each routing to the wizard
+	// that can configure it. Catalog providers list their built-in models and
+	// save the choice; OpenRouter reuses the key + live-catalog browse; local
+	// reuses the endpoint wizard.
+	m.AddModelProviderListFn = func() []harness.ProviderChoice { return addModelProviders(cfg) }
+	m.ProviderReadyFn = func(provider string) bool { return providerReady(cfg, provider) }
+	m.CatalogModelsFn = func(provider string) []harness.ModelChoice { return catalogChoicesFor(cfg, provider) }
+	m.SaveCatalogModelFn = func(provider string, choice harness.ModelChoice) (string, error) {
+		return saveCatalogModel(ctx, cfg, pool, provider, choice)
+	}
+	m.RemoveSavedModelFn = func(provider, modelID string) error {
+		if err := removeModel(provider, modelID); err != nil {
+			return err
+		}
+		// Keep the in-memory config in step so the list refreshes immediately
+		// without a reload.
+		dropModelFromConfig(cfg, provider, modelID)
+		return nil
+	}
+	// Cross-provider selection: the /models list spans providers, so choosing a
+	// model owned by another provider rebuilds that provider and applies it.
+	m.SelectProviderModelFn = func(provider, modelID string) error {
+		if provider == "" {
+			return fmt.Errorf("model provider is missing")
+		}
+		contextWindow := contextWindowForSelection(provider, modelID, cfg)
+		if contextWindow <= 0 {
+			return fmt.Errorf("%w: %s", harness.ErrContextWindowRequired, modelID)
+		}
+		if err := activateProviderModel(ctx, cfg, pool, provider, modelID); err != nil {
+			return err
+		}
+		currentProvider = provider
+		cfg.Provider = provider
+		cfg.Model = modelID
+		if saveErr := saveProvider(provider); saveErr != nil {
+			slog.Warn("wllr: could not persist provider selection", "provider", provider, "error", saveErr)
+		}
+		if saveErr := saveModel(modelID); saveErr != nil {
+			slog.Warn("wllr: could not persist model selection", "model", modelID, "error", saveErr)
+		}
+		m.SetThinkingForModel(startupThinkingMode(ctx, cfg, provider))
+		m.SetSpeedDisplay(speedDisplayFor(provider))
+		return nil
+	}
+
 	// Model tiers: tag models as high/low in /models, then apply a tier by name
 	// (/model high) or via a skill's frontmatter. A tier may name a different
 	// provider, so applying one switches providers when needed.
 	m.TierNamesFn = tierNames
 	m.ModelTierLabelsFn = tierLabels
-	m.TagModelTierFn = func(tier, modelID string) error {
+	m.TagModelTierFn = func(tier, provider, modelID string) error {
 		if modelID == "" {
 			return fmt.Errorf("no model selected")
 		}
-		return setModelTier(tier, currentProvider, modelID)
+		if provider == "" {
+			provider = currentProvider
+		}
+		return setModelTier(tier, provider, modelID)
 	}
 	m.ClearModelTierFn = clearModelTier
 	m.ApplyModelTierFn = func(tier string) (string, string, error) {
@@ -478,8 +476,43 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 			}
 		} else {
 			m.SetThinkingForModel(startupThinkingMode(ctx, cfg, provider))
+			m.SetSpeedDisplay(speedDisplayFor(provider))
 		}
 		return provider, modelID, nil
+	}
+	// OpenRouter provider routing (/openrouter-speed): floor, nitro, or an
+	// explicit sort. This is provider-level, separate from the model choice, so
+	// it is only offered while OpenRouter is the active provider.
+	m.SpeedListFn = func() []harness.SpeedChoice {
+		if currentProvider != providerOpenRouter {
+			return nil
+		}
+		out := make([]harness.SpeedChoice, 0, len(openRouterSpeedOptions))
+		for _, o := range openRouterSpeedOptions {
+			out = append(out, harness.SpeedChoice{ID: o.ID, Label: o.Label, Description: o.Description})
+		}
+		return out
+	}
+	m.SpeedUnavailableReasonFn = func() string {
+		if currentProvider != providerOpenRouter {
+			return "only OpenRouter models route across multiple providers"
+		}
+		return ""
+	}
+	m.SelectSpeedFn = func(id string) error {
+		if currentProvider != providerOpenRouter {
+			return fmt.Errorf("provider routing is only supported for OpenRouter")
+		}
+		if !isValidOpenRouterSpeed(id) {
+			return fmt.Errorf("unknown routing option %q", id)
+		}
+		if err := saveOpenRouterSpeed(id); err != nil {
+			return err
+		}
+		if main := pool.Get(agent.MainAgentID); main != nil {
+			main.SetProviderOptions(providerOptionsForRuntime(currentProvider, savedThinkingMode()))
+		}
+		return nil
 	}
 	m.SetContextWindowFn = func(provider, modelID string, tokens int64) error {
 		if err := saveContextWindow(provider, modelID, tokens); err != nil {
@@ -497,7 +530,7 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 			return fmt.Errorf("provider %s does not support thinking level %q", currentProvider, level)
 		}
 		if main := pool.Get(agent.MainAgentID); main != nil {
-			main.SetProviderOptions(providerOptionsForThinkingMode(currentProvider, modeID))
+			main.SetProviderOptions(providerOptionsForRuntime(currentProvider, modeID))
 		}
 		if err := saveThinkingMode(modeID); err != nil {
 			slog.Warn("wllr: could not persist thinking mode", "mode", modeID, "error", err)
@@ -685,7 +718,7 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 		return "no reasoning modes could be detected for " + cfg.Model
 	}
 	m.SelectThinkingFn = func(levelID string) error {
-		po := providerOptionsForThinkingMode(currentProvider, levelID)
+		po := providerOptionsForRuntime(currentProvider, levelID)
 		if main := pool.Get(agent.MainAgentID); main != nil {
 			main.SetProviderOptions(po)
 		}
@@ -699,12 +732,20 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 	// the provider, or — for local models — the endpoint-declared default when
 	// nothing valid is persisted (so the server's own default is visible and
 	// adjustable, and the agent never starts on an effort the model rejects).
-	if lvl := startupThinkingMode(ctx, cfg, currentProvider); lvl != "" {
-		po := providerOptionsForThinkingMode(currentProvider, lvl)
-		if main := pool.Get(agent.MainAgentID); main != nil {
-			main.SetProviderOptions(po)
-		}
+	startupLevel := startupThinkingMode(ctx, cfg, currentProvider)
+	if lvl := startupLevel; lvl != "" {
 		m.SetActiveThinking(lvl)
+	}
+	// Apply the merged provider options unconditionally: OpenRouter's routing
+	// preference is valid without any reasoning level, so gating this on a
+	// thinking mode would silently drop a configured routing choice.
+	if main := pool.Get(agent.MainAgentID); main != nil {
+		main.SetProviderOptions(providerOptionsForRuntime(currentProvider, startupLevel))
+	}
+	// Reflect the persisted routing preference in the status bar (OpenRouter
+	// only; other providers have no routing preference).
+	if currentProvider == providerOpenRouter {
+		m.SetSpeedDisplay(savedOpenRouterSpeed())
 	}
 	// On startup with a local model that cannot reason (endpoint-declared):
 	// clear the (possibly stale) persisted mode and reflect the state in the

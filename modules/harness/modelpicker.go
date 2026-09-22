@@ -19,6 +19,13 @@ type ModelChoice struct {
 	Sublabel           string
 	ContextWindow      int64
 	ContextWindowKnown bool
+	// Provider is the provider that owns this model. The list spans providers
+	// (each configured/pinned model, not just the active provider's), so
+	// selecting a model switches provider when it differs from the active one.
+	Provider string
+	// Active marks the model currently in use, so the list can show which
+	// provider/model is live.
+	Active bool
 	// Tiers lists the model-tier names this model is tagged with (e.g.
 	// ["high"]). Rendered in the picker sublabel so the tagging is visible.
 	Tiers []string
@@ -42,24 +49,12 @@ func (m *Model) openModelPicker() {
 	}
 	items := make([]sdk.ShowPickerItem, 0, len(choices))
 	for _, c := range choices {
-		if c.ID == OpenRouterBrowseModelID {
-			items = append(items, sdk.ShowPickerItem{ID: c.ID, Label: c.Name, Sublabel: c.Sublabel})
-			continue
-		}
-		sub := c.Sublabel
-		if sub == "" {
-			sub = c.ID
-		}
-		if c.ID == m.activeModel {
-			sub += "  (current)"
-		}
-		if len(c.Tiers) > 0 {
-			sub += "  " + tierTagPrefix + strings.Join(c.Tiers, ", ")
-		}
-		if !c.ContextWindowKnown {
-			sub += "  (context window required)"
-		}
-		items = append(items, sdk.ShowPickerItem{ID: c.ID, Label: c.Name, Sublabel: sub})
+		label, sub := modelListLabel(c, m.activeProvider, m.activeModel)
+		items = append(items, sdk.ShowPickerItem{
+			ID:       modelPickerKey(c.Provider, c.ID),
+			Label:    label,
+			Sublabel: sub,
+		})
 	}
 	title := m.modelPickerTitle()
 	if m.pendingModelPicker {
@@ -70,13 +65,26 @@ func (m *Model) openModelPicker() {
 	m.picker.SetSize(m.width, m.chatHeight())
 }
 
+// addModelKey opens the add-model flow from the model picker.
+const addModelKey = "a"
+
+// removeModelKey removes the highlighted model from the list.
+const removeModelKey = "d"
+
 // modelPickerTitle builds the picker title, including the tagging hint only
 // when tier callbacks are wired.
 func (m *Model) modelPickerTitle() string {
-	if m.TagModelTierFn == nil && m.ClearModelTierFn == nil {
-		return "Select a model  (↑↓ · enter · esc)"
+	hint := "↑↓ · enter"
+	if m.TagModelTierFn != nil || m.ClearModelTierFn != nil {
+		hint += " · h=high l=low u=untag"
 	}
-	return "Select a model  (↑↓ · enter · h=high l=low u=untag · esc)"
+	if m.AddModelProviderListFn != nil {
+		hint += " · a=add"
+	}
+	if m.RemoveSavedModelFn != nil {
+		hint += " · d=remove"
+	}
+	return "Models  (" + hint + " · esc)"
 }
 
 // applyModelSelection switches the active model via SelectModelFn (which rebuilds
@@ -91,6 +99,12 @@ func (m *Model) applyModelSelection(modelID string) tea.Cmd {
 	// user naming the underlying model.
 	if tier := m.configuredTier(modelID); tier != "" {
 		return m.applyModelTier(tier)
+	}
+	// The list spans providers, so resolve the choice's owning provider. When it
+	// differs from the active one, switch provider instead of treating the ID as
+	// a model on the current provider.
+	if provider := m.providerForModel(modelID); provider != "" && provider != m.activeProvider {
+		return m.applyProviderModelSelection(provider, modelID)
 	}
 	if m.SelectModelFn != nil {
 		if err := m.SelectModelFn(modelID); err != nil {
@@ -170,34 +184,58 @@ func modelPickerTierKey(key string) (string, bool) {
 
 // applyModelTierTag tags the highlighted model as tier (or clears its tags when
 // untag is true), then reopens the picker so the tag change is visible. The
-// active provider is tagged because the picker lists the active provider's
-// models; tiers store the provider explicitly so they stay resolvable after a
-// provider switch.
+// picker key carries the owning provider, so tagging works for any row even
+// though the list spans providers.
 func (m *Model) applyModelTierTag(tier string, untag bool) {
-	modelID, ok := m.picker.Highlighted()
+	key, ok := m.picker.Highlighted()
 	if !ok {
 		return
 	}
-	if modelID == OpenRouterBrowseModelID {
-		m.pushNotification("Browse is not a model; highlight a model to tag.")
+	provider, modelID, ok := splitModelPickerKey(key)
+	if !ok {
 		return
 	}
 	if untag {
-		m.untagModelTiers(modelID)
-		m.reopenModelPickerAt(modelID)
+		m.untagModelTiers(provider, modelID)
+		m.reopenModelPickerAt(key)
 		return
 	}
 	if m.TagModelTierFn == nil {
 		m.pushNotification("Model tier tagging is not available.")
 		return
 	}
-	if err := m.TagModelTierFn(tier, modelID); err != nil {
+	if err := m.TagModelTierFn(tier, provider, modelID); err != nil {
 		m.pushNotification(fmt.Sprintf("⚠ could not tag tier %s: %v", tier, err))
-		m.reopenModelPickerAt(modelID)
+		m.reopenModelPickerAt(key)
 		return
 	}
 	m.pushNotification(fmt.Sprintf("Tagged %s as tier %s", modelID, tier))
-	m.reopenModelPickerAt(modelID)
+	m.reopenModelPickerAt(key)
+}
+
+// modelPickerKeySep separates the provider from the model ID in a picker item
+// key. The list spans providers, so the ID alone is ambiguous; a unit separator
+// cannot appear in a provider name or a model ID.
+const modelPickerKeySep = "\x1f"
+
+// modelPickerKey builds the picker's stable per-row key.
+func modelPickerKey(provider, modelID string) string {
+	if provider == "" {
+		return modelID
+	}
+	return provider + modelPickerKeySep + modelID
+}
+
+// splitModelPickerKey reverses modelPickerKey. A key without a separator is
+// reported with an empty provider so unqualified callers still work.
+func splitModelPickerKey(key string) (provider, modelID string, ok bool) {
+	if key == "" {
+		return "", "", false
+	}
+	if i := strings.Index(key, modelPickerKeySep); i >= 0 {
+		return key[:i], key[i+len(modelPickerKeySep):], true
+	}
+	return "", key, true
 }
 
 // reopenModelPickerAt rebuilds the picker (so a changed tag is visible) with
@@ -209,16 +247,16 @@ func (m *Model) reopenModelPickerAt(modelID string) {
 	m.picker.Select(modelID)
 }
 
-// untagModelTiers clears every configured tier currently pointing at modelID.
-func (m *Model) untagModelTiers(modelID string) {
+// untagModelTiers clears every configured tier currently pointing at
+// provider/modelID.
+func (m *Model) untagModelTiers(provider, modelID string) {
 	if m.ClearModelTierFn == nil {
 		m.pushNotification("Model tier tagging is not available.")
 		return
 	}
-	choices := m.currentModelChoices()
 	cleared := 0
-	for _, c := range choices {
-		if c.ID != modelID {
+	for _, c := range m.currentModelChoices() {
+		if c.ID != modelID || (c.Provider != "" && c.Provider != provider) {
 			continue
 		}
 		for _, tier := range c.Tiers {
@@ -282,4 +320,35 @@ func (m *Model) applyThinkingLevel(level string) tea.Cmd {
 	}
 	m.pushNotification("Thinking level set to: " + level)
 	return nil
+}
+
+// providerForModel returns the provider owning the given model ID in the current
+// list, or "" when it cannot be determined.
+func (m *Model) providerForModel(modelID string) string {
+	for _, c := range m.currentModelChoices() {
+		if c.ID == modelID && c.Provider != "" {
+			return c.Provider
+		}
+	}
+	return ""
+}
+
+// applyProviderModelSelection switches to a model on a different provider than
+// the active one, via SelectProviderModelFn, then updates the status display.
+func (m *Model) applyProviderModelSelection(provider, modelID string) tea.Cmd {
+	if m.SelectProviderModelFn == nil {
+		m.pushNotification(fmt.Sprintf("Switching to %s is not available.", provider))
+		return nil
+	}
+	if err := m.SelectProviderModelFn(provider, modelID); err != nil {
+		if errors.Is(err, ErrContextWindowRequired) {
+			m.openContextWindowPrompt(provider, modelID)
+			return nil
+		}
+		m.pushNotification(fmt.Sprintf("⚠ could not switch to %s: %v", provider, err))
+		return nil
+	}
+	cmd := m.setActiveProviderModel(provider, modelID)
+	m.pushNotification(fmt.Sprintf("Model set to: %s (%s)", modelID, provider))
+	return cmd
 }

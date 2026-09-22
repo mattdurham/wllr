@@ -17,7 +17,7 @@ func newTierTestModel(calls *[]string) Model {
 	m.height = 24
 	m.activeModel = "m1"
 	tiers := map[string][]string{}
-	m.TagModelTierFn = func(tier, modelID string) error {
+	m.TagModelTierFn = func(tier, _ string, modelID string) error {
 		tiers[modelID] = []string{tier}
 		*calls = append(*calls, "tag:"+tier+"/"+modelID)
 		return nil
@@ -114,7 +114,7 @@ func TestModelPickerKeepsCursorWhenScrolled(t *testing.T) {
 		items = append(items, ModelChoice{ID: fmt.Sprintf("m%d", i), Name: "M", ContextWindowKnown: true})
 	}
 	m.ModelListFn = func() []ModelChoice { return items }
-	m.TagModelTierFn = func(string, string) error { return nil }
+	m.TagModelTierFn = func(string, string, string) error { return nil }
 
 	m, _ = callUpdate(m, showModelPickerMsg{})
 	for i := 0; i < 29; i++ {
@@ -212,5 +212,42 @@ func TestTierNameShadowsModelID(t *testing.T) {
 	}
 	if m.activeModel != "tier-target" {
 		t.Errorf("activeModel = %q, want tier-target", m.activeModel)
+	}
+}
+
+// TestModelPicker_EnterSelectsWithoutTagging pins the key routing: Enter must
+// select the highlighted model (dispatching the follow-up command), and must
+// never be interpreted as a tier-tag key.
+func TestModelPicker_EnterSelectsWithoutTagging(t *testing.T) {
+	m := newTestModel()
+	m.width, m.height = 80, 24
+	m.activeModel, m.activeProvider = "m1", "local"
+	tagged := 0
+	m.TagModelTierFn = func(string, string, string) error { tagged++; return nil }
+	selected := ""
+	m.SelectModelFn = func(id string) error { selected = id; return nil }
+	m.ModelListFn = func() []ModelChoice {
+		return []ModelChoice{
+			{ID: "m1", Name: "One", ContextWindowKnown: true, Provider: "local"},
+			{ID: "m2", Name: "Two", ContextWindowKnown: true, Provider: "local"},
+		}
+	}
+
+	m, cmd := callUpdate(m, CommandMsg{Name: "models"})
+	m, _ = callUpdate(m, cmd())
+	if !m.picker.IsActive() {
+		t.Fatal("picker not active")
+	}
+	// Enter only: must select, never tag. Binding the returned command and
+	// feeding its message back mirrors what the bubbletea loop does.
+	m, cmd = callUpdate(m, tea.KeyPressMsg{Code: tea.KeyEnter})
+	if cmd != nil {
+		m, _ = callUpdate(m, cmd())
+	}
+	if tagged != 0 {
+		t.Fatalf("Enter triggered %d tag(s)", tagged)
+	}
+	if selected != "m1" {
+		t.Fatalf("selected = %q, want m1", selected)
 	}
 }

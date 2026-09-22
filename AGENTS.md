@@ -104,6 +104,10 @@ Useful config/env entry points:
 - `WLLR_CONFIG`
 - `WLLR_EXTENSIONS_DIR`
 - `WLLR_COMPACT_THRESHOLD`
+- `wllr.saved_models` — catalog models (anthropic/openai/gemini) added through
+  the `a` key in `/models`; local and OpenRouter keep their own stores.
+- `wllr.openrouter_speed` — OpenRouter provider-routing preference (`floor`,
+  `nitro`, or `price`/`throughput`/`latency`), set by `/openrouter-speed`.
 - `wllr.model_tiers` — named cost/thinking tiers (`high`, `low`, or custom)
   pairing a provider, model, and optional thinking level. Tag them in `/models`
   with `h`/`l`, then reference by name (`/model high`, a skill's `model:`

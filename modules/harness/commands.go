@@ -94,7 +94,7 @@ func registerBuiltins(r *Registry) {
 	})
 
 	r.Register(Command{
-		Name:    "model",
+		Name:    commandModel,
 		Desc:    "Select the active model or apply a tier (/model <name|tier>; /model tiers lists tags)",
 		Instant: true,
 		Handler: func(args []string) tea.Cmd {
@@ -109,7 +109,7 @@ func registerBuiltins(r *Registry) {
 	})
 
 	r.Register(Command{
-		Name:    "models",
+		Name:    commandModels,
 		Desc:    "Select the active model or tag tiers (alias for /model)",
 		Instant: true,
 		Handler: func(args []string) tea.Cmd {
@@ -132,6 +132,18 @@ func registerBuiltins(r *Registry) {
 				return func() tea.Msg { return showThinkingPickerMsg{} }
 			}
 			return func() tea.Msg { return setThinkingMsg{Level: args[0]} }
+		},
+	})
+
+	r.Register(Command{
+		Name:    "openrouter-speed",
+		Desc:    "Set the OpenRouter provider routing preference (opens a picker; /openrouter-speed <option> sets directly)",
+		Instant: true,
+		Handler: func(args []string) tea.Cmd {
+			if len(args) == 0 {
+				return func() tea.Msg { return showOpenRouterSpeedPickerMsg{} }
+			}
+			return func() tea.Msg { return setOpenRouterSpeedMsg{ID: args[0]} }
 		},
 	})
 

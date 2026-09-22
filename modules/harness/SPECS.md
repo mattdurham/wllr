@@ -299,7 +299,7 @@ type Command struct {
 
 **Invariant:** Commands with `Instant=true` bypass the "queuing..." UI indicator in `updateActions`. When a `CommandMsg` for an Instant command arrives, `updateActions` invokes `cmd.Handler(msg.Args)` directly without setting `statusBar.statuses["stream"] = "queuing…"`.
 
-**Invariant:** All built-in commands (`/help`, `/clear`, `/reload`, `/model`, `/models`, `/thinking`, `/login`, `/status`, `/tools`) have `Instant=true`. The zero value of `Command.Instant` is `false`. (The `/prompt` command is registered without `Instant=true` because it executes synchronously in the update loop via `ShowModalMsg`, not via WASM dispatch — it is intentionally excluded from the instant list.)
+**Invariant:** All built-in commands (`/help`, `/clear`, `/reload`, `/model`, `/models`, `/thinking`, `/openrouter-speed`, `/login`, `/status`, `/tools`) have `Instant=true`. The zero value of `Command.Instant` is `false`. (The `/prompt` command is registered without `Instant=true` because it executes synchronously in the update loop via `ShowModalMsg`, not via WASM dispatch — it is intentionally excluded from the instant list.)
 
 **Invariant:** Extension-registered commands set `Instant` from the `instant bool` parameter passed to `UIBridge.RegisterCommand(name, desc, instant bool)`. When `instant=true`, the flag is stored on the `Command`, suppressing the "queuing…" status. The handler still routes through `dispatchOnCommandMsg` → `EventOnCommand`.
 
@@ -313,6 +313,7 @@ Built-in commands registered at startup:
 | `/model`        | true    | No arg → `showModelPickerMsg{}` (opens model picker); `/model <name|tier>` → `setModelMsg{Model: name}`; `/model tiers` → `showModelTiersMsg{}` |
 | `/models`       | true    | Alias for `/model`; no args opens the picker (which tags tiers with h/l/u), `<name|tier>` → `setModelMsg`, `tiers` → `showModelTiersMsg` |
 | `/thinking`     | true    | No arg → `showThinkingPickerMsg{}` (opens level picker); `/thinking <level>` → `setThinkingMsg{Level: level}` |
+| `/openrouter-speed` | true | No arg → `showOpenRouterSpeedPickerMsg{}` (opens routing picker); `/openrouter-speed <option>` → `setOpenRouterSpeedMsg{ID: option}` |
 | `/login`        | true    | No args → `showLoginProviderPickerMsg{}` (opens the install-style provider wizard); `/login auth` → `loginMsg{}` (authenticates the active provider) |
 | `/status`       | true    | Emits `StatusUpdateMsg{Key: "_override", Value: text}`       |
 | `/tools`        | true    | Emits `showToolsMsg{}`                                       |
@@ -537,6 +538,24 @@ Startup uses the same required context-window prompt when `SetPendingContextWind
 
 **Invariant:** `SelectModelFn` errors surface as a notification and leave the active model unchanged; `activeModel`/status update only after a successful switch.
 
+### OpenRouter Provider Routing Hooks
+
+`harness.Model` exposes three callback fields for `/openrouter-speed` (set by
+`cmd/main.go`):
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `SpeedListFn` | `func() []SpeedChoice` | Selectable routing options. Nil ⇒ not wired; empty ⇒ unavailable for this provider. |
+| `SpeedUnavailableReasonFn` | `func() string` | Why the list is empty (e.g. not OpenRouter), for the notification. |
+| `SelectSpeedFn` | `func(id string) error` | Applies a routing preference and persists it. Nil ⇒ display-only. |
+
+**Invariant:** an empty `SpeedListFn` result must not open an empty picker; the
+unavailable reason is surfaced instead. Routing is presented only while
+OpenRouter is active, and `SetSpeedDisplay` mirrors the persisted value into the
+`speed` status key without applying it (used at startup and on provider switch).
+
+Flow mirrors the model picker: `/thinking` with no arg emits `showThinkingPickerMsg`
+
 **Model-tier tagging.** While the model picker is open (`modelPickerCallback`), the harness intercepts `h`/`l`/`u` before `PickerView.HandleKey`: `h`/`l` tag the highlighted model as the reserved `high`/`low` tier via `TagModelTierFn` and `u` clears its tags via `ClearModelTierFn`. The picker reopens after each tag so the change is visible; `ModelChoice.Tiers` renders as `tier: <names>` in the sublabel. Tagging is skipped for the OpenRouter "Browse" pseudo-entry, which is not a model.
 
 **Invariant:** a `setModelMsg` whose `Model` matches a configured tier name (case-insensitive) applies the tier via `ApplyModelTierFn` and never calls `SelectModelFn`; a non-tier value resolves as a model ID. `ApplyModelTierFn` returns the resulting provider and model so the status/`EventModelChanged` reflect a cross-provider tier switch.
@@ -551,6 +570,42 @@ Startup uses the same required context-window prompt when `SetPendingContextWind
 | `ThinkingStatusFn` | `func() string` | Status-bar value for the unsupported case (a level ID, or `"unavailable"`). Used when `ThinkingListFn` returns empty. Nil ⇒ no status update. |
 | `ThinkingUnsupportedReasonFn` | `func() string` | User-facing reason for the "not available" message (the model + why, e.g. "the endpoint says it cannot reason"). Empty ⇒ generic message. |
 | `SelectThinkingFn` | `func(levelID string) error` | Applies a reasoning level: sets the main agent's provider options (`Agent.SetProviderOptions`) and persists the choice. Nil ⇒ display-only. |
+
+### On-Demand Provider List and Add-Model Flow
+
+`/models` lists **every model the user has configured**, across providers —
+local `local_models` entries, pinned OpenRouter models, and saved catalog models
+(`wllr.saved_models`) for anthropic/openai/gemini. It is not a per-provider
+catalog view; the `a` key adds a model, which is the route to a model the user
+does not have yet.
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `ModelListFn` | `func() []ModelChoice` | Returns every configured model. Each choice carries its owning `Provider` and an `Active` flag. |
+| `SelectProviderModelFn` | `func(provider, modelID string) error` | Switches to a model on another provider, rebuilding that provider. |
+| `AddModelProviderListFn` | `func() []ProviderChoice` | Providers offered by the `a` flow. Nil ⇒ adding is unavailable. |
+| `ProviderReadyFn` | `func(provider string) bool` | Whether a provider is authenticated/configured enough to list models. |
+| `CatalogModelsFn` | `func(provider string) []ModelChoice` | A provider's addable models. |
+| `SaveCatalogModelFn` | `func(provider string, choice ModelChoice) (string, error)` | Persists an added model and makes it active. |
+| `RemoveSavedModelFn` | `func(provider, modelID string) error` | Removes a model from the persisted list. |
+
+**Invariant:** a picker row's ID is provider-qualified
+(`provider + "\x1f" + modelID`) because the list spans providers and a bare
+model ID is ambiguous. Selection decodes the key: a qualified key routes through
+`SelectProviderModelFn`, a bare key keeps the same-provider path. Tier tagging
+uses the decoded provider, so tagging works for any row regardless of which
+provider is active.
+
+**Invariant:** `a` opens the provider picker. A provider that is not ready
+(`ProviderReadyFn` false) is routed through login first, with the provider
+recorded in `pendingAddModelProvider`; `resumePendingAddModel` re-enters the
+wizard once the provider becomes usable. Local always opens its endpoint wizard
+(adding a local model means pointing at an endpoint, not authenticating).
+
+**Invariant:** the active model is never removable, and a model carrying tier
+tags is not removable until its tags are cleared — removing either would leave
+the config pointing at a model the list no longer offers, or a tier whose target
+is gone.
 
 Flow mirrors the model picker: `/thinking` with no arg emits `showThinkingPickerMsg` → `openThinkingPicker()` builds items from `ThinkingListFn` (marking the current level) and opens the picker with the reserved `thinkingPickerCallback` (`"__wllr:thinking"`). **Three states:** (1) non-empty list → picker popup; (2) empty list with a reason → `"Thinking not available — <reason>"` notification and the `ThinkingStatusFn` status (renders `unavailable` in the status bar); (3) empty list without a reason → the generic `"No thinking levels available."` notification. On selection, `updateKeyPressPicker` emits `setThinkingMsg{Level: id}`; the handler calls `applyThinkingSelection` → `SelectThinkingFn` + `activeThinking`/status (`think` key) update. `/thinking <level>` skips the picker. `SetActiveThinking(level)` reflects a persisted level at startup without changing agent options. `SetThinkingForModel(levelID)` re-applies after a model/provider switch (empty level clears the display); `SetThinkingUnavailable()` marks a non-reasoning model in the status.
 

@@ -126,6 +126,38 @@ type Model struct {
 	// active provider. Nil means model selection is unavailable. Set by cmd/main.go.
 	ModelListFn func() []ModelChoice
 
+	// SelectProviderModelFn switches to a model owned by a provider other than
+	// the active one, rebuilding the pool's provider. It persists the choice and
+	// applies the target provider's thinking default. Returns the resolved model
+	// ID and ErrContextWindowRequired when the model needs a window first.
+	// Nil means cross-provider switching is unavailable. Set by cmd/main.go.
+	SelectProviderModelFn func(provider, modelID string) error
+
+	// AddModelProviderListFn returns the providers offered by the `a` add-model
+	// flow. Nil means adding models is unavailable. Set by cmd/main.go.
+	AddModelProviderListFn func() []ProviderChoice
+
+	// ProviderReadyFn reports whether a provider is authenticated/configured
+	// enough to list its models. Used by the add-model flow to route an
+	// unconfigured provider into login instead of an empty model list.
+	// Nil means readiness is unknown and the provider is assumed ready.
+	ProviderReadyFn func(provider string) bool
+
+	// CatalogModelsFn lists the models a provider can add, for the add-model
+	// flow (a static catalog for anthropic/openai/gemini, the live catalog for
+	// openrouter, the configured/discovered endpoint list for local).
+	// Nil means the provider cannot be listed. Set by cmd/main.go.
+	CatalogModelsFn func(provider string) []ModelChoice
+
+	// SaveCatalogModelFn adds a catalog model to the persisted /models list and
+	// makes it the active model. Returns the resolved model ID.
+	// Nil means catalog models cannot be saved. Set by cmd/main.go.
+	SaveCatalogModelFn func(provider string, choice ModelChoice) (string, error)
+
+	// RemoveSavedModelFn removes a model from the persisted /models list.
+	// Nil means removal is unavailable. Set by cmd/main.go.
+	RemoveSavedModelFn func(provider, modelID string) error
+
 	// OpenRouter setup callbacks fetch the remote catalog, store an API key,
 	// and pin a selected model in the regular model picker.
 	HasOpenRouterKeyFn      func() bool
@@ -155,7 +187,9 @@ type Model struct {
 
 	// TagModelTierFn tags the active provider's model as a named cost/thinking
 	// tier and persists it. Nil means tagging is unavailable. Set by cmd/main.go.
-	TagModelTierFn func(tier, modelID string) error
+	// provider is the provider that owns modelID: the model list spans
+	// providers, so tagging cannot assume the active one.
+	TagModelTierFn func(tier, provider, modelID string) error
 
 	// ClearModelTierFn removes a tier tag. Nil means tagging is unavailable.
 	// Set by cmd/main.go.
@@ -197,6 +231,22 @@ type Model struct {
 	// agent's provider options and persists the choice. Returns an error if the
 	// switch fails. Nil means selection is display-only. Set by cmd/main.go.
 	SelectThinkingFn func(levelID string) error
+
+	// SpeedListFn returns the selectable OpenRouter provider-routing
+	// preferences. Nil means the command is not wired; an empty list means it is
+	// unavailable for the current provider (SpeedUnavailableReasonFn explains
+	// why). Set by cmd/main.go.
+	SpeedListFn func() []SpeedChoice
+
+	// SpeedUnavailableReasonFn explains why no routing options are available
+	// (e.g. the active provider is not OpenRouter). Empty yields the generic
+	// message. Set by cmd/main.go.
+	SpeedUnavailableReasonFn func() string
+
+	// SelectSpeedFn applies a routing preference: it updates the main agent's
+	// provider options and persists the choice. Nil means display-only.
+	// Set by cmd/main.go.
+	SelectSpeedFn func(id string) error
 
 	// SetThinkingLevelFn applies a provider-agnostic thinking level (e.g.
 	// "high") for the active provider/model, resolving it to that provider's
@@ -255,6 +305,7 @@ type Model struct {
 	activeModel          string
 	activeProvider       string
 	activeThinking       string
+	activeSpeed          string
 	authPromptProvider   string
 	pendingAuthProvider  string
 	oauthCaptureProvider string
@@ -266,6 +317,13 @@ type Model struct {
 	localSetupManualStep  int
 	localSetupManualEntry LocalModelEntry
 	openRouterCatalog     []OpenRouterModelChoice
+	// catalogPickerProvider is the provider the add-model catalog picker is
+	// listing, so a selection can be attributed to it.
+	catalogPickerProvider string
+	// pendingAddModelProvider remembers the provider the add-model flow was
+	// adding when it had to detour through login, so the wizard resumes after
+	// authentication instead of dropping the user back to the picker.
+	pendingAddModelProvider string
 
 	// Modal overlay state (non-empty when modal is open).
 	modalContent string
@@ -926,6 +984,18 @@ func (m Model) updateKeyPressPicker(kp tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 			m.applyModelTierTag(tier, kp.String() == modelPickerUntagKey)
 			return m, nil, true
 		}
+		if kp.String() == addModelKey {
+			m.openAddModelProviderPicker()
+			return m, nil, true
+		}
+		if kp.String() == removeModelKey {
+			if key, ok := m.picker.Highlighted(); ok {
+				provider, modelID, _ := splitModelPickerKey(key)
+				m.removeModelFromList(provider, modelID)
+				m.reopenModelPickerAt(key)
+			}
+			return m, nil, true
+		}
 	}
 	selected, id, cancelled := m.picker.HandleKey(kp)
 	if cancelled {
@@ -940,13 +1010,22 @@ func (m Model) updateKeyPressPicker(kp tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		// Core-owned pickers (callback prefixed "__wllr:") route to a harness
 		// handler instead of dispatching EventOnCommand to a WASM extension.
 		if callback == modelPickerCallback {
-			if id == OpenRouterBrowseModelID {
-				return m, func() tea.Msg { return showOpenRouterBrowseMsg{} }, true
+			// The list spans providers, so the key encodes the owner. A
+			// provider-qualified key routes through the cross-provider switch;
+			// a bare key stays a same-provider model (or tier) selection.
+			if provider, modelID, ok := splitModelPickerKey(id); ok && provider != "" {
+				return m, func() tea.Msg {
+					return setProviderModelMsg{Provider: provider, Model: modelID}
+				}, true
 			}
-			return m, func() tea.Msg { return setModelMsg{Model: id} }, true
+			_, modelID, _ := splitModelPickerKey(id)
+			return m, func() tea.Msg { return setModelMsg{Model: modelID} }, true
 		}
 		if callback == thinkingPickerCallback {
 			return m, func() tea.Msg { return setThinkingMsg{Level: id} }, true
+		}
+		if callback == openRouterSpeedPickerCallback {
+			return m, func() tea.Msg { return setOpenRouterSpeedMsg{ID: id} }, true
 		}
 		if callback == authPickerCallback {
 			provider := m.authPromptProvider
@@ -972,6 +1051,13 @@ func (m Model) updateKeyPressPicker(kp tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		}
 		if callback == openRouterCatalogCallback {
 			return m, func() tea.Msg { return openRouterModelPickedMsg{ID: id} }, true
+		}
+		if callback == addModelPickerCallback {
+			return m, func() tea.Msg { return addModelProviderSelectedMsg{Provider: id} }, true
+		}
+		if callback == catalogModelPickerCallback {
+			provider := m.catalogPickerProvider
+			return m, func() tea.Msg { return catalogModelPickedMsg{Provider: provider, Choice: ModelChoice{ID: id}} }, true
 		}
 		extHost := m.extHost
 		return m, func() tea.Msg {
@@ -1275,8 +1361,22 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 		}
 		return m, cmd, true
 
+	case setProviderModelMsg:
+		if msg.Provider == m.activeProvider {
+			return m, m.applyModelSelection(msg.Model), true
+		}
+		return m, m.applyProviderModelSelection(msg.Provider, msg.Model), true
+
 	case setThinkingMsg:
 		m.applyThinkingSelection(msg.Level)
+		return m, nil, true
+
+	case showOpenRouterSpeedPickerMsg:
+		m.openOpenRouterSpeedPicker()
+		return m, nil, true
+
+	case setOpenRouterSpeedMsg:
+		m.applySpeedSelection(msg.ID)
 		return m, nil, true
 
 	case showThinkingPickerMsg:
@@ -1303,11 +1403,11 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 		return m, m.beginOAuthLogin(msg.Provider), true
 
 	case recordAuthMsg:
-		m.applyAuthChoice(msg.Method)
+		cmd := m.applyAuthChoiceCmd(msg.Method)
 		if msg.Method == authMethodOAuth {
 			return m, m.beginOAuthLogin(msg.Provider), true
 		}
-		return m, nil, true
+		return m, cmd, true
 
 	case loginMsg:
 		if m.activeProvider == providerOpenRouter {
@@ -1332,6 +1432,20 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 		m.showModelTiers()
 		return m, nil, true
 
+	case showCatalogModelPickerMsg:
+		m.openCatalogModelPicker(msg.Provider)
+		return m, nil, true
+
+	case addModelProviderSelectedMsg:
+		return m, m.addModelForProvider(msg.Provider), true
+
+	case catalogModelPickedMsg:
+		return m, m.applyCatalogModelPick(msg.Provider, msg.Choice.ID), true
+
+	case resumeAddModelMsg:
+		m.pendingAddModelProvider = msg.Provider
+		return m, m.resumePendingAddModel(), true
+
 	case showOpenRouterSetupMsg:
 		if m.HasOpenRouterKeyFn != nil && m.HasOpenRouterKeyFn() {
 			return m, m.fetchOpenRouterCatalogCmd(), true
@@ -1351,13 +1465,6 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 		}
 		if err := m.SaveOpenRouterKeyFn(strings.TrimSpace(msg.Key)); err != nil {
 			m.pushNotification(fmt.Sprintf("⚠ could not save OpenRouter key: %v", err))
-			return m, nil, true
-		}
-		return m, m.fetchOpenRouterCatalogCmd(), true
-
-	case showOpenRouterBrowseMsg:
-		if m.HasOpenRouterKeyFn == nil || !m.HasOpenRouterKeyFn() {
-			m.openOpenRouterKeyPrompt()
 			return m, nil, true
 		}
 		return m, m.fetchOpenRouterCatalogCmd(), true

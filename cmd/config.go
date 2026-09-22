@@ -45,6 +45,13 @@ type Config struct {
 	// OpenRouterModels are the models pinned in the /models picker.
 	OpenRouterModels []openRouterModelConfig
 
+	// SavedModels are the catalog-provider models (anthropic, openai, gemini)
+	// the user has added to the /models list. Providers with their own model
+	// store keep using it: local_models for local, openrouter_models for
+	// OpenRouter. This covers the providers whose model list is otherwise a
+	// static catalog and so had no way to be pinned.
+	SavedModels []savedModelConfig
+
 	// LocalContextWindow is the context window for the selected configured local
 	// model.
 	LocalContextWindow int64
@@ -90,6 +97,7 @@ func LoadConfig() (*Config, error) {
 		ContextWindowConfigured: contextWindow > 0,
 		LocalModels:             fileCfg.LocalModels,
 		OpenRouterModels:        fileCfg.OpenRouterModels,
+		SavedModels:             fileCfg.SavedModels,
 	}
 
 	// Provider precedence: env WLLR_PROVIDER > persisted selection
@@ -150,6 +158,7 @@ type wllrSettings struct {
 	Model            string                  `json:"model"`
 	LocalModels      []localModelConfig      `json:"local_models"`
 	OpenRouterModels []openRouterModelConfig `json:"openrouter_models"`
+	SavedModels      []savedModelConfig      `json:"saved_models"`
 	RawContextWindow json.RawMessage         `json:"context_window"`
 	ContextWindows   map[string]int64        `json:"context_windows"`
 	ModelTiers       map[string]modelTier    `json:"model_tiers"`
