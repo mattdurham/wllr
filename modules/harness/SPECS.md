@@ -310,8 +310,8 @@ Built-in commands registered at startup:
 | `/help`         | true    | Shows `ShowModalMsg{Text: commands.HelpText()}`              |
 | `/clear`        | true    | Emits `clearMsg{}`                                           |
 | `/reload`       | true    | Emits `ReloadMsg{}`                                          |
-| `/model`        | true    | No arg → `showModelPickerMsg{}` (opens model picker); `/model <name>` → `setModelMsg{Model: name}` |
-| `/models`       | true    | Alias for `/model` with no args; opens model picker |
+| `/model`        | true    | No arg → `showModelPickerMsg{}` (opens model picker); `/model <name|tier>` → `setModelMsg{Model: name}`; `/model tiers` → `showModelTiersMsg{}` |
+| `/models`       | true    | Alias for `/model`; no args opens the picker (which tags tiers with h/l/u), `<name|tier>` → `setModelMsg`, `tiers` → `showModelTiersMsg` |
 | `/thinking`     | true    | No arg → `showThinkingPickerMsg{}` (opens level picker); `/thinking <level>` → `setThinkingMsg{Level: level}` |
 | `/login`        | true    | No args → `showLoginProviderPickerMsg{}` (opens the install-style provider wizard); `/login auth` → `loginMsg{}` (authenticates the active provider) |
 | `/status`       | true    | Emits `StatusUpdateMsg{Key: "_override", Value: text}`       |
@@ -515,6 +515,12 @@ Returns the current set of registered tools from `extHost.RegisteredTools()` as 
 | `ModelListFn` | `func() []ModelChoice` | Returns the active provider's selectable models for the picker. Nil ⇒ selection unavailable. |
 | `SelectModelFn` | `func(modelID string) error` | Switches the active model: rebuilds the main agent's LM (`Agent.SetModel`), updates the context window, and persists the choice. Nil ⇒ display-only. |
 | `SetContextWindowFn` | `func(provider, modelID string, tokens int64) error` | Persists and applies a user-entered context window after unknown-model selection. |
+| `TierNamesFn` | `func() []string` | Returns configured model-tier names. Used to resolve a tier name in `setModelMsg` and to render tier tags. Nil ⇒ tiers unavailable. |
+| `TagModelTierFn` | `func(tier, modelID string) error` | Tags the highlighted model as a named tier from the picker. Nil ⇒ tagging unavailable. |
+| `ClearModelTierFn` | `func(tier string) error` | Clears a tier tag. Nil ⇒ tagging unavailable. |
+| `ModelTierLabelsFn` | `func() []string` | Returns `"name: target"` lines for `/model tiers`. Nil ⇒ tiers unavailable. |
+| `ApplyModelTierFn` | `func(tier string) (provider, modelID string, err error)` | Applies a tier, switching provider when the tier names a different one. Nil ⇒ tier application unavailable. |
+| `SetThinkingLevelFn` | `func(level string) error` | Applies a provider-agnostic thinking level (e.g. `"high"`) for the active provider/model. Used when a skill declares `thinking:`. |
 
 Flow: `/model` with no arg (or `/models`) emits `showModelPickerMsg` → `openModelPicker()` builds picker items from `ModelListFn` (marking the current model and indicating missing context metadata) and opens the picker with the reserved `modelPickerCallback` (`"__wllr:model"`). On selection, `updateKeyPressPicker` recognises the core callback and emits `setModelMsg{Model: id}` (rather than dispatching `EventOnCommand` to a WASM extension); the `setModelMsg` handler calls `applyModelSelection` → `SelectModelFn` + status update + `EventModelChanged`. If selection returns `ErrContextWindowRequired`, a required core text input collects a positive token count, calls `SetContextWindowFn`, and retries selection. `/model <name>` follows the same validation path.
 
@@ -530,6 +536,10 @@ Startup uses the same required context-window prompt when `SetPendingContextWind
 **Invariant:** picker callbacks prefixed `"__wllr:"` are core-owned and route to harness handlers, never to `EventOnCommand`. Extension command names cannot collide (the prefix is reserved). Reserved callbacks: `"__wllr:model"`, `"__wllr:thinking"`.
 
 **Invariant:** `SelectModelFn` errors surface as a notification and leave the active model unchanged; `activeModel`/status update only after a successful switch.
+
+**Model-tier tagging.** While the model picker is open (`modelPickerCallback`), the harness intercepts `h`/`l`/`u` before `PickerView.HandleKey`: `h`/`l` tag the highlighted model as the reserved `high`/`low` tier via `TagModelTierFn` and `u` clears its tags via `ClearModelTierFn`. The picker reopens after each tag so the change is visible; `ModelChoice.Tiers` renders as `tier: <names>` in the sublabel. Tagging is skipped for the OpenRouter "Browse" pseudo-entry, which is not a model.
+
+**Invariant:** a `setModelMsg` whose `Model` matches a configured tier name (case-insensitive) applies the tier via `ApplyModelTierFn` and never calls `SelectModelFn`; a non-tier value resolves as a model ID. `ApplyModelTierFn` returns the resulting provider and model so the status/`EventModelChanged` reflect a cross-provider tier switch.
 
 ### Thinking-Level Hooks
 

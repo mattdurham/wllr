@@ -161,6 +161,11 @@ const (
 	MethodSetSystemPrompt = "set_system_prompt"
 	// MethodAppendSystemPrompt appends text to the existing system prompt.
 	MethodAppendSystemPrompt = "append_system_prompt"
+	// MethodSetModel switches the main agent's active model. The value may be a
+	// model ID or a configured model-tier name (e.g. "high"); tiers switch
+	// provider as needed. Used by the skills extension to apply a skill's
+	// frontmatter `model:` on activation.
+	MethodSetModel = "set_model"
 	// MethodExec executes a shell command on the host. Requires PermExec.
 	MethodExec = "exec"
 	// MethodReadFile reads the contents of a file on the host filesystem.

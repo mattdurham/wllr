@@ -34,6 +34,7 @@ func (b *sceneUIBridge) RegisterCommand(string, string, bool) error         { re
 func (b *sceneUIBridge) RegisterTool(sdk.Tool) error                        { return nil }
 func (b *sceneUIBridge) SetSystemPrompt(string)                             {}
 func (b *sceneUIBridge) AppendSystemPrompt(string)                          {}
+func (b *sceneUIBridge) SetModel(string, string) error                      { return nil }
 func (b *sceneUIBridge) ResetHistory([]sdk.Message) error                   { return nil }
 func (b *sceneUIBridge) ToolResult(string, string, bool)                    {}
 func (b *sceneUIBridge) AfterToolCall(string, string, string, string, bool) {}

@@ -32,6 +32,7 @@ func (b *testUIBridge) RegisterTool(tool sdk.Tool) error {
 }
 func (b *testUIBridge) SetSystemPrompt(_ string)           {}
 func (b *testUIBridge) AppendSystemPrompt(_ string)        {}
+func (b *testUIBridge) SetModel(_, _ string) error         { return nil }
 func (b *testUIBridge) ResetHistory(_ []sdk.Message) error { return nil }
 func (b *testUIBridge) ToolResult(id, result string, isError bool) {
 	if b.onToolResult != nil {

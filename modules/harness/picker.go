@@ -54,6 +54,59 @@ func (p *PickerView) Close() {
 // IsActive reports whether the picker overlay is currently shown.
 func (p *PickerView) IsActive() bool { return p.active }
 
+// Select highlights the item with the given ID, if present, and returns
+// whether it was found. Navigation is clamped so the highlight stays visible.
+// Used to preserve the cursor across a reopen (e.g. the model picker reopening
+// after a tier tag) so consecutive edits apply to the same row.
+func (p *PickerView) Select(id string) bool {
+	if id == "" {
+		return false
+	}
+	count := len(p.Items)
+	if p.searchable {
+		count = len(p.filtered)
+	}
+	for i := 0; i < count; i++ {
+		idx := i
+		if p.searchable {
+			idx = p.filtered[i]
+		}
+		if p.Items[idx].ID != id {
+			continue
+		}
+		p.selectedIdx = i
+		visible := p.visibleRows()
+		if p.selectedIdx < p.scrollOffset {
+			p.scrollOffset = p.selectedIdx
+		}
+		if p.selectedIdx >= p.scrollOffset+visible {
+			p.scrollOffset = p.selectedIdx - visible + 1
+		}
+		return true
+	}
+	return false
+}
+
+// Highlighted returns the ID of the currently highlighted item and whether one
+// exists. Searchable pickers resolve through the filtered index set.
+func (p *PickerView) Highlighted() (string, bool) {
+	count := len(p.Items)
+	if p.searchable {
+		count = len(p.filtered)
+	}
+	if count == 0 || p.selectedIdx < 0 || p.selectedIdx >= count {
+		return "", false
+	}
+	idx := p.selectedIdx
+	if p.searchable {
+		idx = p.filtered[idx]
+	}
+	if idx < 0 || idx >= len(p.Items) {
+		return "", false
+	}
+	return p.Items[idx].ID, true
+}
+
 // SetSize updates the dimensions available to the picker.
 func (p *PickerView) SetSize(width, height int) {
 	p.width = width

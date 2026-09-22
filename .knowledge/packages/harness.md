@@ -24,7 +24,7 @@ is swappable.
 # Key Interfaces
 
 - `Renderer` (`modules/harness/renderer.go`) — the TUI decoupling seam (AppendToken, ShowModal, ShowPicker, SetStatus, ResetHistory, …)
-- `Model` — the Bubble Tea model; callback fields wire core features: `ModelListFn`/`SelectModelFn`, `ThinkingListFn`/`SelectThinkingFn`, `RecordAuthFn`/`BeginOAuthFn`/`CompleteOAuthFn`, `OnUserMessage`/`OnMessageEnd`
+- `Model` — the Bubble Tea model; callback fields wire core features: `ModelListFn`/`SelectModelFn`, tier callbacks (`TierNamesFn`, `TagModelTierFn`, `ClearModelTierFn`, `ModelTierLabelsFn`, `ApplyModelTierFn`, `SetThinkingLevelFn`), `ThinkingListFn`/`SelectThinkingFn`, `RecordAuthFn`/`BeginOAuthFn`/`CompleteOAuthFn`, `OnUserMessage`/`OnMessageEnd`
 - `Command` / `Registry` — slash-command dispatch (Instant fast path)
 - `SceneRenderer` — the scene-graph area renderer fed by `UIBridge`
 
@@ -32,6 +32,7 @@ is swappable.
 
 - [TUI decoupled behind Renderer + UIBridge](../decisions/tui-decoupled-behind-renderer.md)
 - [Reserved __wllr: picker-callback prefix](../decisions/reserved-picker-callback-prefix.md)
+- [Model tiers](../decisions/model-tiers.md)
 
 # Dependencies
 

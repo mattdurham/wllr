@@ -15,6 +15,13 @@ Package `agent` manages sub-agents and teams for the bob harness. Each `Agent` w
 - The `providerName` and `defaultModelName` fields are read/written under `p.mu`.
 - The `baseSystemPrompt` field has its own `baseSystemPromptMu sync.RWMutex`, separate from the main `mu`, because it can be updated independently without touching agent/team maps.
 - The optional `modelFactory` is read and written under `p.mu`; it receives the current provider and resolves model and endpoint requests for sub-agent creation. The factory is invoked even when the endpoint is empty, so it can select a configured endpoint from the model name.
+- The optional `subagentResolver` is read/written under `p.mu`. `ResolveSubagentModel`
+  consults it only when the spawn request omits a model name; an explicit model
+  always resolves through `modelFactory` first. The resolver returns both the
+  `LanguageModel` and the resolved model name so context-window lookup and
+  compaction sizing use the model the sub-agent actually runs. This lets the
+  host apply a configured working tier that may live on a different provider
+  than the session model, which the single-provider `modelFactory` cannot express.
 - Individual `Agent` fields (inbox, cancel, history, onToken, onDone, onToolCall, onTurnStart, toolsFn, systemPrompt) carry their own per-field mutexes. Callers never need to hold pool-level locks when calling agent methods.
 
 **Invariant:** No pool operation blocks on an in-progress agent turn. Pool operations that call `a.Cancel()` release `p.mu` before invoking Cancel to avoid lock ordering issues.
@@ -499,7 +506,10 @@ type SpawnOpts struct {
 - `InheritBasePrompt`: if nil or pointing to `true`, the agent inherits the pool's accumulated base system prompt (AGENTS.md, tool list, action rules). Set to `false` for focused sub-agents that don't need the full orchestration context.
 - `SystemPrompt`: the agent-specific prompt appended after the base prompt on every turn.
 - `Name`: human-readable display name for the agent; used in logs and agent list responses.
-- `ModelName`: overrides the pool's default model name for context-window sizing during compaction. If empty, the pool default is used.
+- `ModelName`: overrides the pool's default model name for context-window sizing
+  during compaction. If empty, `ResolveSubagentModel` consults the pool's
+  `subagentResolver` (host-installed, e.g. the configured `low` model tier) and
+  falls back to the pool default when no resolver is installed.
 - `ContextWindow`: resolved input context window in tokens for this model. A positive value is required for production turns; zero means metadata resolution is incomplete.
 - `Tools`: static tool list. If `SetToolsFn` is called on the agent after spawn, the dynamic function takes priority over `Tools`.
 - `ThinkingBudget`: enables extended thinking with the given token budget. Only supported on Anthropic models. Zero means disabled.

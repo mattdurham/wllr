@@ -153,10 +153,12 @@ Output:
 
 Input: `name`, `system_prompt`, and `prompt` strings are required. Optional
 fields are `model` and `endpoint` strings, plus `thinking_budget` integer.
-An empty model uses the current session model. For the local provider, a named
-model must exist in `wllr.local_models`; its configured `base_url` and `api_key`
-are used automatically. If `endpoint` is supplied, it must match that model's
-configured `base_url`. Other providers reject `endpoint`.
+An empty model uses the configured working tier (`low`) when one is tagged in
+`/models`, otherwise the current session model. A named model always wins over
+the tier default. For the local provider, a named model must exist in
+`wllr.local_models`; its configured `base_url` and `api_key` are used
+automatically. If `endpoint` is supplied, it must match that model's configured
+`base_url`. Other providers reject `endpoint`.
 
 Output: JSON object `{ "agent_id": string, "status": "created" }`. Fatal
 errors include missing `name` or host spawn failure.

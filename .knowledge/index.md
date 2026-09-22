@@ -14,7 +14,7 @@ This is the project knowledge catalog. Start here, then navigate to the relevant
 ## Sections
 
 * [Packages](packages/index.md) — Core Go modules + built-in and installed extensions (20 concepts)
-* [Decisions](decisions/index.md) — Cross-cutting architectural decisions (8)
+* [Decisions](decisions/index.md) — Cross-cutting architectural decisions (9)
 * [Patterns](patterns/index.md) — Reusable patterns: WASM authoring, scene-graph UI, pickers, interceptors (4)
 * [Playbooks](playbooks/index.md) — Pre-commit checks, adding an extension (2)
 * [Features](features/index.md) — Planned work (2)

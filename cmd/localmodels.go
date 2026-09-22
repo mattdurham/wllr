@@ -147,6 +147,10 @@ func discoverLocalModels(ctx context.Context, cfg *Config) []modelInfo {
 			if model.ContextWindow == 0 {
 				model.ContextWindow = contextWindowFromOpenAIModel(remote)
 			}
+			// Record the endpoint-advertised window so lookups for this model
+			// (picker entries, tier resolution) can resolve it without a
+			// context.Context or a second network round-trip.
+			rememberDiscoveredLocalWindow(id, contextWindowFromOpenAIModel(remote))
 			if model.LocalBaseURL == "" {
 				model.LocalBaseURL = baseURL
 				model.LocalAPIKey = local.APIKey
@@ -163,6 +167,46 @@ func discoverLocalModels(ctx context.Context, cfg *Config) []modelInfo {
 	}
 	sort.Slice(discovered, func(i, j int) bool { return discovered[i].ID < discovered[j].ID })
 	return discovered
+}
+
+// localWindowState caches endpoint-discovered context windows per local model.
+// contextWindowForSelection needs a window for models other than the currently
+// selected one (the /models picker and tier resolution), and those lookups have
+// no context.Context to run discovery with — so discovery records what it found
+// here, and window lookups read it without another network round-trip.
+var localWindowState struct {
+	mu      sync.Mutex
+	windows map[string]int64
+}
+
+// rememberDiscoveredLocalWindow records an endpoint-advertised window for a
+// local model id.
+func rememberDiscoveredLocalWindow(id string, window int64) {
+	if id == "" || window <= 0 {
+		return
+	}
+	localWindowState.mu.Lock()
+	if localWindowState.windows == nil {
+		localWindowState.windows = make(map[string]int64)
+	}
+	localWindowState.windows[id] = window
+	localWindowState.mu.Unlock()
+}
+
+// discoveredLocalWindow returns the last endpoint-advertised window for a local
+// model id, or 0 when none was discovered this session.
+func discoveredLocalWindow(id string) int64 {
+	localWindowState.mu.Lock()
+	window := localWindowState.windows[id]
+	localWindowState.mu.Unlock()
+	return window
+}
+
+// resetLocalWindowState clears the discovery cache. Used by tests for isolation.
+func resetLocalWindowState() {
+	localWindowState.mu.Lock()
+	localWindowState.windows = nil
+	localWindowState.mu.Unlock()
 }
 
 // contextWindowFromOpenAIModel resolves a context-window token count from an
@@ -494,6 +538,27 @@ func probeLocalModelsEndpoint(
 		return nil, "", queryLocalModelsBadResponse
 	}
 	return nil, "", queryLocalModelsUnreachable
+}
+
+// resolveLocalModelWindow returns the context window for a configured local
+// model, running endpoint discovery once when no window is known yet. Unlike a
+// plain contextWindowForSelection call this can populate the per-model window
+// cache, so a model that only advertises its window over the endpoint (a tier
+// target the user never selected) still resolves its own window.
+func resolveLocalModelWindow(ctx context.Context, cfg *Config, id string) int64 {
+	if window := contextWindowForSelection(providerLocal, id, cfg); window > 0 {
+		return window
+	}
+	if cfg == nil || id == "" {
+		return 0
+	}
+	for _, model := range localModels(ctx, cfg) {
+		if model.ID == id {
+			rememberDiscoveredLocalWindow(id, model.ContextWindow)
+			break
+		}
+	}
+	return contextWindowForSelection(providerLocal, id, cfg)
 }
 
 func applyLocalModelChoice(ctx context.Context, cfg *Config, id string) bool {

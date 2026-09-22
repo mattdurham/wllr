@@ -58,7 +58,11 @@ module's defensive fallback is the honest state for "window unknown".
   `applyLocalModelChoice`.
 - `cmd/config.go` — `applyLocalModelSelection` (LoadConfig path).
 - `cmd/modelcatalog.go` — `contextWindowForSelection` (picker path: explicit
-  override, config entry, pool-resolved window, catalog).
+  override, config entry, per-model discovered window, session window *only
+  for the selected model*, catalog).
+- `cmd/localmodels.go` — `discoverLocalModels` records each model's
+  endpoint window; `resolveLocalModelWindow` resolves a non-selected local
+  model's window on demand.
 - `cmd/main.go` — startup `pool.SetContextWindow(cfg.ContextWindow)` plus the
   picker's unconditional apply.
 

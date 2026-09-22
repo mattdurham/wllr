@@ -104,6 +104,11 @@ Useful config/env entry points:
 - `WLLR_CONFIG`
 - `WLLR_EXTENSIONS_DIR`
 - `WLLR_COMPACT_THRESHOLD`
+- `wllr.model_tiers` — named cost/thinking tiers (`high`, `low`, or custom)
+  pairing a provider, model, and optional thinking level. Tag them in `/models`
+  with `h`/`l`, then reference by name (`/model high`, a skill's `model:`
+  frontmatter, or the sub-agent default). See
+  [.knowledge/decisions/model-tiers.md](.knowledge/decisions/model-tiers.md).
 
 ## Built-In Components
 

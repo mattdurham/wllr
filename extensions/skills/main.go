@@ -159,6 +159,14 @@ func onSessionStart() {
 			if v := fm["category"]; v != "" {
 				meta.Category = v
 			}
+			// model/thinking select the model a skill runs on. model may be a
+			// tier name tagged in /models (e.g. "high") or an exact model ID.
+			if v := strings.TrimSpace(fm["model"]); v != "" && v != "default" {
+				meta.Model = v
+			}
+			if v := strings.TrimSpace(fm["thinking"]); v != "" {
+				meta.Thinking = v
+			}
 		}
 		if meta.Description == "" {
 			meta.Description = cmdName + " skill"
@@ -243,6 +251,10 @@ func activateSkill(entry skillEntry) {
 	//   </skill>
 	// The LLM reads the skill instructions from the block and acts accordingly.
 	// This preserves the AGENTS.md system prompt rather than replacing it.
+	//
+	// The model switch happens before the skill body is sent so the first turn
+	// that reads the skill already runs on the requested model.
+	applySkillModel(entry)
 	baseDir := filepath.Dir(entry.filePath)
 	skillMsg := "<skill name=\"" + entry.meta.Name + "\" location=\"" + entry.filePath + "\">\n" +
 		"References are relative to " + baseDir + ".\n\n" +
@@ -253,6 +265,28 @@ func activateSkill(entry skillEntry) {
 	}
 	skillsCall("send_message", msgParams{Role: "user", Content: skillMsg})
 	Logf(1, "skills: activated skill %s", entry.meta.Name)
+}
+
+// applySkillModel applies the skill's `model:` frontmatter, if present. model
+// may be a model-tier name tagged in /models (e.g. "high") or an exact model
+// ID; the host resolves tiers and switches provider when the tier names one.
+// A failure is logged and the skill still runs on the current model, so a
+// stale tag never blocks activating a skill.
+func applySkillModel(entry skillEntry) {
+	model := strings.TrimSpace(entry.meta.Model)
+	thinking := strings.TrimSpace(entry.meta.Thinking)
+	if model == "" && thinking == "" {
+		return
+	}
+	params := map[string]string{}
+	if model != "" {
+		params["model"] = model
+	}
+	if thinking != "" {
+		params["thinking"] = thinking
+	}
+	skillsCall("set_model", params)
+	Logf(1, "skills: requested model %q thinking %q for skill %s", model, thinking, entry.meta.Name)
 }
 
 // ─── Tool handlers ────────────────────────────────────────────────────────────
@@ -281,60 +315,6 @@ func handleGetSkill(input json.RawMessage) (string, bool) {
 		return "get_skill: skill not found: " + req.Name, true
 	}
 	return entry.body, false
-}
-
-// ─── Frontmatter parsing ──────────────────────────────────────────────────────
-
-// parseFrontmatter parses a SKILL.md file and returns the frontmatter fields
-// as a map[string]string plus the body text (everything after the closing ---).
-// If the file does not start with ---, returns nil map and the full content as body.
-func parseFrontmatter(content string) (map[string]string, string) {
-	if !strings.HasPrefix(content, "---\n") {
-		return nil, strings.TrimSpace(content)
-	}
-
-	// Find the closing ---
-	rest := content[4:] // skip opening ---\n
-	end := strings.Index(rest, "\n---\n")
-	if end < 0 {
-		// Check for trailing --- at end of file.
-		trimmed := strings.TrimRight(rest, "\n")
-		if strings.HasSuffix(trimmed, "\n---") {
-			idx := strings.LastIndex(rest, "\n---")
-			fm := parseFrontmatterFields(rest[:idx])
-			return fm, ""
-		}
-		return nil, strings.TrimSpace(content)
-	}
-
-	fmText := rest[:end]
-	body := strings.TrimSpace(rest[end+5:]) // skip \n---\n
-	fm := parseFrontmatterFields(fmText)
-	return fm, body
-}
-
-// parseFrontmatterFields parses simple "key: value" lines into a map.
-// Quoted string values have surrounding quotes stripped.
-func parseFrontmatterFields(text string) map[string]string {
-	fields := make(map[string]string)
-	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		idx := strings.Index(line, ":")
-		if idx < 0 {
-			continue
-		}
-		key := strings.TrimSpace(line[:idx])
-		val := strings.TrimSpace(line[idx+1:])
-		// Strip surrounding quotes from string values.
-		if len(val) >= 2 && val[0] == '"' && val[len(val)-1] == '"' {
-			val = val[1 : len(val)-1]
-		}
-		fields[key] = val
-	}
-	return fields
 }
 
 func main() {}

@@ -58,6 +58,7 @@ func (e *earlyUIBridge) RegisterCommand(name, desc string, instant bool) error {
 func (e *earlyUIBridge) RegisterTool(_ sdk.Tool) error             { return nil }
 func (e *earlyUIBridge) SetSystemPrompt(_ string)                  {}
 func (e *earlyUIBridge) AppendSystemPrompt(_ string)               {}
+func (e *earlyUIBridge) SetModel(_, _ string) error                { return nil }
 func (e *earlyUIBridge) ResetHistory(_ []sdk.Message) error        { return nil }
 func (e *earlyUIBridge) ToolResult(_, _ string, _ bool)            {}
 func (e *earlyUIBridge) AfterToolCall(_, _, _, _ string, _ bool)   {}
@@ -438,6 +439,21 @@ func (b *harnessUIBridge) SendMessage(msg sdk.Message) {
 		sm.Display = skillDisplayName(msg.Content)
 	}
 	b.prog.Send(sm)
+}
+
+// SetModel queues a model switch on the bubbletea goroutine. value may be a
+// model ID or a configured model-tier name; the core setModelMsg handler
+// resolves tiers and applies the switch. Errors surface as notifications, so
+// the returned error is always nil (the switch is asynchronous by design).
+func (b *harnessUIBridge) SetModel(value, thinking string) error {
+	if b.prog == nil {
+		return nil
+	}
+	// A thinking-only request still goes through setModelMsg with an empty
+	// model; applyModelSelection treats an empty model as a no-op, so only the
+	// thinking level changes.
+	b.prog.Send(setModelMsg{Model: value, Thinking: thinking})
+	return nil
 }
 
 func (b *harnessUIBridge) RegisterCommand(name, desc string, instant bool) error {

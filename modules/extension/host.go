@@ -460,6 +460,9 @@ func (h *Host) buildDispatch() map[string]func(ctx context.Context, ext *Extensi
 		sdk.MethodSetSystemPrompt: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleSetSystemPrompt(req)
 		},
+		sdk.MethodSetModel: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleSetModel(req)
+		},
 		sdk.MethodAppendSystemPrompt: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleAppendSystemPrompt(req)
 		},
@@ -820,6 +823,26 @@ func (h *Host) handleSetSystemPrompt(req sdk.HostCallRequest) sdk.HostCallRespon
 		return sdk.HostCallResponse{Error: fmt.Sprintf("set_system_prompt: %v", err)}
 	}
 	h.uiBridge().SetSystemPrompt(params.Prompt)
+	return sdk.HostCallResponse{}
+}
+
+func (h *Host) handleSetModel(req sdk.HostCallRequest) sdk.HostCallResponse {
+	if h.uiBridge() == nil {
+		return sdk.HostCallResponse{Error: "set_model: not supported by host"}
+	}
+	var params struct {
+		Model    string `json:"model"`
+		Thinking string `json:"thinking"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return sdk.HostCallResponse{Error: fmt.Sprintf("set_model: %v", err)}
+	}
+	if strings.TrimSpace(params.Model) == "" && strings.TrimSpace(params.Thinking) == "" {
+		return sdk.HostCallResponse{Error: "set_model: model or thinking is required"}
+	}
+	if err := h.uiBridge().SetModel(params.Model, params.Thinking); err != nil {
+		return sdk.HostCallResponse{Error: fmt.Sprintf("set_model: %v", err)}
+	}
 	return sdk.HostCallResponse{}
 }
 

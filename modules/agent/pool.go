@@ -697,3 +697,39 @@ func (p *AgentPool) CloseTeam(ctx context.Context, id string) error {
 	p.mu.Unlock()
 	return t.Close(ctx)
 }
+
+// SetSubagentResolver installs the resolver used to choose a sub-agent's model
+// when a spawn request omits one. It returns the language model and the
+// resolved model name. A nil resolver restores the pool's default-model path.
+// The resolver may select a provider different from the session's, which the
+// pool's single-provider factory cannot express.
+func (p *AgentPool) SetSubagentResolver(
+	fn func(ctx context.Context, requested string) (fantasy.LanguageModel, string, error),
+) {
+	p.mu.Lock()
+	p.subagentResolver = fn
+	p.mu.Unlock()
+}
+
+// ResolveSubagentModel returns the language model for a spawn request. A
+// non-empty requested name is resolved through the normal factory path so an
+// explicit model always wins. An empty name consults the subagent resolver when
+// one is installed (e.g. a configured working tier), and otherwise falls back
+// to the pool's default model.
+func (p *AgentPool) ResolveSubagentModel(
+	ctx context.Context,
+	requested, endpoint string,
+) (fantasy.LanguageModel, string, error) {
+	if requested != "" {
+		lm, err := p.LanguageModelForModelAtEndpoint(ctx, requested, endpoint)
+		return lm, requested, err
+	}
+	p.mu.RLock()
+	resolver := p.subagentResolver
+	p.mu.RUnlock()
+	if resolver != nil {
+		return resolver(ctx, requested)
+	}
+	lm, err := p.LanguageModelForModelAtEndpoint(ctx, "", endpoint)
+	return lm, p.DefaultModelName(), err
+}

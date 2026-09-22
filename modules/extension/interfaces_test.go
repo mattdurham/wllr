@@ -100,6 +100,7 @@ func (f *fakeUIBridge) RegisterCommand(_, _ string, _ bool) error             { 
 func (f *fakeUIBridge) RegisterTool(_ sdk.Tool) error                         { return nil }
 func (f *fakeUIBridge) SetSystemPrompt(_ string)                              {}
 func (f *fakeUIBridge) AppendSystemPrompt(_ string)                           {}
+func (f *fakeUIBridge) SetModel(_, _ string) error                            { return nil }
 func (f *fakeUIBridge) ResetHistory(_ []sdk.Message) error                    { return nil }
 func (f *fakeUIBridge) ToolResult(_, _ string, _ bool)                        {}
 func (f *fakeUIBridge) AfterToolCall(_, _, _, _ string, _ bool)               {}

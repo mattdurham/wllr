@@ -149,6 +149,28 @@ type Model struct {
 	// Set by cmd/main.go.
 	SelectModelFn func(modelID string) error
 
+	// TierNamesFn returns the configured model-tier names for the /model picker
+	// hint and /model tiers. Nil means tiers are not wired. Set by cmd/main.go.
+	TierNamesFn func() []string
+
+	// TagModelTierFn tags the active provider's model as a named cost/thinking
+	// tier and persists it. Nil means tagging is unavailable. Set by cmd/main.go.
+	TagModelTierFn func(tier, modelID string) error
+
+	// ClearModelTierFn removes a tier tag. Nil means tagging is unavailable.
+	// Set by cmd/main.go.
+	ClearModelTierFn func(tier string) error
+
+	// ModelTierLabelsFn returns the configured tiers as "name: target" strings
+	// for /model tiers output. Nil means tiers are not wired. Set by cmd/main.go.
+	ModelTierLabelsFn func() []string
+
+	// ApplyModelTierFn applies a named tier: it switches provider and model as
+	// needed, sets the tier's thinking level, and persists the selection.
+	// Returns the resulting provider and model ID. Nil means tier application
+	// is unavailable. Set by cmd/main.go.
+	ApplyModelTierFn func(tier string) (provider, modelID string, err error)
+
 	// SetContextWindowFn persists and applies a user-supplied context window for
 	// one provider/model after the required context prompt.
 	SetContextWindowFn func(provider, modelID string, tokens int64) error
@@ -175,6 +197,12 @@ type Model struct {
 	// agent's provider options and persists the choice. Returns an error if the
 	// switch fails. Nil means selection is display-only. Set by cmd/main.go.
 	SelectThinkingFn func(levelID string) error
+
+	// SetThinkingLevelFn applies a provider-agnostic thinking level (e.g.
+	// "high") for the active provider/model, resolving it to that provider's
+	// mode ID. Used when a skill declares a thinking level alongside its model.
+	// Nil means level application is unavailable. Set by cmd/main.go.
+	SetThinkingLevelFn func(level string) error
 
 	// RecordAuthFn records the user's chosen auth method for a provider (from the
 	// first-run auth prompt), so the prompt is not shown again. Returns an error
@@ -889,6 +917,16 @@ func (m Model) requestTurnCancel() {
 // updateKeyPressPicker handles key events when the picker overlay is active.
 func (m Model) updateKeyPressPicker(kp tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	callback := m.picker.Callback
+	// The model picker doubles as the tier-tagging surface: while it is open,
+	// h/l tag the highlighted model as the high/low tier and u clears its tag.
+	// These keys are handled before PickerView.HandleKey because the picker
+	// would otherwise consume them as navigation/no-ops.
+	if callback == modelPickerCallback {
+		if tier, ok := modelPickerTierKey(kp.String()); ok {
+			m.applyModelTierTag(tier, kp.String() == modelPickerUntagKey)
+			return m, nil, true
+		}
+	}
 	selected, id, cancelled := m.picker.HandleKey(kp)
 	if cancelled {
 		m.picker.Close()
@@ -1229,7 +1267,13 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 		return m, nil, true
 
 	case setModelMsg:
-		return m, m.applyModelSelection(msg.Model), true
+		cmd := m.applyModelSelection(msg.Model)
+		// A skill may declare a thinking level alongside its model; apply it
+		// after the model switch so it targets the new provider/model.
+		if msg.Thinking != "" {
+			cmd = tea.Batch(cmd, m.applyThinkingLevel(msg.Thinking))
+		}
+		return m, cmd, true
 
 	case setThinkingMsg:
 		m.applyThinkingSelection(msg.Level)
@@ -1282,6 +1326,10 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 
 	case showModelPickerMsg:
 		m.openModelPicker()
+		return m, nil, true
+
+	case showModelTiersMsg:
+		m.showModelTiers()
 		return m, nil, true
 
 	case showOpenRouterSetupMsg:

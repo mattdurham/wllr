@@ -192,6 +192,7 @@ type testUIBridge struct {
 	onRegisterTool    func(tool sdk.Tool) error
 	onSetSystemPrompt func(prompt string)
 	onAppendSP        func(text string)
+	onSetModel        func(value, thinking string) error
 	onResetHistory    func(messages []sdk.Message) error
 	onToolResult      func(toolCallID, result string, isError bool)
 	onAfterToolCall   func(agentID, toolCallID, toolName, result string, isError bool)
@@ -275,6 +276,13 @@ func (b *testUIBridge) AppendSystemPrompt(text string) {
 	if b.onAppendSP != nil {
 		b.onAppendSP(text)
 	}
+}
+
+func (b *testUIBridge) SetModel(value, thinking string) error {
+	if b.onSetModel != nil {
+		return b.onSetModel(value, thinking)
+	}
+	return nil
 }
 
 func (b *testUIBridge) ResetHistory(messages []sdk.Message) error {

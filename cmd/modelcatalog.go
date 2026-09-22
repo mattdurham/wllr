@@ -490,15 +490,30 @@ func contextWindowForSelection(provider, id string, cfg *Config) int64 {
 	}
 	if provider == providerLocal && cfg != nil {
 		// Explicit local_models config is authoritative over anything the
-		// endpoint exposes; the pool-facing resolved window (what
-		// rememberLocalModel applied) is the next source of truth.
+		// endpoint exposes.
 		if lm, ok := cfg.localModelByID(id); ok && lm.ContextWindow > 0 {
 			return lm.ContextWindow
 		}
-		if cfg.ContextWindow > 0 {
-			return cfg.ContextWindow
+		// A window the endpoint advertised for this specific model, recorded
+		// during discovery. This is model-specific, so it is authoritative over
+		// the session-scoped fields below — which may still describe the model
+		// that was selected before a tier switch.
+		if discovered := discoveredLocalWindow(id); discovered > 0 {
+			return discovered
 		}
-		return cfg.LocalContextWindow
+		// cfg.ContextWindow / cfg.LocalContextWindow are session-scoped: they
+		// describe the *currently selected* local model only (set by
+		// rememberLocalModel when that model was chosen). Using them for any
+		// other model would leak the session window onto it — so a tier or a
+		// pre-selection picker entry would report the wrong window. They are
+		// valid here only when id is that selected model.
+		if id == cfg.Model {
+			if cfg.ContextWindow > 0 {
+				return cfg.ContextWindow
+			}
+			return cfg.LocalContextWindow
+		}
+		return 0
 	}
 	if provider == providerOpenRouter && cfg != nil {
 		if model, ok := cfg.openRouterModel(id); ok {

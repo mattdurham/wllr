@@ -363,6 +363,31 @@ No response result.
 
 ---
 
+### `set_model`
+
+Switch the main agent's active model. `model` may be an exact model ID or a
+configured **model-tier** name (see [Model tiers](providers.md#model-tiers)).
+Applying a tier may switch the active provider. `thinking` is an optional
+provider-agnostic reasoning level (`off`, `minimal`, `low`, `medium`, `high`,
+`xhigh`) applied after the model switch. At least one of the two is required.
+
+The bundled `skills` extension uses this to apply a skill's frontmatter
+`model:`/`thinking:` on activation. Failures are returned in the response
+`error` field and the caller is expected to continue without the switch.
+
+```json
+{"method": "set_model", "params": {"model": "high", "thinking": "high"}}
+```
+
+| Field      | Type   | Description                                             |
+|------------|--------|---------------------------------------------------------|
+| `model`    | string | Model ID or model-tier name. Optional if `thinking` set. |
+| `thinking` | string | Optional reasoning level applied after the switch.       |
+
+No response result on success.
+
+---
+
 ### `set_status`
 
 Set a keyed value readable via `get_status_info`. The bundled `statusline`

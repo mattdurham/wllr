@@ -56,13 +56,12 @@ func (s *Spawner) Spawn(ctx context.Context, req extension.SpawnRequest) error {
 		return fmt.Errorf("no agent pool")
 	}
 
-	lm, err := s.pool.LanguageModelForModelAtEndpoint(ctx, req.ModelName, req.Endpoint)
+	// An explicit model always wins. An omitted model consults the pool's
+	// sub-agent resolver, which the host uses to apply the configured working
+	// model tier (possibly on a different provider).
+	lm, modelName, err := s.pool.ResolveSubagentModel(ctx, req.ModelName, req.Endpoint)
 	if err != nil {
 		return fmt.Errorf("spawn agent %q: get model %q: %w", req.ID, req.ModelName, err)
-	}
-	modelName := req.ModelName
-	if modelName == "" {
-		modelName = s.pool.DefaultModelName()
 	}
 	contextWindow := s.pool.ContextWindowForModel(modelName)
 

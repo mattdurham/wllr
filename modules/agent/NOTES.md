@@ -495,3 +495,36 @@ appended tool results provides a timely trigger.
 the turn. A failure stops the turn before the next provider call. The summary
 is used within the current tool loop; the ordinary history recording path
 continues to own future-turn context.
+
+---
+
+## 34. Host-installed sub-agent model resolver
+
+*Added: 2026-09-21*
+
+**Decision:** Add `AgentPool.SetSubagentResolver` and `ResolveSubagentModel`. A
+spawn request that names a model resolves through the existing `modelFactory`;
+only an omitted model consults the resolver. The resolver returns both the
+`LanguageModel` and the resolved model name.
+
+**Rationale:** Model tiers (issue #43) let the user tag a cheap "low" model on a
+different provider than the session model, so sub-agents can run cheaply while
+the main agent plans on an expensive one. The pool's `modelFactory` is bound to
+the session provider and cannot build a model from another provider; expressing
+cross-provider defaulting inside the pool would mean importing provider
+construction into `modules/agent`. Returning the resolved name alongside the
+model is required because `Spawner` derives the compaction window from the model
+name — a tier model must size against its own window, not the session model's.
+
+**Consequence:** Explicit `model` in `create_agent` keeps winning (checked
+before the resolver), and a nil resolver reproduces the previous default-model
+behavior exactly. The host (`cmd`) owns tier lookup and provider construction,
+so the agent package stays free of provider-specific imports.
+
+*(Follow-up, same day.)* The host rejects a tier model with no resolvable
+context window instead of spawning it: `Spawner` sizes compaction from the
+resolved model name, so a window-less tier model would stream with incomplete
+metadata. A local tier model resolves its window through
+`resolveLocalModelWindow`, which runs endpoint discovery when the window is not
+already known; a sub-agent tier that still cannot resolve falls back to the
+session model rather than failing every spawn.

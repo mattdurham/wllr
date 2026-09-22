@@ -95,11 +95,14 @@ func registerBuiltins(r *Registry) {
 
 	r.Register(Command{
 		Name:    "model",
-		Desc:    "Select the active model (opens a picker; /model <name> sets directly)",
+		Desc:    "Select the active model or apply a tier (/model <name|tier>; /model tiers lists tags)",
 		Instant: true,
 		Handler: func(args []string) tea.Cmd {
 			if len(args) == 0 {
 				return func() tea.Msg { return showModelPickerMsg{} }
+			}
+			if args[0] == "tiers" {
+				return func() tea.Msg { return showModelTiersMsg{} }
 			}
 			return func() tea.Msg { return setModelMsg{Model: args[0]} }
 		},
@@ -107,9 +110,15 @@ func registerBuiltins(r *Registry) {
 
 	r.Register(Command{
 		Name:    "models",
-		Desc:    "Select the active model (alias for /model)",
+		Desc:    "Select the active model or tag tiers (alias for /model)",
 		Instant: true,
-		Handler: func(_ []string) tea.Cmd {
+		Handler: func(args []string) tea.Cmd {
+			if len(args) > 0 {
+				if args[0] == "tiers" {
+					return func() tea.Msg { return showModelTiersMsg{} }
+				}
+				return func() tea.Msg { return setModelMsg{Model: args[0]} }
+			}
 			return func() tea.Msg { return showModelPickerMsg{} }
 		},
 	})

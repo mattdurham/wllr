@@ -23,13 +23,14 @@ coordination.
 # Key Interfaces
 
 - `Agent` — one conversation; `Submit`, `SetModel`, `SetProviderOptions`, `ModelName`, mailbox `Deliver`
-- `AgentPool` — `Spawn`, `Get`, `Close`, `LanguageModelForModel`, `SetProvider`, `SetDefaultModelName`, `SetContextWindow`
+- `AgentPool` — `Spawn`, `Get`, `Close`, `LanguageModelForModel`, `ResolveSubagentModel` (explicit model → factory; omitted → host-installed `SetSubagentResolver`, else the default model), `SetProvider`, `SetDefaultModelName`, `SetContextWindow`
 - `Spawner` — sub-agent construction (applies Anthropic thinking budget)
 - `ProviderRequestInterceptor` — the before_provider_request reroute hook
 
 # Cross-cutting Decisions
 
 - [Single lmMu guards runtime model/provider-option swaps](../decisions/single-lmmu-runtime-swaps.md)
+- [Model tiers](../decisions/model-tiers.md)
 
 # Dependencies
 

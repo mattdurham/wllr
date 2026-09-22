@@ -686,3 +686,27 @@ search mode so other picker behavior remains unchanged. The everyday `/models`
 picker contains only persisted OpenRouter choices plus a Browse entry; the
 remote catalog is fetched when Browse is chosen. This avoids loading a large
 remote list on every ordinary model switch.
+
+## Model tiers surfaced through /models (2026-09-21)
+
+Issue #43. The model picker is the natural place to tag a model because the
+user is already looking at the model list. Rather than adding a second picker or
+a config-Editing command, the picker consumes `h`/`l`/`u` while it is open: the
+keys are intercepted before `PickerView.HandleKey`, which would otherwise treat
+them as no-ops (the picker is not searchable). Tagging reopens the picker so the
+new `tier:` sublabel is immediately visible.
+
+`tierHighName`/`tierLowName` are duplicated in the harness rather than imported
+from `cmd`, because `cmd` imports `harness` and the dependency cannot run the
+other way. The harness owns the keys that produce these names, so the two
+constants are a UI contract rather than a config one; `cmd` remains the sole
+owner of tier storage and resolution.
+
+A `setModelMsg` carrying a tier name is routed to `ApplyModelTierFn` instead of
+`SelectModelFn`, so `/model high` works without the user knowing the underlying
+model. `ApplyModelTierFn` returns the provider too, because a tier may point at
+a different provider and the status bar and `EventModelChanged` must reflect it.
+
+The `/model tiers` listing is a plain modal rather than a picker: it is
+read-only output, and the existing modal already handles long lists with
+scrolling.

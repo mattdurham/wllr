@@ -4,7 +4,34 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+
+	yaml "gopkg.in/yaml.v3"
 )
+
+// readConfigGroups parses the config file into a map of group name to a JSON
+// object. The file is documented as YAML, so a YAML parse is authoritative;
+// JSON is a YAML subset and is handled by the same path. A missing or malformed
+// file yields an empty map so callers can proceed (and overwrite) rather than
+// losing the write entirely.
+func readConfigGroups() map[string]json.RawMessage {
+	all := map[string]json.RawMessage{}
+	data, err := os.ReadFile(configPath())
+	if err != nil {
+		return all
+	}
+	var nodes map[string]any
+	if err := yaml.Unmarshal(data, &nodes); err != nil {
+		return all
+	}
+	for group, value := range nodes {
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			continue
+		}
+		all[group] = encoded
+	}
+	return all
+}
 
 // The persisted model selection lives in the shared config file
 // (~/.config/wllr/config.json) under the "wllr" group as {"model": "<id>"}.
@@ -84,13 +111,8 @@ func saveLocalModels(models []localModelConfig) error {
 // Best-effort: returns an error the caller may surface, but never partially
 // writes (temp-file + rename).
 func saveWllrRawField(field string, value any) error {
-	path := configPath()
-
 	// Read the whole config object (or start empty).
-	all := map[string]json.RawMessage{}
-	if data, err := os.ReadFile(path); err == nil {
-		_ = json.Unmarshal(data, &all) // tolerate a malformed file by overwriting
-	}
+	all := readConfigGroups()
 
 	// Merge the field into the "wllr" group, preserving its other keys.
 	group := map[string]json.RawMessage{}
@@ -108,12 +130,45 @@ func saveWllrRawField(field string, value any) error {
 	}
 	all[wllrConfigGroup] = gv
 
+	return writeWllrConfig(all)
+}
+
+// removeWllrField deletes a field from the "wllr" group of the config file,
+// preserving all other groups and keys. Removing an absent field is a no-op
+// that leaves the file untouched. Best-effort: returns an error the caller may
+// surface, but never partially writes (temp-file + rename).
+func removeWllrField(field string) error {
+	all := readConfigGroups()
+
+	group := map[string]json.RawMessage{}
+	if existing, ok := all[wllrConfigGroup]; ok {
+		_ = json.Unmarshal(existing, &group)
+	}
+	if _, ok := group[field]; !ok {
+		return nil
+	}
+	delete(group, field)
+	gv, err := json.Marshal(group)
+	if err != nil {
+		return err
+	}
+	all[wllrConfigGroup] = gv
+
+	return writeWllrConfig(all)
+}
+
+// writeWllrConfig serializes the config object and atomically replaces the
+// config file. Temp file + rename keeps readers from observing a partial file.
+// The output is JSON, which is a YAML subset, so the file stays parseable as
+// the YAML the config format documents while matching the bytes existing
+// tooling already writes.
+func writeWllrConfig(all map[string]json.RawMessage) error {
+	path := configPath()
 	out, err := json.MarshalIndent(all, "", "  ")
 	if err != nil {
 		return err
 	}
 
-	// Atomic write: temp file in the same dir + rename.
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}

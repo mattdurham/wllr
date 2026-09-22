@@ -97,6 +97,40 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 	)
 	pool.SetProviderName(cfg.Provider)
 	pool.SetDefaultModelName(cfg.Model)
+	// Sub-agents without an explicit model default to the configured working
+	// tier ("low"), which may live on a different provider than the session
+	// model. An explicit model in create_agent still wins (the pool resolves
+	// that before consulting this resolver), and an unconfigured low tier falls
+	// back to the session model.
+	pool.SetSubagentResolver(
+		func(resolveCtx context.Context, _ string) (fantasy.LanguageModel, string, error) {
+			resolveProvider, modelID, _, tierErr := resolveModelTier(tierLow, cfg.Provider, cfg)
+			if tierErr != nil {
+				return sessionModel(resolveCtx, pool)
+			}
+			// A tier model must have a resolved window or it cannot stream, and
+			// the window is what sub-agent compaction sizes against. Local
+			// models may only advertise it over the endpoint, so remember the
+			// model (as selecting it from /models would) and resolve its own
+			// window through the same path the interactive switch uses.
+			cw := contextWindowForSelection(resolveProvider, modelID, cfg)
+			if resolveProvider == providerLocal {
+				applyLocalModelChoice(resolveCtx, cfg, modelID)
+				cw = resolveLocalModelWindow(resolveCtx, cfg, modelID)
+			}
+			if cw <= 0 {
+				return sessionModel(resolveCtx, pool)
+			}
+			lm, err := modelForProviderTier(resolveCtx, cfg, resolveProvider, modelID)
+			if err != nil {
+				// A misconfigured working tier must not break every sub-agent
+				// spawn; fall back to the session model so delegation still works.
+				return sessionModel(resolveCtx, pool)
+			}
+			pool.SetModelContextWindow(modelID, cw)
+			return lm, modelID, nil
+		},
+	)
 	if cfg.ContextWindow <= 0 {
 		cfg.ContextWindow = contextWindowForSelection(cfg.Provider, cfg.Model, cfg)
 	}
@@ -280,6 +314,7 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 						Sublabel:           model.ID,
 						ContextWindow:      cw,
 						ContextWindowKnown: cw > 0,
+						Tiers:              tiersForModel(providerOpenRouter, model.ID),
 					},
 				)
 			}
@@ -306,6 +341,7 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 					Sublabel:           modelChoiceSublabel(mi),
 					ContextWindow:      cw,
 					ContextWindowKnown: cw > 0,
+					Tiers:              tiersForModel(currentProvider, mi.ID),
 				},
 			)
 		}
@@ -357,11 +393,118 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 		m.SetThinkingForModel(startupThinkingMode(ctx, cfg, currentProvider))
 		return nil
 	}
+	// Model tiers: tag models as high/low in /models, then apply a tier by name
+	// (/model high) or via a skill's frontmatter. A tier may name a different
+	// provider, so applying one switches providers when needed.
+	m.TierNamesFn = tierNames
+	m.ModelTierLabelsFn = tierLabels
+	m.TagModelTierFn = func(tier, modelID string) error {
+		if modelID == "" {
+			return fmt.Errorf("no model selected")
+		}
+		return setModelTier(tier, currentProvider, modelID)
+	}
+	m.ClearModelTierFn = clearModelTier
+	m.ApplyModelTierFn = func(tier string) (string, string, error) {
+		provider, modelID, thinking, err := resolveModelTier(tier, currentProvider, cfg)
+		if err != nil {
+			return "", "", err
+		}
+		if err := validateTierThinking(provider, thinking); err != nil {
+			return "", "", fmt.Errorf("tier %s: %w", tier, err)
+		}
+		if provider == providerLocal {
+			// The tier may name a model the endpoint advertised rather than one
+			// declared in local_models (the picker lists both). Remember it for
+			// the session, exactly as selecting it from /models would, so the
+			// switch below can build a provider for it.
+			if !applyLocalModelChoice(ctx, cfg, modelID) {
+				return "", "", fmt.Errorf(
+					"tier %s: local model %q is not available from any configured endpoint",
+					tier, modelID,
+				)
+			}
+		}
+		// A model with no resolved window cannot stream (the pool treats a zero
+		// window as incomplete metadata). Resolve the target model's own window
+		// first — for local models that may require endpoint discovery — and
+		// fail with an actionable message only when it stays unknown.
+		if provider == providerLocal {
+			if resolveLocalModelWindow(ctx, cfg, modelID) <= 0 {
+				return "", "", fmt.Errorf(
+					"tier %s: context window for %s is unknown; set it in wllr.local_models or select it once in /models",
+					tier, modelID,
+				)
+			}
+		} else if contextWindowForSelection(provider, modelID, cfg) <= 0 {
+			return "", "", fmt.Errorf(
+				"tier %s: context window for %s is unknown; select it once in /models to set a window, then tag it",
+				tier, modelID,
+			)
+		}
+		if provider != currentProvider {
+			if err := activateProviderModel(ctx, cfg, pool, provider, modelID); err != nil {
+				return "", "", err
+			}
+			currentProvider = provider
+			cfg.Provider = provider
+			if saveErr := saveProvider(provider); saveErr != nil {
+				slog.Warn("wllr: could not persist provider selection", "provider", provider, "error", saveErr)
+			}
+		} else if provider == providerLocal {
+			if err := activateProviderModel(ctx, cfg, pool, provider, modelID); err != nil {
+				return "", "", err
+			}
+		} else {
+			lm, lmErr := pool.LanguageModelForModel(ctx, modelID)
+			if lmErr != nil {
+				return "", "", lmErr
+			}
+			if main := pool.Get(agent.MainAgentID); main != nil {
+				main.SetModel(lm, modelID, contextWindowForSelection(provider, modelID, cfg))
+			}
+		}
+		cfg.Model = modelID
+		pool.SetDefaultModelName(modelID)
+		if saveErr := saveModel(modelID); saveErr != nil {
+			slog.Warn("wllr: could not persist model selection", "model", modelID, "error", saveErr)
+		}
+		// A tier may pin a thinking level; otherwise keep the provider's resolved
+		// default. The mode ID for the target provider/model comes from the saved
+		// thinking level, so a tier without one leaves the current selection.
+		if thinking != "" {
+			if modeID := thinkingModeIDForLevel(provider, modelID, thinking); modeID != "" {
+				m.SetThinkingForModel(modeID)
+			}
+		} else {
+			m.SetThinkingForModel(startupThinkingMode(ctx, cfg, provider))
+		}
+		return provider, modelID, nil
+	}
 	m.SetContextWindowFn = func(provider, modelID string, tokens int64) error {
 		if err := saveContextWindow(provider, modelID, tokens); err != nil {
 			return err
 		}
 		pool.SetModelContextWindow(modelID, tokens)
+		return nil
+	}
+	// A skill may declare a thinking level (e.g. thinking: high). Resolve it to
+	// the active provider's mode ID and apply it, so the level vocabulary is
+	// consistent with /thinking and tier thinking overrides.
+	m.SetThinkingLevelFn = func(level string) error {
+		modeID := thinkingModeIDForLevel(currentProvider, cfg.Model, level)
+		if modeID == "" {
+			return fmt.Errorf("provider %s does not support thinking level %q", currentProvider, level)
+		}
+		if main := pool.Get(agent.MainAgentID); main != nil {
+			main.SetProviderOptions(providerOptionsForThinkingMode(currentProvider, modeID))
+		}
+		if err := saveThinkingMode(modeID); err != nil {
+			slog.Warn("wllr: could not persist thinking mode", "mode", modeID, "error", err)
+		}
+		if err := saveThinkingLevel(thinkingLevel(level)); err != nil {
+			slog.Warn("wllr: could not persist thinking level", "level", level, "error", err)
+		}
 		return nil
 	}
 	m.HasOpenRouterKeyFn = func() bool { return cfg.OpenRouterAPIKey != "" }
@@ -912,8 +1055,14 @@ func loadConfigGroup(group string) (json.RawMessage, error) {
 		return nil, fmt.Errorf("config: parse error: %w", err)
 	}
 	if v, ok := all[group]; ok {
-		// Marshal the node back to JSON bytes
-		out, err := yaml.Marshal(v)
+		// Decode the YAML node and re-encode as JSON. Marshaling the node back
+		// to YAML would emit YAML for a YAML source file, but every caller
+		// json.Unmarshals this result, so the group must always be JSON here.
+		var value any
+		if err := v.Decode(&value); err != nil {
+			return nil, fmt.Errorf("config: decode error: %w", err)
+		}
+		out, err := json.Marshal(value)
 		if err != nil {
 			return nil, fmt.Errorf("config: marshal error: %w", err)
 		}

@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -306,5 +307,100 @@ func TestRegistry_Get_MissingCommand(t *testing.T) {
 	_, ok := r.Get("nonexistent")
 	if ok {
 		t.Error("expected ok=false for nonexistent command")
+	}
+}
+
+func TestBuiltinModelTiers_ListsTiers(t *testing.T) {
+	r := NewRegistry()
+	registerBuiltins(r)
+
+	for _, name := range []string{"model", "models"} {
+		msg := r.Dispatch(name, []string{"tiers"})()
+		if _, ok := msg.(showModelTiersMsg); !ok {
+			t.Errorf("/%s tiers message = %T, want showModelTiersMsg", name, msg)
+		}
+	}
+}
+
+func TestApplyModelSelection_TierNameAppliesTier(t *testing.T) {
+	m := newTestModel()
+	applied := ""
+	m.TierNamesFn = func() []string { return []string{"high", "low"} }
+	m.ApplyModelTierFn = func(tier string) (string, string, error) {
+		applied = tier
+		return "anthropic", "claude-opus-4-8", nil
+	}
+	selectCalled := false
+	m.SelectModelFn = func(string) error { selectCalled = true; return nil }
+
+	m.applyModelSelection("high")
+
+	if applied != "high" {
+		t.Fatalf("applied tier = %q, want high", applied)
+	}
+	if selectCalled {
+		t.Error("a tier name must not be treated as a model ID")
+	}
+	if m.activeModel != "claude-opus-4-8" {
+		t.Errorf("activeModel = %q, want claude-opus-4-8", m.activeModel)
+	}
+}
+
+func TestApplyModelSelection_TierLookupIsCaseInsensitive(t *testing.T) {
+	m := newTestModel()
+	m.TierNamesFn = func() []string { return []string{"high"} }
+	got := ""
+	m.ApplyModelTierFn = func(tier string) (string, string, error) {
+		got = tier
+		return "anthropic", "claude-opus-4-8", nil
+	}
+	m.applyModelSelection("HIGH")
+	if got != "high" {
+		t.Fatalf("tier = %q, want high", got)
+	}
+}
+
+func TestApplyModelSelection_PlainModelStillWorks(t *testing.T) {
+	m := newTestModel()
+	m.TierNamesFn = func() []string { return []string{"high"} }
+	selected := ""
+	m.SelectModelFn = func(id string) error { selected = id; return nil }
+	m.applyModelSelection("claude-haiku-4-5")
+	if selected != "claude-haiku-4-5" {
+		t.Fatalf("selected = %q, want claude-haiku-4-5", selected)
+	}
+}
+
+func TestModelPickerTierKeys(t *testing.T) {
+	if tier, ok := modelPickerTierKey("h"); !ok || tier != "high" {
+		t.Errorf("h → %q/%v, want high/true", tier, ok)
+	}
+	if tier, ok := modelPickerTierKey("l"); !ok || tier != "low" {
+		t.Errorf("l → %q/%v, want low/true", tier, ok)
+	}
+	if _, ok := modelPickerTierKey("u"); !ok {
+		t.Error("u should be a tier key (untag)")
+	}
+	if _, ok := modelPickerTierKey("enter"); ok {
+		t.Error("enter must not be a tier key")
+	}
+}
+
+func TestOpenModelPicker_ShowsTierTags(t *testing.T) {
+	m := newTestModel()
+	m.width = 80
+	m.height = 24
+	m.TagModelTierFn = func(string, string) error { return nil }
+	m.ModelListFn = func() []ModelChoice {
+		return []ModelChoice{
+			{ID: "m1", Name: "Model One", Sublabel: "s", ContextWindowKnown: true, Tiers: []string{"high"}},
+		}
+	}
+	m.openModelPicker()
+	if got := m.picker.Items[0].Sublabel; got != "s  tier: high" {
+		t.Fatalf("sublabel = %q, want tier tag appended", got)
+	}
+	if !strings.Contains(m.picker.Title, "h=high") {
+		t.Errorf("picker title = %q, want tagging hint", m.picker.Title)
 	}
 }

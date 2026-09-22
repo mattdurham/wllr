@@ -241,3 +241,14 @@ a model, and typing/backspace filtering in the searchable picker.
 | `TestSceneDirty_AppendOnlyChatCoalescesRefresh` | append-only chat scene area changes | refresh is scheduled, not immediate; delayed message refreshes viewport |
 | `TestSceneDirty_AppendOnlyChatUsesFastSuffixRefresh` | append-only update to trailing assistant text node | delayed refresh updates viewport by replacing the rendered node suffix |
 | `TestRenderScenes_SkipsChatAreaInWASMMode` | `wasmChat=true`, `chat` area present | `renderScenes` output excludes the chat transcript (rendered in viewport instead) |
+
+## Model Tiers (commands_test.go)
+
+| Level | Test | Scenario | Assertion |
+|-------|------|----------|-----------|
+| High | `TestModelPickerTierKeys` | `h`/`l`/`u`/other keys | `h`→high, `l`→low, `u`→untag, `enter` not a tier key |
+| High | `TestApplyModelSelection_TierNameAppliesTier` | `/model high` with `high` tagged | `ApplyModelTierFn` called; `SelectModelFn` not called; active model updated |
+| Medium | `TestApplyModelSelection_TierLookupIsCaseInsensitive` | `/model HIGH` | tier resolves as `high` |
+| Medium | `TestApplyModelSelection_PlainModelStillWorks` | `/model claude-haiku-4-5` | resolves as a model ID via `SelectModelFn` |
+| Medium | `TestBuiltinModelTiers_ListsTiers` | `/model tiers`, `/models tiers` | emits `showModelTiersMsg` |
+| Low | `TestOpenModelPicker_ShowsTierTags` | model with `Tiers: ["high"]` | sublabel ends with `tier: high`; title shows the `h=high` hint |

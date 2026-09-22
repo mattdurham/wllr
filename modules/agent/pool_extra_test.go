@@ -5,7 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/fantasy"
 	"github.com/mattdurham/wllr/modules/agent"
+	"github.com/mattdurham/wllr/modules/testutil"
 )
 
 func TestAgentPool_SetBaseSystemPrompt_PropagatestoExistingAgents(t *testing.T) {
@@ -143,4 +145,59 @@ func TestAgentPool_Send_NonExistent_ReturnsError(t *testing.T) {
 func testCtx(t *testing.T) context.Context {
 	t.Helper()
 	return context.Background()
+}
+
+func TestResolveSubagentModel_ExplicitModelWins(t *testing.T) {
+	pool := agent.NewPool()
+	pool.SetProvider(testutil.NewFakeProvider())
+	pool.SetDefaultModelName("session-model")
+	called := false
+	pool.SetSubagentResolver(func(_ context.Context, _ string) (fantasy.LanguageModel, string, error) {
+		called = true
+		return newMockLM(), "tier-model", nil
+	})
+
+	lm, model, err := pool.ResolveSubagentModel(testCtx(t), "explicit-model", "")
+	if err != nil {
+		t.Fatalf("ResolveSubagentModel: %v", err)
+	}
+	if called {
+		t.Error("an explicit model must not consult the sub-agent resolver")
+	}
+	if model != "explicit-model" {
+		t.Errorf("model = %q, want explicit-model", model)
+	}
+	if lm == nil {
+		t.Error("expected a language model")
+	}
+}
+
+func TestResolveSubagentModel_UsesResolverWhenModelOmitted(t *testing.T) {
+	pool := agent.NewPool()
+	pool.SetDefaultModelName("session-model")
+	pool.SetSubagentResolver(func(_ context.Context, _ string) (fantasy.LanguageModel, string, error) {
+		return newMockLM(), "tier-model", nil
+	})
+
+	_, model, err := pool.ResolveSubagentModel(testCtx(t), "", "")
+	if err != nil {
+		t.Fatalf("ResolveSubagentModel: %v", err)
+	}
+	if model != "tier-model" {
+		t.Errorf("model = %q, want tier-model from the resolver", model)
+	}
+}
+
+func TestResolveSubagentModel_FallsBackToDefault(t *testing.T) {
+	pool := agent.NewPool()
+	pool.SetDefaultModelName("session-model")
+	pool.SetProvider(testutil.NewFakeProvider())
+
+	_, model, err := pool.ResolveSubagentModel(testCtx(t), "", "")
+	if err != nil {
+		t.Fatalf("ResolveSubagentModel: %v", err)
+	}
+	if model != "session-model" {
+		t.Errorf("model = %q, want session-model", model)
+	}
 }

@@ -154,6 +154,69 @@ provider's available models (the active one is marked). Selecting a model:
 **Model precedence at startup:** `WLLR_MODEL` (env) > persisted selection
 (`config.json`) > built-in default (`claude-sonnet-4-6`).
 
+### Model tiers
+
+A **model tier** is a name for a provider/model pair (optionally with a
+thinking level) that you tag once and then reference by name. This is the
+supported way to keep a research/planning workflow on an expensive model while
+sub-agents run on a cheap working model, without naming a model each time.
+
+Tiers are stored under `wllr.model_tiers` in the config file and may span
+providers:
+
+```yaml
+wllr:
+  model_tiers:
+    high:
+      provider: anthropic
+      model: claude-opus-4-8
+      thinking: high
+    low:
+      provider: local
+      model: qwen3.8-27b
+```
+
+The string shorthand `high: claude-opus-4-8` sets only a model and resolves it
+against whichever provider is active when the tier is applied.
+
+**Tagging from the picker.** Open `/models` and press:
+
+| Key | Effect                                            |
+|-----|---------------------------------------------------|
+| `h` | Tag the highlighted model as the `high` tier.     |
+| `l` | Tag the highlighted model as the `low` tier.      |
+| `u` | Clear every tier tag from the highlighted model.  |
+
+Current tags appear in each row's sublabel as `tier: high`.
+
+**Applying a tier.** `/model <tier>` (or `/models <tier>`) switches to the
+tier's provider and model and applies its thinking level. `/model tiers` lists
+the configured tiers.
+
+```
+/models              # tag models with h / l
+/model high          # switch to the high tier
+/model tiers         # list configured tiers
+```
+
+**Context windows.** A tier's model uses its own context window, never the
+session model's. For local models the window comes from the model's
+`local_models` entry or what its endpoint advertises during discovery. If a
+tier's window cannot be resolved, applying the tier fails with an actionable
+message rather than switching to a model that cannot stream. Local models whose
+window is only endpoint-advertised are resolved automatically when the tier is
+applied; set `context_window` explicitly to avoid depending on the endpoint.
+
+**Where tiers are used automatically:**
+
+- **Skills.** A skill may declare `model:` and optional `thinking:` in its
+  frontmatter. Activating the skill applies them. `model:` accepts a tier name
+  or an exact model ID.
+- **Sub-agents.** `create_agent` without a `model` uses the `low` tier when one
+  is tagged, so you can plan on the high tier and delegate work to the working
+  model. An explicit `model` in `create_agent` always wins, and if no `low`
+  tier is configured sub-agents fall back to the session model.
+
 ### Selecting a thinking level
 
 Run `/thinking` (no argument) to open a picker of reasoning levels, or

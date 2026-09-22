@@ -3,6 +3,7 @@ package agent
 // NOTE: Any changes to this file must be reflected in the corresponding SPECS.md or NOTES.md.
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 
@@ -15,8 +16,15 @@ import (
 type AgentPool struct {
 	provider     fantasy.Provider
 	modelFactory ModelFactory
-	agents       map[string]*Agent
-	teams        map[string]*Team
+	// subagentResolver, when set, chooses the model for a sub-agent whose spawn
+	// request omits an explicit model name. It returns the language model and
+	// the resolved model name. This lets the host apply a configured working
+	// model tier that may live on a different provider than the session model,
+	// which the pool's own single-provider factory cannot express.
+	// Set via SetSubagentResolver.
+	subagentResolver func(ctx context.Context, requested string) (fantasy.LanguageModel, string, error)
+	agents           map[string]*Agent
+	teams            map[string]*Team
 	// contextUsageDispatcher, when set, is called after each completed turn on any
 	// agent so the harness can forward EventContextUsage to WASM extensions without
 	// a circular import between the agent and extension packages.

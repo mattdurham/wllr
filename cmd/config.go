@@ -152,6 +152,7 @@ type wllrSettings struct {
 	OpenRouterModels []openRouterModelConfig `json:"openrouter_models"`
 	RawContextWindow json.RawMessage         `json:"context_window"`
 	ContextWindows   map[string]int64        `json:"context_windows"`
+	ModelTiers       map[string]modelTier    `json:"model_tiers"`
 	ContextWindow    int64                   `json:"-"`
 }
 

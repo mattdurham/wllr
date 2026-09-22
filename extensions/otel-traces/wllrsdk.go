@@ -272,6 +272,18 @@ func AppendSystemPrompt(text string) {
 	_sdkCall("append_system_prompt", map[string]string{"text": text})
 }
 
+// SetModel switches the main agent active model.
+// value may be a model ID or a configured model-tier name (e.g. "high").
+// thinking, when non-empty, is a provider-agnostic reasoning level (e.g. "high")
+// applied after the model switch.
+func SetModel(value, thinking string) {
+	params := map[string]string{"model": value}
+	if thinking != "" {
+		params["thinking"] = thinking
+	}
+	_sdkCall("set_model", params)
+}
+
 // ShowPicker opens an interactive TUI list picker.
 // When the user selects an item, the host fires EventOnCommand{name: callback, args: [item.ID]}.
 // Register a handler with OnCommand(callback, fn) to receive the selection.

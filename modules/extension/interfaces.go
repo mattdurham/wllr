@@ -147,6 +147,12 @@ type UIBridge interface {
 	RegisterTool(tool sdk.Tool) error
 	SetSystemPrompt(prompt string)
 	AppendSystemPrompt(text string)
+	// SetModel switches the main agent's active model. value may be a model ID
+	// or a configured model-tier name (e.g. "high"); tiers may switch provider.
+	// thinking, when non-empty, is a provider-agnostic reasoning level (e.g.
+	// "high") applied after the model switch.
+	// Returns an error when the model/tier cannot be applied.
+	SetModel(value, thinking string) error
 	ResetHistory(messages []sdk.Message) error
 	ToolResult(toolCallID, result string, isError bool)
 	AfterToolCall(agentID, toolCallID, toolName, result string, isError bool)

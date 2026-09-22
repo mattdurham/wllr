@@ -196,6 +196,7 @@ The full set of dispatched methods is:
 | `MethodModal`                 | `handleModal`                                    |
 | `MethodSetSystemPrompt`       | `handleSetSystemPrompt`                          |
 | `MethodAppendSystemPrompt`    | `handleAppendSystemPrompt`                       |
+| `MethodSetModel`              | `handleSetModel`                                 |
 | `MethodExec`                  | `handleExec`                                     |
 | `MethodGetEnv`                | `handleGetEnv`                                   |
 | `MethodReadFile`              | `handleReadFile`                                 |
@@ -244,7 +245,7 @@ The full set of dispatched methods is:
 |---------------|---------------------|-------------------------|----------------------------------------------------------------|
 | `agents`      | `AgentBridge`       | `SetAgentBridge`        | Spawn, close, message, run, list agents and manage history     |
 | `teams`       | `TeamBridge`        | `SetTeamBridge`         | Create, close, add/remove members, list teams                  |
-| `ui`          | `UIBridge`          | `SetUIBridge`           | Notify, modal, picker, text input, status, system prompt, scene-graph areas |
+| `ui`          | `UIBridge`          | `SetUIBridge`           | Notify, modal, picker, text input, status, system prompt, model switch, scene-graph areas |
 | `capabilities`| `CapabilityProvider`| `SetCapabilities`       | Exec, GetEnv, ReadFile, WriteFile, AppendFile, HTTPPost, HTTPGet, ConfigRead, FormatMarkdown |
 | `mcp`         | `MCPBridge`         | `SetMCPBridge`          | Spawn, close, send, read MCP server subprocesses               |
 
@@ -252,7 +253,16 @@ The full set of dispatched methods is:
 
 **Invariant:** Dispatch handlers snapshot the bridge field under `h.mu.RLock()` via internal getter methods (`h.agentBridge()`, `h.uiBridge()`, etc.) so that the field transition from early stub to full implementation is race-free.
 
-**Invariant:** `PermExec` is required for `exec` and `mcp_spawn`; `PermFileRead` for `read_file`; `PermFileWrite` for `write_file`/`append_file`; `PermNetworkWrite` for `http_post`; `PermNetworkRead` for `http_get`; `PermUI` for `ui_create_area`/`ui_patch`/`ui_update_area`/`ui_remove_area` and `format_markdown`. `get_env`, `get_os`, agent/team/mailbox methods, `store_*`, `modal`, `notify`, `set_status`, and `append_system_prompt` require no permission. If the extension is nil or lacks the required permission, the call returns a permission-denied error response.
+**Invariant:** `PermExec` is required for `exec` and `mcp_spawn`; `PermFileRead` for `read_file`; `PermFileWrite` for `write_file`/`append_file`; `PermNetworkWrite` for `http_post`; `PermNetworkRead` for `http_get`; `PermUI` for `ui_create_area`/`ui_patch`/`ui_update_area`/`ui_remove_area` and `format_markdown`. `get_env`, `get_os`, agent/team/mailbox methods, `store_*`, `modal`, `notify`, `set_status`, `append_system_prompt`, and
+`set_model` require no permission. If the extension is nil or lacks the
+required permission, the call returns a permission-denied error response.
+
+**Invariant:** `set_model` (`MethodSetModel`) param `model` is a model ID or a
+configured model-tier name; param `thinking` is an optional provider-agnostic
+reasoning level. At least one is required. `handleSetModel` delegates to
+`UIBridge.SetModel(model, thinking)`; a missing `UIBridge` or malformed params
+produce an error response. The harness owns resolution (including
+cross-provider tier switching), keeping the host provider-agnostic.
 
 **Invariant:** `PermUI` is required for `ui_create_area`, `ui_patch`, `ui_remove_area`, and `ui_update_area`. The `UIBridge` exposes four scene-graph methods: `CreateArea(sdk.UIArea) error`, `PatchUI(sdk.UIPatchParams) error`, `RemoveArea(string)`, and `UpdateArea(sdk.UIUpdateAreaParams) error`. `CreateArea`, `PatchUI`, and `UpdateArea` return errors (duplicate area, missing area/node, unknown area) forwarded to the extension as an error response; `RemoveArea` is a no-op for a missing area.
 
