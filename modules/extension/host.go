@@ -535,6 +535,12 @@ func (h *Host) buildDispatch() map[string]func(ctx context.Context, ext *Extensi
 		sdk.MethodShowPicker: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleShowPicker(req)
 		},
+		sdk.MethodShowAgentTree: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleShowAgentTree(req)
+		},
+		sdk.MethodSetFocusedAgent: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleSetFocusedAgent(req)
+		},
 		sdk.MethodShowTextInput: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleShowTextInput(req)
 		},
@@ -1475,6 +1481,35 @@ func (h *Host) handleShowPicker(req sdk.HostCallRequest) sdk.HostCallResponse {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("show_picker: %v", err)}
 	}
 	h.uiBridge().ShowPicker(params.Title, params.Items, params.Callback)
+	return sdk.HostCallResponse{}
+}
+
+func (h *Host) handleShowAgentTree(req sdk.HostCallRequest) sdk.HostCallResponse {
+	if h.uiBridge() == nil {
+		return sdk.HostCallResponse{Error: "show_agent_tree: not supported by host"}
+	}
+	var params sdk.ShowAgentTreeParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return sdk.HostCallResponse{Error: fmt.Sprintf("show_agent_tree: %v", err)}
+	}
+	if params.Callback == "" {
+		return sdk.HostCallResponse{Error: "show_agent_tree: callback is required"}
+	}
+	h.uiBridge().ShowAgentTree(params)
+	return sdk.HostCallResponse{}
+}
+
+func (h *Host) handleSetFocusedAgent(req sdk.HostCallRequest) sdk.HostCallResponse {
+	if h.uiBridge() == nil {
+		return sdk.HostCallResponse{Error: "set_focused_agent: not supported by host"}
+	}
+	var params sdk.SetFocusedAgentParams
+	if len(req.Params) > 0 {
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			return sdk.HostCallResponse{Error: fmt.Sprintf("set_focused_agent: %v", err)}
+		}
+	}
+	h.uiBridge().SetFocusedAgent(params.ID)
 	return sdk.HostCallResponse{}
 }
 

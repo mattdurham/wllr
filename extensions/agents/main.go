@@ -8,7 +8,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 	"unsafe"
 )
@@ -222,6 +221,9 @@ func init() {
 
 	OnSessionStart(onSessionStart)
 	OnCommand("agents", onAgentsCommand)
+	// A tree selection switches the transcript and input target. The host owns
+	// the routing; the extension owns what to render.
+	OnCommand("agents:focus", onAgentsFocus)
 
 	// Use the raw before_tool_call event so we get the AgentID field too.
 	OnBeforeToolCall(onBeforeToolCall)
@@ -526,95 +528,82 @@ func onAgentsCommand(_ []string) {
 		_ = json.Unmarshal([]byte(result), &poolResp)
 	}
 
-	subAgents := poolResp.Agents[:0]
-	for _, a := range poolResp.Agents {
-		if a.ID != "" && a.ID != "main" {
-			subAgents = append(subAgents, a)
-		}
-	}
-
-	if len(subAgents) == 0 {
-		Modal("No sub-agents running.")
-		return
-	}
-
-	// Build a lookup of WASM-side metadata (task, last update) by agent ID.
 	meta := make(map[string]*agentRecord, len(agentRecords))
 	for i := range agentRecords {
 		meta[agentRecords[i].id] = &agentRecords[i]
 	}
 
-	// Order by ID: a parent's ID is a prefix of its descendants' IDs, so a
-	// lexical sort places each parent immediately before its subtree while
-	// keeping siblings alphabetical. A lexical sort is also the only stable
-	// order here — ListAgents iterates a Go map, so without it the list
-	// reshuffled on every invocation.
-	sort.Slice(subAgents, func(i, j int) bool { return subAgents[i].ID < subAgents[j].ID })
-
-	var sb strings.Builder
-	sb.WriteString("Sub-agents\n")
-	sb.WriteString(strings.Repeat("─", 40))
-	sb.WriteString("\n\n")
-	for _, a := range subAgents {
-		// Depth is derived from the ID convention: the first segment is the
-		// root scope ("main"), so "main/x" is depth 1 and "main/x/y" is 2.
-		depth := agentDepth(a.ID)
-		indent := strings.Repeat("   ", depth-1)
-		sb.WriteString(indent)
-		if depth > 1 {
-			sb.WriteString("└─ ")
+	// Build a flat node list; the host derives the tree from ParentID. The root
+	// agent is included as a node like any other so focus can return to it.
+	nodes := make([]AgentTreeNode, 0, len(poolResp.Agents))
+	for _, a := range poolResp.Agents {
+		if a.ID == "" {
+			continue
 		}
-		sb.WriteString(a.ID)
-		if a.Name != "" && a.Name != a.ID {
-			sb.WriteString("  (" + a.Name + ")")
+		label := a.Name
+		if label == "" {
+			label = a.ID
 		}
-		sb.WriteString("\n")
-		body := indent
-		if depth > 1 {
-			body += "   "
-		}
-		if a.IsRunning {
-			sb.WriteString(body + "Status: running\n")
-			if a.TurnDurationMS > 0 {
-				sb.WriteString(body + fmt.Sprintf("Turn running: %s\n", formatDurationMS(a.TurnDurationMS)))
-			}
-		} else {
-			sb.WriteString(body + "Status: idle\n")
-		}
-		if a.Liveness != "" {
-			sb.WriteString(body + "Liveness: " + a.Liveness + "\n")
-		}
-		if a.Working {
-			sb.WriteString(body + "Working: true\n")
-		}
-		if a.LastActivityAgeMS > 0 {
-			sb.WriteString(body + fmt.Sprintf("Last activity: %s ago\n", formatDurationMS(a.LastActivityAgeMS)))
-		}
-		if a.ActiveTool != "" {
-			sb.WriteString(body + "Active tool: " + a.ActiveTool + "\n")
-		} else if a.LastTool != "" {
-			sb.WriteString(body + "Last tool: " + a.LastTool + "\n")
-		}
-		if a.LastToolDoneAgeMS > 0 {
-			sb.WriteString(body + fmt.Sprintf("Last tool done: %s ago\n", formatDurationMS(a.LastToolDoneAgeMS)))
-		}
-		if a.ShutdownRequested {
-			sb.WriteString(body + "Shutdown: requested\n")
-		}
-		if a.PendingMessages > 0 {
-			sb.WriteString(body + fmt.Sprintf("Pending messages: %d\n", a.PendingMessages))
-		}
-		if r, ok := meta[a.ID]; ok {
-			if r.task != "" {
-				sb.WriteString(body + "Task: " + r.task + "\n")
-			}
-			if r.lastUpdate != "" {
-				sb.WriteString(body + "Last: " + r.lastUpdate + "\n")
-			}
-		}
-		sb.WriteString("\n")
+		nodes = append(nodes, AgentTreeNode{
+			ID:       a.ID,
+			ParentID: agentParentID(a.ID),
+			Label:    label,
+			Detail:   agentDetail(a.IsRunning, a.ActiveTool, a.LastTool, a.TurnDurationMS, a.Liveness, meta[a.ID]),
+		})
 	}
-	Modal(strings.TrimRight(sb.String(), "\n"))
+	if len(nodes) == 0 {
+		Notify("No agents running.")
+		return
+	}
+	ShowAgentTree("Agents", nodes, "agents:focus")
+}
+
+// agentParentID derives the owning agent from the "<scope>/<name>" convention
+// Spawn uses, so the host can build the hierarchy without knowing it.
+func agentParentID(id string) string {
+	i := strings.LastIndex(id, "/")
+	if i <= 0 {
+		return ""
+	}
+	return id[:i]
+}
+
+// agentDetail renders the status line shown beneath a node while expanded.
+func agentDetail(running bool, activeTool, lastTool string, turnMS int64, liveness string, rec *agentRecord) string {
+	parts := make([]string, 0, 4)
+	if running {
+		parts = append(parts, "running")
+		if turnMS > 0 {
+			parts = append(parts, formatDurationMS(turnMS))
+		}
+	} else {
+		parts = append(parts, "idle")
+	}
+	if activeTool != "" {
+		parts = append(parts, "tool:"+activeTool)
+	} else if lastTool != "" {
+		parts = append(parts, "last:"+lastTool)
+	}
+	if liveness != "" && liveness != "idle" {
+		parts = append(parts, liveness)
+	}
+	if rec != nil && rec.task != "" {
+		parts = append(parts, truncate(rec.task, 40))
+	}
+	return strings.Join(parts, " · ")
+}
+
+// onAgentsFocus switches the focused agent: the host routes subsequent input to
+// it, and the transcript is rebuilt from its history. An empty or root id both
+// mean the root agent, which is only the first node rather than a special case.
+func onAgentsFocus(args []string) {
+	if len(args) == 0 || args[0] == "" {
+		return
+	}
+	id := args[0]
+	SetFocusedAgent(id)
+	RebuildTranscriptFor(id)
+	Notify("Focused " + id)
 }
 
 func onBeforeToolCall(payload json.RawMessage) {

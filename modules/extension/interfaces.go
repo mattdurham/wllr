@@ -142,6 +142,12 @@ type UIBridge interface {
 	Notify(text string)
 	ShowModal(text string)
 	ShowPicker(title string, items []sdk.ShowPickerItem, callback string)
+	// ShowAgentTree opens the interactive agent tree overlay. Selecting a node
+	// fires EventOnCommand with the supplied callback and the agent ID.
+	ShowAgentTree(params sdk.ShowAgentTreeParams)
+	// SetFocusedAgent sets which agent receives user input and owns the
+	// transcript. An empty id means the root agent.
+	SetFocusedAgent(id string)
 	ShowTextInput(title, placeholder, initialValue, callback string)
 	Abort()
 	SetStatus(key, value string)

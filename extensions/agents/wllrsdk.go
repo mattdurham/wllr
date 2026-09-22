@@ -201,14 +201,15 @@ func OnShutdown(fn func(reason string)) {
 
 // OnBeforeAgentStart registers a handler called before the agent processes
 // each user message. prompt is the user's message text.
-func OnBeforeAgentStart(fn func(prompt string, queued bool)) {
+func OnBeforeAgentStart(fn func(agentID, prompt string, queued bool)) {
 	_sdkOn("before_agent_start", func(payload json.RawMessage) {
 		var p struct {
-			Prompt string `json:"prompt"`
-			Queued bool   `json:"queued"`
+			AgentID string `json:"agent_id"`
+			Prompt  string `json:"prompt"`
+			Queued  bool   `json:"queued"`
 		}
 		if err := json.Unmarshal(payload, &p); err == nil && p.Prompt != "" {
-			fn(p.Prompt, p.Queued)
+			fn(p.AgentID, p.Prompt, p.Queued)
 		}
 	})
 }
@@ -295,6 +296,22 @@ func SetModel(value, thinking string) {
 		params["thinking"] = thinking
 	}
 	_sdkCall("set_model", params)
+}
+
+// ShowAgentTree opens the interactive agent tree overlay. Selecting a node
+// fires EventOnCommand{name: callback, args: [agent_id]}.
+func ShowAgentTree(title string, nodes []AgentTreeNode, callback string) {
+	_sdkCall("show_agent_tree", map[string]any{
+		"title":    title,
+		"nodes":    nodes,
+		"callback": callback,
+	})
+}
+
+// SetFocusedAgent tells the host which agent receives user input and owns the
+// transcript. An empty id means the root agent.
+func SetFocusedAgent(id string) {
+	_sdkCall("set_focused_agent", map[string]string{"id": id})
 }
 
 // ShowPicker opens an interactive TUI list picker.
@@ -591,4 +608,13 @@ func OnNotify(fn func(text string)) {
 			fn(p.Text)
 		}
 	})
+}
+
+// AgentTreeNode is one node for ShowAgentTree. The host derives the tree shape
+// from ParentID, so callers pass a flat list.
+type AgentTreeNode struct {
+	ID       string `json:"id"`
+	ParentID string `json:"parent_id,omitempty"`
+	Label    string `json:"label,omitempty"`
+	Detail   string `json:"detail,omitempty"`
 }

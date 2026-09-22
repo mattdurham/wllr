@@ -3,6 +3,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -54,8 +55,21 @@ func onChatSessionStart() {
 // onChatUserPrompt appends a user message box and reserves a fresh assistant text
 // node for the upcoming turn. The assistant box is inserted on first token so an
 // empty response box does not appear while the provider is still thinking.
-func onChatUserPrompt(prompt string, _ bool) {
+func onChatUserPrompt(agentID, prompt string, _ bool) {
 	if !chatEnabled || prompt == "" {
+		return
+	}
+	// Prompts for other agents belong to their own transcript. An absent id is
+	// attributed to the root so older dispatch paths keep working.
+	owner := agentID
+	if owner == "" {
+		owner = "main"
+	}
+	focused := focusedAgentID
+	if focused == "" {
+		focused = "main"
+	}
+	if owner != focused {
 		return
 	}
 	chatSeq++
@@ -80,9 +94,18 @@ func onChatToken(agentID, text string) {
 	if !chatEnabled {
 		return
 	}
-	// Only the main agent's text appears in the transcript; sub-agents work
-	// silently in the background.
-	if agentID != "" && agentID != "main" {
+	// The transcript shows the focused agent. An empty focus means the root, and
+	// a token with no agent id is attributed to the root so older dispatch paths
+	// keep working.
+	owner := agentID
+	if owner == "" {
+		owner = "main"
+	}
+	focused := focusedAgentID
+	if focused == "" {
+		focused = "main"
+	}
+	if owner != focused {
 		return
 	}
 	if chatAsstNode == "" {
@@ -161,4 +184,80 @@ func onChatNotify(text string) {
 		Props: &UIProps{Fg: "muted", Italic: true, Width: "fill", Wrap: true},
 	}
 	UIPatch(chatArea, OpInsert(chatRootID, node))
+}
+
+// focusedAgentID is the agent whose conversation the transcript shows. Empty
+// means the root agent; the root is not special, only the default.
+var focusedAgentID string
+
+// RebuildTranscriptFor switches the transcript to the named agent and repaints
+// it from that agent's stored history. This is what makes main and sub-agents
+// interchangeable: the view is a function of the focused agent, not of a
+// hardcoded main conversation.
+func RebuildTranscriptFor(id string) {
+	if !chatEnabled {
+		return
+	}
+	focusedAgentID = id
+	// Reset the transcript: nodes are re-created from history, so stale text
+	// from the previous agent cannot linger.
+	UIPatch(chatArea, OpSetRoot(UIVStack(chatRootID)))
+	chatSeq = 0
+	chatAsstNode = ""
+	chatPendingAsstNode = ""
+
+	result := agentCall("agent_get_history", map[string]string{"id": id})
+	var hist struct {
+		ID       string `json:"id"`
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+			Type    string `json:"type"`
+		} `json:"messages"`
+	}
+	if result != "" {
+		_ = json.Unmarshal([]byte(result), &hist)
+	}
+	for _, m := range hist.Messages {
+		// System messages are broker/lifecycle traffic, not conversation.
+		if m.Type == "system" || strings.TrimSpace(m.Content) == "" {
+			continue
+		}
+		switch m.Role {
+		case "user":
+			appendUserBox(m.Content)
+		case "assistant":
+			appendAssistantBox(m.Content)
+		}
+	}
+}
+
+// appendUserBox inserts a user message box.
+func appendUserBox(text string) {
+	chatSeq++
+	box := UINode{
+		ID:    fmt.Sprintf("u%d", chatSeq),
+		Type:  "text",
+		Text:  strings.TrimRight(text, "\n\r"),
+		Props: &UIProps{Border: "rounded", Fg: "success", Padding: []int{0, 1}, Width: "fill", Wrap: true},
+	}
+	UIPatch(chatArea, OpInsert(chatRootID, box))
+}
+
+// appendAssistantBox inserts a finalized assistant message box.
+func appendAssistantBox(text string) {
+	display := text
+	if markdownEnabled {
+		if rendered := FormatMarkdown(text); rendered != "" {
+			display = rendered
+		}
+	}
+	chatSeq++
+	box := UINode{
+		ID:    fmt.Sprintf("a%d", chatSeq),
+		Type:  "text",
+		Text:  strings.TrimRight(display, "\n\r"),
+		Props: &UIProps{Border: "rounded", Fg: "accent", Padding: []int{0, 1}, Width: "fill", Wrap: true},
+	}
+	UIPatch(chatArea, OpInsert(chatRootID, box))
 }

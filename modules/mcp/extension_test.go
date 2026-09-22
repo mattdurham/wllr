@@ -17,6 +17,8 @@ type testUIBridge struct {
 
 func (b *testUIBridge) Notify(_ string)                                       {}
 func (b *testUIBridge) ShowModal(_ string)                                    {}
+func (b *testUIBridge) ShowAgentTree(_ sdk.ShowAgentTreeParams)               {}
+func (b *testUIBridge) SetFocusedAgent(_ string)                              {}
 func (b *testUIBridge) ShowPicker(_ string, _ []sdk.ShowPickerItem, _ string) {}
 func (b *testUIBridge) ShowTextInput(_, _, _, _ string)                       {}
 func (b *testUIBridge) Abort()                                                {}

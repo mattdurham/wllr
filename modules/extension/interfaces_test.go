@@ -91,6 +91,8 @@ type fakeUIBridge struct{}
 
 func (f *fakeUIBridge) Notify(_ string)                                       {}
 func (f *fakeUIBridge) ShowModal(_ string)                                    {}
+func (f *fakeUIBridge) ShowAgentTree(_ sdk.ShowAgentTreeParams)               {}
+func (f *fakeUIBridge) SetFocusedAgent(_ string)                              {}
 func (f *fakeUIBridge) ShowPicker(_ string, _ []sdk.ShowPickerItem, _ string) {}
 func (f *fakeUIBridge) ShowTextInput(_, _, _, _ string)                       {}
 func (f *fakeUIBridge) Abort()                                                {}

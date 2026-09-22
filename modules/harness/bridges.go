@@ -35,6 +35,8 @@ type earlyUIBridge struct {
 func (e *earlyUIBridge) Notify(_ string)                                       {}
 func (e *earlyUIBridge) ShowModal(_ string)                                    {}
 func (e *earlyUIBridge) ShowPicker(_ string, _ []sdk.ShowPickerItem, _ string) {}
+func (e *earlyUIBridge) ShowAgentTree(_ sdk.ShowAgentTreeParams)               {}
+func (e *earlyUIBridge) SetFocusedAgent(_ string)                              {}
 func (e *earlyUIBridge) ShowTextInput(_, _, _, _ string)                       {}
 func (e *earlyUIBridge) Abort()                                                {}
 func (e *earlyUIBridge) SetStatus(_, _ string)                                 {}
@@ -386,6 +388,28 @@ func (b *harnessUIBridge) ShowPicker(title string, items []sdk.ShowPickerItem, c
 		return
 	}
 	b.prog.Send(ShowPickerMsg{Title: title, Items: items, Callback: callback})
+}
+
+// ShowAgentTree opens the interactive agent tree; a node selection is routed
+// back to the extension as EventOnCommand with the given callback.
+func (b *harnessUIBridge) ShowAgentTree(params sdk.ShowAgentTreeParams) {
+	if b.prog == nil {
+		return
+	}
+	b.prog.Send(ShowAgentTreeMsg{
+		Title:    params.Title,
+		Callback: params.Callback,
+		Nodes:    params.Nodes,
+	})
+}
+
+// SetFocusedAgent tells the harness which agent user input and the transcript
+// target. Routed through the program so focus changes on the UI goroutine.
+func (b *harnessUIBridge) SetFocusedAgent(id string) {
+	if b.prog == nil {
+		return
+	}
+	b.prog.Send(FocusAgentMsg{AgentID: id})
 }
 
 func (b *harnessUIBridge) ShowTextInput(title, placeholder, initialValue, callback string) {

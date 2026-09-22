@@ -764,3 +764,23 @@ routing it into the main chat would be wrong, so the harness dispatches it as
 bubbletea program to notify. Each agent gets its own batcher rather than sharing
 one, so one agent's coalescing window cannot delay another's, and the batcher's
 timing state stays single-goroutine (one turn per agent at a time).
+
+## Agent tree overlay and focus routing (2026-09-22)
+
+The `/agents` modal was static text with scroll-only keys, so it had nowhere to
+put a cursor, folding, or a focus action. The replacement is a component
+(`AgentTreeView`) rather than an extension-rendered string: the extension
+supplies a flat node list and the host owns the hierarchy, keys, and rendering.
+That split keeps agent-ID conventions out of WASM and lets the tree reuse the
+host's styling and test surface.
+
+`esc` is deliberately not the tree's close key, even though it is the usual
+overlay convention. `updateKeyPress` handles `esc` before the overlay switch so
+that it cancels an in-flight turn, and the user asked for that to remain the
+meaning. The tree therefore falls through on `esc` and closes on `q`, which is
+advertised in the header alongside the other keys.
+
+Focus is a plain agent ID with the empty string meaning the root. Modelling the
+root as "the default" rather than a distinct case is what lets one code path
+serve main and sub-agents, and it is why `submitToAgent` needed only a target
+lookup rather than a branch.

@@ -534,6 +534,30 @@ The API key prompt uses `TextInputView.OpenSecret` and password echo mode.
 
 Startup uses the same required context-window prompt when `SetPendingContextWindow(provider, model)` is set. Empty, zero, negative, and non-numeric values are rejected; the model is not applied until persistence and selection succeed.
 
+### Agent Tree and Focus
+
+`AgentTreeView` is the interactive `/agents` surface: ↑↓ move, →← fold/unfold,
+space toggles, enter focuses, `q` closes. It replaces the previous static modal,
+which could not express selection. Extensions supply a flat node list and the
+view derives the hierarchy from `ParentID`; siblings sort by ID because the
+agent list comes from a Go map and would otherwise reshuffle between openings.
+A node whose parent is absent renders as a root, so a partial list still shows
+every agent. Collapsing hides a node's children but keeps the node visible, and
+the cursor clamps to a visible row so a collapse cannot strand the highlight.
+
+**Invariant:** `esc` is **not** consumed by the agent tree. It keeps its global
+meaning of cancelling the current ask (`updateKeyPress` handles it before the
+overlay switch), so the tree falls through on `esc` and closes on `q` instead.
+This is deliberate and covered by `TestAgentTree_EscIsNotHandled` and
+`TestModel_Esc_DuringStream_CancelsBeforeModalClose`.
+
+**Invariant:** input follows focus. `submitToAgent` targets `focusedAgent`, and
+an empty focus means the root agent — the root is the default, not a special
+case, so the same path serves main and sub-agents. A focus target that has been
+closed falls back to the root rather than losing the message. Focusing a node
+dispatches `EventOnCommand` with `AgentTreeCallback` and the agent ID, which the
+extension turns into a transcript switch.
+
 **Invariant:** sub-agent streamed text is dispatched as `EventToken` with the
 producing agent's ID (`dispatchSegmentedTokens`), while remaining absent from the
 main transcript. Each agent gets its own batcher so coalescing windows are

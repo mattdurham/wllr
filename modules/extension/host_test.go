@@ -223,6 +223,8 @@ func (b *testUIBridge) ShowModal(text string) {
 	}
 }
 
+func (b *testUIBridge) ShowAgentTree(_ sdk.ShowAgentTreeParams) {}
+func (b *testUIBridge) SetFocusedAgent(_ string)                {}
 func (b *testUIBridge) ShowPicker(title string, items []sdk.ShowPickerItem, callback string) {
 	if b.onShowPicker != nil {
 		b.onShowPicker(title, items, callback)

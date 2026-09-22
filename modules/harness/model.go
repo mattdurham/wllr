@@ -347,6 +347,13 @@ type Model struct {
 
 	picker PickerView
 
+	agentTree AgentTreeView
+
+	// focusedAgent is the agent receiving user input and owning the transcript.
+	// Empty means the root agent, which is not special — it is simply the first
+	// node in the tree, so focus is a plain string rather than an enum.
+	focusedAgent string
+
 	textInput TextInputView
 
 	width, height int
@@ -465,6 +472,22 @@ func (m *Model) SetProgram(p *tea.Program) {
 		// so a focused view can render it live. Each agent gets its own batcher;
 		// nothing is sent to the main chat.
 		spawner.SetTokenObserver(dispatchSegmentedTokens(extHostRef))
+		// Attribute each sub-agent's turn start to that agent, so a focused
+		// transcript shows the prompt alongside the reply.
+		spawner.SetPromptObserver(func(agentID, content string, queued bool) {
+			payload, err := json.Marshal(sdk.BeforeAgentStartPayload{
+				AgentID: agentID,
+				Prompt:  content,
+				Queued:  queued,
+			})
+			if err != nil {
+				return
+			}
+			_, _ = extHostRef.DispatchEvent(
+				context.Background(),
+				sdk.Event{Type: sdk.EventBeforeAgentStart, Payload: payload},
+			)
+		})
 
 		m.extHost.SetAgentBridge(&harnessAgentBridge{
 			pool:    pool,
@@ -655,8 +678,9 @@ func (m *Model) wireMainAgentCallbacks(p *tea.Program) {
 				continue
 			}
 			payload, _ := json.Marshal(sdk.BeforeAgentStartPayload{
-				Prompt: message.Content,
-				Queued: true,
+				AgentID: mainID,
+				Prompt:  message.Content,
+				Queued:  true,
 			})
 			_, _ = extHostForToken.DispatchEvent(
 				context.Background(),
@@ -665,7 +689,8 @@ func (m *Model) wireMainAgentCallbacks(p *tea.Program) {
 		}
 		if strings.TrimSpace(content) != "" {
 			payload, _ := json.Marshal(sdk.BeforeAgentStartPayload{
-				Prompt: content,
+				AgentID: mainID,
+				Prompt:  content,
 			})
 			_, _ = extHostForToken.DispatchEvent(
 				context.Background(),
@@ -889,6 +914,29 @@ func (m Model) updateWindow(msg tea.Msg) (Model, tea.Cmd, bool) {
 		m.modalContent = msg.Text
 		m.modalScroll = 0
 		return m, nil, true
+	case ShowAgentTreeMsg:
+		nodes := make([]AgentTreeNode, 0, len(msg.Nodes))
+		for _, n := range msg.Nodes {
+			nodes = append(nodes, AgentTreeNode{
+				ID:       n.ID,
+				ParentID: n.ParentID,
+				Label:    n.Label,
+				Detail:   n.Detail,
+			})
+		}
+		m.agentTree.Open(nodes, msg.Callback)
+		m.agentTree.SetSize(m.width, m.chatHeight())
+		return m, nil, true
+
+	case FocusAgentMsg:
+		m.focusedAgent = msg.AgentID
+		if msg.AgentID == "" || msg.AgentID == m.mainAgentID {
+			m.live.setStatus("agent", "")
+		} else {
+			m.live.setStatus("agent", msg.AgentID)
+		}
+		return m, nil, true
+
 	case ShowPickerMsg:
 		m.picker.Open(msg.Title, msg.Items, msg.Callback)
 		m.picker.SetSize(m.width, m.chatHeight())
@@ -916,6 +964,28 @@ func (m Model) updateKeyPress(msg tea.Msg) (Model, tea.Cmd, bool) {
 	kp, ok := msg.(tea.KeyPressMsg)
 	if !ok {
 		return m, nil, false
+	}
+
+	if m.agentTree.IsActive() {
+		res := m.agentTree.HandleKey(kp)
+		if res.Closed {
+			m.agentTree.Close()
+			return m, nil, true
+		}
+		if res.Focused != "" {
+			m.agentTree.Close()
+			id := res.Focused
+			return m, func() tea.Msg {
+				return dispatchOnCommandMsg{
+					Name: AgentTreeCallback,
+					Args: []string{id},
+				}
+			}, true
+		}
+		if res.Handled {
+			return m, nil, true
+		}
+		// Not handled (notably esc): fall through so the global handler runs.
 	}
 
 	// Esc during an active main-agent turn cancels it, and that takes precedence
@@ -1839,6 +1909,13 @@ func (m Model) submitToAgent(content, display string) (tea.Model, tea.Cmd) {
 	pool := m.agentPool
 	mainAgentID := m.mainAgentID
 	activeModel := m.activeModel
+	// Input follows focus: an explicit focus target wins, and an empty focus
+	// means the root agent. The root is not special-cased beyond being the
+	// default, so the same path serves main and sub-agents.
+	targetAgentID := m.focusedAgent
+	if targetAgentID == "" {
+		targetAgentID = mainAgentID
+	}
 
 	cmd := func() tea.Msg {
 		// before_provider_request is dispatched as a transform chain inside the
@@ -1851,14 +1928,22 @@ func (m Model) submitToAgent(content, display string) (tea.Model, tea.Cmd) {
 			return StreamDoneMsg{Err: fmt.Errorf("no agent pool configured")}
 		}
 
-		// Submit to the main agent. The agent runs its turn in a goroutine and
-		// calls onToken/onDone (wired in SetProgram) to deliver results back.
+		// Submit to the focused agent (the root unless the user focused another).
+		// The agent runs its turn in a goroutine and calls onToken/onDone to
+		// deliver results back.
 		prompt := content
 		if r := []rune(prompt); len(r) > 120 {
 			prompt = string(r[:120]) + "…"
 		}
-		slog.Info("stream start", "prompt", prompt, "system_prompt_len", len(pool.BaseSystemPrompt()))
-		sendErr := pool.Send(mainAgentID, content)
+		slog.Info("stream start", "agent", targetAgentID, "prompt", prompt, "system_prompt_len", len(pool.BaseSystemPrompt()))
+		sendErr := pool.Send(targetAgentID, content)
+		// A missing focus target falls back to the root rather than failing the
+		// send: a sub-agent may have been closed while it was focused.
+		if errors.Is(sendErr, agent.ErrAgentNotFound) && targetAgentID != mainAgentID {
+			slog.Warn("focused agent missing; falling back to root", "agent", targetAgentID)
+			targetAgentID = mainAgentID
+			sendErr = pool.Send(targetAgentID, content)
+		}
 		if errors.Is(sendErr, agent.ErrAgentNotFound) && mainAgentID == agent.MainAgentID {
 			slog.Warn("main agent missing; attempting automatic recovery")
 			if recoverErr := pool.EnsureMainAgent(context.Background()); recoverErr != nil {
@@ -2186,6 +2271,8 @@ func (m Model) View() tea.View {
 	var sb strings.Builder
 	if m.textInput.IsActive() {
 		sb.WriteString(strings.TrimRight(m.textInput.View(), "\n") + "\n")
+	} else if m.agentTree.IsActive() {
+		sb.WriteString(strings.TrimRight(m.agentTree.View(), "\n") + "\n")
 	} else if m.picker.IsActive() {
 		sb.WriteString(strings.TrimRight(m.picker.View(), "\n") + "\n")
 	} else if m.modalContent != "" {

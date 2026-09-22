@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"charm.land/fantasy"
 	anthropicprovider "charm.land/fantasy/providers/anthropic"
@@ -27,6 +28,10 @@ type Spawner struct {
 	// this is what lets a focused view render a sub-agent's turn as it streams
 	// rather than only after the turn completes.
 	tokenFn func(agentID, text string)
+	// promptFn, when set, receives each sub-agent's turn start (prompt plus any
+	// queued inbox messages) with the producing agent. A focused transcript
+	// needs this to show the user/broker prompt that began the turn.
+	promptFn func(agentID, content string, queued bool)
 }
 
 // NewSpawner creates a Spawner bound to the given pool.
@@ -56,6 +61,15 @@ func (s *Spawner) SetToolCallObserver(fn func(agentID, id, toolName, input strin
 // block; the harness batches per agent before dispatching.
 func (s *Spawner) SetTokenObserver(fn func(agentID, text string)) {
 	s.tokenFn = fn
+}
+
+// SetPromptObserver installs an optional callback invoked when a sub-agent
+// begins a turn, with the agent, the prompt text, and whether it came from the
+// inbox rather than a direct send. Used to attribute transcript entries to the
+// right agent; without it a focused view would have assistant text with no
+// matching prompt.
+func (s *Spawner) SetPromptObserver(fn func(agentID, content string, queued bool)) {
+	s.promptFn = fn
 }
 
 // Spawn creates and registers a sub-agent with the given parameters.
@@ -147,6 +161,21 @@ func (s *Spawner) Spawn(ctx context.Context, req extension.SpawnRequest) error {
 	})
 
 	agentID := req.ID
+	if s.promptFn != nil {
+		promptFn := s.promptFn
+		subID := req.ID
+		a.SetOnTurnStart(func(content string, messages []sdk.Message) {
+			for _, m := range messages {
+				if m.Type == sdk.MessageTypeSystem || strings.TrimSpace(m.Content) == "" {
+					continue
+				}
+				promptFn(subID, m.Content, true)
+			}
+			if strings.TrimSpace(content) != "" {
+				promptFn(subID, content, false)
+			}
+		})
+	}
 	toolsFn := s.toolsFn
 	a.SetToolsFn(func() []fantasy.AgentTool {
 		if toolsFn == nil {

@@ -215,6 +215,8 @@ The full set of dispatched methods is:
 | `MethodAgentTokenCount`       | `handleAgentTokenCount`                          |
 | `MethodAgentResetHistory`     | `handleAgentResetHistory`                        |
 | `MethodAgentGetHistory`      | `handleAgentGetHistory`                          |
+| `MethodShowAgentTree`        | `handleShowAgentTree`                            |
+| `MethodSetFocusedAgent`      | `handleSetFocusedAgent`                          |
 | `MethodTeamCreate`            | `handleTeamCreate`                               |
 | `MethodTeamClose`             | `handleTeamClose`                                |
 | `MethodTeamAddMember`         | `handleTeamAddMember`                            |
@@ -257,6 +259,17 @@ The full set of dispatched methods is:
 **Invariant:** `PermExec` is required for `exec` and `mcp_spawn`; `PermFileRead` for `read_file`; `PermFileWrite` for `write_file`/`append_file`; `PermNetworkWrite` for `http_post`; `PermNetworkRead` for `http_get`; `PermUI` for `ui_create_area`/`ui_patch`/`ui_update_area`/`ui_remove_area` and `format_markdown`. `get_env`, `get_os`, agent/team/mailbox methods, `store_*`, `modal`, `notify`, `set_status`, `append_system_prompt`, and
 `set_model` require no permission. If the extension is nil or lacks the
 required permission, the call returns a permission-denied error response.
+
+**Invariant:** `show_agent_tree` (`MethodShowAgentTree`) requires no permission
+and opens the interactive agent tree. The extension supplies a flat node list
+plus a callback; the harness derives the hierarchy from `parent_id`, so tree
+shape is host-side and extensions need no knowledge of agent ID conventions.
+Focusing a node fires `EventOnCommand` with the callback and the agent ID.
+
+**Invariant:** `set_focused_agent` (`MethodSetFocusedAgent`) requires no
+permission. Param `id` names the agent receiving user input and owning the
+transcript; an empty id means the root agent. The root is not special — it is
+the first node — so focus is a plain string rather than an enum.
 
 **Invariant:** `agent_get_history` (`MethodAgentGetHistory`) is read-only
 observability and requires no permission, matching `agent_list` and

@@ -261,3 +261,19 @@ a model, and typing/backspace filtering in the searchable picker.
 | High | `TestOpenRouterSpeedPickerMarksCurrentAndApplies` | picker with a current value, then select another | current is marked; selection applies and updates `ActiveSpeed` |
 | Medium | `TestOpenRouterSpeedUnavailableExplainsWhy` | empty option list | picker does not open; the reason is surfaced |
 | High | `TestModelPicker_EnterSelectsWithoutTagging` | Enter on the model picker | selects the highlighted model; never tags |
+
+## Agent tree and focus (agenttree_test.go, focus_test.go)
+
+| Level | Test | Scenario | Assertion |
+|-------|------|----------|-----------|
+| High | `TestAgentTree_OrderIsStable` | nodes from a map-backed list | siblings sort by ID; depth drives indentation |
+| High | `TestAgentTree_CollapseHidesSubtreeKeepsParent` | fold a parent | children hide, the parent stays visible |
+| High | `TestAgentTree_ExpandRevealsSubtree` | fold then unfold | rows shrink to 3 then return to 4 |
+| Medium | `TestAgentTree_CollapseClampsCursor` | fold with the cursor inside | cursor moves to a visible row |
+| Medium | `TestAgentTree_LeafDoesNotFold` | toggle a leaf | not reported as folded |
+| High | `TestAgentTree_EscIsNotHandled` | esc on the tree | falls through so it still cancels the ask |
+| Medium | `TestAgentTree_QCloses` | q on the tree | closes the overlay |
+| Medium | `TestAgentTree_OrphanRendersAsRoot` | node with a missing parent | still rendered, as a root |
+| High | `TestSubmitRoutesToFocusedAgent` | focus a sub-agent | focus state is set and input targets it |
+| High | `TestSubmitFallsBackWhenFocusedAgentGone` | focus a closed agent | falls back to the root instead of dropping input |
+| High | `TestAgentTreeSelectionDispatchesFocusCallback` | enter on a node | dispatches EventOnCommand with the agent ID |
