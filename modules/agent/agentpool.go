@@ -35,6 +35,14 @@ type AgentPool struct {
 	// that agent (wake=true). The harness uses it to drive the TUI streaming
 	// indicator for the main agent. Set via SetWakeNotifier.
 	wakeNotifier func(id string)
+	// usageObserver, when set, is called once per completed agent turn with that
+	// turn's token usage. The harness installs it to record per-model/per-agent
+	// metrics without giving the agent package a metrics dependency.
+	// Set via SetUsageObserver.
+	usageObserver func(TurnUsage)
+	// lifecycleObserver, when set, is called whenever an agent is added to or
+	// removed from the pool. Set via SetLifecycleObserver.
+	lifecycleObserver func(AgentLifecycle)
 	// providerRequestInterceptor, when set, runs the before_provider_request
 	// transform chain just before each agent turn streams to the provider. It can
 	// redact the outgoing messages, reroute the model, or block the request.

@@ -550,6 +550,9 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 		return
 	}
 	a.markTurnStart()
+	if a.pool != nil {
+		a.pool.observeTurn(TurnStarted(a.id, a.id == MainAgentID))
+	}
 
 	// Snapshot current history under lock.
 	a.historyMu.Lock()
@@ -833,6 +836,9 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 				fa = fantasy.NewAgent(lm, agentOpts...)
 				contextWindow = newContextWindow
 				keepRecent = contextWindow / 10
+				// Record the model that will actually run: usage is attributed
+				// to the rerouted model, not the one the turn started with.
+				modelName = newModel
 			}
 		}
 		return redacted, "", false, ""
@@ -928,8 +934,33 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 		if pool != nil && a.id == MainAgentID {
 			pool.dispatchContextUsage(sdk.ContextUsageFromFantasy(usage, contextWindow), didCompact, a.compactionCount)
 		}
+		if pool != nil {
+			pool.observeTurn(TurnUsage{
+				AgentID:             a.id,
+				Model:               modelName,
+				Main:                a.id == MainAgentID,
+				InputTokens:         usage.InputTokens,
+				OutputTokens:        usage.OutputTokens,
+				TotalTokens:         usage.TotalTokens,
+				ReasoningTokens:     usage.ReasoningTokens,
+				CacheCreationTokens: usage.CacheCreationTokens,
+				CacheReadTokens:     usage.CacheReadTokens,
+				DurationMS:          a.turnDurationMS(),
+			})
+		}
 	} else {
 		a.setLastUsage(fantasy.Usage{})
+		// A failed turn is still a turn: report it so turn/latency counts reflect
+		// what actually ran, with no token usage attributed.
+		if pool != nil {
+			pool.observeTurn(TurnUsage{
+				AgentID:    a.id,
+				Model:      modelName,
+				Main:       a.id == MainAgentID,
+				Err:        true,
+				DurationMS: a.turnDurationMS(),
+			})
+		}
 	}
 
 	// Always record what the user said and the assistant response.
@@ -1284,4 +1315,16 @@ func sdkToFantasyMessages(msgs []sdk.Message) []fantasy.Message {
 		})
 	}
 	return result
+}
+
+// turnDurationMS returns how long the current turn has been running, in
+// milliseconds. Zero when no turn has started.
+func (a *Agent) turnDurationMS() int64 {
+	a.activityMu.RLock()
+	started := a.turnStartedAt
+	a.activityMu.RUnlock()
+	if started.IsZero() {
+		return 0
+	}
+	return time.Since(started).Milliseconds()
 }

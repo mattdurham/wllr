@@ -528,3 +528,33 @@ metadata. A local tier model resolves its window through
 `resolveLocalModelWindow`, which runs endpoint discovery when the window is not
 already known; a sub-agent tier that still cannot resolve falls back to the
 session model rather than failing every spawn.
+
+## 35. Plain-value observer seams for usage and lifecycle
+
+*Added: 2026-09-22*
+
+**Decision:** Report per-turn token usage and pool membership as plain value
+types (`TurnUsage`, `AgentLifecycle`) through observer callbacks installed with
+`SetUsageObserver` / `SetLifecycleObserver`. The agent package does not import a
+metrics library; the host decides what to record.
+
+**Rationale:** Prometheus metrics are a host concern, and the agent package is
+deliberately dependency-light. The existing `SetContextUsageDispatcher` already
+established this seam for the status bar, so usage reporting reuses the pattern
+rather than introducing a coupling. Passing plain values also keeps the
+instrumentation testable without a metrics registry.
+
+**Consequence:** A completed turn reports a start signal and then a completion,
+so in-flight turns are observable; a failed turn is reported as a turn with no
+usage rather than dropped, so turn counts match what ran. Lifecycle events are
+reported after releasing `p.mu` — an observer is host code and must never run
+under the pool lock.
+
+Two attribution fixes fell out of this work:
+
+- A provider-request interceptor that reroutes a turn to another model now
+  updates `modelName` for the turn, so usage (and the existing context-usage
+  dispatch) is attributed to the model that actually served the request rather
+  than the one the turn started with.
+- The workflow previously reported usage only for the main agent; the observer
+  now reports every agent, which is what makes per-sub-agent accounting possible.

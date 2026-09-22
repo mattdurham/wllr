@@ -104,6 +104,9 @@ Useful config/env entry points:
 - `WLLR_CONFIG`
 - `WLLR_EXTENSIONS_DIR`
 - `WLLR_COMPACT_THRESHOLD`
+- `WLLR_PPROF_ADDR` — debug listener (default `127.0.0.1:6060`) serving pprof and
+  the Prometheus metrics endpoint at `/metrics`. Empty disables both. See
+  [docs/metrics.md](docs/metrics.md).
 - `wllr.saved_models` — catalog models (anthropic/openai/gemini) added through
   the `a` key in `/models`; local and OpenRouter keep their own stores.
 - `wllr.openrouter_speed` — OpenRouter provider-routing preference (`floor`,

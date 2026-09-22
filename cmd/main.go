@@ -163,7 +163,12 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 	// in core; the rolling log FILE is written by the bundled `logging` WASM
 	// extension, fed by the dispatchLogHandler via EventLog. See cmd/loghandler.go.
 	cleanupLog := setupLogging(h, *execPrompt == "")
-	cleanupPprof := startPprofServer(*pprofAddr)
+	// Usage metrics are served alongside pprof on the debug listener (at
+	// /metrics), so a local Prometheus scrape needs no second address.
+	metrics := newWllrMetrics()
+	pool.SetUsageObserver(metrics.recordTurn)
+	pool.SetLifecycleObserver(metrics.recordLifecycle)
+	cleanupPprof := startDebugServer(*pprofAddr, metrics)
 	defer cleanupPprof()
 	// Route the host's own diagnostic logs through the configured default handler
 	// too (the dispatch handler's reentrancy guard makes this safe).

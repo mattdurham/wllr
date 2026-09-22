@@ -125,3 +125,12 @@ mismatched endpoint overrides.
 | HIGH | `TestSpawner_Spawn_InitialPrompt` | InitialPrompt starts first turn | pool.Send called after spawn |
 | MEDIUM | `TestAgent_Cancel_StopsActiveGoroutine` | Cancel during active turn | Turn goroutine exits; onDone called with cancel error |
 | MEDIUM | `TestPool_CancelAll_StopsAllAgents` | CancelAll cancels every agent | All active turns cancelled |
+
+## Usage and lifecycle observers (usage_observer_test.go)
+
+| Level | Test | Scenario | Assertion |
+|-------|------|----------|-----------|
+| High | `TestUsageObserverReportsTurn` | one successful turn | a start signal then a completion with agent, model, and token counts |
+| High | `TestUsageObserverReportsFailure` | a turn that errors | reported as a turn with `Err` set and no tokens attributed |
+| High | `TestUsageObserverCoversSubagents` | main + sub-agent turns | the observer fires for both, enabling per-agent accounting |
+| Medium | `TestLifecycleObserverReportsSpawnAndClose` | spawn then close | reports the added and removed agent with the post-change live count |

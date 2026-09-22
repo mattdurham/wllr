@@ -12,6 +12,10 @@ import (
 
 const fallbackPprofAddr = "127.0.0.1:6060"
 
+// metricsPath is the Prometheus exposition endpoint, served on the debug
+// listener alongside the pprof endpoints.
+const metricsPath = "/metrics"
+
 func defaultPprofAddr() string {
 	if addr := os.Getenv("WLLR_PPROF_ADDR"); addr != "" {
 		return addr
@@ -20,11 +24,21 @@ func defaultPprofAddr() string {
 }
 
 func startPprofServer(addr string) func() {
+	return startDebugServer(addr, nil)
+}
+
+// startDebugServer serves the profiling endpoints plus, when metrics is
+// non-nil, the Prometheus exposition at /metrics. One listener serves both so a
+// local scraper and a profiler target the same address.
+func startDebugServer(addr string, metrics *wllrMetrics) func() {
 	if addr == "" {
 		return func() {}
 	}
 
 	mux := newPprofMux()
+	if metrics != nil {
+		mux.Handle(metricsPath, metrics.handler())
+	}
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		slog.Warn("wllr: pprof listen failed", "addr", addr, "error", err)

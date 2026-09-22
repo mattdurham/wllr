@@ -26,6 +26,9 @@ coordination.
 - `AgentPool` — `Spawn`, `Get`, `Close`, `LanguageModelForModel`, `ResolveSubagentModel` (explicit model → factory; omitted → host-installed `SetSubagentResolver`, else the default model), `SetProvider`, `SetDefaultModelName`, `SetContextWindow`
 - `Spawner` — sub-agent construction (applies Anthropic thinking budget)
 - `ProviderRequestInterceptor` — the before_provider_request reroute hook
+- `SetUsageObserver` / `SetLifecycleObserver` — plain-value seams reporting
+  per-turn token usage and pool membership to the host (see
+  [Prometheus metrics](../decisions/prometheus-metrics.md))
 
 # Cross-cutting Decisions
 

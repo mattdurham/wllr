@@ -12,3 +12,4 @@
 * [Local model context window resolution — config entry, then endpoint, then nothing](local-model-context-window-resolution.md) — a window-less model clears the pool's window; explicit override always wins.
 * [Agents verify repository state before editing](agent-editing-discipline.md) — targeted changes, preservation of user work, and verified completion.
 * [Model tiers route work by cost, not model name](model-tiers.md) — tag high/low tier targets in `/models`; reference them from skills and sub-agent defaults.
+* [Prometheus metrics via plain-value observer seams](prometheus-metrics.md) — per-model/per-agent token and turn visibility without coupling the agent package to a metrics library.
