@@ -59,6 +59,10 @@ type AgentBridge interface {
 	List() ([]AgentInfo, error)
 	TokenCount() int64
 	SetHistory(id string, messages []sdk.Message) error
+	// GetHistory returns a copy of the agent's conversation history. An empty
+	// id means the root agent. Returns ErrAgentNotFound-equivalent when the
+	// agent is unknown.
+	GetHistory(id string) ([]sdk.Message, error)
 	// MainAgentContextUsage returns the current context window usage for the main agent.
 	// Returns a zero-valued ContextUsage before the first turn completes or when no
 	// main agent is registered.

@@ -214,6 +214,7 @@ The full set of dispatched methods is:
 | `MethodAgentList`             | `handleAgentList`                                |
 | `MethodAgentTokenCount`       | `handleAgentTokenCount`                          |
 | `MethodAgentResetHistory`     | `handleAgentResetHistory`                        |
+| `MethodAgentGetHistory`      | `handleAgentGetHistory`                          |
 | `MethodTeamCreate`            | `handleTeamCreate`                               |
 | `MethodTeamClose`             | `handleTeamClose`                                |
 | `MethodTeamAddMember`         | `handleTeamAddMember`                            |
@@ -256,6 +257,13 @@ The full set of dispatched methods is:
 **Invariant:** `PermExec` is required for `exec` and `mcp_spawn`; `PermFileRead` for `read_file`; `PermFileWrite` for `write_file`/`append_file`; `PermNetworkWrite` for `http_post`; `PermNetworkRead` for `http_get`; `PermUI` for `ui_create_area`/`ui_patch`/`ui_update_area`/`ui_remove_area` and `format_markdown`. `get_env`, `get_os`, agent/team/mailbox methods, `store_*`, `modal`, `notify`, `set_status`, `append_system_prompt`, and
 `set_model` require no permission. If the extension is nil or lacks the
 required permission, the call returns a permission-denied error response.
+
+**Invariant:** `agent_get_history` (`MethodAgentGetHistory`) is read-only
+observability and requires no permission, matching `agent_list` and
+`mailbox_snapshot`. Param `id` names the agent; empty means the root agent, so a
+caller need not know its ID. The result is `{id, messages}` — an object even
+when the history is empty, so a caller can distinguish "no messages yet" from a
+failed call. An unknown agent id is an error response.
 
 **Invariant:** `set_model` (`MethodSetModel`) param `model` is a model ID or a
 configured model-tier name; param `thinking` is an optional provider-agnostic

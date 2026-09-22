@@ -20,6 +20,7 @@ func (f *fakeAgentBridge) Run(_ string) error                                   
 func (f *fakeAgentBridge) List() ([]extension.AgentInfo, error)                    { return nil, nil }
 func (f *fakeAgentBridge) TokenCount() int64                                       { return 0 }
 func (f *fakeAgentBridge) SetHistory(_ string, _ []sdk.Message) error              { return nil }
+func (f *fakeAgentBridge) GetHistory(_ string) ([]sdk.Message, error)              { return nil, nil }
 func (f *fakeAgentBridge) MainAgentContextUsage() sdk.ContextUsage                 { return sdk.ContextUsage{} }
 
 func (f *fakeAgentBridge) SnapshotInbox(_ string) ([]sdk.Message, error) { return nil, nil }

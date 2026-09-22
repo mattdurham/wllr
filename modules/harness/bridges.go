@@ -80,6 +80,9 @@ type earlyAgentBridge struct{}
 func (e *earlyAgentBridge) Spawn(_ context.Context, _ extension.SpawnRequest) error {
 	return fmt.Errorf("agent_spawn: session not yet started")
 }
+func (e *earlyAgentBridge) GetHistory(_ string) ([]sdk.Message, error) {
+	return nil, fmt.Errorf("agent_get_history: session not yet started")
+}
 func (e *earlyAgentBridge) Close(_ string) error { return fmt.Errorf("not started") }
 func (e *earlyAgentBridge) SendMessage(_ string, _ sdk.Message) error {
 	return fmt.Errorf("not started")
@@ -241,6 +244,22 @@ func (b *harnessAgentBridge) TokenCount() int64 {
 		return 0
 	}
 	return b.pool.TokenCount()
+}
+
+// GetHistory returns a copy of the named agent's conversation history. An
+// empty id means the root agent, so callers do not need to know its ID.
+func (b *harnessAgentBridge) GetHistory(id string) ([]sdk.Message, error) {
+	if b.pool == nil {
+		return nil, fmt.Errorf("no agent pool")
+	}
+	if id == "" {
+		id = b.mainID
+	}
+	a := b.pool.Get(id)
+	if a == nil {
+		return nil, fmt.Errorf("agent %q not found", id)
+	}
+	return a.History(), nil
 }
 
 func (b *harnessAgentBridge) SetHistory(id string, messages []sdk.Message) error {

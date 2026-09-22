@@ -36,6 +36,7 @@ type testAgentBridge struct {
 	onList                  func() ([]AgentInfo, error)
 	onTokenCount            func() int64
 	onSetHistory            func(id string, messages []sdk.Message) error
+	onGetHistory            func(id string) ([]sdk.Message, error)
 	onMainAgentContextUsage func() sdk.ContextUsage
 	onSnapshotInbox         func(id string) ([]sdk.Message, error)
 	onDeleteFromInbox       func(id string, byIndex int, byMessageID string) (int, error)
@@ -96,6 +97,13 @@ func (b *testAgentBridge) SetHistory(id string, messages []sdk.Message) error {
 		return b.onSetHistory(id, messages)
 	}
 	return nil
+}
+
+func (b *testAgentBridge) GetHistory(id string) ([]sdk.Message, error) {
+	if b.onGetHistory != nil {
+		return b.onGetHistory(id)
+	}
+	return nil, nil
 }
 
 func (b *testAgentBridge) MainAgentContextUsage() sdk.ContextUsage {

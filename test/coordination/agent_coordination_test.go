@@ -397,6 +397,7 @@ func (b *poolAgentBridge) List() ([]extension.AgentInfo, error) {
 }
 func (b *poolAgentBridge) TokenCount() int64                          { return b.pool.TokenCount() }
 func (b *poolAgentBridge) SetHistory(_ string, _ []sdk.Message) error { return nil }
+func (b *poolAgentBridge) GetHistory(_ string) ([]sdk.Message, error) { return nil, nil }
 func (b *poolAgentBridge) MainAgentContextUsage() sdk.ContextUsage    { return sdk.ContextUsage{} }
 
 func (b *poolAgentBridge) SnapshotInbox(id string) ([]sdk.Message, error) {

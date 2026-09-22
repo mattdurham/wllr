@@ -541,6 +541,9 @@ func (h *Host) buildDispatch() map[string]func(ctx context.Context, ext *Extensi
 		sdk.MethodAgentResetHistory: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleAgentResetHistory(req)
 		},
+		sdk.MethodAgentGetHistory: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleAgentGetHistory(req)
+		},
 		sdk.MethodMCPSpawn: func(_ context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleMCPSpawn(ext, req)
 		},
@@ -1499,6 +1502,29 @@ func (h *Host) handleAgentResetHistory(req sdk.HostCallRequest) sdk.HostCallResp
 		return sdk.HostCallResponse{Error: err.Error()}
 	}
 	return sdk.HostCallResponse{}
+}
+
+func (h *Host) handleAgentGetHistory(req sdk.HostCallRequest) sdk.HostCallResponse {
+	if h.AgentBridge() == nil {
+		return sdk.HostCallResponse{Error: "agent_get_history: not supported by host"}
+	}
+	var params sdk.AgentGetHistoryParams
+	if len(req.Params) > 0 {
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			return sdk.HostCallResponse{Error: fmt.Sprintf("agent_get_history: %v", err)}
+		}
+	}
+	messages, err := h.AgentBridge().GetHistory(params.ID)
+	if err != nil {
+		return sdk.HostCallResponse{Error: fmt.Sprintf("agent_get_history: %v", err)}
+	}
+	// Always return an object so a caller can distinguish "no messages" from a
+	// failed call; an empty history is a valid answer.
+	result, err := json.Marshal(sdk.AgentGetHistoryResult{ID: params.ID, Messages: messages})
+	if err != nil {
+		return sdk.HostCallResponse{Error: fmt.Sprintf("agent_get_history: %v", err)}
+	}
+	return sdk.HostCallResponse{Result: result}
 }
 
 func (h *Host) handleMCPSpawn(ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {

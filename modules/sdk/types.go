@@ -251,6 +251,10 @@ const (
 	// MethodAgentResetHistory replaces the main agent's conversation history
 	// and rebuilds the chat view from the supplied messages.
 	MethodAgentResetHistory = "agent_reset_history"
+	// MethodAgentGetHistory returns an agent's conversation history so a view
+	// can render it (e.g. focusing a sub-agent's transcript). Read-only; no
+	// permission required, matching agent_list and mailbox_snapshot.
+	MethodAgentGetHistory = "agent_get_history"
 
 	// MethodGetStatusInfo returns the current status bar data so extensions can
 	// build a custom status line. Returns StatusInfo JSON.
