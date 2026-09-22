@@ -116,13 +116,14 @@ func TestAgentTree_EnterFocusesHighlighted(t *testing.T) {
 	}
 }
 
-// esc deliberately falls through: it keeps its global meaning of cancelling the
-// current ask, so the tree must not swallow it.
-func TestAgentTree_EscIsNotHandled(t *testing.T) {
+// esc closes the tree like any other overlay. While an overlay is open it owns
+// esc, so the same key cannot both dismiss the dialog and cancel the turn
+// behind it.
+func TestAgentTree_EscCloses(t *testing.T) {
 	tree := newTree()
 	r := tree.HandleKey(tea.KeyPressMsg{Code: tea.KeyEsc})
-	if r.Handled || r.Closed || r.Focused != "" {
-		t.Fatalf("esc must fall through to the caller, got %+v", r)
+	if !r.Closed || !r.Handled {
+		t.Fatalf("esc should close the tree, got %+v", r)
 	}
 }
 

@@ -236,9 +236,7 @@ type AgentTreeKeyResult struct {
 	// Folded is set when a node was expanded or collapsed, so the caller can
 	// re-render without re-fetching nodes.
 	Folded bool
-	// Handled is false when the key is not the tree's. esc is deliberately not
-	// handled: it keeps its global meaning of "cancel the current ask", so the
-	// caller lets it fall through rather than closing the tree.
+	// Handled is false when the key is not the tree's.
 	Handled bool
 }
 
@@ -246,7 +244,7 @@ type AgentTreeKeyResult struct {
 func (t *AgentTreeView) HandleKey(kp tea.KeyPressMsg) AgentTreeKeyResult {
 	rows := t.rows()
 	switch kp.String() {
-	case "q":
+	case "q", keyEsc:
 		return AgentTreeKeyResult{Closed: true, Handled: true}
 	case "enter":
 		if node, ok := t.Highlighted(); ok {

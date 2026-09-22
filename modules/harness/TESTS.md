@@ -277,3 +277,11 @@ a model, and typing/backspace filtering in the searchable picker.
 | High | `TestSubmitRoutesToFocusedAgent` | focus a sub-agent | focus state is set and input targets it |
 | High | `TestSubmitFallsBackWhenFocusedAgentGone` | focus a closed agent | falls back to the root instead of dropping input |
 | High | `TestAgentTreeSelectionDispatchesFocusCallback` | enter on a node | dispatches EventOnCommand with the agent ID |
+
+## Esc and overlay precedence (tui_test.go)
+
+| Level | Test | Scenario | Assertion |
+|-------|------|----------|-----------|
+| High | `TestEscInOverlaysDoesNotCancelTurn` | esc in modal, picker, text input while a turn runs | each closes the overlay and the turn keeps running |
+| High | `TestModel_Esc_ClosesModalWithoutCancellingTurn` | esc with a modal open and a live turn | modal closes, no "cancelling…", agent still running |
+| Medium | `TestAgentTree_EscCloses` | esc on the agent tree | tree closes |

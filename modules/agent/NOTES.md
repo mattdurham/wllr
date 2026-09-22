@@ -597,3 +597,30 @@ convention `Spawn` uses to derive child IDs, tested with the separator so
 `main/x2` is not treated as a child of `main/x`. `Descendants(id)` exposes the
 set without acting on it, for callers that need to report the impact. Lifecycle
 observers fire once per affected agent, so metrics see each removal.
+
+## 38. Spawn must not start the first turn on the caller's stack
+
+*Added: 2026-09-22*
+
+**Decision:** `Spawner.Spawn` sends the initial prompt from a detached
+goroutine rather than calling `pool.Send` inline.
+
+**Rationale:** Spawn executes inside the spawning extension's WASM call — the
+agents extension calls `create_agent`, which reaches `agent_spawn`, which reaches
+Spawn. Starting the turn inline runs `onTurnStart` before Spawn returns, and the
+host's turn-start handler dispatches an event back into that same extension. The
+extension host serializes calls per extension with a non-reentrant mutex, so the
+inner dispatch waits on a lock the outer frame holds and cannot release. The
+result is a permanent deadlock that also blocks every later call into that
+extension (observed as `create_agent` and `list_agents` hanging forever, three
+goroutines stuck 26 minutes).
+
+**Consequence:** Turn start is detached, so the first turn begins just after
+Spawn returns. Callers that need the turn to have started before returning must
+not assume it. Fixing this at the source protects every `onTurnStart` callback,
+not just the prompt observer that exposed it.
+
+**Note:** `go test -race` cannot detect this class of bug. It is a deadlock, not
+a data race — all access is correctly synchronized through a mutex that is simply
+never released. The regression test asserts liveness (Spawn returns while the
+callback contends on a held lock), which is the only reliable detector.

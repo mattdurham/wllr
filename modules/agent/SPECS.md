@@ -37,6 +37,14 @@ Package `agent` manages sub-agents and teams for the bob harness. Each `Agent` w
   than the session model, which the single-provider `modelFactory` cannot express.
 - Individual `Agent` fields (inbox, cancel, history, onToken, onDone, onToolCall, onTurnStart, toolsFn, systemPrompt) carry their own per-field mutexes. Callers never need to hold pool-level locks when calling agent methods.
 
+**Invariant:** `Spawn` must not start the spawned agent's first turn on the
+caller's goroutine. Spawn runs inside the spawning extension's WASM call, so a
+turn that starts synchronously fires `onTurnStart` (and any host work it
+triggers) while the extension's non-reentrant call mutex is still held by an
+outer frame — re-entering that extension deadlocks permanently and stalls every
+later call into it. The initial prompt is therefore sent from a detached
+goroutine, which protects all turn-start callbacks rather than one caller.
+
 **Invariant:** `Close(id)` and `Cancel(id)` cascade to every descendant of `id`,
 where a descendant is any agent whose ID is prefixed by `"<id>/"`. An agent's
 descendants exist only to serve it, so leaving them running after their parent

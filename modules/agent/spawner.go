@@ -191,9 +191,18 @@ func (s *Spawner) Spawn(ctx context.Context, req extension.SpawnRequest) error {
 	})
 
 	if req.InitialPrompt != "" {
-		if err := pool.Send(req.ID, req.InitialPrompt); err != nil {
-			slog.Warn("sub-agent: initial turn start failed", "agent", req.ID, "err", err)
-		}
+		// Start the first turn off this goroutine. Spawn runs inside the
+		// spawning extension's WASM call, so any callback that fires while
+		// starting a turn (onTurnStart, and anything the host does in response)
+		// would re-enter that same extension and deadlock on its non-reentrant
+		// call mutex. Detaching keeps turn start off the caller's stack.
+		agentID := req.ID
+		prompt := req.InitialPrompt
+		go func() {
+			if err := pool.Send(agentID, prompt); err != nil {
+				slog.Warn("sub-agent: initial turn start failed", "agent", agentID, "err", err)
+			}
+		}()
 	}
 
 	return nil

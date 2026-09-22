@@ -136,3 +136,5 @@ mismatched endpoint overrides.
 | Medium | `TestLifecycleObserverReportsSpawnAndClose` | spawn then close | reports the added and removed agent with the post-change live count |
 
 | High | `TestSpawnerTokenObserverCarriesAgentID` | a spawned sub-agent streams text | the observer fires with the producing agent's ID, enabling live focused views |
+
+| High | `TestSpawnDoesNotBlockOnTurnStartCallback` | spawn while the caller holds a lock the turn-start callback needs | Spawn returns instead of invoking the callback on the spawning stack (regression for the create_agent deadlock) |

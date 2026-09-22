@@ -474,20 +474,14 @@ func (m *Model) SetProgram(p *tea.Program) {
 		spawner.SetTokenObserver(dispatchSegmentedTokens(extHostRef))
 		// Attribute each sub-agent's turn start to that agent, so a focused
 		// transcript shows the prompt alongside the reply.
-		spawner.SetPromptObserver(func(agentID, content string, queued bool) {
-			payload, err := json.Marshal(sdk.BeforeAgentStartPayload{
-				AgentID: agentID,
-				Prompt:  content,
-				Queued:  queued,
-			})
-			if err != nil {
-				return
-			}
-			_, _ = extHostRef.DispatchEvent(
-				context.Background(),
-				sdk.Event{Type: sdk.EventBeforeAgentStart, Payload: payload},
-			)
-		})
+		//
+		// This MUST NOT dispatch synchronously. A sub-agent's first turn starts
+		// inside Spawn, which itself runs inside the spawning extension's WASM
+		// call — so a synchronous dispatch here re-enters that same extension and
+		// blocks forever on its non-reentrant call mutex (the create_agent
+		// deadlock). Dispatching from its own goroutine keeps the turn start off
+		// the caller's stack.
+		spawner.SetPromptObserver(dispatchAgentPrompt(extHostRef))
 
 		m.extHost.SetAgentBridge(&harnessAgentBridge{
 			pool:    pool,
@@ -966,6 +960,9 @@ func (m Model) updateKeyPress(msg tea.Msg) (Model, tea.Cmd, bool) {
 		return m, nil, false
 	}
 
+	// An open overlay owns esc: it dismisses the dialog rather than reaching
+	// through to cancel the turn behind it. Disambiguation would otherwise be
+	// impossible — the same key would both close the dialog and stop the work.
 	if m.agentTree.IsActive() {
 		res := m.agentTree.HandleKey(kp)
 		if res.Closed {
@@ -985,22 +982,7 @@ func (m Model) updateKeyPress(msg tea.Msg) (Model, tea.Cmd, bool) {
 		if res.Handled {
 			return m, nil, true
 		}
-		// Not handled (notably esc): fall through so the global handler runs.
 	}
-
-	// Esc during an active main-agent turn cancels it, and that takes precedence
-	// over closing an open overlay (see
-	// TestModel_Esc_DuringStream_CancelsBeforeModalClose). Sub-agents are not
-	// cancelled: esc means "stop what I asked you for", not "abandon everything
-	// I delegated". Their lifecycle is shutdown_agent / shutdown_team.
-	if kp.String() == keyEsc {
-		if m.mainTurnActive() {
-			m.cancelMainTurn()
-			m.live.setStatus("stream", "cancelling…")
-			return m, nil, true
-		}
-	}
-
 	if m.textInput.IsActive() {
 		return m.updateKeyPressTextInput(kp)
 	}
@@ -1009,6 +991,18 @@ func (m Model) updateKeyPress(msg tea.Msg) (Model, tea.Cmd, bool) {
 	}
 	if m.modalContent != "" {
 		return m.updateKeyPressModal(kp)
+	}
+
+	// With no overlay open, esc during an active main-agent turn cancels it.
+	// Sub-agents are not cancelled: esc means "stop what I asked you for", not
+	// "abandon everything I delegated". Their lifecycle is shutdown_agent /
+	// shutdown_team.
+	if kp.String() == keyEsc {
+		if m.mainTurnActive() {
+			m.cancelMainTurn()
+			m.live.setStatus("stream", "cancelling…")
+			return m, nil, true
+		}
 	}
 	if len(m.suggestions) > 0 {
 		if m2, cmd, handled := m.updateKeyPressDropdown(kp); handled {
@@ -2715,5 +2709,39 @@ func dispatchSegmentedTokens(extHost *extension.Host) func(agentID, text string)
 		}
 		mu.Unlock()
 		dispatch(text)
+	}
+}
+
+// dispatchAgentPrompt returns a prompt observer that reports a sub-agent's turn
+// start as EventBeforeAgentStart.
+//
+// The dispatch is deliberately asynchronous. A sub-agent's first turn begins
+// inside Spawner.Spawn, which runs inside the spawning extension's WASM call, so
+// the extension host's per-extension call mutex is already held by an outer
+// frame. Dispatching on that stack re-enters the same extension and blocks on a
+// mutex that cannot be released until the outer call returns — a permanent
+// deadlock that also stalls every later call into that extension.
+func dispatchAgentPrompt(extHost *extension.Host) func(agentID, content string, queued bool) {
+	if extHost == nil {
+		return nil
+	}
+	return func(agentID, content string, queued bool) {
+		if agentID == "" || strings.TrimSpace(content) == "" {
+			return
+		}
+		payload, err := json.Marshal(sdk.BeforeAgentStartPayload{
+			AgentID: agentID,
+			Prompt:  content,
+			Queued:  queued,
+		})
+		if err != nil {
+			return
+		}
+		go func() {
+			_, _ = extHost.DispatchEvent(
+				context.Background(),
+				sdk.Event{Type: sdk.EventBeforeAgentStart, Payload: payload},
+			)
+		}()
 	}
 }

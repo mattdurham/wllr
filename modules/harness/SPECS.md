@@ -545,11 +545,14 @@ A node whose parent is absent renders as a root, so a partial list still shows
 every agent. Collapsing hides a node's children but keeps the node visible, and
 the cursor clamps to a visible row so a collapse cannot strand the highlight.
 
-**Invariant:** `esc` is **not** consumed by the agent tree. It keeps its global
-meaning of cancelling the current ask (`updateKeyPress` handles it before the
-overlay switch), so the tree falls through on `esc` and closes on `q` instead.
-This is deliberate and covered by `TestAgentTree_EscIsNotHandled` and
-`TestModel_Esc_DuringStream_CancelsBeforeModalClose`.
+**Invariant:** an open overlay owns `esc`. `updateKeyPress` consults text input,
+picker, modal, and agent tree **before** the esc-cancels-the-ask branch, so `esc`
+dismisses the dialog and leaves any running turn untouched. If esc-cancelled
+turns took precedence, the same key would both close a dialog and stop the work
+with no way to express only the first. With no overlay open, `esc` during an
+active main-agent turn cancels that turn. Covered by
+`TestEscInOverlaysDoesNotCancelTurn` and
+`TestModel_Esc_ClosesModalWithoutCancellingTurn`.
 
 **Invariant:** input follows focus. `submitToAgent` targets `focusedAgent`, and
 an empty focus means the root agent — the root is the default, not a special

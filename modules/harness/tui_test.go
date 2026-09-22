@@ -142,19 +142,38 @@ func TestModel_Esc_DuringStream_SetsCancellingStatus(t *testing.T) {
 	}
 }
 
-func TestModel_Esc_DuringStream_CancelsBeforeModalClose(t *testing.T) {
-	m := newTestModel()
-	m.streaming = true
+// An open dialog owns esc: it closes the dialog instead of cancelling the turn
+// running behind it. Without this the same key would both dismiss the dialog and
+// stop the work, with no way to express only the first.
+func TestModel_Esc_ClosesModalWithoutCancellingTurn(t *testing.T) {
+	lm := &blockingLM{started: make(chan struct{})}
+	pool := agent.NewPool()
+	a, err := pool.Spawn(agent.MainAgentID, lm, agent.SpawnOpts{TurnTimeout: -1})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	a.Submit(context.Background(), "block")
+	select {
+	case <-lm.started:
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for the turn to start")
+	}
+
+	m := New(pool, agent.MainAgentID, nil)
 	m.modalContent = "help"
 
 	m, _ = callUpdate(m, keyMsg(tea.KeyEsc, 0))
 
-	if v := m.live.getStatus("stream"); v != "cancelling…" {
-		t.Errorf("expected 'cancelling…', got %q", v)
+	if m.modalContent != "" {
+		t.Error("esc should close the open modal")
 	}
-	if m.modalContent == "" {
-		t.Fatal("modal should remain open when esc is used to cancel an active turn")
+	if v := m.live.getStatus("stream"); v == "cancelling…" {
+		t.Error("esc closing a modal must not cancel the running turn")
 	}
+	if !a.IsRunning() {
+		t.Error("the agent's turn should still be running")
+	}
+	a.Cancel()
 }
 
 func TestModel_Esc_CancelsRunningAgentWhenStreamingStateIsStale(t *testing.T) {
@@ -402,5 +421,40 @@ func TestModel_Esc_CancelsMainButNotSubagents(t *testing.T) {
 	// ...but the sub-agent keeps running.
 	if !sub.IsRunning() {
 		t.Fatal("esc must not cancel sub-agents; it cancelled main/coder")
+	}
+}
+
+// Esc while an overlay is open dismisses the overlay and leaves any running turn
+// alone. Overlays own esc so the key has one unambiguous meaning.
+func TestEscInOverlaysDoesNotCancelTurn(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		open func(m *Model)
+	}{
+		{"modal", func(m *Model) { m.modalContent = "help" }},
+		{"picker", func(m *Model) { m.picker.Open("t", nil, "__wllr:test") }},
+		{"textinput", func(m *Model) { m.textInput.Open("t", "p", "", "__wllr:test") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			lm := &blockingLM{started: make(chan struct{})}
+			pool := agent.NewPool()
+			a, err := pool.Spawn(agent.MainAgentID, lm, agent.SpawnOpts{TurnTimeout: -1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			a.Submit(context.Background(), "block")
+			select {
+			case <-lm.started:
+			case <-time.After(time.Second):
+				t.Fatal("turn did not start")
+			}
+			m := New(pool, agent.MainAgentID, nil)
+			tc.open(&m)
+			_, _ = callUpdate(m, keyMsg(tea.KeyEsc, 0))
+			if !a.IsRunning() {
+				t.Errorf("esc in a %s cancelled the running turn", tc.name)
+			}
+			a.Cancel()
+		})
 	}
 }
