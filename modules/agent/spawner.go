@@ -22,6 +22,11 @@ type Spawner struct {
 	toolsFn    func(agentID string) []fantasy.AgentTool
 	notifyFn   func(text string)
 	toolCallFn func(agentID, id, toolName, input string)
+	// tokenFn, when set, receives every sub-agent's streamed text along with
+	// the agent that produced it. Sub-agent output is otherwise discarded, so
+	// this is what lets a focused view render a sub-agent's turn as it streams
+	// rather than only after the turn completes.
+	tokenFn func(agentID, text string)
 }
 
 // NewSpawner creates a Spawner bound to the given pool.
@@ -43,6 +48,14 @@ func NewSpawner(
 // sub-agents dispatch tool calls.
 func (s *Spawner) SetToolCallObserver(fn func(agentID, id, toolName, input string)) {
 	s.toolCallFn = fn
+}
+
+// SetTokenObserver installs an optional callback receiving each sub-agent's
+// streamed text and the agent that produced it. The callback runs on the
+// agent's turn goroutine, so it must be safe for concurrent use and must not
+// block; the harness batches per agent before dispatching.
+func (s *Spawner) SetTokenObserver(fn func(agentID, text string)) {
+	s.tokenFn = fn
 }
 
 // Spawn creates and registers a sub-agent with the given parameters.
@@ -93,8 +106,15 @@ func (s *Spawner) Spawn(ctx context.Context, req extension.SpawnRequest) error {
 		a.creatorID = req.CallerID
 	}
 
-	// Sub-agent tokens are NOT routed to the main chat.
-	a.SetOnToken(func(_ string) {})
+	// Sub-agent tokens are not routed to the main transcript, but an observer
+	// can forward them (keyed by agent) so a focused view can render them.
+	if s.tokenFn != nil {
+		tokenFn := s.tokenFn
+		subAgentID := req.ID
+		a.SetOnToken(func(text string) { tokenFn(subAgentID, text) })
+	} else {
+		a.SetOnToken(func(_ string) {})
+	}
 
 	subID := req.ID
 	notifyFn := s.notifyFn

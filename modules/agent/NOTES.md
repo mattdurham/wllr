@@ -558,3 +558,22 @@ Two attribution fixes fell out of this work:
   than the one the turn started with.
 - The workflow previously reported usage only for the main agent; the observer
   now reports every agent, which is what makes per-sub-agent accounting possible.
+
+## 36. Sub-agent token observer
+
+*Added: 2026-09-22*
+
+**Decision:** Add `Spawner.SetTokenObserver`, which receives each sub-agent's
+streamed text together with the agent that produced it. When unset, sub-agent
+tokens stay discarded as before.
+
+**Rationale:** Sub-agent output was routed to a no-op (`SetOnToken(func(_ string){})`)
+so only the main agent's text reached the transcript. Reading an agent's history
+covers completed turns, but a running agent's in-flight text appears nowhere
+until its turn ends. Keying the observer by agent ID lets a focused view render
+live output while leaving the main transcript untouched.
+
+**Consequence:** The harness creates one batcher per agent, so coalescing
+windows are independent and a slow agent cannot delay a fast one. The batcher's
+program field is optional: a nil program marks dispatch-only operation, which is
+how sub-agent text reaches extensions without emitting a main-chat `TokenMsg`.

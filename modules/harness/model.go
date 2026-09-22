@@ -461,6 +461,10 @@ func (m *Model) SetProgram(p *tea.Program) {
 		spawner.SetToolCallObserver(func(agentID, id, toolName, input string) {
 			p.Send(ToolCallStartMsg{AgentID: agentID, ID: id, ToolName: toolName, Input: input})
 		})
+		// Forward each sub-agent's streamed text as EventToken keyed by agent,
+		// so a focused view can render it live. Each agent gets its own batcher;
+		// nothing is sent to the main chat.
+		spawner.SetTokenObserver(dispatchSegmentedTokens(extHostRef))
 
 		m.extHost.SetAgentBridge(&harnessAgentBridge{
 			pool:    pool,
@@ -568,7 +572,11 @@ func (b *tokenBatcher) onToken(token string) {
 		b.buf.Reset()
 		b.lastSend = now
 		b.mu.Unlock()
-		b.p.Send(TokenMsg{Token: s})
+		// A nil program marks a dispatch-only batcher (sub-agent output):
+		// there is no main-chat TokenMsg to send, only the extension event.
+		if b.p != nil {
+			b.p.Send(TokenMsg{Token: s})
+		}
 		if b.dispatch != nil {
 			b.dispatch(s)
 		}
@@ -583,7 +591,9 @@ func (b *tokenBatcher) flush() {
 	b.buf.Reset()
 	b.mu.Unlock()
 	if s != "" {
-		b.p.Send(TokenMsg{Token: s})
+		if b.p != nil {
+			b.p.Send(TokenMsg{Token: s})
+		}
 		if b.dispatch != nil {
 			b.dispatch(s)
 		}
@@ -598,6 +608,15 @@ func (b *tokenBatcher) flush() {
 // (EventToken).
 func makeBatchedOnToken(p *tea.Program, dispatch func(string)) (onToken func(string), flush func()) {
 	b := &tokenBatcher{p: p, dispatch: dispatch}
+	return b.onToken, b.flush
+}
+
+// makeDispatchOnlyBatcher coalesces sub-agent text for extension dispatch
+// without sending main-chat TokenMsg: sub-agent output must not appear in the
+// main transcript. Batches are per agent (one batcher is created per sub-agent),
+// so timing state is never shared between agents.
+func makeDispatchOnlyBatcher(dispatch func(string)) (onToken func(string), flush func()) {
+	b := &tokenBatcher{dispatch: dispatch}
 	return b.onToken, b.flush
 }
 
@@ -2574,4 +2593,40 @@ func (m Model) renderConsole() string {
 	}
 	footer := b.Render("╰" + strings.Repeat("─", innerWidth) + "╯")
 	return header + "\n" + body.String() + footer + "\n"
+}
+
+// dispatchSegmentedTokens returns a token observer for sub-agents that batches
+// each agent's text separately and dispatches it as EventToken with that
+// agent's ID. One batcher per agent keeps the coalescing window independent, so
+// a slow agent cannot delay a fast one, and nothing is written to the main
+// transcript. The returned observer runs on agent turn goroutines.
+func dispatchSegmentedTokens(extHost *extension.Host) func(agentID, text string) {
+	if extHost == nil {
+		return nil
+	}
+	var mu sync.Mutex
+	batchers := make(map[string]func(string))
+	return func(agentID, text string) {
+		if agentID == "" || text == "" {
+			return
+		}
+		mu.Lock()
+		dispatch := batchers[agentID]
+		if dispatch == nil {
+			onToken, _ := makeDispatchOnlyBatcher(func(batch string) {
+				payload, err := json.Marshal(sdk.TokenPayload{AgentID: agentID, Text: batch})
+				if err != nil {
+					return
+				}
+				_, _ = extHost.DispatchEvent(
+					context.Background(),
+					sdk.Event{Type: sdk.EventToken, Payload: payload},
+				)
+			})
+			dispatch = onToken
+			batchers[agentID] = onToken
+		}
+		mu.Unlock()
+		dispatch(text)
+	}
 }

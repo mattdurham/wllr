@@ -134,3 +134,5 @@ mismatched endpoint overrides.
 | High | `TestUsageObserverReportsFailure` | a turn that errors | reported as a turn with `Err` set and no tokens attributed |
 | High | `TestUsageObserverCoversSubagents` | main + sub-agent turns | the observer fires for both, enabling per-agent accounting |
 | Medium | `TestLifecycleObserverReportsSpawnAndClose` | spawn then close | reports the added and removed agent with the post-change live count |
+
+| High | `TestSpawnerTokenObserverCarriesAgentID` | a spawned sub-agent streams text | the observer fires with the producing agent's ID, enabling live focused views |

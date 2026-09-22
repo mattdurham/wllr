@@ -752,3 +752,15 @@ path target the same provider entry.
 stays unset and nothing is sent. The startup apply is deliberately not gated on a
 reasoning level existing: OpenRouter routing is valid on its own, and gating it
 would silently drop a configured preference.
+
+## Sub-agent token routing (2026-09-22)
+
+Sub-agent output was deliberately dropped (`SetOnToken(func(_ string){})`) so it
+never polluted the main transcript. A focused agent view needs that text, but
+routing it into the main chat would be wrong, so the harness dispatches it as
+`EventToken` keyed by agent while sending no `TokenMsg`.
+
+`tokenBatcher` gained a nil-program mode for exactly this: a dispatcher with no
+bubbletea program to notify. Each agent gets its own batcher rather than sharing
+one, so one agent's coalescing window cannot delay another's, and the batcher's
+timing state stays single-goroutine (one turn per agent at a time).

@@ -534,6 +534,12 @@ The API key prompt uses `TextInputView.OpenSecret` and password echo mode.
 
 Startup uses the same required context-window prompt when `SetPendingContextWindow(provider, model)` is set. Empty, zero, negative, and non-numeric values are rejected; the model is not applied until persistence and selection succeed.
 
+**Invariant:** sub-agent streamed text is dispatched as `EventToken` with the
+producing agent's ID (`dispatchSegmentedTokens`), while remaining absent from the
+main transcript. Each agent gets its own batcher so coalescing windows are
+independent; `tokenBatcher` treats a nil program as dispatch-only, which is what
+lets sub-agent text reach extensions without emitting a main-chat `TokenMsg`.
+
 **Invariant:** picker callbacks prefixed `"__wllr:"` are core-owned and route to harness handlers, never to `EventOnCommand`. Extension command names cannot collide (the prefix is reserved). Reserved callbacks: `"__wllr:model"`, `"__wllr:thinking"`.
 
 **Invariant:** `SelectModelFn` errors surface as a notification and leave the active model unchanged; `activeModel`/status update only after a successful switch.

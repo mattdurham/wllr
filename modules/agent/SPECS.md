@@ -15,6 +15,12 @@ Package `agent` manages sub-agents and teams for the bob harness. Each `Agent` w
 - The `providerName` and `defaultModelName` fields are read/written under `p.mu`.
 - The `baseSystemPrompt` field has its own `baseSystemPromptMu sync.RWMutex`, separate from the main `mu`, because it can be updated independently without touching agent/team maps.
 - The optional `modelFactory` is read and written under `p.mu`; it receives the current provider and resolves model and endpoint requests for sub-agent creation. The factory is invoked even when the endpoint is empty, so it can select a configured endpoint from the model name.
+- The optional `tokenObserver` (Spawner.SetTokenObserver) receives each
+  sub-agent's streamed text with the producing agent's ID. Sub-agent output is
+  otherwise discarded, so this is the only way a focused view can render it as
+  it streams. It runs on the agent's turn goroutine and must be non-blocking;
+  the harness batches per agent before dispatching.
+
 - The optional `usageObserver` and `lifecycleObserver` are read/written under
   `p.dispatchMu`. `observeTurn` reports a `TurnUsage` per turn (a start signal,
   then a completion with token counts and duration); `observeLifecycle` reports
