@@ -1273,6 +1273,23 @@ func (a *Agent) streamTurn(
 		Messages:    sdkToFantasyMessages(history),
 		Prompt:      content,
 		PrepareStep: compactor.prepare,
+		OnTextStart: func(_ string) error {
+			// Each text part is a separate assistant segment — typically the
+			// narration surrounding a tool call. Parts carry no separating
+			// whitespace of their own, so concatenating them raw fuses the last
+			// sentence of one segment onto the first of the next, both in the
+			// live token stream and in the persisted history ("...done.Starting
+			// the next step..."). Join parts with a paragraph break instead;
+			// collapseBlankLineRuns bounds any excess at render time.
+			if collected == "" {
+				return nil
+			}
+			collected = strings.TrimRight(collected, "\n") + "\n\n"
+			if onToken != nil {
+				onToken("\n\n")
+			}
+			return nil
+		},
 		OnTextDelta: func(_, text string) error {
 			if text == "" {
 				return nil
