@@ -23,3 +23,6 @@ Implements `fantasy.Provider` and `fantasy.LanguageModel` using preset responses
 7. ScriptedToolCall is emitted as a single StreamPartTypeToolCall part (not as
    the streaming ToolInputStart/Delta/End sequence) so tool calls are dispatched
    atomically by the fantasy.Agent agentic loop.
+8. Scripted turns containing tool calls finish with FinishReasonToolCalls (not
+   FinishReasonStop); fantasy.Agent (v0.42.0+) only continues to tool execution
+   when the finish reason explicitly signals tool calls, matching real providers.

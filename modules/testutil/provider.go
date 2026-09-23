@@ -175,10 +175,16 @@ func (lm *FakeLM) Stream(ctx context.Context, call fantasy.Call) (fantasy.Stream
 			}
 		}
 
-		// Finish part.
+		// Finish part. Tool-call turns must finish with FinishReasonToolCalls:
+		// fantasy's agent loop only continues to tool execution when the finish
+		// reason explicitly signals tool calls (matching real providers).
+		finishReason := fantasy.FinishReasonStop
+		if len(toolCalls) > 0 {
+			finishReason = fantasy.FinishReasonToolCalls
+		}
 		yield(fantasy.StreamPart{
 			Type:         fantasy.StreamPartTypeFinish,
-			FinishReason: fantasy.FinishReasonStop,
+			FinishReason: finishReason,
 			Usage: fantasy.Usage{
 				InputTokens:  int64(len(rc.Prompt) / 4),
 				OutputTokens: int64(len(text) / 4),
