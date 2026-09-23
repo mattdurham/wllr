@@ -649,3 +649,33 @@ case: reaches the model, stays out of the transcript.
 `protocol` — that is the whole point. The transcript filters it in three places
 (history replay, the main agent's turn-start dispatch, and the sub-agent prompt
 observer), so a lifecycle envelope can never be mistaken for a user prompt.
+
+## 40. Nothing agent-side may call back into the host on a host call's stack
+
+*Added: 2026-09-22*
+
+**Decision:** Every agent callback that can dispatch into the extension host —
+turn start, token, context usage — runs on its own goroutine, never inline on the
+caller's stack. `Submit`'s turn goroutine waits for the start callback so output
+ordering is preserved.
+
+**Rationale:** This is the third deadlock of the same shape. `Submit` is
+reachable from a host call (`agent_deliver`, `agent_run`, `agent_send_message`),
+so its stack may already be inside an extension's WASM call. The extension host
+serializes per extension with `callMu`, which is not reentrant and cannot be:
+WASM linear memory is shared, so parallel calls would race on SDK globals. Any
+callback that dispatches from that stack therefore waits on a mutex held by its
+own caller, and the process wedges. Fixing call sites one at a time kept missing
+instances (Spawn's initial turn, the token flush, now turn start), so the
+invariant is stated once and enforced where the callbacks are invoked.
+
+**Consequence:** A caller of `Deliver`/`Send` may observe the turn beginning
+just after it returns rather than before. Nothing reads turn state back through
+those calls, so this is not load-bearing. Ordering between the prompt and the
+assistant's output is preserved by the turn goroutine waiting on the start
+callback.
+
+**Testing note:** `-race` cannot detect this. It is a deadlock, not a data race —
+all access is correctly synchronized through a mutex that is never released.
+Tests assert liveness instead: a call must return while a lock the callback needs
+is held. That assertion fails in seconds when the inline call is reinstated.

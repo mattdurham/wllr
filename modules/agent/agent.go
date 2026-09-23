@@ -606,13 +606,39 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 	onToolCall := a.onToolCallFn
 	a.onToolCallMu.RUnlock()
 
+	// turnStarted gates the turn goroutine on the start callback having run, so
+	// the prompt is announced before any assistant output.
+	var turnStarted chan struct{}
+
 	a.onTurnStartMu.RLock()
 	onTurnStart := a.onTurnStart
 	a.onTurnStartMu.RUnlock()
+	// The turn-start callback is invoked off this goroutine.
+	//
+	// Submit is reachable from a host call (agent_deliver, agent_run,
+	// agent_send_message), so this stack may already be inside an extension's
+	// WASM call. A callback that dispatches back into that extension would then
+	// wait on the extension host's non-reentrant per-extension call mutex —
+	// which the outer frame holds and cannot release until we return — and the
+	// whole process wedges. Detaching makes the invariant unconditional: no
+	// agent callback runs on a stack a host call can be on.
+	//
+	// Consequence: a caller of Deliver/Send observes that the turn may begin
+	// just after it returns, not before. Nothing reads turn state back through
+	// these calls, so this is not load-bearing for any caller.
+	// Ordered so the prompt is always announced before the turn's own output:
+	// onTurnStart renders the user's prompt, and the turn goroutine below emits
+	// assistant tokens. Firing the callback concurrently could let a token
+	// arrive first and render the reply above its prompt.
 	if onTurnStart != nil {
 		messages := make([]sdk.Message, len(inboxMsgs))
 		copy(messages, inboxMsgs)
-		onTurnStart(content, messages)
+		startTurn := make(chan struct{})
+		go func() {
+			defer close(startTurn)
+			onTurnStart(content, messages)
+		}()
+		turnStarted = startTurn
 	}
 
 	// Capture last summary for iterative compaction (read before goroutine launch
@@ -633,6 +659,9 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 
 	go func() {
 		defer cancel()
+		if turnStarted != nil {
+			<-turnStarted
+		}
 		defer func() {
 			if r := recover(); r != nil {
 				if onDone != nil {

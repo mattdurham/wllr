@@ -37,6 +37,23 @@ Package `agent` manages sub-agents and teams for the bob harness. Each `Agent` w
   than the session model, which the single-provider `modelFactory` cannot express.
 - Individual `Agent` fields (inbox, cancel, history, onToken, onDone, onToolCall, onTurnStart, toolsFn, systemPrompt) carry their own per-field mutexes. Callers never need to hold pool-level locks when calling agent methods.
 
+**Invariant (re-entrancy):** no agent callback may be invoked on a stack that a
+host call can be on. `Submit` is reachable from `agent_deliver`, `agent_run`, and
+`agent_send_message`, so its goroutine may already be inside an extension's WASM
+call — where the extension host holds a non-reentrant per-extension call mutex.
+A callback that dispatches back into that extension then waits on a lock its own
+caller holds and cannot release, wedging the process.
+
+Every callback that could dispatch (turn start, token, context usage) is
+therefore invoked from its own goroutine rather than inline. The turn goroutine
+waits on the start callback so the prompt is still announced before the turn's
+own output.
+
+**Invariant:** a deadlock of this shape is invisible to `go test -race`: the code
+is correctly synchronized and simply never completes. Regression tests for it
+assert liveness — that a call returns while a contended lock is held — because
+that is the only property that distinguishes it from working code.
+
 **Invariant:** `Spawn` must not start the spawned agent's first turn on the
 caller's goroutine. Spawn runs inside the spawning extension's WASM call, so a
 turn that starts synchronously fires `onTurnStart` (and any host work it

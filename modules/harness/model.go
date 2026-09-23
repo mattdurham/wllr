@@ -522,7 +522,12 @@ func (m *Model) SetProgram(p *tea.Program) {
 						},
 					)
 					evt := sdk.Event{Type: sdk.EventContextUsage, Payload: payload}
-					_, _ = extHostRef.DispatchEvent(context.Background(), evt)
+					// Off the turn goroutine: a turn can be running inside an
+					// extension's WASM call, so dispatching here would re-enter
+					// that extension and deadlock its call mutex.
+					go func() {
+						_, _ = extHostRef.DispatchEvent(context.Background(), evt)
+					}()
 				},
 			)
 			// Drive the TUI streaming indicator when a Deliver (e.g. a sub-agent's
@@ -689,20 +694,14 @@ func (m *Model) wireMainAgentCallbacks(p *tea.Program) {
 				Prompt:  message.Content,
 				Queued:  true,
 			})
-			_, _ = extHostForToken.DispatchEvent(
-				context.Background(),
-				sdk.Event{Type: sdk.EventBeforeAgentStart, Payload: payload},
-			)
+			dispatchTurnStart(extHostForToken, payload)
 		}
 		if strings.TrimSpace(content) != "" {
 			payload, _ := json.Marshal(sdk.BeforeAgentStartPayload{
 				AgentID: mainID,
 				Prompt:  content,
 			})
-			_, _ = extHostForToken.DispatchEvent(
-				context.Background(),
-				sdk.Event{Type: sdk.EventBeforeAgentStart, Payload: payload},
-			)
+			dispatchTurnStart(extHostForToken, payload)
 		}
 	})
 	a.SetOnDone(func(err error) {
@@ -2727,10 +2726,17 @@ func dispatchSegmentedTokens(extHost *extension.Host) func(agentID, text string)
 				if err != nil {
 					return
 				}
-				_, _ = extHost.DispatchEvent(
-					context.Background(),
-					sdk.Event{Type: sdk.EventToken, Payload: payload},
-				)
+				// Dispatched from its own goroutine. This flush runs on the
+				// sub-agent's turn goroutine, and for an agent spawned inside an
+				// extension tool call that goroutine is inside the extension's
+				// WASM call — so dispatching here would re-enter the same
+				// extension and block on its non-reentrant call mutex.
+				go func() {
+					_, _ = extHost.DispatchEvent(
+						context.Background(),
+						sdk.Event{Type: sdk.EventToken, Payload: payload},
+					)
+				}()
 			})
 			dispatch = onToken
 			batchers[agentID] = onToken
@@ -2779,4 +2785,24 @@ func dispatchAgentPrompt(extHost *extension.Host) func(agentID, content string, 
 // chrome, so the statusline must not be drawn on top of them.
 func (m Model) overlayActive() bool {
 	return m.textInput.IsActive() || m.agentTree.IsActive() || m.picker.IsActive() || m.modalContent != ""
+}
+
+// dispatchTurnStart reports a turn start to extensions without running on the
+// caller's stack.
+//
+// The turn-start callback fires from Agent.Submit, which is reachable from a
+// host call (agent_deliver, agent_run, agent_send_message). That stack may
+// already be inside an extension's WASM call, so dispatching synchronously would
+// re-enter the same extension and block on its non-reentrant per-extension call
+// mutex — the outer frame holds it and cannot release it until we return.
+func dispatchTurnStart(extHost *extension.Host, payload []byte) {
+	if extHost == nil {
+		return
+	}
+	go func() {
+		_, _ = extHost.DispatchEvent(
+			context.Background(),
+			sdk.Event{Type: sdk.EventBeforeAgentStart, Payload: payload},
+		)
+	}()
 }
