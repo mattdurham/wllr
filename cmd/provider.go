@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -142,6 +143,7 @@ func buildProvider(ctx context.Context, cfg *Config) (fantasy.Provider, fantasy.
 	case providerOpenRouter:
 		prov, provErr = fantasyopenrouterprovider.New(
 			fantasyopenrouterprovider.WithAPIKey(cfg.OpenRouterAPIKey),
+			fantasyopenrouterprovider.WithHTTPClient(openRouterRetryClient{base: http.DefaultClient}),
 		)
 	case providerLocal:
 		if !cfg.applyLocalModelSelection(cfg.Model) {

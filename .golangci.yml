@@ -129,6 +129,14 @@ linters:
         linters:
           - gosec
 
+      # G704 in the OpenRouter retry transport: Fantasy constructs the request
+      # URL, and this wrapper only repeats that same request after a specific
+      # OpenRouter 402 response. It never accepts a URL from tool input.
+      - path: cmd/openrouter_retry\.go
+        text: "G704:"
+        linters:
+          - gosec
+
       # appendAssign in tests is intentional
       - path: _test\.go
         text: "appendAssign:"
