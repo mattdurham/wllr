@@ -22,7 +22,21 @@ func init() {
 
 	OnRawSessionStart(handleSessionStart)
 
-	OnBeforeAgentStart(func(prompt string) {
+	// Only the root agent's prompts belong in this session file. Sub-agent
+	// prompts arrive on the same event; recording them would make a child's
+	// instruction look like something the user typed.
+	// Only a prompt the user actually sent belongs in this session file. A
+	// queued message is inbox-delivered work — a sub-agent's task arriving, or a
+	// lifecycle notification — which would otherwise be recorded as if the user
+	// typed it. Recording one is indistinguishable from a real prompt once
+	// stored, so it must be filtered here.
+	OnBeforeAgentStart(func(agentID, prompt string, queued bool) {
+		if queued {
+			return
+		}
+		if agentID != "" && agentID != "main" {
+			return
+		}
 		recordMessage("user", prompt)
 	})
 

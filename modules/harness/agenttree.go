@@ -3,7 +3,6 @@ package harness
 // NOTE: Any changes to this file must be reflected in the corresponding SPECS.md or NOTES.md.
 
 import (
-	"sort"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -120,11 +119,10 @@ func (t *AgentTreeView) rows() []agentTreeRow {
 		}
 		children[n.ParentID] = append(children[n.ParentID], n)
 	}
-	byID := func(s []AgentTreeNode) {
-		sort.Slice(s, func(i, j int) bool { return s[i].ID < s[j].ID })
-	}
-	byID(roots)
-
+	// Children are rendered in the order the caller supplied them, which is
+	// spawn order. The extension already returns agents in that order, so
+	// re-sorting here would present siblings in an order the user did not
+	// create them in. Roots keep that same order too.
 	var out []agentTreeRow
 	var walk func(nodes []AgentTreeNode, depth int)
 	walk = func(nodes []AgentTreeNode, depth int) {
@@ -134,7 +132,6 @@ func (t *AgentTreeView) rows() []agentTreeRow {
 			if len(kids) == 0 || !t.expanded[n.ID] {
 				continue
 			}
-			byID(kids)
 			walk(kids, depth+1)
 		}
 	}

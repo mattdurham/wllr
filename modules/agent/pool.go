@@ -81,6 +81,7 @@ func NewPool() *AgentPool {
 	}
 	return &AgentPool{
 		agents:         make(map[string]*Agent),
+		spawnSeq:       make(map[string]int64),
 		teams:          make(map[string]*Team),
 		contextWindows: make(map[string]int64),
 		compactConfig: CompactConfig{
@@ -513,6 +514,8 @@ func (p *AgentPool) Spawn(id string, lm fantasy.LanguageModel, opts SpawnOpts) (
 		}
 	}
 	p.agents[id] = a
+	p.nextSeq++
+	p.spawnSeq[id] = p.nextSeq
 	live := int64(len(p.agents))
 	p.mu.Unlock()
 	// Reported outside the lock: the observer is host code and must never be
@@ -560,6 +563,7 @@ func (p *AgentPool) Close(id string) error {
 	closed := make([]string, 0, len(doomed))
 	for _, a := range doomed {
 		delete(p.agents, a.id)
+		delete(p.spawnSeq, a.id)
 		closed = append(closed, a.id)
 	}
 	live := int64(len(p.agents))
@@ -639,13 +643,19 @@ func (p *AgentPool) AddTokens(n int64) {
 }
 
 // ListAgents returns a snapshot of all registered agent IDs.
+// ListAgents returns live agent IDs in spawn order. The pool stores agents in a
+// map, so without the recorded sequence the order would be random and any list
+// built from it would reshuffle between calls.
 func (p *AgentPool) ListAgents() []string {
 	p.mu.RLock()
-	defer p.mu.RUnlock()
 	ids := make([]string, 0, len(p.agents))
 	for id := range p.agents {
 		ids = append(ids, id)
 	}
+	sort.Slice(ids, func(i, j int) bool {
+		return p.spawnSeq[ids[i]] < p.spawnSeq[ids[j]]
+	})
+	p.mu.RUnlock()
 	return ids
 }
 

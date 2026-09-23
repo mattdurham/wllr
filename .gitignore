@@ -32,6 +32,19 @@ go.work.sum
 # env file
 .env
 
+# Credentials and local runtime config. The real files live outside the repo
+# (~/.config/wllr/auth.json, mode 0600), but a copy made inside the tree — or a
+# WLLR_CONFIG/WLLR_AUTH pointed at a repo path — must never be committable.
+auth.json
+config.yaml
+.wllr/
+*credentials*
+*.pem
+
+# Extension configuration belongs in ~/.wllr/extensions/<name>/, not the repo.
+# The example under modules/mcp/ is intentionally tracked and named differently
+# so this pattern cannot hide it.
+
 # Editor/IDE
 # .idea/
 # .vscode/

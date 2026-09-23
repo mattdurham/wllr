@@ -132,7 +132,10 @@ func onSessionStart() {
 	Logf(0, "otel-traces: session started, new trace ID generated")
 }
 
-func onBeforeAgentStart(prompt string) {
+func onBeforeAgentStart(_ string, prompt string, _ bool) {
+	// The agent id is available for future per-agent spans; the turn span is
+	// currently keyed by prompt only.
+	_ = prompt
 	// If a previous turn was not closed (e.g. no message_end), discard it.
 	if turnOpen {
 		Logf(0, "otel-traces: closing unclosed turn span")

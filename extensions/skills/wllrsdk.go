@@ -189,13 +189,15 @@ func OnShutdown(fn func(reason string)) {
 
 // OnBeforeAgentStart registers a handler called before the agent processes
 // each user message. prompt is the user's message text.
-func OnBeforeAgentStart(fn func(prompt string)) {
+func OnBeforeAgentStart(fn func(agentID, prompt string, queued bool)) {
 	_sdkOn("before_agent_start", func(payload json.RawMessage) {
 		var p struct {
-			Prompt string `json:"prompt"`
+			AgentID string `json:"agent_id"`
+			Prompt  string `json:"prompt"`
+			Queued  bool   `json:"queued"`
 		}
 		if err := json.Unmarshal(payload, &p); err == nil && p.Prompt != "" {
-			fn(p.Prompt)
+			fn(p.AgentID, p.Prompt, p.Queued)
 		}
 	})
 }

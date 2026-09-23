@@ -24,7 +24,12 @@ type AgentPool struct {
 	// Set via SetSubagentResolver.
 	subagentResolver func(ctx context.Context, requested string) (fantasy.LanguageModel, string, error)
 	agents           map[string]*Agent
-	teams            map[string]*Team
+	// spawnSeq records the order agents were added to the pool, keyed by ID.
+	// agents is a map, so iteration order is random; this preserves the order a
+	// user expects to see (spawn order) for anything that lists agents.
+	spawnSeq map[string]int64
+	nextSeq  int64
+	teams    map[string]*Team
 	// contextUsageDispatcher, when set, is called after each completed turn on any
 	// agent so the harness can forward EventContextUsage to WASM extensions without
 	// a circular import between the agent and extension packages.

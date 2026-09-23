@@ -142,3 +142,12 @@ This requires `file_read`; the bundled extension is trusted and receives it
 automatically. Message *loading* (`loadMessages`) still happens in-guest — the
 guest filesystem is readable for file contents; only stat/mtime and reliable
 enumeration needed the host.
+
+## What is recorded
+
+Only the root agent's directly-sent prompts and the assistant's replies. A
+`before_agent_start` event with `queued: true` is inbox-delivered work — a
+sub-agent's task arriving, or a lifecycle notification — and is **not** recorded
+as a user message, because once stored it is indistinguishable from a prompt the
+user typed. Sub-agent turns are attributed by `agent_id` and skipped for the same
+reason.
