@@ -7,5 +7,6 @@ const (
 	commandModel  = "model"
 	commandModels = "models"
 	keyEsc        = "esc"
+	keyEnter      = "enter"
 	borderRounded = "rounded"
 )

@@ -2384,3 +2384,95 @@ func TestSessionPreview_NormalizesWhitespace(t *testing.T) {
 		t.Errorf("sessionPreview = %q, want empty", got)
 	}
 }
+
+func TestListSessionFiles_DirScoped(t *testing.T) {
+	base := t.TempDir()
+	projA := filepath.Join(base, "proj-a")
+	projB := filepath.Join(base, "proj-b")
+	for _, dir := range []string{projA, projB} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+	}
+	write := func(path string) {
+		content := `{"type":"session","id":"x","timestamp":"2026-01-01T00:00:00Z","cwd":"/"}` + "\n"
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	root := filepath.Join(base, "legacy.jsonl")
+	a1, a2 := filepath.Join(projA, "s1.jsonl"), filepath.Join(projA, "s2.jsonl")
+	b1 := filepath.Join(projB, "s3.jsonl")
+	for _, p := range []string{root, a1, a2, b1} {
+		write(p)
+	}
+	// A non-jsonl file and a nested subdirectory must be ignored in both modes.
+	if err := os.WriteFile(filepath.Join(projA, "notes.txt"), []byte("x"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(projA, "nested"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// Scoped: only proj-a's .jsonl files, root-level legacy file excluded.
+	got, err := listSessionFiles(base, projA, "", 25)
+	if err != nil {
+		t.Fatalf("listSessionFiles(dir-scoped): %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("dir-scoped listing = %d entries, want 2: %+v", len(got), got)
+	}
+	for _, info := range got {
+		if filepath.Dir(info.Path) != projA {
+			t.Errorf("dir-scoped listing included %q from outside %q", info.Path, projA)
+		}
+	}
+
+	// Scoped with exclude: the caller's current file is dropped.
+	got, err = listSessionFiles(base, projA, a1, 25)
+	if err != nil {
+		t.Fatalf("listSessionFiles(dir-scoped, exclude): %v", err)
+	}
+	if len(got) != 1 || got[0].Path != a2 {
+		t.Fatalf("dir-scoped listing with exclude = %+v, want only %q", got, a2)
+	}
+
+	// Unscoped (dir empty): legacy root-level file plus every project's files.
+	got, err = listSessionFiles(base, "", "", 25)
+	if err != nil {
+		t.Fatalf("listSessionFiles(unscoped): %v", err)
+	}
+	if len(got) != 4 {
+		t.Fatalf("unscoped listing = %d entries, want 4: %+v", len(got), got)
+	}
+
+	// Limit still applies in scoped mode.
+	got, err = listSessionFiles(base, projA, "", 1)
+	if err != nil {
+		t.Fatalf("listSessionFiles(limit): %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("limited listing = %d entries, want 1", len(got))
+	}
+
+	// A scoped dir that does not exist is an error, not an empty listing.
+	if _, err := listSessionFiles(base, filepath.Join(base, "missing"), "", 25); err == nil {
+		t.Error("listSessionFiles(missing dir) should error")
+	}
+}
+
+func TestNewHostWithTaskLedger(t *testing.T) {
+	h, err := NewHostWithTaskLedger(nil, t.TempDir())
+	if err != nil {
+		t.Fatalf("NewHostWithTaskLedger: %v", err)
+	}
+	if h == nil {
+		t.Fatal("NewHostWithTaskLedger returned nil host")
+	}
+	if h.taskLedgerSnapshot() == nil {
+		t.Error("task ledger not installed")
+	}
+	if err := h.Close(context.Background()); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}

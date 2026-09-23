@@ -153,6 +153,20 @@ single-claim behavior, and truncated-tail versus earlier corruption handling.
 - `Load` returns nil.
 - `h.extensions` has length 1.
 
+#### TestListSessionFiles_DirScoped
+
+**Scenario:** Sessions live in per-cwd subdirectories; the history picker lists
+only the current project's directory unless asked for all.
+**Setup:** Temp base with two project subdirectories, a legacy root-level
+`.jsonl`, a non-`.jsonl` file, and a nested subdirectory.
+**Assertions:**
+
+- `dir` set returns only that directory's `.jsonl` files (root-level legacy and
+  other projects excluded).
+- `exclude` drops the caller's current file in scoped mode.
+- Empty `dir` returns root-level plus all subdirectory files (old behavior).
+- `limit` still caps in scoped mode; a missing `dir` is an error.
+
 ### interceptor_test.go
 
 #### TestApplyInterceptorResponse

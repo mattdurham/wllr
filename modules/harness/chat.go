@@ -8,6 +8,7 @@ import (
 
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+	"github.com/mattdurham/wllr/modules/agent"
 )
 
 // NewChatView creates a ChatView with the given dimensions.
@@ -98,7 +99,7 @@ func (c *ChatView) ToolActivityLines(width, height int) []string {
 			status = "done"
 		}
 		line := status + " " + e.Name
-		if e.AgentID != "" && e.AgentID != "main" {
+		if e.AgentID != "" && e.AgentID != agent.MainAgentID {
 			line += " [" + e.AgentID + "]"
 		}
 		if e.Preview != "" {

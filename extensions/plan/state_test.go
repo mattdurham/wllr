@@ -117,3 +117,49 @@ func TestNextStepAssignee(t *testing.T) {
 		t.Fatalf("expected empty assignee, got %q", got)
 	}
 }
+
+func TestNextStepTitle(t *testing.T) {
+	plan := &Plan{Steps: []PlanStep{
+		{ID: "a", Title: "done step", Status: stepCompleted},
+		{ID: "b", Title: "next up", Status: stepInProgress},
+	}}
+	if got := nextStepTitle(plan); got != "next up" {
+		t.Fatalf("expected next up, got %q", got)
+	}
+	// All complete -> empty.
+	plan.Steps[1].Status = stepCompleted
+	if got := nextStepTitle(plan); got != "" {
+		t.Fatalf("expected empty title, got %q", got)
+	}
+}
+
+func TestValidPlanAndStepStatus(t *testing.T) {
+	for _, s := range []string{planActive, planPaused, planCompleted, planArchived} {
+		if !validPlanStatus(s) {
+			t.Errorf("validPlanStatus(%q) = false, want true", s)
+		}
+	}
+	if validPlanStatus("exploded") {
+		t.Error(`validPlanStatus("exploded") = true, want false`)
+	}
+	for _, s := range []string{stepPending, stepInProgress, stepCompleted, stepBlocked} {
+		if !validStepStatus(s) {
+			t.Errorf("validStepStatus(%q) = false, want true", s)
+		}
+	}
+	if validStepStatus("vibes") {
+		t.Error(`validStepStatus("vibes") = true, want false`)
+	}
+}
+
+func TestEmptyPlanState(t *testing.T) {
+	s := emptyPlanState()
+	if s.Version != 1 || s.ActiveID != "" || len(s.Plans) != 0 {
+		t.Fatalf("unexpected initial state: %+v", s)
+	}
+	// The returned map must be usable, not nil.
+	s.Plans["p"] = &Plan{ID: "p"}
+	if s.Plans["p"].ID != "p" {
+		t.Fatal("plans map not writable")
+	}
+}

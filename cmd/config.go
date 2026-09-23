@@ -154,14 +154,14 @@ func LoadConfig() (*Config, error) {
 }
 
 type wllrSettings struct {
+	ContextWindows   map[string]int64        `json:"context_windows"`
+	ModelTiers       map[string]modelTier    `json:"model_tiers"`
 	Provider         string                  `json:"provider"`
 	Model            string                  `json:"model"`
 	LocalModels      []localModelConfig      `json:"local_models"`
 	OpenRouterModels []openRouterModelConfig `json:"openrouter_models"`
 	SavedModels      []savedModelConfig      `json:"saved_models"`
 	RawContextWindow json.RawMessage         `json:"context_window"`
-	ContextWindows   map[string]int64        `json:"context_windows"`
-	ModelTiers       map[string]modelTier    `json:"model_tiers"`
 	ContextWindow    int64                   `json:"-"`
 }
 
@@ -189,13 +189,13 @@ type localModelConfig struct {
 	BaseURL          string          `json:"base_url"`
 	APIKey           string          `json:"api_key"`
 	RawContextWindow json.RawMessage `json:"context_window"`
-	ContextWindow    int64           `json:"-"`
 
 	// ThinkingModes is an explicit per-model list of reasoning effort mode IDs
 	// (e.g. ["none","low","medium","high"]). When set, it overrides whatever
 	// the model's endpoint declares (LM Studio app API) and the standard
 	// OpenAI fallback set for the /thinking picker.
 	ThinkingModes []string `json:"thinking_modes,omitempty"`
+	ContextWindow int64    `json:"-"`
 }
 
 func loadWllrSettings() wllrSettings {

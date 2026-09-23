@@ -8,13 +8,13 @@ import "github.com/mattdurham/wllr/modules/sdk"
 type PickerView struct {
 	Title        string
 	Callback     string
-	Items        []sdk.ShowPickerItem
-	searchable   bool
 	query        string
+	Items        []sdk.ShowPickerItem
 	filtered     []int
 	selectedIdx  int
 	scrollOffset int
 	width        int
 	height       int
+	searchable   bool
 	active       bool
 }

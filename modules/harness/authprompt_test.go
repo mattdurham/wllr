@@ -112,8 +112,7 @@ func TestLoginProviderSelected_CloudRecordsOAuthAndBeginsLogin(t *testing.T) {
 func TestLoginProviderSelected_LocalDoesNotBeginLogin(t *testing.T) {
 	m := New(nil, "main", nil)
 
-	next, cmd := m.Update(loginProviderSelectedMsg{Provider: "local"})
-	m = next.(Model)
+	_, cmd := m.Update(loginProviderSelectedMsg{Provider: "local"})
 
 	if cmd == nil {
 		t.Fatal("local provider selection should open the setup wizard")

@@ -197,11 +197,31 @@ type openRouterSpeedOption struct {
 // own routing after picking a preference.
 var openRouterSpeedOptions = []openRouterSpeedOption{
 	{ID: openRouterSpeedDefault, Label: "Default", Description: "OpenRouter's own balanced routing"},
-	{ID: openRouterSpeedFloor, Label: "Floor", Description: "cheapest available provider (price)", Sort: openRouterSpeedPrice},
-	{ID: openRouterSpeedNitro, Label: "Nitro", Description: "fastest provider (throughput)", Sort: openRouterSpeedThroughput},
+	{
+		ID:          openRouterSpeedFloor,
+		Label:       "Floor",
+		Description: "cheapest available provider (price)",
+		Sort:        openRouterSpeedPrice,
+	},
+	{
+		ID:          openRouterSpeedNitro,
+		Label:       "Nitro",
+		Description: "fastest provider (throughput)",
+		Sort:        openRouterSpeedThroughput,
+	},
 	{ID: openRouterSpeedPrice, Label: "Price", Description: "sort by price", Sort: openRouterSpeedPrice},
-	{ID: openRouterSpeedThroughput, Label: "Throughput", Description: "sort by tokens/sec", Sort: openRouterSpeedThroughput},
-	{ID: openRouterSpeedLatency, Label: "Latency", Description: "sort by time to first token", Sort: openRouterSpeedLatency},
+	{
+		ID:          openRouterSpeedThroughput,
+		Label:       "Throughput",
+		Description: "sort by tokens/sec",
+		Sort:        openRouterSpeedThroughput,
+	},
+	{
+		ID:          openRouterSpeedLatency,
+		Label:       "Latency",
+		Description: "sort by time to first token",
+		Sort:        openRouterSpeedLatency,
+	},
 }
 
 // openRouterSpeedSort maps a stored option ID to the OpenRouter sort value.

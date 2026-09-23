@@ -9,19 +9,6 @@ import (
 	lipgloss "charm.land/lipgloss/v2"
 )
 
-// AgentTreeNode is one agent in the interactive /agents tree. The extension
-// supplies a flat list; the tree shape comes from ParentID.
-type AgentTreeNode struct {
-	// ID is the agent's identity, e.g. "main" or "main/coder".
-	ID string
-	// ParentID is the owning agent's ID; empty for the root.
-	ParentID string
-	// Label is the row's primary text (usually the agent name).
-	Label string
-	// Detail is the status line rendered under the row when expanded.
-	Detail string
-}
-
 // AgentTreeCallback is fired when the user focuses an agent. The harness emits
 // EventOnCommand with this name and the agent ID, so the extension can switch
 // its transcript and input target.
@@ -32,12 +19,12 @@ const AgentTreeCallback = "agents:focus"
 // agent list: a modal cannot express selection, so focus and folding need a
 // component with its own key handling.
 type AgentTreeView struct {
-	Nodes    []AgentTreeNode
-	Callback string
-
 	// expanded records which node IDs are open. Nodes default to expanded so
 	// the first view shows the whole fleet; collapsing is the deliberate act.
 	expanded map[string]bool
+	Callback string
+
+	Nodes []AgentTreeNode
 	// cursor is an index into the visible (flattened) rows.
 	cursor   int
 	offset   int
@@ -224,26 +211,13 @@ func (t *AgentTreeView) ensureVisible() {
 	}
 }
 
-// AgentTreeKeyResult reports what a key press did to the tree.
-type AgentTreeKeyResult struct {
-	// Focused is the agent to switch to, set when the user confirms with enter.
-	Focused string
-	// Closed is set when the user dismissed the tree with q.
-	Closed bool
-	// Folded is set when a node was expanded or collapsed, so the caller can
-	// re-render without re-fetching nodes.
-	Folded bool
-	// Handled is false when the key is not the tree's.
-	Handled bool
-}
-
 // HandleKey processes a key press, reporting whether the tree consumed it.
 func (t *AgentTreeView) HandleKey(kp tea.KeyPressMsg) AgentTreeKeyResult {
 	rows := t.rows()
 	switch kp.String() {
 	case "q", keyEsc:
 		return AgentTreeKeyResult{Closed: true, Handled: true}
-	case "enter":
+	case keyEnter:
 		if node, ok := t.Highlighted(); ok {
 			return AgentTreeKeyResult{Focused: node.ID, Handled: true}
 		}
@@ -311,14 +285,24 @@ func (t *AgentTreeView) View() string {
 		line := t.renderRow(r, i == t.cursor, content)
 		padded := line + strings.Repeat(" ", max(0, content-lipgloss.Width(line)))
 		if i == t.cursor {
-			sb.WriteString(treeBorderStyle.Render("│") + " " + treeSelectStyle.Render(padded) + " " + treeBorderStyle.Render("│") + "\n")
+			sb.WriteString(
+				treeBorderStyle.Render(
+					"│",
+				) + " " + treeSelectStyle.Render(
+					padded,
+				) + " " + treeBorderStyle.Render(
+					"│",
+				) + "\n",
+			)
 		} else {
 			sb.WriteString(treeBorderStyle.Render("│") + " " + padded + " " + treeBorderStyle.Render("│") + "\n")
 		}
 		rendered++
 	}
 	for rendered < visible {
-		sb.WriteString(treeBorderStyle.Render("│") + " " + strings.Repeat(" ", content) + " " + treeBorderStyle.Render("│") + "\n")
+		sb.WriteString(
+			treeBorderStyle.Render("│") + " " + strings.Repeat(" ", content) + " " + treeBorderStyle.Render("│") + "\n",
+		)
 		rendered++
 	}
 

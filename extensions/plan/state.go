@@ -20,48 +20,48 @@ const (
 )
 
 type PlanStep struct {
-	ID               string    `json:"id"`
-	Title            string    `json:"title"`
-	Description      string    `json:"description,omitempty"`
-	Status           string    `json:"status"`
-	AcceptanceChecks []string  `json:"acceptance_checks,omitempty"`
-	Evidence         []string  `json:"evidence,omitempty"`
-	Notes            string    `json:"notes,omitempty"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	ID          string    `json:"id"`
+	Title       string    `json:"title"`
+	Description string    `json:"description,omitempty"`
+	Status      string    `json:"status"`
+	Notes       string    `json:"notes,omitempty"`
 	// Assignee is the agent responsible for completing this step, set via
 	// plan_assign. Distinct from AgentID provenance (last toucher).
 	Assignee string `json:"assignee,omitempty"`
 	// Provenance: which agent last touched this step and how many times it was
 	// attempted. Attempts increment on each status transition toward completion.
-	AgentID  string `json:"agent_id,omitempty"`
-	Attempts int    `json:"attempts"`
+	AgentID          string   `json:"agent_id,omitempty"`
+	AcceptanceChecks []string `json:"acceptance_checks,omitempty"`
+	Evidence         []string `json:"evidence,omitempty"`
+	Attempts         int      `json:"attempts"`
 }
 
 type Plan struct {
-	ID          string     `json:"id"`
-	Title       string     `json:"title"`
-	Description string     `json:"description,omitempty"`
-	Status      string     `json:"status"`
-	Content     string     `json:"content,omitempty"`
-	Steps       []PlanStep `json:"steps,omitempty"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
-	// Version increments on every mutation. plan_update/plan_step_update accept
-	// an optional expected_version and fail on mismatch so concurrent agents
-	// cannot silently overwrite each other's changes.
-	Version int `json:"version"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	ID          string    `json:"id"`
+	Title       string    `json:"title"`
+	Description string    `json:"description,omitempty"`
+	Status      string    `json:"status"`
+	Content     string    `json:"content,omitempty"`
 	// Provenance: who created the plan and the last agent to update it.
 	CreatedBy string `json:"created_by,omitempty"`
 	UpdatedBy string `json:"updated_by,omitempty"`
 	// CompletionOverride records the explicit reason a plan was force-completed
 	// despite unresolved steps or missing evidence. Empty unless overridden.
-	CompletionOverride string `json:"completion_override,omitempty"`
+	CompletionOverride string     `json:"completion_override,omitempty"`
+	Steps              []PlanStep `json:"steps,omitempty"`
+	// Version increments on every mutation. plan_update/plan_step_update accept
+	// an optional expected_version and fail on mismatch so concurrent agents
+	// cannot silently overwrite each other's changes.
+	Version int `json:"version"`
 }
 
 type planState struct {
-	Version  int              `json:"version"`
-	ActiveID string           `json:"active_id,omitempty"`
 	Plans    map[string]*Plan `json:"plans"`
+	ActiveID string           `json:"active_id,omitempty"`
+	Version  int              `json:"version"`
 }
 
 func emptyPlanState() planState { return planState{Version: 1, Plans: map[string]*Plan{}} }

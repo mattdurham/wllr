@@ -82,6 +82,7 @@ type earlyAgentBridge struct{}
 func (e *earlyAgentBridge) Spawn(_ context.Context, _ extension.SpawnRequest) error {
 	return fmt.Errorf("agent_spawn: session not yet started")
 }
+
 func (e *earlyAgentBridge) GetHistory(_ string) ([]sdk.Message, error) {
 	return nil, fmt.Errorf("agent_get_history: session not yet started")
 }

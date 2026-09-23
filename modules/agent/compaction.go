@@ -274,32 +274,6 @@ const compactionSummaryPrompt = `Summarize the new conversation messages above (
 
 Keep each section concise. Preserve exact file paths, function names, and error messages verbatim.`
 
-// CompactionResult is the outcome of a compactHistory run. On no-op
-// (history fits the budget, or no valid user boundary) Summary and Usage are
-// zero-valued and History is the input unchanged; callers must treat
-// Summary == "" as "compaction did not happen" and must not increment
-// compaction counters or emit compaction log records for it.
-type CompactionResult struct {
-	// History is the post-compaction history (input unchanged on no-op or
-	// failure).
-	History []sdk.Message
-	// Summary is the raw summary text (empty on no-op or failure).
-	Summary string
-	// Messages is the number of history messages folded into the summary
-	// (zero on no-op or failure).
-	Messages int
-	// Usage is the token cost of the summarization call (zero on no-op or
-	// failure).
-	Usage fantasy.Usage
-	// Latency is the wall-clock duration of the summarization call (zero on
-	// no-op or failure).
-	Latency time.Duration
-	// Trigger is the compaction trigger kind (see CompactionTrigger*) that
-	// caused this run. Set for every result so callers can log it without
-	// re-deriving it.
-	Trigger string
-}
-
 // compactHistory summarizes the oldest messages using the LLM and returns the
 // run outcome: compacted history, raw summary text for the caller to store as
 // priorSummary, the number of messages folded into the summary, and the token

@@ -125,7 +125,7 @@ func (p *PickerView) HandleKey(kp tea.KeyPressMsg) (selected bool, id string, ca
 	switch kp.String() {
 	case keyEsc:
 		return false, "", true
-	case "enter":
+	case keyEnter:
 		if count == 0 {
 			return false, "", false
 		}

@@ -1,9 +1,13 @@
 package harness
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/mattdurham/wllr/modules/extension"
 	"github.com/mattdurham/wllr/modules/sdk"
 )
 
@@ -164,6 +168,73 @@ func TestResetChatArea_EmptiesTranscript(t *testing.T) {
 	}
 }
 
+// ResetHistoryMsg must both wipe the transcript and schedule a rebuild: the
+// replay lands in agent context, and without the rebuild the chat would go
+// blank, making the restore look like it did nothing.
+func TestResetHistoryMsg_ResetsAndDispatchesRebuild(t *testing.T) {
+	m := New(newTestPool(), "main", nil)
+	m.width = 60
+	m.scene = newSceneWithChat(t, "stale transcript")
+	m.extHost = extension.NewHost(nil)
+	ctx := context.Background()
+	defer func() { _ = m.extHost.Close(ctx) }()
+
+	next, cmd := m.Update(ResetHistoryMsg{Messages: []sdk.Message{
+		{Role: sdk.RoleUser, Content: "restored question"},
+	}})
+	m = next.(Model)
+
+	if cmd == nil {
+		t.Fatal("ResetHistoryMsg should return a rebuild-dispatch cmd")
+	}
+	if got := m.scene.Render(wasmChatAreaID, 60); got != "" {
+		t.Fatalf("ResetHistoryMsg should empty the transcript first, got %q", got)
+	}
+
+	res := cmd()
+	evtResult, ok := res.(ExtensionEventResultMsg)
+	if !ok {
+		t.Fatalf("rebuild cmd returned %T, want ExtensionEventResultMsg", res)
+	}
+	if evtResult.Err != nil {
+		t.Fatalf("rebuild dispatch error: %v", evtResult.Err)
+	}
+}
+
+// The rebuild event payload is the contract the transcript-owning extension
+// (agents) registers against; pin the name and argument.
+func TestTranscriptRebuildEvent_Payload(t *testing.T) {
+	evt := transcriptRebuildEvent("main")
+	if evt.Type != sdk.EventOnCommand {
+		t.Fatalf("event type = %q, want %q", evt.Type, sdk.EventOnCommand)
+	}
+	var p sdk.OnCommandPayload
+	if err := json.Unmarshal(evt.Payload, &p); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if p.Name != TranscriptRebuildCallback || len(p.Args) != 1 || p.Args[0] != "main" {
+		t.Fatalf("payload = %+v, want name %q args [main]", p, TranscriptRebuildCallback)
+	}
+}
+
+// Without an extension host there is nothing to rebuild through; the reset
+// must still happen and no cmd may be returned.
+func TestResetHistoryMsg_NilHost_ResetsOnly(t *testing.T) {
+	m := New(newTestPool(), "main", nil)
+	m.width = 60
+	m.scene = newSceneWithChat(t, "stale transcript")
+
+	next, cmd := m.Update(ResetHistoryMsg{})
+	m = next.(Model)
+
+	if cmd != nil {
+		t.Error("ResetHistoryMsg with nil extHost should return nil cmd")
+	}
+	if got := m.scene.Render(wasmChatAreaID, 60); got != "" {
+		t.Fatalf("ResetHistoryMsg should still empty the transcript, got %q", got)
+	}
+}
+
 func TestRenderScenes_SkipsChatArea(t *testing.T) {
 	m := New(nil, "main", nil)
 	m.width = 60
@@ -173,5 +244,63 @@ func TestRenderScenes_SkipsChatArea(t *testing.T) {
 	// must not also stack it below the chat.
 	if got := m.renderScenes(); strings.Contains(got, "transcript text") {
 		t.Fatalf("renderScenes must skip the chat area: %q", got)
+	}
+}
+
+// transcriptMessageBoxProps mirrors the agents extension's message-box props
+// (extensions/agents/chat.go messageBoxProps). Keeping a copy here pins the
+// render contract the transcript depends on; if the extension drifts, this
+// test's mirror is the reminder to re-check the visual result.
+func transcriptMessageBoxProps(fg string) *sdk.UIProps {
+	return &sdk.UIProps{
+		Border: "rounded", Fg: fg, Padding: []int{0, 1},
+		Margin: []int{0, 0, 1, 0}, Width: "fill", Wrap: true,
+	}
+}
+
+// Consecutive transcript messages must render with a blank line between their
+// boxes. Without the bottom margin, adjacent boxes touch (bottom border
+// immediately followed by top border) and a replayed history reads as one
+// solid wall of text.
+func TestTranscriptMessageBoxesRenderSeparated(t *testing.T) {
+	s := NewSceneRenderer()
+	if err := s.CreateArea(sdk.UIArea{ID: wasmChatAreaID, Placement: sdk.UIAreaMain}); err != nil {
+		t.Fatalf("create area: %v", err)
+	}
+	ops := make([]sdk.UIPatchOp, 0, 5)
+	ops = append(ops, sdk.UIPatchOp{Op: sdk.UIOpSetRoot, Node: &sdk.UINode{ID: wasmChatRootID, Type: sdk.UINodeVStack}})
+	for i, id := range []string{"u1", "a1", "u2", "a2"} {
+		ops = append(ops, sdk.UIPatchOp{Op: sdk.UIOpInsert, Parent: wasmChatRootID, Node: &sdk.UINode{
+			ID:    id,
+			Type:  sdk.UINodeText,
+			Text:  fmt.Sprintf("message %d", i),
+			Props: transcriptMessageBoxProps("success"),
+		}})
+	}
+	if err := s.ApplyPatch(sdk.UIPatchParams{Area: wasmChatAreaID, Ops: ops}); err != nil {
+		t.Fatalf("patch: %v", err)
+	}
+
+	lines := strings.Split(s.Render(wasmChatAreaID, 80), "\n")
+	boxesSeen := 0
+	for i, line := range lines {
+		if !strings.Contains(line, "╭") {
+			continue
+		}
+		boxesSeen++
+		if boxesSeen == 1 {
+			continue // the first box may sit flush at the top
+		}
+		// Every later box must have a blank line above it and a box bottom
+		// border above that.
+		if i == 0 || strings.TrimSpace(lines[i-1]) != "" {
+			t.Fatalf("box %d has no blank line above it: %q", boxesSeen, lines[i-1])
+		}
+		if i < 2 || !strings.Contains(lines[i-2], "╰") {
+			t.Fatalf("blank line above box %d is not preceded by a box bottom border: %q", boxesSeen, lines[i-2])
+		}
+	}
+	if boxesSeen < 2 {
+		t.Fatalf("expected at least 2 boxes in render, saw %d:\n%s", boxesSeen, s.Render(wasmChatAreaID, 80))
 	}
 }

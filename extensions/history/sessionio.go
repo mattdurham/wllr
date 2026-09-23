@@ -7,6 +7,7 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -79,4 +80,23 @@ func sanitizePath(p string) string {
 		return "--"
 	}
 	return strings.NewReplacer("/", "--", " ", "_").Replace(strings.TrimPrefix(p, "/"))
+}
+
+// historyListDir returns the session directory the /history picker should list:
+// the current project's per-cwd directory by default, all directories (empty
+// string) when the user explicitly asked for "all". currentFile is the session
+// file being written; when it is unknown (session start failed) the caller's
+// host cwd is sanitized into the equivalent directory. Empty result means the
+// listing falls back to unscoped (all folders under base).
+func historyListDir(currentFile, hostCwd, base, firstArg string) string {
+	if firstArg == "all" {
+		return ""
+	}
+	if currentFile != "" {
+		return filepath.Dir(currentFile)
+	}
+	if hostCwd != "" {
+		return filepath.Join(base, sanitizePath(hostCwd))
+	}
+	return ""
 }

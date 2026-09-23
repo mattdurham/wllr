@@ -41,15 +41,16 @@ type modelInfo struct {
 	LocalBaseURL string
 	LocalAPIKey  string
 
-	ContextWindow int64
-	ThinkingModes []thinkingMode // Model-specific thinking modes
-
 	// ReasoningDefault is the server-declared default reasoning setting for a
 	// discovered local model (from the LM Studio app API). For a model whose
 	// advertised modes already contain the standard "none" ID, an empty value
 	// means the default is "none". Switching to a local model adopts this
 	// default when no provider-specific thinking mode is saved.
 	ReasoningDefault string
+
+	ThinkingModes []thinkingMode // Model-specific thinking modes
+
+	ContextWindow int64
 
 	// ReasoningDeclared reports whether the model's endpoint explicitly declared
 	// its reasoning capability (LM Studio app API listing). When true and
@@ -58,378 +59,166 @@ type modelInfo struct {
 	ReasoningDeclared bool
 }
 
+// Shared thinking-mode row sets. Every model in a provider's catalog carries
+// the same mode set, so the rows are declared once here and referenced by each
+// catalog entry. Treat them as read-only: catalog entries share one slice, so
+// in-place mutation would leak across models.
+var (
+	// anthropicThinkingModes maps Anthropic budget-token mode IDs to their
+	// picker rows.
+	anthropicThinkingModes = []thinkingMode{
+		{ID: "2048", Name: "Low", Description: "Extended thinking (2K tokens)"},
+		{ID: "4096", Name: "Medium-Low", Description: "Extended thinking (4K tokens)"},
+		{ID: "16384", Name: "Medium", Description: "Extended thinking (16K tokens)"},
+		{ID: "32768", Name: "High", Description: "Extended thinking (32K tokens)"},
+		{ID: "65536", Name: "X-High", Description: "Extended thinking (64K tokens)"},
+	}
+	// openAIThinkingModes is the standard reasoning-effort vocabulary, in
+	// picker order. It is also the default set for local models whose endpoint
+	// does not declare one (see openAIStandardThinkingModes).
+	openAIThinkingModes = []thinkingMode{
+		{ID: thinkingModeNone, Name: "None", Description: "No extended reasoning"},
+		{ID: thinkingModeMinimal, Name: "Minimal", Description: "Minimal extended reasoning"},
+		{ID: thinkingModeLow, Name: "Low", Description: "Extended reasoning (low effort)"},
+		{ID: thinkingModeMedium, Name: "Medium", Description: "Extended reasoning (medium effort)"},
+		{ID: thinkingModeHigh, Name: "High", Description: "Extended reasoning (high effort)"},
+		{ID: thinkingModeXHigh, Name: "X-High", Description: "Extended reasoning (maximum effort)"},
+	}
+	// geminiThinkingModes maps Gemini budget-token mode IDs to their rows.
+	geminiThinkingModes = []thinkingMode{
+		{ID: "512", Name: "Minimal", Description: "Extended thinking (512 tokens)"},
+		{ID: "4096", Name: "Low", Description: "Extended thinking (4K tokens)"},
+		{ID: "16384", Name: "Medium", Description: "Extended thinking (16K tokens)"},
+		{ID: "32768", Name: "High", Description: "Extended thinking (32K tokens)"},
+		{ID: "65536", Name: "X-High", Description: "Extended thinking (64K tokens)"},
+	}
+)
+
+// defaultGeminiModel is the default model ID for the Gemini provider.
+const defaultGeminiModel = "gemini-3-pro-preview"
+
+// Model IDs that appear in docs, config examples, and tests beyond their
+// catalog entry, named so the catalog stays the single source of truth.
+const (
+	claudeOpus48Model  = "claude-opus-4-8"
+	gemini35FlashModel = "gemini-3.5-flash"
+)
+
 // modelCatalog maps a provider name (cfg.Provider) to its selectable models,
 // most-capable first. Keys match the provider names accepted by buildProvider.
 var modelCatalog = map[string][]modelInfo{
 	providerAnthropic: {
-		{ID: "claude-opus-4-8", Name: "Claude Opus 4.8", ContextWindow: 1000000, ThinkingModes: []thinkingMode{
-			{ID: "2048", Name: "Low", Description: "Extended thinking (2K tokens)"},
-			{ID: "4096", Name: "Medium-Low", Description: "Extended thinking (4K tokens)"},
-			{ID: "16384", Name: "Medium", Description: "Extended thinking (16K tokens)"},
-			{ID: "32768", Name: "High", Description: "Extended thinking (32K tokens)"},
-			{ID: "65536", Name: "X-High", Description: "Extended thinking (64K tokens)"},
-		}},
-		{ID: "claude-opus-4-7", Name: "Claude Opus 4.7", ContextWindow: 1000000, ThinkingModes: []thinkingMode{
-			{ID: "2048", Name: "Low", Description: "Extended thinking (2K tokens)"},
-			{ID: "4096", Name: "Medium-Low", Description: "Extended thinking (4K tokens)"},
-			{ID: "16384", Name: "Medium", Description: "Extended thinking (16K tokens)"},
-			{ID: "32768", Name: "High", Description: "Extended thinking (32K tokens)"},
-			{ID: "65536", Name: "X-High", Description: "Extended thinking (64K tokens)"},
-		}},
-		{ID: "claude-opus-4-6", Name: "Claude Opus 4.6", ContextWindow: 200000, ThinkingModes: []thinkingMode{
-			{ID: "2048", Name: "Low", Description: "Extended thinking (2K tokens)"},
-			{ID: "4096", Name: "Medium-Low", Description: "Extended thinking (4K tokens)"},
-			{ID: "16384", Name: "Medium", Description: "Extended thinking (16K tokens)"},
-			{ID: "32768", Name: "High", Description: "Extended thinking (32K tokens)"},
-			{ID: "65536", Name: "X-High", Description: "Extended thinking (64K tokens)"},
-		}},
-		{ID: "claude-opus-4-5-20251101", Name: "Claude Opus 4.5", ContextWindow: 200000, ThinkingModes: []thinkingMode{
-			{ID: "2048", Name: "Low", Description: "Extended thinking (2K tokens)"},
-			{ID: "4096", Name: "Medium-Low", Description: "Extended thinking (4K tokens)"},
-			{ID: "16384", Name: "Medium", Description: "Extended thinking (16K tokens)"},
-			{ID: "32768", Name: "High", Description: "Extended thinking (32K tokens)"},
-			{ID: "65536", Name: "X-High", Description: "Extended thinking (64K tokens)"},
-		}},
-		{ID: "claude-sonnet-5", Name: "Claude Sonnet 5", ContextWindow: 1000000, ThinkingModes: []thinkingMode{
-			{ID: "2048", Name: "Low", Description: "Extended thinking (2K tokens)"},
-			{ID: "4096", Name: "Medium-Low", Description: "Extended thinking (4K tokens)"},
-			{ID: "16384", Name: "Medium", Description: "Extended thinking (16K tokens)"},
-			{ID: "32768", Name: "High", Description: "Extended thinking (32K tokens)"},
-			{ID: "65536", Name: "X-High", Description: "Extended thinking (64K tokens)"},
-		}},
-		{ID: defaultAnthropicModel, Name: "Claude Sonnet 4.6", ContextWindow: 200000, ThinkingModes: []thinkingMode{
-			{ID: "2048", Name: "Low", Description: "Extended thinking (2K tokens)"},
-			{ID: "4096", Name: "Medium-Low", Description: "Extended thinking (4K tokens)"},
-			{ID: "16384", Name: "Medium", Description: "Extended thinking (16K tokens)"},
-			{ID: "32768", Name: "High", Description: "Extended thinking (32K tokens)"},
-			{ID: "65536", Name: "X-High", Description: "Extended thinking (64K tokens)"},
-		}},
+		{ID: claudeOpus48Model, Name: "Claude Opus 4.8", ContextWindow: 1000000, ThinkingModes: anthropicThinkingModes},
+		{ID: "claude-opus-4-7", Name: "Claude Opus 4.7", ContextWindow: 1000000, ThinkingModes: anthropicThinkingModes},
+		{ID: "claude-opus-4-6", Name: "Claude Opus 4.6", ContextWindow: 200000, ThinkingModes: anthropicThinkingModes},
+		{
+			ID:            "claude-opus-4-5-20251101",
+			Name:          "Claude Opus 4.5",
+			ContextWindow: 200000,
+			ThinkingModes: anthropicThinkingModes,
+		},
+		{ID: "claude-sonnet-5", Name: "Claude Sonnet 5", ContextWindow: 1000000, ThinkingModes: anthropicThinkingModes},
+		{
+			ID:            defaultAnthropicModel,
+			Name:          "Claude Sonnet 4.6",
+			ContextWindow: 200000,
+			ThinkingModes: anthropicThinkingModes,
+		},
 		{
 			ID:            "claude-sonnet-4-5-20250929",
 			Name:          "Claude Sonnet 4.5",
 			ContextWindow: 200000,
-			ThinkingModes: []thinkingMode{
-				{ID: "2048", Name: "Low", Description: "Extended thinking (2K tokens)"},
-				{ID: "4096", Name: "Medium-Low", Description: "Extended thinking (4K tokens)"},
-				{ID: "16384", Name: "Medium", Description: "Extended thinking (16K tokens)"},
-				{ID: "32768", Name: "High", Description: "Extended thinking (32K tokens)"},
-				{ID: "65536", Name: "X-High", Description: "Extended thinking (64K tokens)"},
-			},
+			ThinkingModes: anthropicThinkingModes,
 		},
 		{
 			ID:            "claude-haiku-4-5-20251001",
 			Name:          "Claude Haiku 4.5",
 			ContextWindow: 200000,
 			ThinkingModes: []thinkingMode{
-				{ID: "none", Name: "None", Description: "No extended thinking"},
+				{ID: thinkingModeNone, Name: "None", Description: "No extended thinking"},
 			},
 		},
-		{ID: "claude-opus-4-1-20250805", Name: "Claude Opus 4.1", ContextWindow: 200000, ThinkingModes: []thinkingMode{
-			{ID: "2048", Name: "Low", Description: "Extended thinking (2K tokens)"},
-			{ID: "4096", Name: "Medium-Low", Description: "Extended thinking (4K tokens)"},
-			{ID: "16384", Name: "Medium", Description: "Extended thinking (16K tokens)"},
-			{ID: "32768", Name: "High", Description: "Extended thinking (32K tokens)"},
-			{ID: "65536", Name: "X-High", Description: "Extended thinking (64K tokens)"},
-		}},
-		{ID: "claude-opus-4-20250514", Name: "Claude Opus 4", ContextWindow: 200000, ThinkingModes: []thinkingMode{
-			{ID: "2048", Name: "Low", Description: "Extended thinking (2K tokens)"},
-			{ID: "4096", Name: "Medium-Low", Description: "Extended thinking (4K tokens)"},
-			{ID: "16384", Name: "Medium", Description: "Extended thinking (16K tokens)"},
-			{ID: "32768", Name: "High", Description: "Extended thinking (32K tokens)"},
-			{ID: "65536", Name: "X-High", Description: "Extended thinking (64K tokens)"},
-		}},
-		{ID: "claude-sonnet-4-20250514", Name: "Claude Sonnet 4", ContextWindow: 200000, ThinkingModes: []thinkingMode{
-			{ID: "2048", Name: "Low", Description: "Extended thinking (2K tokens)"},
-			{ID: "4096", Name: "Medium-Low", Description: "Extended thinking (4K tokens)"},
-			{ID: "16384", Name: "Medium", Description: "Extended thinking (16K tokens)"},
-			{ID: "32768", Name: "High", Description: "Extended thinking (32K tokens)"},
-			{ID: "65536", Name: "X-High", Description: "Extended thinking (64K tokens)"},
-		}},
+		{
+			ID:            "claude-opus-4-1-20250805",
+			Name:          "Claude Opus 4.1",
+			ContextWindow: 200000,
+			ThinkingModes: anthropicThinkingModes,
+		},
+		{
+			ID:            "claude-opus-4-20250514",
+			Name:          "Claude Opus 4",
+			ContextWindow: 200000,
+			ThinkingModes: anthropicThinkingModes,
+		},
+		{
+			ID:            "claude-sonnet-4-20250514",
+			Name:          "Claude Sonnet 4",
+			ContextWindow: 200000,
+			ThinkingModes: anthropicThinkingModes,
+		},
 	},
 	providerOpenAI: {
-		{ID: defaultOpenAIModel, Name: "GPT-5.5", ContextWindow: 1050000, ThinkingModes: []thinkingMode{
-			{ID: "none", Name: "None", Description: "No extended reasoning"},
-			{ID: "minimal", Name: "Minimal", Description: "Minimal extended reasoning"},
-			{ID: "low", Name: "Low", Description: "Extended reasoning (low effort)"},
-			{ID: "medium", Name: "Medium", Description: "Extended reasoning (medium effort)"},
-			{ID: "high", Name: "High", Description: "Extended reasoning (high effort)"},
-			{ID: "xhigh", Name: "X-High", Description: "Extended reasoning (maximum effort)"},
-		}},
-		{ID: "gpt-5.5-pro", Name: "GPT-5.5 Pro", ContextWindow: 1050000, ThinkingModes: []thinkingMode{
-			{ID: "none", Name: "None", Description: "No extended reasoning"},
-			{ID: "minimal", Name: "Minimal", Description: "Minimal extended reasoning"},
-			{ID: "low", Name: "Low", Description: "Extended reasoning (low effort)"},
-			{ID: "medium", Name: "Medium", Description: "Extended reasoning (medium effort)"},
-			{ID: "high", Name: "High", Description: "Extended reasoning (high effort)"},
-			{ID: "xhigh", Name: "X-High", Description: "Extended reasoning (maximum effort)"},
-		}},
-		{ID: "gpt-5.4", Name: "GPT-5.4", ContextWindow: 1050000, ThinkingModes: []thinkingMode{
-			{ID: "none", Name: "None", Description: "No extended reasoning"},
-			{ID: "minimal", Name: "Minimal", Description: "Minimal extended reasoning"},
-			{ID: "low", Name: "Low", Description: "Extended reasoning (low effort)"},
-			{ID: "medium", Name: "Medium", Description: "Extended reasoning (medium effort)"},
-			{ID: "high", Name: "High", Description: "Extended reasoning (high effort)"},
-			{ID: "xhigh", Name: "X-High", Description: "Extended reasoning (maximum effort)"},
-		}},
-		{ID: "gpt-5.4-pro", Name: "GPT-5.4 Pro", ContextWindow: 1050000, ThinkingModes: []thinkingMode{
-			{ID: "none", Name: "None", Description: "No extended reasoning"},
-			{ID: "minimal", Name: "Minimal", Description: "Minimal extended reasoning"},
-			{ID: "low", Name: "Low", Description: "Extended reasoning (low effort)"},
-			{ID: "medium", Name: "Medium", Description: "Extended reasoning (medium effort)"},
-			{ID: "high", Name: "High", Description: "Extended reasoning (high effort)"},
-			{ID: "xhigh", Name: "X-High", Description: "Extended reasoning (maximum effort)"},
-		}},
-		{ID: "gpt-5.4-mini", Name: "GPT-5.4 Mini", ContextWindow: 400000, ThinkingModes: []thinkingMode{
-			{ID: "none", Name: "None", Description: "No extended reasoning"},
-			{ID: "minimal", Name: "Minimal", Description: "Minimal extended reasoning"},
-			{ID: "low", Name: "Low", Description: "Extended reasoning (low effort)"},
-			{ID: "medium", Name: "Medium", Description: "Extended reasoning (medium effort)"},
-			{ID: "high", Name: "High", Description: "Extended reasoning (high effort)"},
-			{ID: "xhigh", Name: "X-High", Description: "Extended reasoning (maximum effort)"},
-		}},
-		{ID: "gpt-5.4-nano", Name: "GPT-5.4 Nano", ContextWindow: 400000, ThinkingModes: []thinkingMode{
-			{ID: "none", Name: "None", Description: "No extended reasoning"},
-			{ID: "minimal", Name: "Minimal", Description: "Minimal extended reasoning"},
-			{ID: "low", Name: "Low", Description: "Extended reasoning (low effort)"},
-			{ID: "medium", Name: "Medium", Description: "Extended reasoning (medium effort)"},
-			{ID: "high", Name: "High", Description: "Extended reasoning (high effort)"},
-			{ID: "xhigh", Name: "X-High", Description: "Extended reasoning (maximum effort)"},
-		}},
-		{ID: "gpt-5.3-codex", Name: "GPT-5.3 Codex", ContextWindow: 400000, ThinkingModes: []thinkingMode{
-			{ID: "none", Name: "None", Description: "No extended reasoning"},
-			{ID: "minimal", Name: "Minimal", Description: "Minimal extended reasoning"},
-			{ID: "low", Name: "Low", Description: "Extended reasoning (low effort)"},
-			{ID: "medium", Name: "Medium", Description: "Extended reasoning (medium effort)"},
-			{ID: "high", Name: "High", Description: "Extended reasoning (high effort)"},
-			{ID: "xhigh", Name: "X-High", Description: "Extended reasoning (maximum effort)"},
-		}},
-		{ID: "gpt-5.2", Name: "GPT-5.2", ContextWindow: 400000, ThinkingModes: []thinkingMode{
-			{ID: "none", Name: "None", Description: "No extended reasoning"},
-			{ID: "minimal", Name: "Minimal", Description: "Minimal extended reasoning"},
-			{ID: "low", Name: "Low", Description: "Extended reasoning (low effort)"},
-			{ID: "medium", Name: "Medium", Description: "Extended reasoning (medium effort)"},
-			{ID: "high", Name: "High", Description: "Extended reasoning (high effort)"},
-			{ID: "xhigh", Name: "X-High", Description: "Extended reasoning (maximum effort)"},
-		}},
-		{ID: "gpt-5.2-codex", Name: "GPT-5.2 Codex", ContextWindow: 400000, ThinkingModes: []thinkingMode{
-			{ID: "none", Name: "None", Description: "No extended reasoning"},
-			{ID: "minimal", Name: "Minimal", Description: "Minimal extended reasoning"},
-			{ID: "low", Name: "Low", Description: "Extended reasoning (low effort)"},
-			{ID: "medium", Name: "Medium", Description: "Extended reasoning (medium effort)"},
-			{ID: "high", Name: "High", Description: "Extended reasoning (high effort)"},
-			{ID: "xhigh", Name: "X-High", Description: "Extended reasoning (maximum effort)"},
-		}},
-		{ID: "gpt-5.1", Name: "GPT-5.1", ContextWindow: 400000, ThinkingModes: []thinkingMode{
-			{ID: "none", Name: "None", Description: "No extended reasoning"},
-			{ID: "minimal", Name: "Minimal", Description: "Minimal extended reasoning"},
-			{ID: "low", Name: "Low", Description: "Extended reasoning (low effort)"},
-			{ID: "medium", Name: "Medium", Description: "Extended reasoning (medium effort)"},
-			{ID: "high", Name: "High", Description: "Extended reasoning (high effort)"},
-			{ID: "xhigh", Name: "X-High", Description: "Extended reasoning (maximum effort)"},
-		}},
-		{ID: "gpt-5.1-codex", Name: "GPT-5.1 Codex", ContextWindow: 400000, ThinkingModes: []thinkingMode{
-			{ID: "none", Name: "None", Description: "No extended reasoning"},
-			{ID: "minimal", Name: "Minimal", Description: "Minimal extended reasoning"},
-			{ID: "low", Name: "Low", Description: "Extended reasoning (low effort)"},
-			{ID: "medium", Name: "Medium", Description: "Extended reasoning (medium effort)"},
-			{ID: "high", Name: "High", Description: "Extended reasoning (high effort)"},
-			{ID: "xhigh", Name: "X-High", Description: "Extended reasoning (maximum effort)"},
-		}},
-		{ID: "gpt-5.1-codex-max", Name: "GPT-5.1 Codex Max", ContextWindow: 400000, ThinkingModes: []thinkingMode{
-			{ID: "none", Name: "None", Description: "No extended reasoning"},
-			{ID: "minimal", Name: "Minimal", Description: "Minimal extended reasoning"},
-			{ID: "low", Name: "Low", Description: "Extended reasoning (low effort)"},
-			{ID: "medium", Name: "Medium", Description: "Extended reasoning (medium effort)"},
-			{ID: "high", Name: "High", Description: "Extended reasoning (high effort)"},
-			{ID: "xhigh", Name: "X-High", Description: "Extended reasoning (maximum effort)"},
-		}},
-		{ID: "gpt-5.1-codex-mini", Name: "GPT-5.1 Codex Mini", ContextWindow: 400000, ThinkingModes: []thinkingMode{
-			{ID: "none", Name: "None", Description: "No extended reasoning"},
-			{ID: "minimal", Name: "Minimal", Description: "Minimal extended reasoning"},
-			{ID: "low", Name: "Low", Description: "Extended reasoning (low effort)"},
-			{ID: "medium", Name: "Medium", Description: "Extended reasoning (medium effort)"},
-			{ID: "high", Name: "High", Description: "Extended reasoning (high effort)"},
-			{ID: "xhigh", Name: "X-High", Description: "Extended reasoning (maximum effort)"},
-		}},
-		{ID: "gpt-5-codex", Name: "GPT-5 Codex", ContextWindow: 400000, ThinkingModes: []thinkingMode{
-			{ID: "none", Name: "None", Description: "No extended reasoning"},
-			{ID: "minimal", Name: "Minimal", Description: "Minimal extended reasoning"},
-			{ID: "low", Name: "Low", Description: "Extended reasoning (low effort)"},
-			{ID: "medium", Name: "Medium", Description: "Extended reasoning (medium effort)"},
-			{ID: "high", Name: "High", Description: "Extended reasoning (high effort)"},
-			{ID: "xhigh", Name: "X-High", Description: "Extended reasoning (maximum effort)"},
-		}},
-		{ID: "gpt-5", Name: "GPT-5", ContextWindow: 400000, ThinkingModes: []thinkingMode{
-			{ID: "none", Name: "None", Description: "No extended reasoning"},
-			{ID: "minimal", Name: "Minimal", Description: "Minimal extended reasoning"},
-			{ID: "low", Name: "Low", Description: "Extended reasoning (low effort)"},
-			{ID: "medium", Name: "Medium", Description: "Extended reasoning (medium effort)"},
-			{ID: "high", Name: "High", Description: "Extended reasoning (high effort)"},
-			{ID: "xhigh", Name: "X-High", Description: "Extended reasoning (maximum effort)"},
-		}},
-		{ID: "gpt-5-mini", Name: "GPT-5 Mini", ContextWindow: 400000, ThinkingModes: []thinkingMode{
-			{ID: "none", Name: "None", Description: "No extended reasoning"},
-			{ID: "minimal", Name: "Minimal", Description: "Minimal extended reasoning"},
-			{ID: "low", Name: "Low", Description: "Extended reasoning (low effort)"},
-			{ID: "medium", Name: "Medium", Description: "Extended reasoning (medium effort)"},
-			{ID: "high", Name: "High", Description: "Extended reasoning (high effort)"},
-			{ID: "xhigh", Name: "X-High", Description: "Extended reasoning (maximum effort)"},
-		}},
-		{ID: "gpt-5-nano", Name: "GPT-5 Nano", ContextWindow: 400000, ThinkingModes: []thinkingMode{
-			{ID: "none", Name: "None", Description: "No extended reasoning"},
-			{ID: "minimal", Name: "Minimal", Description: "Minimal extended reasoning"},
-			{ID: "low", Name: "Low", Description: "Extended reasoning (low effort)"},
-			{ID: "medium", Name: "Medium", Description: "Extended reasoning (medium effort)"},
-			{ID: "high", Name: "High", Description: "Extended reasoning (high effort)"},
-			{ID: "xhigh", Name: "X-High", Description: "Extended reasoning (maximum effort)"},
-		}},
-		{ID: "o4-mini", Name: "o4 Mini", ContextWindow: 200000, ThinkingModes: []thinkingMode{
-			{ID: "none", Name: "None", Description: "No extended reasoning"},
-			{ID: "minimal", Name: "Minimal", Description: "Minimal extended reasoning"},
-			{ID: "low", Name: "Low", Description: "Extended reasoning (low effort)"},
-			{ID: "medium", Name: "Medium", Description: "Extended reasoning (medium effort)"},
-			{ID: "high", Name: "High", Description: "Extended reasoning (high effort)"},
-			{ID: "xhigh", Name: "X-High", Description: "Extended reasoning (maximum effort)"},
-		}},
-		{ID: "o3", Name: "o3", ContextWindow: 200000, ThinkingModes: []thinkingMode{
-			{ID: "none", Name: "None", Description: "No extended reasoning"},
-			{ID: "minimal", Name: "Minimal", Description: "Minimal extended reasoning"},
-			{ID: "low", Name: "Low", Description: "Extended reasoning (low effort)"},
-			{ID: "medium", Name: "Medium", Description: "Extended reasoning (medium effort)"},
-			{ID: "high", Name: "High", Description: "Extended reasoning (high effort)"},
-			{ID: "xhigh", Name: "X-High", Description: "Extended reasoning (maximum effort)"},
-		}},
-		{ID: "gpt-4.1", Name: "GPT-4.1", ContextWindow: 1047576, ThinkingModes: []thinkingMode{
-			{ID: "none", Name: "None", Description: "No extended reasoning"},
-			{ID: "minimal", Name: "Minimal", Description: "Minimal extended reasoning"},
-			{ID: "low", Name: "Low", Description: "Extended reasoning (low effort)"},
-			{ID: "medium", Name: "Medium", Description: "Extended reasoning (medium effort)"},
-			{ID: "high", Name: "High", Description: "Extended reasoning (high effort)"},
-			{ID: "xhigh", Name: "X-High", Description: "Extended reasoning (maximum effort)"},
-		}},
-		{ID: "gpt-4.1-mini", Name: "GPT-4.1 Mini", ContextWindow: 1047576, ThinkingModes: []thinkingMode{
-			{ID: "none", Name: "None", Description: "No extended reasoning"},
-			{ID: "minimal", Name: "Minimal", Description: "Minimal extended reasoning"},
-			{ID: "low", Name: "Low", Description: "Extended reasoning (low effort)"},
-			{ID: "medium", Name: "Medium", Description: "Extended reasoning (medium effort)"},
-			{ID: "high", Name: "High", Description: "Extended reasoning (high effort)"},
-			{ID: "xhigh", Name: "X-High", Description: "Extended reasoning (maximum effort)"},
-		}},
-		{ID: "gpt-4.1-nano", Name: "GPT-4.1 Nano", ContextWindow: 1047576, ThinkingModes: []thinkingMode{
-			{ID: "none", Name: "None", Description: "No extended reasoning"},
-			{ID: "minimal", Name: "Minimal", Description: "Minimal extended reasoning"},
-			{ID: "low", Name: "Low", Description: "Extended reasoning (low effort)"},
-			{ID: "medium", Name: "Medium", Description: "Extended reasoning (medium effort)"},
-			{ID: "high", Name: "High", Description: "Extended reasoning (high effort)"},
-			{ID: "xhigh", Name: "X-High", Description: "Extended reasoning (maximum effort)"},
-		}},
-		{ID: "o3-mini", Name: "o3 Mini", ContextWindow: 200000, ThinkingModes: []thinkingMode{
-			{ID: "none", Name: "None", Description: "No extended reasoning"},
-			{ID: "minimal", Name: "Minimal", Description: "Minimal extended reasoning"},
-			{ID: "low", Name: "Low", Description: "Extended reasoning (low effort)"},
-			{ID: "medium", Name: "Medium", Description: "Extended reasoning (medium effort)"},
-			{ID: "high", Name: "High", Description: "Extended reasoning (high effort)"},
-			{ID: "xhigh", Name: "X-High", Description: "Extended reasoning (maximum effort)"},
-		}},
-		{ID: "gpt-4o", Name: "GPT-4o", ContextWindow: 128000, ThinkingModes: []thinkingMode{
-			{ID: "none", Name: "None", Description: "No extended reasoning"},
-			{ID: "minimal", Name: "Minimal", Description: "Minimal extended reasoning"},
-			{ID: "low", Name: "Low", Description: "Extended reasoning (low effort)"},
-			{ID: "medium", Name: "Medium", Description: "Extended reasoning (medium effort)"},
-			{ID: "high", Name: "High", Description: "Extended reasoning (high effort)"},
-			{ID: "xhigh", Name: "X-High", Description: "Extended reasoning (maximum effort)"},
-		}},
-		{ID: "gpt-4o-mini", Name: "GPT-4o-mini", ContextWindow: 128000, ThinkingModes: []thinkingMode{
-			{ID: "none", Name: "None", Description: "No extended reasoning"},
-			{ID: "minimal", Name: "Minimal", Description: "Minimal extended reasoning"},
-			{ID: "low", Name: "Low", Description: "Extended reasoning (low effort)"},
-			{ID: "medium", Name: "Medium", Description: "Extended reasoning (medium effort)"},
-			{ID: "high", Name: "High", Description: "Extended reasoning (high effort)"},
-			{ID: "xhigh", Name: "X-High", Description: "Extended reasoning (maximum effort)"},
-		}},
+		{ID: defaultOpenAIModel, Name: "GPT-5.5", ContextWindow: 1050000, ThinkingModes: openAIThinkingModes},
+		{ID: "gpt-5.5-pro", Name: "GPT-5.5 Pro", ContextWindow: 1050000, ThinkingModes: openAIThinkingModes},
+		{ID: "gpt-5.4", Name: "GPT-5.4", ContextWindow: 1050000, ThinkingModes: openAIThinkingModes},
+		{ID: "gpt-5.4-pro", Name: "GPT-5.4 Pro", ContextWindow: 1050000, ThinkingModes: openAIThinkingModes},
+		{ID: "gpt-5.4-mini", Name: "GPT-5.4 Mini", ContextWindow: 400000, ThinkingModes: openAIThinkingModes},
+		{ID: "gpt-5.4-nano", Name: "GPT-5.4 Nano", ContextWindow: 400000, ThinkingModes: openAIThinkingModes},
+		{ID: "gpt-5.3-codex", Name: "GPT-5.3 Codex", ContextWindow: 400000, ThinkingModes: openAIThinkingModes},
+		{ID: "gpt-5.2", Name: "GPT-5.2", ContextWindow: 400000, ThinkingModes: openAIThinkingModes},
+		{ID: "gpt-5.2-codex", Name: "GPT-5.2 Codex", ContextWindow: 400000, ThinkingModes: openAIThinkingModes},
+		{ID: "gpt-5.1", Name: "GPT-5.1", ContextWindow: 400000, ThinkingModes: openAIThinkingModes},
+		{ID: "gpt-5.1-codex", Name: "GPT-5.1 Codex", ContextWindow: 400000, ThinkingModes: openAIThinkingModes},
+		{ID: "gpt-5.1-codex-max", Name: "GPT-5.1 Codex Max", ContextWindow: 400000, ThinkingModes: openAIThinkingModes},
+		{
+			ID:            "gpt-5.1-codex-mini",
+			Name:          "GPT-5.1 Codex Mini",
+			ContextWindow: 400000,
+			ThinkingModes: openAIThinkingModes,
+		},
+		{ID: "gpt-5-codex", Name: "GPT-5 Codex", ContextWindow: 400000, ThinkingModes: openAIThinkingModes},
+		{ID: "gpt-5", Name: "GPT-5", ContextWindow: 400000, ThinkingModes: openAIThinkingModes},
+		{ID: "gpt-5-mini", Name: "GPT-5 Mini", ContextWindow: 400000, ThinkingModes: openAIThinkingModes},
+		{ID: "gpt-5-nano", Name: "GPT-5 Nano", ContextWindow: 400000, ThinkingModes: openAIThinkingModes},
+		{ID: "o4-mini", Name: "o4 Mini", ContextWindow: 200000, ThinkingModes: openAIThinkingModes},
+		{ID: "o3", Name: "o3", ContextWindow: 200000, ThinkingModes: openAIThinkingModes},
+		{ID: "gpt-4.1", Name: "GPT-4.1", ContextWindow: 1047576, ThinkingModes: openAIThinkingModes},
+		{ID: "gpt-4.1-mini", Name: "GPT-4.1 Mini", ContextWindow: 1047576, ThinkingModes: openAIThinkingModes},
+		{ID: "gpt-4.1-nano", Name: "GPT-4.1 Nano", ContextWindow: 1047576, ThinkingModes: openAIThinkingModes},
+		{ID: "o3-mini", Name: "o3 Mini", ContextWindow: 200000, ThinkingModes: openAIThinkingModes},
+		{ID: "gpt-4o", Name: "GPT-4o", ContextWindow: 128000, ThinkingModes: openAIThinkingModes},
+		{ID: "gpt-4o-mini", Name: "GPT-4o-mini", ContextWindow: 128000, ThinkingModes: openAIThinkingModes},
 	},
 	providerGemini: {
-		{ID: "gemini-3.5-flash", Name: "Gemini 3.5 Flash", ContextWindow: 1048576, ThinkingModes: []thinkingMode{
-			{ID: "512", Name: "Minimal", Description: "Extended thinking (512 tokens)"},
-			{ID: "4096", Name: "Low", Description: "Extended thinking (4K tokens)"},
-			{ID: "16384", Name: "Medium", Description: "Extended thinking (16K tokens)"},
-			{ID: "32768", Name: "High", Description: "Extended thinking (32K tokens)"},
-			{ID: "65536", Name: "X-High", Description: "Extended thinking (64K tokens)"},
-		}},
+		{ID: gemini35FlashModel, Name: "Gemini 3.5 Flash", ContextWindow: 1048576, ThinkingModes: geminiThinkingModes},
 		{
 			ID:            "gemini-3.1-pro-preview-customtools",
 			Name:          "Gemini 3.1 Pro",
 			ContextWindow: 1048576,
-			ThinkingModes: []thinkingMode{
-				{ID: "512", Name: "Minimal", Description: "Extended thinking (512 tokens)"},
-				{ID: "4096", Name: "Low", Description: "Extended thinking (4K tokens)"},
-				{ID: "16384", Name: "Medium", Description: "Extended thinking (16K tokens)"},
-				{ID: "32768", Name: "High", Description: "Extended thinking (32K tokens)"},
-				{ID: "65536", Name: "X-High", Description: "Extended thinking (64K tokens)"},
-			},
+			ThinkingModes: geminiThinkingModes,
 		},
-		{ID: "gemini-3-pro-preview", Name: "Gemini 3 Pro", ContextWindow: 1048576, ThinkingModes: []thinkingMode{
-			{ID: "512", Name: "Minimal", Description: "Extended thinking (512 tokens)"},
-			{ID: "4096", Name: "Low", Description: "Extended thinking (4K tokens)"},
-			{ID: "16384", Name: "Medium", Description: "Extended thinking (16K tokens)"},
-			{ID: "32768", Name: "High", Description: "Extended thinking (32K tokens)"},
-			{ID: "65536", Name: "X-High", Description: "Extended thinking (64K tokens)"},
-		}},
-		{ID: "gemini-3-flash-preview", Name: "Gemini 3 Flash", ContextWindow: 1048576, ThinkingModes: []thinkingMode{
-			{ID: "512", Name: "Minimal", Description: "Extended thinking (512 tokens)"},
-			{ID: "4096", Name: "Low", Description: "Extended thinking (4K tokens)"},
-			{ID: "16384", Name: "Medium", Description: "Extended thinking (16K tokens)"},
-			{ID: "32768", Name: "High", Description: "Extended thinking (32K tokens)"},
-			{ID: "65536", Name: "X-High", Description: "Extended thinking (64K tokens)"},
-		}},
-		{ID: "gemini-2.5-pro", Name: "Gemini 2.5 Pro", ContextWindow: 1048576, ThinkingModes: []thinkingMode{
-			{ID: "512", Name: "Minimal", Description: "Extended thinking (512 tokens)"},
-			{ID: "4096", Name: "Low", Description: "Extended thinking (4K tokens)"},
-			{ID: "16384", Name: "Medium", Description: "Extended thinking (16K tokens)"},
-			{ID: "32768", Name: "High", Description: "Extended thinking (32K tokens)"},
-			{ID: "65536", Name: "X-High", Description: "Extended thinking (64K tokens)"},
-		}},
-		{ID: "gemini-2.5-flash", Name: "Gemini 2.5 Flash", ContextWindow: 1048576, ThinkingModes: []thinkingMode{
-			{ID: "512", Name: "Minimal", Description: "Extended thinking (512 tokens)"},
-			{ID: "4096", Name: "Low", Description: "Extended thinking (4K tokens)"},
-			{ID: "16384", Name: "Medium", Description: "Extended thinking (16K tokens)"},
-			{ID: "32768", Name: "High", Description: "Extended thinking (32K tokens)"},
-			{ID: "65536", Name: "X-High", Description: "Extended thinking (64K tokens)"},
-		}},
+		{ID: "gemini-3-pro-preview", Name: "Gemini 3 Pro", ContextWindow: 1048576, ThinkingModes: geminiThinkingModes},
+		{
+			ID:            "gemini-3-flash-preview",
+			Name:          "Gemini 3 Flash",
+			ContextWindow: 1048576,
+			ThinkingModes: geminiThinkingModes,
+		},
+		{ID: "gemini-2.5-pro", Name: "Gemini 2.5 Pro", ContextWindow: 1048576, ThinkingModes: geminiThinkingModes},
+		{ID: "gemini-2.5-flash", Name: "Gemini 2.5 Flash", ContextWindow: 1048576, ThinkingModes: geminiThinkingModes},
 	},
 }
 
 var chatGPTOAuthModels = []modelInfo{
-	{ID: defaultOpenAIModel, Name: "GPT-5.5", ContextWindow: 1050000, ThinkingModes: []thinkingMode{
-		{ID: "none", Name: "None", Description: "No extended reasoning"},
-		{ID: "minimal", Name: "Minimal", Description: "Minimal extended reasoning"},
-		{ID: "low", Name: "Low", Description: "Extended reasoning (low effort)"},
-		{ID: "medium", Name: "Medium", Description: "Extended reasoning (medium effort)"},
-		{ID: "high", Name: "High", Description: "Extended reasoning (high effort)"},
-		{ID: "xhigh", Name: "X-High", Description: "Extended reasoning (maximum effort)"},
-	}},
-	{ID: "gpt-5.4", Name: "GPT-5.4", ContextWindow: 1050000, ThinkingModes: []thinkingMode{
-		{ID: "none", Name: "None", Description: "No extended reasoning"},
-		{ID: "minimal", Name: "Minimal", Description: "Minimal extended reasoning"},
-		{ID: "low", Name: "Low", Description: "Extended reasoning (low effort)"},
-		{ID: "medium", Name: "Medium", Description: "Extended reasoning (medium effort)"},
-		{ID: "high", Name: "High", Description: "Extended reasoning (high effort)"},
-		{ID: "xhigh", Name: "X-High", Description: "Extended reasoning (maximum effort)"},
-	}},
-	{ID: "gpt-5.4-mini", Name: "GPT-5.4 Mini", ContextWindow: 400000, ThinkingModes: []thinkingMode{
-		{ID: "none", Name: "None", Description: "No extended reasoning"},
-		{ID: "minimal", Name: "Minimal", Description: "Minimal extended reasoning"},
-		{ID: "low", Name: "Low", Description: "Extended reasoning (low effort)"},
-		{ID: "medium", Name: "Medium", Description: "Extended reasoning (medium effort)"},
-		{ID: "high", Name: "High", Description: "Extended reasoning (high effort)"},
-		{ID: "xhigh", Name: "X-High", Description: "Extended reasoning (maximum effort)"},
-	}},
+	{ID: defaultOpenAIModel, Name: "GPT-5.5", ContextWindow: 1050000, ThinkingModes: openAIThinkingModes},
+	{ID: "gpt-5.4", Name: "GPT-5.4", ContextWindow: 1050000, ThinkingModes: openAIThinkingModes},
+	{ID: "gpt-5.4-mini", Name: "GPT-5.4 Mini", ContextWindow: 400000, ThinkingModes: openAIThinkingModes},
 }
 
 var defaultModelsByProvider = map[string]string{
 	providerAnthropic: defaultAnthropicModel,
 	providerOpenAI:    defaultOpenAIModel,
-	providerGemini:    "gemini-3-pro-preview",
+	providerGemini:    defaultGeminiModel,
 }
 
 // modelsForProvider returns the catalog for a provider, or nil if unknown.
@@ -549,16 +338,12 @@ func supportedThinkingModesForModel(provider, model string) []thinkingMode {
 
 // openAIStandardThinkingModes is the full standard OpenAI reasoning-effort
 // vocabulary, in picker order. Used for local models whose endpoint does not
-// declare a supported set.
+// declare a supported set. Returns a fresh copy of the shared catalog rows so
+// callers cannot mutate the catalog through the returned slice.
 func openAIStandardThinkingModes() []thinkingMode {
-	return []thinkingMode{
-		{ID: thinkingModeNone, Name: "None", Description: "No extended reasoning"},
-		{ID: thinkingModeMinimal, Name: "Minimal", Description: "Minimal extended reasoning"},
-		{ID: thinkingModeLow, Name: "Low", Description: "Extended reasoning (low effort)"},
-		{ID: thinkingModeMedium, Name: "Medium", Description: "Extended reasoning (medium effort)"},
-		{ID: thinkingModeHigh, Name: "High", Description: "Extended reasoning (high effort)"},
-		{ID: thinkingModeXHigh, Name: "X-High", Description: "Extended reasoning (maximum effort)"},
-	}
+	out := make([]thinkingMode, len(openAIThinkingModes))
+	copy(out, openAIThinkingModes)
+	return out
 }
 
 // adoptedLocalThinkingMode returns the mode ID to adopt when switching to a
@@ -640,7 +425,7 @@ func currentThinkingModeForModel(provider, model string) string {
 	// Get the saved thinking level from config
 	savedLevel := savedThinkingLevel()
 	if savedLevel == thinkingOff {
-		return "none"
+		return thinkingModeNone
 	}
 
 	switch provider {
@@ -658,5 +443,5 @@ func currentThinkingModeForModel(provider, model string) string {
 		}
 	}
 
-	return "none"
+	return thinkingModeNone
 }

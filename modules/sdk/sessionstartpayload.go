@@ -10,10 +10,10 @@ package sdk
 // writing pathed or timestamped artifacts.
 type SessionStartPayload struct {
 	Reason    string          `json:"reason"`
-	Tools     []PromptTool    `json:"tools,omitempty"`
-	Commands  []PromptCommand `json:"commands,omitempty"`
 	CWD       string          `json:"cwd,omitempty"`
 	StartedAt string          `json:"started_at,omitempty"` // RFC3339Nano
+	Tools     []PromptTool    `json:"tools,omitempty"`
+	Commands  []PromptCommand `json:"commands,omitempty"`
 }
 
 // PromptTool is the prompt-relevant subset of a registered tool.

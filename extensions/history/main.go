@@ -67,9 +67,7 @@ func init() {
 		})
 	})
 
-	OnCommand("history", func(_ []string) {
-		handleHistoryCommand()
-	})
+	OnCommand("history", handleHistoryCommand)
 	// Step 2: a session was chosen → show the message picker so the user can
 	// choose the point to resume from.
 	OnCommand("history:session_selected", func(args []string) {
@@ -198,16 +196,25 @@ func nowRFC() string {
 
 // ─── /history → session picker ───────────────────────────────────────────────
 
-func handleHistoryCommand() {
+// handleHistoryCommand shows the session picker. By default it lists only the
+// current project's sessions (the per-cwd directory this session writes into);
+// `/history all` widens the listing to every folder's sessions.
+func handleHistoryCommand(args []string) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		home = "/tmp"
 	}
 	base := filepath.Join(home, ".wllr", "sessions")
+	firstArg := ""
+	if len(args) > 0 {
+		firstArg = args[0]
+	}
+	hostCwd, _, _ := HostInfo()
+	dir := historyListDir(currentFile, hostCwd, base, firstArg)
 
 	// List host-side: the WASM sandbox cannot reliably stat or sort by mtime,
 	// so the host returns real mtimes and first-user-message previews.
-	sessions, err := ListSessions(base, currentFile, 20)
+	sessions, err := ListSessions(base, dir, currentFile, 20)
 	if err != nil || len(sessions) == 0 {
 		Modal("No previous sessions found.\n\nStart a conversation to create your first session.")
 		return

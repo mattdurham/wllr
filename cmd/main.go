@@ -429,7 +429,8 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 			if resolveLocalModelWindow(ctx, cfg, modelID) <= 0 {
 				return "", "", fmt.Errorf(
 					"tier %s: context window for %s is unknown; set it in wllr.local_models or select it once in /models",
-					tier, modelID,
+					tier,
+					modelID,
 				)
 			}
 		} else if contextWindowForSelection(provider, modelID, cfg) <= 0 {
@@ -812,7 +813,8 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 		// No renderer and no input: the renderer is what would draw to a TTY, and
 		// nil input stops bubbletea from opening one to read from. Together they
 		// let the same program run unattended.
-		prog := tea.NewProgram(&m,
+		prog := tea.NewProgram(
+			&m,
 			tea.WithoutRenderer(),
 			tea.WithInput(nil),
 			tea.WithoutSignalHandler(),

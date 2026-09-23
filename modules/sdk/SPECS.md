@@ -371,7 +371,7 @@ wire contract** section above.
 | `MethodGetEnv`            | `"get_env"`            | Read a host environment variable (no permission required)     |
 | `MethodGetOS`             | `"get_os"`             | Returns the host operating system and architecture strings    |
 | `MethodHostInfo`          | `"host_info"`          | Returns host ground truth: `cwd`, `now` (RFC3339Nano), `os`, `arch` (no permission required) |
-| `MethodListSessions`      | `"list_sessions"`      | List session files under `base` with host mtimes, newest first, up to `limit`, excluding `exclude` (requires PermFileRead) |
+| `MethodListSessions`      | `"list_sessions"`      | List session files under `base` — or only the directory given by optional `dir` — with host mtimes, newest first, up to `limit`, excluding `exclude` (requires PermFileRead) |
 | `MethodConfigRead`        | `"config_read"`        | Read the calling extension's config group, or an explicit `group`, from the shared config file |
 | `MethodModal`             | `"modal"`              | Display text in a modal overlay window                        |
 | `MethodSetSystemPrompt`   | `"set_system_prompt"`  | Replace the base system prompt on all agents                  |

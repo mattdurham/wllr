@@ -374,12 +374,14 @@ type HostSession struct {
 	Preview   string `json:"preview,omitempty"`
 }
 
-// ListSessions lists session files under base (default ~/.wllr/sessions) with
-// real host mtimes, newest first, up to limit entries, excluding the current
-// file. Listing is done host-side because the WASM sandbox cannot reliably
-// stat or enumerate the host filesystem. Requires the file_read permission.
-func ListSessions(base, exclude string, limit int) ([]HostSession, error) {
-	params := map[string]any{"base": base, "exclude": exclude, "limit": limit}
+// ListSessions lists session files with real host mtimes, newest first, up to
+// limit entries, excluding the current file. When dir is non-empty the listing
+// is scoped to that directory (the caller's own per-cwd session directory);
+// when empty it spans every session directory under base. Listing is done
+// host-side because the WASM sandbox cannot reliably stat or enumerate the
+// host filesystem. Requires the file_read permission.
+func ListSessions(base, dir, exclude string, limit int) ([]HostSession, error) {
+	params := map[string]any{"base": base, "dir": dir, "exclude": exclude, "limit": limit}
 	raw := _sdkCallResult("list_sessions", params)
 	if raw == nil {
 		return nil, fmt.Errorf("list_sessions: no response")

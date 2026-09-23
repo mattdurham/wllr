@@ -67,7 +67,7 @@ func (t *TextInputView) HandleKey(kp tea.KeyPressMsg) (submitted bool, value str
 	switch kp.String() {
 	case keyEsc:
 		return false, "", true, nil
-	case "enter":
+	case keyEnter:
 		return true, t.input.Value(), false, nil
 	}
 	t.input, cmd = t.input.Update(kp)

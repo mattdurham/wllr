@@ -14,21 +14,21 @@ import (
 // ModelChoice is one selectable model for the /model picker. ID is the wire
 // model identifier passed to the provider; Name is a human label.
 type ModelChoice struct {
-	ID                 string
-	Name               string
-	Sublabel           string
-	ContextWindow      int64
-	ContextWindowKnown bool
+	ID       string
+	Name     string
+	Sublabel string
 	// Provider is the provider that owns this model. The list spans providers
 	// (each configured/pinned model, not just the active provider's), so
 	// selecting a model switches provider when it differs from the active one.
 	Provider string
+	// Tiers lists the model-tier names this model is tagged with (e.g.
+	// ["high"]). Rendered in the picker sublabel so the tagging is visible.
+	Tiers              []string
+	ContextWindow      int64
+	ContextWindowKnown bool
 	// Active marks the model currently in use, so the list can show which
 	// provider/model is live.
 	Active bool
-	// Tiers lists the model-tier names this model is tagged with (e.g.
-	// ["high"]). Rendered in the picker sublabel so the tagging is visible.
-	Tiers []string
 }
 
 // tierTagPrefix is the sublabel marker introducing the model's tier tags.

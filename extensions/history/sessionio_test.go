@@ -183,3 +183,51 @@ func TestSanitizePath(t *testing.T) {
 		}
 	}
 }
+
+func TestFormatTimestamp(t *testing.T) {
+	// RFC3339Nano host timestamps render as human "2006-01-02 15:04" picker
+	// labels; unparseable input falls back to the raw string.
+	cases := []struct {
+		raw  string
+		want string
+	}{
+		{"2026-09-22T10-00-00_abcd", "2026-09-22T10-00-00_abcd"}, // not RFC3339 → raw
+		{"2026-09-22T10:30:00Z", "2026-09-22 10:30"},
+		{"2026-09-22T10:30:00.123456789+02:00", "2026-09-22 10:30"},
+		{"", ""},
+	}
+	for _, tc := range cases {
+		if got := formatTimestamp(tc.raw); got != tc.want {
+			t.Errorf("formatTimestamp(%q) = %q, want %q", tc.raw, got, tc.want)
+		}
+	}
+}
+
+func TestHistoryListDir(t *testing.T) {
+	base := filepath.Join("home", ".wllr", "sessions")
+	currentFile := filepath.Join(base, "Users--matt--proj", "2026-09-22T10-00-00_abcd.jsonl")
+	wantDir := filepath.Join(base, "Users--matt--proj")
+
+	cases := []struct {
+		name        string
+		currentFile string
+		hostCwd     string
+		firstArg    string
+		want        string
+	}{
+		// Default: scope to the session file's directory.
+		{"scoped to current session dir", currentFile, "/other", "", wantDir},
+		// /history all: unscoped listing (empty dir).
+		{"all widens listing", currentFile, "/other", "all", ""},
+		// No session file yet: derive the dir from the host cwd.
+		{"falls back to host cwd", "", "/Users/matt/source/proj", "", filepath.Join(base, "Users--matt--source--proj")},
+		// Nothing known at all: unscoped rather than empty listing.
+		{"no ground truth falls back to all", "", "", "", ""},
+	}
+	for _, tc := range cases {
+		if got := historyListDir(tc.currentFile, tc.hostCwd, base, tc.firstArg); got != tc.want {
+			t.Errorf("%s: historyListDir(%q, %q, %q, %q) = %q, want %q",
+				tc.name, tc.currentFile, tc.hostCwd, base, tc.firstArg, got, tc.want)
+		}
+	}
+}

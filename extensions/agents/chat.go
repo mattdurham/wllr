@@ -78,13 +78,10 @@ func onChatUserPrompt(agentID, prompt string, _ bool) {
 	chatAsstNode = ""
 
 	userBox := UINode{
-		ID:   userID,
-		Type: "text",
-		// The user prompt is final the moment it's typed, so trailing newlines
-		// (e.g. from a pasted block) are trimmed here rather than at render
-		// time, which would also clip in-flight streamed assistant text.
+		ID:    userID,
+		Type:  "text",
 		Text:  strings.TrimRight(prompt, "\n\r"),
-		Props: &UIProps{Border: "rounded", Fg: "success", Padding: []int{0, 1}, Width: "fill", Wrap: true},
+		Props: messageBoxProps("success"),
 	}
 	UIPatch(chatArea, OpInsert(chatRootID, userBox))
 }
@@ -120,7 +117,7 @@ func onChatToken(agentID, text string) {
 			ID:    asstID,
 			Type:  "text",
 			Text:  text,
-			Props: &UIProps{Border: "rounded", Fg: "accent", Padding: []int{0, 1}, Width: "fill", Wrap: true},
+			Props: messageBoxProps("accent"),
 		}
 		UIPatch(chatArea, OpInsert(chatRootID, asstBox))
 		return
@@ -166,7 +163,7 @@ func onChatMessageEnd(role, content string) {
 		ID:    asstID,
 		Type:  "text",
 		Text:  display,
-		Props: &UIProps{Border: "rounded", Fg: "accent", Padding: []int{0, 1}, Width: "fill", Wrap: true},
+		Props: messageBoxProps("accent"),
 	}
 	UIPatch(chatArea, OpInsert(chatRootID, asstBox))
 }
@@ -181,7 +178,7 @@ func onChatNotify(text string) {
 		ID:    fmt.Sprintf("n%d", chatSeq),
 		Type:  "text",
 		Text:  "» " + text,
-		Props: &UIProps{Fg: "muted", Italic: true, Width: "fill", Wrap: true},
+		Props: notifyProps(),
 	}
 	UIPatch(chatArea, OpInsert(chatRootID, node))
 }
@@ -234,6 +231,29 @@ func RebuildTranscriptFor(id string) {
 	}
 }
 
+// messageBoxProps returns the standard transcript message-box props: rounded
+// border, themed text, a one-line bottom margin so consecutive messages render
+// with a blank line between them instead of as a solid wall of touching boxes,
+// full width, wrapped. Used by both the live streaming path and the history
+// replay rebuild so the two always look the same.
+func messageBoxProps(fg string) *UIProps {
+	return &UIProps{
+		Border:  "rounded",
+		Fg:      fg,
+		Padding: []int{0, 1},
+		Margin:  []int{0, 0, 1, 0},
+		Width:   "fill",
+		Wrap:    true,
+	}
+}
+
+// notifyProps returns the props for one-line system notifications in the
+// transcript: muted italic, no border, with the same bottom margin as message
+// boxes so notifications do not sit flush against the next message.
+func notifyProps() *UIProps {
+	return &UIProps{Fg: "muted", Italic: true, Margin: []int{0, 0, 1, 0}, Width: "fill", Wrap: true}
+}
+
 // appendUserBox inserts a user message box.
 func appendUserBox(text string) {
 	chatSeq++
@@ -241,7 +261,7 @@ func appendUserBox(text string) {
 		ID:    fmt.Sprintf("u%d", chatSeq),
 		Type:  "text",
 		Text:  strings.TrimRight(text, "\n\r"),
-		Props: &UIProps{Border: "rounded", Fg: "success", Padding: []int{0, 1}, Width: "fill", Wrap: true},
+		Props: messageBoxProps("success"),
 	}
 	UIPatch(chatArea, OpInsert(chatRootID, box))
 }
@@ -259,7 +279,7 @@ func appendAssistantBox(text string) {
 		ID:    fmt.Sprintf("a%d", chatSeq),
 		Type:  "text",
 		Text:  strings.TrimRight(display, "\n\r"),
-		Props: &UIProps{Border: "rounded", Fg: "accent", Padding: []int{0, 1}, Width: "fill", Wrap: true},
+		Props: messageBoxProps("accent"),
 	}
 	UIPatch(chatArea, OpInsert(chatRootID, box))
 }

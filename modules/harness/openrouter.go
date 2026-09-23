@@ -26,8 +26,8 @@ type (
 	showOpenRouterSetupMsg     struct{}
 	openRouterKeyEnteredMsg    struct{ Key string }
 	openRouterCatalogResultMsg struct {
-		Models []OpenRouterModelChoice
 		Err    error
+		Models []OpenRouterModelChoice
 	}
 )
 type openRouterModelPickedMsg struct{ ID string }

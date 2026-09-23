@@ -131,28 +131,11 @@ func geminiBudgetForThinkingMode(modeID string) *int64 {
 // reasoning effort value. Returns nil if the mode is unknown or off.
 func openAIReasoningEffortForThinkingMode(modeID string) *fantasyopenapiprovider.ReasoningEffort {
 	// OpenAI uses named effort levels as mode IDs
-	switch modeID {
-	case "none":
-		val := fantasyopenapiprovider.ReasoningEffortNone
+	if effort, ok := openAIReasoningEffortByMode[modeID]; ok {
+		val := effort
 		return &val
-	case "minimal":
-		val := fantasyopenapiprovider.ReasoningEffortMinimal
-		return &val
-	case "low":
-		val := fantasyopenapiprovider.ReasoningEffortLow
-		return &val
-	case "medium":
-		val := fantasyopenapiprovider.ReasoningEffortMedium
-		return &val
-	case "high":
-		val := fantasyopenapiprovider.ReasoningEffortHigh
-		return &val
-	case "xhigh":
-		val := fantasyopenapiprovider.ReasoningEffortXHigh
-		return &val
-	default:
-		return nil // unknown or off
 	}
+	return nil // unknown or off
 }
 
 // savedThinkingMode returns the persisted thinking mode ID, or empty string if

@@ -27,3 +27,19 @@ events by `event_id` and use `version` for CAS updates. `workspace_mode`
 (`shared`, `worktree`, or `readonly`) is currently metadata only. Use
 `send_message` for prose and progress; report before going idle. Never poll,
 sleep, or use `wait_for_all`, and inspect liveness before retrying work.
+
+## Transcript ownership and callbacks
+
+This extension owns the `chat` scene area — the main transcript — and re-renders
+it from agent history. Message boxes carry a one-line bottom margin
+(`messageBoxProps`) so consecutive messages render separated; the same props
+serve live streaming and history replay, so the two always look identical.
+
+Two internal `on_command` callbacks drive that:
+
+- `agents:focus` (agent ID) — `/agents` tree selection: switches the focused
+  agent, rebuilds the transcript from its history, and notifies.
+- `agents:transcript_rebuild` (agent ID; empty means the root agent) — fired by
+  the harness after a history restore rewrites the main agent's history, so the
+  restored conversation is visible. Rebuilds only; no focus switch, no
+  notification.

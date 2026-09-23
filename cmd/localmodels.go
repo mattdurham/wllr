@@ -101,7 +101,7 @@ func discoverLocalModels(ctx context.Context, cfg *Config) []modelInfo {
 		if baseURL == "" {
 			continue
 		}
-		models, result := queryLocalModels(ctx, baseURL+"/models", local.APIKey)
+		models, result := queryLocalModels(ctx, baseURL+discoveryPathModels, local.APIKey)
 		if result != queryLocalModelsOK {
 			continue
 		}
@@ -233,8 +233,8 @@ func contextWindowFromOpenAIModel(m openAIModel) int64 {
 // capabilities object: the boolean/graded reasoning options the model supports
 // and the model's default setting.
 type lmsReasoningCapability struct {
-	AllowedOptions []string `json:"allowed_options"`
 	Default        string   `json:"default"`
+	AllowedOptions []string `json:"allowed_options"`
 }
 
 // lmsAppModelsEndpoint derives LM Studio's app API v1 model-listing endpoint
@@ -247,13 +247,13 @@ func lmsAppModelsEndpoint(baseURL string) string {
 	if base == "" {
 		return ""
 	}
+	// Unconditional TrimSuffix is equivalent to the HasSuffix check it replaces:
+	// a base already ending in /api/v1 is returned verbatim (+/models), and the
+	// /v1 strip below never matches it.
 	if strings.HasSuffix(base, "/api/v1") {
-		return base + "/models"
+		return base + discoveryPathModels
 	}
-	if strings.HasSuffix(base, "/v1") {
-		base = strings.TrimSuffix(base, "/v1")
-	}
-	return base + "/api/v1/models"
+	return strings.TrimSuffix(base, "/v1") + discoveryPathAPIModels
 }
 
 // lmsCapabilities is the capabilities object on an LM Studio app-API model.
@@ -261,17 +261,17 @@ func lmsAppModelsEndpoint(baseURL string) string {
 // endpoint-declared; a nil/absent capabilities object means the listing said
 // nothing about the model.
 type lmsCapabilities struct {
+	Reasoning         *lmsReasoningCapability `json:"reasoning"`
 	Vision            bool                    `json:"vision"`
 	TrainedForToolUse bool                    `json:"trained_for_tool_use"`
-	Reasoning         *lmsReasoningCapability `json:"reasoning"`
 }
 
 // lmsV1Model is one entry in LM Studio's app API v1 /api/v1/models listing.
 type lmsV1Model struct {
+	Capabilities     *lmsCapabilities `json:"capabilities"`
 	Key              string           `json:"key"`
 	DisplayName      string           `json:"display_name"`
 	MaxContextLength int64            `json:"max_context_length"`
-	Capabilities     *lmsCapabilities `json:"capabilities"`
 }
 
 type lmsV1ModelsResponse struct {
@@ -319,6 +319,13 @@ func queryLMSV1Models(ctx context.Context, endpoint, apiKey string) map[string]*
 	return out
 }
 
+// lmsReasoningOff and lmsReasoningOn are LM Studio's boolean reasoning
+// vocabulary from the app API's allowed_options.
+const (
+	lmsReasoningOff = "off"
+	lmsReasoningOn  = "on"
+)
+
 // lmsReasoningModeID maps an LM Studio reasoning option (its allowed_options
 // vocabulary) to a wire-safe OpenAI reasoning_effort ID: "off" is the boolean
 // spelling of "none" and "on" (boolean models) maps to "medium" — the
@@ -327,9 +334,9 @@ func queryLMSV1Models(ctx context.Context, endpoint, apiKey string) map[string]*
 // standard effort IDs to be usable.
 func lmsReasoningModeID(opt string) (string, bool) {
 	switch opt {
-	case "off":
+	case lmsReasoningOff:
 		return thinkingModeNone, true
-	case "on":
+	case lmsReasoningOn:
 		return thinkingModeMedium, true
 	default:
 		if _, ok := openAIReasoningEffortByMode[opt]; ok {
@@ -342,19 +349,10 @@ func lmsReasoningModeID(opt string) (string, bool) {
 // thinkingModeLabel returns the display name and description for a standard
 // OpenAI reasoning-effort mode ID.
 func thinkingModeLabel(id string) (name, desc string) {
-	switch id {
-	case thinkingModeNone:
-		return "None", "No extended reasoning"
-	case thinkingModeMinimal:
-		return "Minimal", "Minimal extended reasoning"
-	case thinkingModeLow:
-		return "Low", "Extended reasoning (low effort)"
-	case thinkingModeMedium:
-		return "Medium", "Extended reasoning (medium effort)"
-	case thinkingModeHigh:
-		return "High", "Extended reasoning (high effort)"
-	case thinkingModeXHigh:
-		return "X-High", "Extended reasoning (maximum effort)"
+	for _, m := range openAIStandardThinkingModes() {
+		if m.ID == id {
+			return m.Name, m.Description
+		}
 	}
 	return id, ""
 }
@@ -499,10 +497,16 @@ func queryLocalModels(parent context.Context, endpoint, apiKey string) ([]openAI
 // OpenAI-compatible servers expect the caller to already include "/v1" in the
 // base URL, but users commonly type the bare host:port — this fills that gap
 // without requiring them to know the convention.
+const (
+	discoveryPathModels    = "/models"
+	discoveryPathV1Models  = "/v1/models"
+	discoveryPathAPIModels = "/api/v1/models"
+)
+
 var localModelsDiscoveryPathSuffixes = []string{
-	"/models",
-	"/v1/models",
-	"/api/v1/models",
+	discoveryPathModels,
+	discoveryPathV1Models,
+	discoveryPathAPIModels,
 }
 
 // probeLocalModelsEndpoint tries each of localModelsDiscoveryPathSuffixes
@@ -527,7 +531,7 @@ func probeLocalModelsEndpoint(
 		endpoint := base + suffix
 		models, result := queryLocalModels(ctx, endpoint, apiKey)
 		if result == queryLocalModelsOK && len(models) > 0 {
-			resolvedBase := strings.TrimSuffix(endpoint, "/models")
+			resolvedBase := strings.TrimSuffix(endpoint, discoveryPathModels)
 			return models, resolvedBase, queryLocalModelsOK
 		}
 		if result != queryLocalModelsUnreachable {

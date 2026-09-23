@@ -46,23 +46,16 @@ type Agent struct {
 	// SetProviderOptions. Guarded by lmMu; read once per turn in Submit.
 	providerOpts fantasy.ProviderOptions
 
-	id            string
-	name          string
-	modelName     string // for context window lookup
-	contextWindow int64  // resolved input context window for this model
-	systemPrompt  string
-	creatorID     string // ID of the agent that spawned this one; "" for top-level agents
+	id           string
+	name         string
+	modelName    string // for context window lookup
+	systemPrompt string
+	creatorID    string // ID of the agent that spawned this one; "" for top-level agents
 
 	// lastSummary is the most recent compaction summary text. Passed to
 	// compactHistory as priorSummary on subsequent compaction calls so the model
 	// can build an incremental summary. Protected by lastSummaryMu.
 	lastSummary string
-
-	// compactionCount is the number of successful context compactions this agent
-	// has run for its session lifetime. Monotonically non-decreasing; no-op
-	// compactions (history fits) and failures do not increment it. Incremented
-	// only from the turn goroutine — no separate lock needed (one turn at a time).
-	compactionCount int
 
 	// pendingShutdownFrom is set when a shutdown_request arrives alongside normal
 	// pending messages in finishTurn. The shutdown is deferred until all normal
@@ -85,7 +78,15 @@ type Agent struct {
 	// lastUsage is the token usage from the most recently completed turn.
 	// Updated after each turn by setLastUsage. Read by LastUsage().
 	// Protected by lastUsageMu.
-	lastUsage   fantasy.Usage
+	lastUsage     fantasy.Usage
+	contextWindow int64 // resolved input context window for this model
+
+	// compactionCount is the number of successful context compactions this agent
+	// has run for its session lifetime. Monotonically non-decreasing; no-op
+	// compactions (history fits) and failures do not increment it. Incremented
+	// only from the turn goroutine — no separate lock needed (one turn at a time).
+	compactionCount int
+
 	lastUsageMu sync.RWMutex
 
 	// activity tracks intra-turn liveness for status tools. Completed-turn

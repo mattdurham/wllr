@@ -27,31 +27,49 @@ var (
 	ErrTaskInvalid      = errors.New("invalid task transition")
 )
 
-type taskJournalRecord struct {
-	Schema   int                        `json:"schema"`
-	Sequence int64                      `json:"sequence"`
+// taskLedgerSchema is the serialized schema version shared by the journal body
+// and the snapshot. Bump it on any incompatible format change.
+const taskLedgerSchema = 2
+
+// taskJournalBody is the digest-protected payload of a journal line. Its field
+// order — and the field order of the SDK types it embeds — is deliberately NOT
+// part of the format: the digest covers the exact stored bytes of this value
+// (see taskJournalRecord), so reordering fields cannot invalidate existing
+// lines.
+type taskJournalBody struct {
 	Lists    map[string]sdk.TaskList    `json:"lists"`
 	Tasks    map[string]sdk.TaskRecord  `json:"tasks"`
 	Events   map[string][]sdk.TaskEvent `json:"events"`
-	Digest   string                     `json:"digest"`
+	Schema   int                        `json:"schema"`
+	Sequence int64                      `json:"sequence"`
+}
+
+// taskJournalRecord is one line of the append-only journal: an envelope that
+// pairs the stored body bytes with their digest. Digest is the SHA-256 of
+// Body's exact on-disk bytes, and replay verifies those bytes verbatim rather
+// than re-serializing the parsed struct, so the checksum is independent of Go
+// struct field order.
+type taskJournalRecord struct {
+	Digest string          `json:"digest"`
+	Body   json.RawMessage `json:"body"`
 }
 type taskSnapshot struct {
-	Schema   int                        `json:"schema"`
-	Sequence int64                      `json:"sequence"`
 	Lists    map[string]sdk.TaskList    `json:"lists"`
 	Tasks    map[string]sdk.TaskRecord  `json:"tasks"`
 	Events   map[string][]sdk.TaskEvent `json:"events"`
+	Schema   int                        `json:"schema"`
+	Sequence int64                      `json:"sequence"`
 }
 
 type TaskLedger struct {
-	mu       sync.Mutex
-	dir      string
 	journal  *os.File
-	sequence int64
 	lists    map[string]sdk.TaskList
 	tasks    map[string]sdk.TaskRecord
 	events   map[string][]sdk.TaskEvent
 	notify   func(string, sdk.TaskEvent) error
+	dir      string
+	sequence int64
+	mu       sync.Mutex
 	closed   bool
 }
 
@@ -101,7 +119,7 @@ func (l *TaskLedger) loadSnapshot() error {
 	if err := json.Unmarshal(b, &s); err != nil {
 		return fmt.Errorf("corrupt task snapshot: %w", err)
 	}
-	if s.Schema != 1 {
+	if s.Schema != taskLedgerSchema {
 		return fmt.Errorf("unsupported task snapshot schema %d", s.Schema)
 	}
 	l.sequence = s.Sequence
@@ -140,21 +158,22 @@ func (l *TaskLedger) replay() (err error) {
 				}
 				return fmt.Errorf("corrupt task journal line %d: %w", lineNo, err)
 			}
-			digest := rec.Digest
-			rec.Digest = ""
-			raw, _ := json.Marshal(rec)
-			sum := sha256.Sum256(raw)
-			if digest != hex.EncodeToString(sum[:]) {
+			sum := sha256.Sum256(rec.Body)
+			if rec.Digest != hex.EncodeToString(sum[:]) {
 				return fmt.Errorf("corrupt task journal checksum line %d", lineNo)
 			}
-			if rec.Schema != 1 {
-				return fmt.Errorf("unsupported task journal schema %d", rec.Schema)
+			var body taskJournalBody
+			if err := json.Unmarshal(rec.Body, &body); err != nil {
+				return fmt.Errorf("corrupt task journal line %d: %w", lineNo, err)
 			}
-			if rec.Sequence > l.sequence {
-				l.sequence = rec.Sequence
-				l.lists = rec.Lists
-				l.tasks = rec.Tasks
-				l.events = rec.Events
+			if body.Schema != taskLedgerSchema {
+				return fmt.Errorf("unsupported task journal schema %d", body.Schema)
+			}
+			if body.Sequence > l.sequence {
+				l.sequence = body.Sequence
+				l.lists = body.Lists
+				l.tasks = body.Tasks
+				l.events = body.Events
 			}
 		}
 		if readErr == io.EOF {
@@ -176,11 +195,21 @@ func opaqueID(prefix string) (string, error) {
 }
 
 func (l *TaskLedger) commitLocked() (err error) {
-	rec := taskJournalRecord{1, l.sequence, l.lists, l.tasks, l.events, ""}
-	raw, _ := json.Marshal(rec)
-	sum := sha256.Sum256(raw)
-	rec.Digest = hex.EncodeToString(sum[:])
-	line, err := json.Marshal(rec)
+	body, err := json.Marshal(taskJournalBody{
+		Schema:   taskLedgerSchema,
+		Sequence: l.sequence,
+		Lists:    l.lists,
+		Tasks:    l.tasks,
+		Events:   l.events,
+	})
+	if err != nil {
+		return err
+	}
+	sum := sha256.Sum256(body)
+	line, err := json.Marshal(taskJournalRecord{
+		Body:   body,
+		Digest: hex.EncodeToString(sum[:]),
+	})
 	if err != nil {
 		return err
 	}
@@ -191,7 +220,13 @@ func (l *TaskLedger) commitLocked() (err error) {
 	if err := l.journal.Sync(); err != nil {
 		return fmt.Errorf("flush task journal: %w", err)
 	}
-	s := taskSnapshot{1, l.sequence, l.lists, l.tasks, l.events}
+	s := taskSnapshot{
+		Schema:   taskLedgerSchema,
+		Sequence: l.sequence,
+		Lists:    l.lists,
+		Tasks:    l.tasks,
+		Events:   l.events,
+	}
 	sb, _ := json.Marshal(s)
 	f, err := os.CreateTemp(l.dir, "snapshot-*.tmp")
 	if err != nil {

@@ -19,8 +19,8 @@ type AgentTreeNode struct {
 // ShowAgentTreeParams is the params blob for show_agent_tree.
 type ShowAgentTreeParams struct {
 	Title    string          `json:"title,omitempty"`
-	Nodes    []AgentTreeNode `json:"nodes"`
 	Callback string          `json:"callback"`
+	Nodes    []AgentTreeNode `json:"nodes"`
 }
 
 // SetFocusedAgentParams is the params blob for set_focused_agent.

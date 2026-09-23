@@ -113,6 +113,22 @@ linters:
         linters:
           - gosec
 
+      # G703 (taint-analysis path traversal) in tests: fixtures write paths
+      # constructed in the test itself.
+      - path: _test\.go
+        text: "G703:"
+        linters:
+          - gosec
+
+      # G703 in cmd/provider.go's native edit_file tool: the tool's contract is
+      # to edit files at agent-supplied paths — the same unrestricted access
+      # read_file/write_file already exercise (G304 excluded above). There is no
+      # path allowlist to add without breaking the tool.
+      - path: cmd/provider\.go
+        text: "G703:"
+        linters:
+          - gosec
+
       # appendAssign in tests is intentional
       - path: _test\.go
         text: "appendAssign:"
@@ -175,6 +191,30 @@ linters:
       # sdk/taskledger.go defines the task protocol's tightly-coupled wire types
       # together for discoverability.
       - path: sdk/taskledger\.go
+        linters:
+          - revive
+
+      # sdk/agentgethistoryparams.go holds the agent_get_history request and
+      # result wire types together — a single host_call's contract.
+      - path: sdk/agentgethistoryparams\.go
+        linters:
+          - revive
+
+      # sdk/agenttreeparams.go holds the agent-tree wire types (node shape and
+      # the params blobs that carry it) together.
+      - path: sdk/agenttreeparams\.go
+        linters:
+          - revive
+
+      # sdk/sessionstartpayload.go holds the session_start payload plus the
+      # PromptTool/PromptCommand projection types it embeds — one wire contract.
+      - path: sdk/sessionstartpayload\.go
+        linters:
+          - revive
+
+      # extensions/plan/state.go defines the plan wire model (Plan + PlanStep)
+      # and its small state helpers in one file for the plan protocol.
+      - path: extensions/plan/state\.go
         linters:
           - revive
 

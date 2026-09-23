@@ -28,7 +28,6 @@ type AgentPool struct {
 	// agents is a map, so iteration order is random; this preserves the order a
 	// user expects to see (spawn order) for anything that lists agents.
 	spawnSeq map[string]int64
-	nextSeq  int64
 	teams    map[string]*Team
 	// contextUsageDispatcher, when set, is called after each completed turn on any
 	// agent so the harness can forward EventContextUsage to WASM extensions without
@@ -54,14 +53,15 @@ type AgentPool struct {
 	// Installed by the harness (routes to extension DispatchEventChain) to avoid
 	// an agent→extension circular import. Set via SetProviderRequestInterceptor.
 	providerRequestInterceptor ProviderRequestInterceptor
+	contextWindows             map[string]int64
 	providerName               string
 	defaultModelName           string
 	baseSystemPrompt           string
 	// compactConfig controls the percentage-based compaction trigger.
 	// Initialized from WLLR_COMPACT_THRESHOLD in NewPool; override via SetCompactConfig.
 	compactConfig      CompactConfig
+	nextSeq            int64
 	contextWindow      int64
-	contextWindows     map[string]int64
 	tokenCount         atomic.Int64
 	mu                 sync.RWMutex
 	baseSystemPromptMu sync.RWMutex

@@ -17,11 +17,11 @@ import (
 // so cutStep records which completed steps are already included in summary.
 type toolLoopCompactor struct {
 	lm           fantasy.LanguageModel
+	onCompaction func(CompactionResult)
+	summary      string
 	window       int64
 	threshold    int64
-	summary      string
 	cutStep      int
-	onCompaction func(CompactionResult)
 }
 
 func newToolLoopCompactor(

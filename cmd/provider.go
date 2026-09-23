@@ -184,10 +184,10 @@ type editFileInput struct {
 
 // editFileResult represents the structured output from edit_file.
 type editFileResult struct {
-	Success bool     `json:"success"`
 	Message string   `json:"message"`
 	Edits   []int    `json:"edits,omitempty"`
 	Errors  []string `json:"errors,omitempty"`
+	Success bool     `json:"success"`
 }
 
 // registerNativeTools registers the native Go tools (read_file, write_file,

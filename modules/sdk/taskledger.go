@@ -36,6 +36,8 @@ type TaskList struct {
 }
 
 type TaskRecord struct {
+	CreatedAt       time.Time         `json:"created_at"`
+	UpdatedAt       time.Time         `json:"updated_at"`
 	TaskID          string            `json:"task_id"`
 	ListID          string            `json:"list_id"`
 	ParentTaskID    string            `json:"parent_task_id,omitempty"`
@@ -44,15 +46,13 @@ type TaskRecord struct {
 	Title           string            `json:"title"`
 	Description     string            `json:"description,omitempty"`
 	Status          TaskStatus        `json:"status"`
-	Priority        int               `json:"priority,omitempty"`
-	DependsOn       []string          `json:"depends_on,omitempty"`
-	Result          json.RawMessage   `json:"result,omitempty"`
 	Error           string            `json:"error,omitempty"`
 	Reason          string            `json:"reason,omitempty"`
 	WorkspaceMode   TaskWorkspaceMode `json:"workspace_mode"`
 	AttemptID       string            `json:"attempt_id,omitempty"`
-	CreatedAt       time.Time         `json:"created_at"`
-	UpdatedAt       time.Time         `json:"updated_at"`
+	DependsOn       []string          `json:"depends_on,omitempty"`
+	Result          json.RawMessage   `json:"result,omitempty"`
+	Priority        int               `json:"priority,omitempty"`
 	Version         int64             `json:"version"`
 }
 
@@ -66,15 +66,15 @@ type TaskAttempt struct {
 }
 
 type TaskEvent struct {
+	CreatedAt    time.Time       `json:"created_at"`
 	EventID      string          `json:"event_id"`
 	ListID       string          `json:"list_id"`
 	TaskID       string          `json:"task_id,omitempty"`
 	AttemptID    string          `json:"attempt_id,omitempty"`
 	Event        string          `json:"event"`
-	Version      int64           `json:"version"`
 	ActorAgentID string          `json:"actor_agent_id,omitempty"`
 	Snapshot     json.RawMessage `json:"snapshot,omitempty"`
-	CreatedAt    time.Time       `json:"created_at"`
+	Version      int64           `json:"version"`
 }
 
 type TaskEventEnvelope struct {
@@ -83,10 +83,10 @@ type TaskEventEnvelope struct {
 	TaskID       string          `json:"task_id,omitempty"`
 	AttemptID    string          `json:"attempt_id,omitempty"`
 	Event        string          `json:"event"`
-	Version      int64           `json:"version"`
 	ActorAgentID string          `json:"actor_agent_id,omitempty"`
-	Snapshot     json.RawMessage `json:"snapshot,omitempty"`
 	Reference    string          `json:"reference,omitempty"`
+	Snapshot     json.RawMessage `json:"snapshot,omitempty"`
+	Version      int64           `json:"version"`
 }
 
 type TasklistCreateRequest struct {
@@ -101,9 +101,9 @@ type TasksCreateRequest struct {
 	AssigneeAgentID string            `json:"assignee_agent_id,omitempty"`
 	Title           string            `json:"title"`
 	Description     string            `json:"description,omitempty"`
-	Priority        int               `json:"priority,omitempty"`
-	DependsOn       []string          `json:"depends_on,omitempty"`
 	WorkspaceMode   TaskWorkspaceMode `json:"workspace_mode"`
+	DependsOn       []string          `json:"depends_on,omitempty"`
+	Priority        int               `json:"priority,omitempty"`
 }
 type TasksClaimRequest struct {
 	ListID          string `json:"list_id"`
@@ -112,15 +112,15 @@ type TasksClaimRequest struct {
 	ExpectedVersion int64  `json:"expected_version"`
 }
 type TasksUpdateRequest struct {
-	ListID          string             `json:"list_id"`
-	TaskID          string             `json:"task_id"`
-	AgentID         string             `json:"agent_id,omitempty"`
-	ExpectedVersion int64              `json:"expected_version"`
 	Title           *string            `json:"title,omitempty"`
 	Description     *string            `json:"description,omitempty"`
 	Priority        *int               `json:"priority,omitempty"`
 	AssigneeAgentID *string            `json:"assignee_agent_id,omitempty"`
 	WorkspaceMode   *TaskWorkspaceMode `json:"workspace_mode,omitempty"`
+	ListID          string             `json:"list_id"`
+	TaskID          string             `json:"task_id"`
+	AgentID         string             `json:"agent_id,omitempty"`
+	ExpectedVersion int64              `json:"expected_version"`
 }
 type TasksReportRequest struct {
 	ListID    string          `json:"list_id"`
@@ -128,9 +128,9 @@ type TasksReportRequest struct {
 	AttemptID string          `json:"attempt_id"`
 	AgentID   string          `json:"agent_id"`
 	Status    TaskStatus      `json:"status"`
-	Result    json.RawMessage `json:"result,omitempty"`
 	Error     string          `json:"error,omitempty"`
 	Reason    string          `json:"reason,omitempty"`
+	Result    json.RawMessage `json:"result,omitempty"`
 }
 type TasksGetRequest struct {
 	ListID string `json:"list_id"`

@@ -281,7 +281,7 @@ func TestDiscoverLocalModels_RespectsExplicitConfigModes(t *testing.T) {
 	if len(models) != 1 {
 		t.Fatalf("len(models) = %d, want 1", len(models))
 	}
-	ids := make([]string, 0)
+	ids := make([]string, 0, len(models[0].ThinkingModes))
 	for _, m := range models[0].ThinkingModes {
 		ids = append(ids, m.ID)
 	}
@@ -390,7 +390,7 @@ func TestLocalThinkingInfo_ExplicitConfigWins(t *testing.T) {
 	if declared {
 		t.Error("explicit config must not report endpoint-declared")
 	}
-	ids := make([]string, 0)
+	ids := make([]string, 0, len(modes))
 	for _, m := range modes {
 		ids = append(ids, m.ID)
 	}

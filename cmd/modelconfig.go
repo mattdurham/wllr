@@ -86,8 +86,8 @@ type localModelConfigWire struct {
 	Name          string   `json:"name"`
 	BaseURL       string   `json:"base_url"`
 	APIKey        string   `json:"api_key"`
-	ContextWindow int64    `json:"context_window,omitempty"`
 	ThinkingModes []string `json:"thinking_modes,omitempty"`
+	ContextWindow int64    `json:"context_window,omitempty"`
 }
 
 // saveLocalModels persists the full local_models list to the "wllr" group.

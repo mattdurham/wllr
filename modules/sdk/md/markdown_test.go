@@ -71,10 +71,8 @@ func TestRender_BoldEmphasis(t *testing.T) {
 
 func TestRender_List(t *testing.T) {
 	out := Render("- first item\n- second item")
-	if strings.Contains(out, "- ") {
-		// The bullet marker is styled but the body is unstyled; the "- " prefix
-		// is still part of the styled marker. Only assert content presence.
-	}
+	// The bullet marker is styled but the body is unstyled; the "- " prefix is
+	// still part of the styled marker, so only content presence is asserted.
 	if !strings.Contains(out, "first item") || !strings.Contains(out, "second item") {
 		t.Fatalf("list items should be present, got %q", out)
 	}

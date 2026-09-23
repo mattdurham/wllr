@@ -237,9 +237,10 @@ const (
 	MethodHostInfo = "host_info"
 
 	// MethodListSessions lists session files under base (root-level files plus
-	// files one level of subdirectories deep) with real host mtimes, newest
-	// first, up to limit entries, excluding paths equal to exclude. Requires
-	// PermFileRead. Result: [{"path", "timestamp", "preview"}].
+	// files one level of subdirectories deep, or only the directory given by the
+	// optional dir param when set) with real host mtimes, newest first, up to
+	// limit entries, excluding paths equal to exclude. Requires PermFileRead.
+	// Result: [{"path", "timestamp", "preview"}].
 	MethodListSessions = "list_sessions"
 
 	// MethodShowAgentTree opens the interactive agent tree overlay. After the

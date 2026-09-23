@@ -11,6 +11,18 @@ recoverable; earlier corruption is reported. Claims atomically assign an opaque
 attempt ID, reports require that attempt, events replay from cursor zero, and
 notifications happen after commit without rollback on delivery failure.
 
+**Invariant (the digest covers stored bytes, not Go struct layout):** each
+journal line is a `taskJournalRecord` — a `{"body":…,"digest":"…"}` envelope
+whose `digest` is the SHA-256 of `body`'s exact on-disk bytes. Replay hashes
+those stored bytes verbatim and never re-serializes the parsed struct, so the
+checksum is independent of Go struct field order: reordering the fields of
+`taskJournalBody`, or of the `TaskList`/`TaskRecord`/`TaskEvent` values it
+embeds, cannot invalidate existing lines. (An earlier revision hashed
+`json.Marshal` of the parsed record with `Digest` cleared, which made field
+order load-bearing and forced `// betteralign:ignore` on those types; that is
+why the schema is now 2.) `taskLedgerSchema` is the single version for both the
+journal and the snapshot; bump it on any incompatible format change.
+
 ---
 
 ## 1. Required WASM Exports

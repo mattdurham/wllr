@@ -99,7 +99,11 @@ func (s *liveState) getStatus(key string) string {
 // Model is the root bubbletea v2 model for the bob TUI.
 type Model struct {
 	streamStart time.Time
-	commands    *Registry
+	// execWriter receives the final response in exec mode, where the renderer
+	// is off and there is no transcript to read it from.
+	execWriter io.Writer
+
+	commands *Registry
 
 	agentPool *agent.AgentPool
 	extHost   *extension.Host
@@ -313,11 +317,7 @@ type Model struct {
 
 	// Local-model interactive setup state (base-URL probe + discovered-model
 	// picker, or manual-entry fallback). See localmodelsetup.go.
-	localSetupBaseURL     string
-	localSetupModels      []LocalModelChoice
-	localSetupManualStep  int
-	localSetupManualEntry LocalModelEntry
-	openRouterCatalog     []OpenRouterModelChoice
+	localSetupBaseURL string
 	// catalogPickerProvider is the provider the add-model catalog picker is
 	// listing, so a selection can be attributed to it.
 	catalogPickerProvider string
@@ -334,7 +334,20 @@ type Model struct {
 	streamContent  string
 	chatAppendID   string
 	chatAppendText string
-	input          InputArea
+	execPrompt     string
+
+	// focusedAgent is the agent receiving user input and owning the transcript.
+	// Empty means the root agent, which is not special — it is simply the first
+	// node in the tree, so focus is a plain string rather than an enum.
+	focusedAgent string
+
+	pendingContextProvider string
+	pendingContextModel    string
+	input                  InputArea
+
+	localSetupManualEntry LocalModelEntry
+	localSetupModels      []LocalModelChoice
+	openRouterCatalog     []OpenRouterModelChoice
 
 	// Loaded extension paths for reload.
 	extPaths []string
@@ -346,37 +359,28 @@ type Model struct {
 
 	chat ChatView
 
-	picker PickerView
-
 	agentTree AgentTreeView
 
-	// execMode marks a one-shot run: `wllr --exec` submits a single prompt and
-	// quits when that turn completes. execPrompt holds it until Init is running.
-	execMode   bool
-	execPrompt string
-	// execWriter receives the final response in exec mode, where the renderer
-	// is off and there is no transcript to read it from.
-	execWriter io.Writer
-
-	// focusedAgent is the agent receiving user input and owning the transcript.
-	// Empty means the root agent, which is not special — it is simply the first
-	// node in the tree, so focus is a plain string rather than an enum.
-	focusedAgent string
-
 	textInput TextInputView
+
+	picker PickerView
+
+	localSetupManualStep int
 
 	width, height int
 
 	suggestionIdx  int
 	dropdownOffset int // first visible suggestion index
 
-	modalScroll            int
-	pendingSetupWizard     bool
-	pendingModelPicker     bool
-	pendingContextProvider string
-	pendingContextModel    string
-	streaming              bool
-	consoleVisible         bool
+	modalScroll int
+
+	// execMode marks a one-shot run: `wllr --exec` submits a single prompt and
+	// quits when that turn completes. execPrompt holds it until Init is running.
+	execMode           bool
+	pendingSetupWizard bool
+	pendingModelPicker bool
+	streaming          bool
+	consoleVisible     bool
 
 	chatAppendDirty            bool
 	chatAppendRefreshScheduled bool
@@ -955,13 +959,24 @@ func (m Model) updateWindow(msg tea.Msg) (Model, tea.Cmd, bool) {
 		return m, nil, true
 	case ResetHistoryMsg:
 		// Agent history is replaced by the UIBridge; the visual transcript is
-		// owned by the WASM extension, so we reset it to empty here. Subsequent
-		// turns repopulate it. (The restored messages remain in agent context.)
+		// owned by the WASM extension, so we reset it to empty here and then ask
+		// that extension to rebuild from the restored history. Without the
+		// rebuild the replay lands in agent context only and the chat goes
+		// blank, making the restore look like it did nothing.
 		m.resetChatArea()
 		m.streamContent = ""
 		m.picker.Close()
 		m.pushNotification("History restored — conversation loaded from selected point.")
-		return m, nil, true
+		extHost := m.extHost
+		mainID := m.mainAgentID
+		if extHost == nil {
+			return m, nil, true
+		}
+		return m, func() tea.Msg {
+			evt := transcriptRebuildEvent(mainID)
+			results, err := extHost.DispatchEvent(context.Background(), evt)
+			return ExtensionEventResultMsg{Results: results, Err: err}
+		}, true
 	}
 	return m, nil, false
 }
@@ -1148,11 +1163,7 @@ func (m Model) updateKeyPressPicker(kp tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 				if choice.ID == id {
 					chosen := choice
 					return m, func() tea.Msg {
-						return localModelPickedMsg{
-							ID:            chosen.ID,
-							Name:          chosen.Name,
-							ContextWindow: chosen.ContextWindow,
-						}
+						return localModelPickedMsg(chosen)
 					}, true
 				}
 			}
@@ -1223,7 +1234,7 @@ func (m Model) updateKeyPressTextInput(kp tea.KeyPressMsg) (Model, tea.Cmd, bool
 // updateKeyPressModal handles key events when the modal overlay is open.
 func (m Model) updateKeyPressModal(kp tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	switch kp.String() {
-	case keyEsc, "enter", "q":
+	case keyEsc, keyEnter, "q":
 		m.modalContent = ""
 		m.modalScroll = 0
 	case "up":
@@ -1281,7 +1292,7 @@ func (m Model) updateKeyPressDropdown(kp tea.KeyPressMsg) (Model, tea.Cmd, bool)
 		}
 		m.closeSuggestions()
 		return m, nil, true
-	case "enter":
+	case keyEnter:
 		// Dispatch the selected command and clear input.
 		if m.suggestionIdx < len(m.suggestions) {
 			cmd := m.suggestions[m.suggestionIdx]
@@ -1437,6 +1448,10 @@ func (m Model) updateTools(msg tea.Msg) (Model, tea.Cmd, bool) {
 	return m, nil, false
 }
 
+// updateActions handles user-action messages. The switch is split into
+// domain sub-handlers (model/provider, auth, OpenRouter, local-model setup)
+// to keep each function's complexity bounded; each returns handled=true when
+// it consumed the message.
 func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case showToolsMsg:
@@ -1469,6 +1484,37 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 		m.chat.ClearToolLog()
 		return m, nil, true
 
+	case abortStreamMsg:
+		m.cancelActiveTurn()
+		return m, nil, true
+
+	case dispatchOnCommandMsg:
+		if m.extHost != nil {
+			extHost := m.extHost
+			return m, func() tea.Msg {
+				payload, _ := json.Marshal(sdk.OnCommandPayload{Name: msg.Name, Args: msg.Args})
+				evt := sdk.Event{Type: sdk.EventOnCommand, Payload: payload}
+				results, err := extHost.DispatchEvent(context.Background(), evt)
+				return ExtensionEventResultMsg{Results: results, Err: err}
+			}, true
+		}
+		return m, nil, true
+	}
+	if n, cmd, ok := m.updateModelProviderActions(msg); ok {
+		return n, cmd, true
+	}
+	if n, cmd, ok := m.updateAuthActions(msg); ok {
+		return n, cmd, true
+	}
+	if n, cmd, ok := m.updateOpenRouterActions(msg); ok {
+		return n, cmd, true
+	}
+	return m.updateLocalModelActions(msg)
+}
+
+// updateModelProviderActions handles model, provider, and thinking-picker messages.
+func (m Model) updateModelProviderActions(msg tea.Msg) (Model, tea.Cmd, bool) {
+	switch msg := msg.(type) {
 	case setModelMsg:
 		cmd := m.applyModelSelection(msg.Model)
 		// A skill may declare a thinking level alongside its model; apply it
@@ -1488,18 +1534,38 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 		m.applyThinkingSelection(msg.Level)
 		return m, nil, true
 
-	case showOpenRouterSpeedPickerMsg:
-		m.openOpenRouterSpeedPicker()
-		return m, nil, true
-
-	case setOpenRouterSpeedMsg:
-		m.applySpeedSelection(msg.ID)
-		return m, nil, true
-
 	case showThinkingPickerMsg:
 		m.openThinkingPicker()
 		return m, nil, true
 
+	case showModelPickerMsg:
+		m.openModelPicker()
+		return m, nil, true
+
+	case showModelTiersMsg:
+		m.showModelTiers()
+		return m, nil, true
+
+	case showCatalogModelPickerMsg:
+		m.openCatalogModelPicker(msg.Provider)
+		return m, nil, true
+
+	case addModelProviderSelectedMsg:
+		return m, m.addModelForProvider(msg.Provider), true
+
+	case catalogModelPickedMsg:
+		return m, m.applyCatalogModelPick(msg.Provider, msg.Choice.ID), true
+
+	case resumeAddModelMsg:
+		m.pendingAddModelProvider = msg.Provider
+		return m, m.resumePendingAddModel(), true
+	}
+	return m, nil, false
+}
+
+// updateAuthActions handles first-run auth and OAuth login messages.
+func (m Model) updateAuthActions(msg tea.Msg) (Model, tea.Cmd, bool) {
+	switch msg := msg.(type) {
 	case showAuthPromptMsg:
 		m.openAuthPrompt(msg.Provider)
 		return m, nil, true
@@ -1540,28 +1606,21 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 
 	case oauthCallbackMsg:
 		return m, m.completeOAuthFromCallback(msg), true
+	}
+	return m, nil, false
+}
 
-	case showModelPickerMsg:
-		m.openModelPicker()
+// updateOpenRouterActions handles OpenRouter key setup, catalog browsing, and
+// provider-routing preference messages.
+func (m Model) updateOpenRouterActions(msg tea.Msg) (Model, tea.Cmd, bool) {
+	switch msg := msg.(type) {
+	case showOpenRouterSpeedPickerMsg:
+		m.openOpenRouterSpeedPicker()
 		return m, nil, true
 
-	case showModelTiersMsg:
-		m.showModelTiers()
+	case setOpenRouterSpeedMsg:
+		m.applySpeedSelection(msg.ID)
 		return m, nil, true
-
-	case showCatalogModelPickerMsg:
-		m.openCatalogModelPicker(msg.Provider)
-		return m, nil, true
-
-	case addModelProviderSelectedMsg:
-		return m, m.addModelForProvider(msg.Provider), true
-
-	case catalogModelPickedMsg:
-		return m, m.applyCatalogModelPick(msg.Provider, msg.Choice.ID), true
-
-	case resumeAddModelMsg:
-		m.pendingAddModelProvider = msg.Provider
-		return m, m.resumePendingAddModel(), true
 
 	case showOpenRouterSetupMsg:
 		if m.HasOpenRouterKeyFn != nil && m.HasOpenRouterKeyFn() {
@@ -1596,7 +1655,15 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 
 	case openRouterModelPickedMsg:
 		return m, m.applyOpenRouterModelPick(msg.ID), true
+	}
+	return m, nil, false
+}
 
+// updateLocalModelActions handles the interactive local-model setup flow:
+// endpoint probing, discovered-model picking, the required context-window
+// prompt, and the manual-entry fallback.
+func (m Model) updateLocalModelActions(msg tea.Msg) (Model, tea.Cmd, bool) {
+	switch msg := msg.(type) {
 	case contextWindowEnteredMsg:
 		if msg.Value == "" {
 			m.openContextWindowPrompt(msg.Provider, msg.Model)
@@ -1633,25 +1700,7 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 		return m, m.probeLocalModelsCmd(msg.URL), true
 
 	case localModelProbeResultMsg:
-		if msg.Status == LocalModelProbeOK && len(msg.Models) > 0 {
-			// msg.BaseURL is the resolved base URL that actually worked (it may
-			// differ from what the user typed, e.g. with "/v1" appended) — persist
-			// that, not the original input.
-			m.localSetupBaseURL = msg.BaseURL
-			m.openModelPickerFromProbe(msg.Models)
-			return m, nil, true
-		}
-		if msg.Status == LocalModelProbeUnreachable {
-			m.localSetupBaseURL = ""
-			m.pushNotification(fmt.Sprintf("⚠ could not reach %s — check the URL and try again.", msg.BaseURL))
-			m.openLocalModelBaseURLPrompt()
-			return m, nil, true
-		}
-		m.localSetupManualStep = 0
-		m.localSetupManualEntry = LocalModelEntry{BaseURL: m.localSetupBaseURL}
-		m.pushNotification("Endpoint reached but no models were found — enter details manually.")
-		m.openNextManualField()
-		return m, nil, true
+		return m.handleLocalModelProbeResult(msg), nil, true
 
 	case localModelPickedMsg:
 		entry := LocalModelEntry{
@@ -1663,53 +1712,68 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 		return m, m.applyLocalModelPick(entry), true
 
 	case localModelManualFieldEnteredMsg:
-		switch m.localSetupManualStep {
-		case 0:
-			value := strings.TrimSpace(msg.Value)
-			if value == "" {
-				m.pushNotification("model id is required")
-				m.openNextManualField()
-				return m, nil, true
-			}
-			m.localSetupManualEntry.ID = value
-		case 1:
-			name := strings.TrimSpace(msg.Value)
-			if name == "" {
-				name = m.localSetupManualEntry.ID
-			}
-			m.localSetupManualEntry.Name = name
-		case 2:
-			m.localSetupManualEntry.ContextWindow = parseContextWindowLoose(msg.Value)
-		case 3:
-			m.localSetupManualEntry.APIKey = msg.Value
-		default:
-			return m, nil, true
-		}
-		if m.localSetupManualStep < 3 {
-			m.localSetupManualStep++
+		return m.handleLocalModelManualField(msg)
+	}
+	return m, nil, false
+}
+
+// handleLocalModelProbeResult routes a probe outcome: a good listing opens the
+// discovered-model picker, an unreachable endpoint re-prompts, and a reachable
+// but empty endpoint falls back to manual entry.
+func (m Model) handleLocalModelProbeResult(msg localModelProbeResultMsg) Model {
+	if msg.Status == LocalModelProbeOK && len(msg.Models) > 0 {
+		// msg.BaseURL is the resolved base URL that actually worked (it may
+		// differ from what the user typed, e.g. with "/v1" appended) — persist
+		// that, not the original input.
+		m.localSetupBaseURL = msg.BaseURL
+		m.openModelPickerFromProbe(msg.Models)
+		return m
+	}
+	if msg.Status == LocalModelProbeUnreachable {
+		m.localSetupBaseURL = ""
+		m.pushNotification(fmt.Sprintf("⚠ could not reach %s — check the URL and try again.", msg.BaseURL))
+		m.openLocalModelBaseURLPrompt()
+		return m
+	}
+	m.localSetupManualStep = 0
+	m.localSetupManualEntry = LocalModelEntry{BaseURL: m.localSetupBaseURL}
+	m.pushNotification("Endpoint reached but no models were found — enter details manually.")
+	m.openNextManualField()
+	return m
+}
+
+// handleLocalModelManualField records one submitted manual-entry field and
+// advances to the next; after the last field the entry is applied.
+func (m Model) handleLocalModelManualField(msg localModelManualFieldEnteredMsg) (Model, tea.Cmd, bool) {
+	switch m.localSetupManualStep {
+	case 0:
+		value := strings.TrimSpace(msg.Value)
+		if value == "" {
+			m.pushNotification("model id is required")
 			m.openNextManualField()
 			return m, nil, true
 		}
-		entry := m.localSetupManualEntry
-		return m, m.applyLocalModelPick(entry), true
-
-	case abortStreamMsg:
-		m.cancelActiveTurn()
-		return m, nil, true
-
-	case dispatchOnCommandMsg:
-		if m.extHost != nil {
-			extHost := m.extHost
-			return m, func() tea.Msg {
-				payload, _ := json.Marshal(sdk.OnCommandPayload{Name: msg.Name, Args: msg.Args})
-				evt := sdk.Event{Type: sdk.EventOnCommand, Payload: payload}
-				results, err := extHost.DispatchEvent(context.Background(), evt)
-				return ExtensionEventResultMsg{Results: results, Err: err}
-			}, true
+		m.localSetupManualEntry.ID = value
+	case 1:
+		name := strings.TrimSpace(msg.Value)
+		if name == "" {
+			name = m.localSetupManualEntry.ID
 		}
+		m.localSetupManualEntry.Name = name
+	case 2:
+		m.localSetupManualEntry.ContextWindow = parseContextWindowLoose(msg.Value)
+	case 3:
+		m.localSetupManualEntry.APIKey = msg.Value
+	default:
 		return m, nil, true
 	}
-	return m, nil, false
+	if m.localSetupManualStep < 3 {
+		m.localSetupManualStep++
+		m.openNextManualField()
+		return m, nil, true
+	}
+	entry := m.localSetupManualEntry
+	return m, m.applyLocalModelPick(entry), true
 }
 
 // updateExtension handles extension-related messages: ExtensionEventResultMsg, ReloadMsg, NotifyMsg, StatusUpdateMsg.
@@ -1951,7 +2015,15 @@ func (m Model) submitToAgent(content, display string) (tea.Model, tea.Cmd) {
 		if r := []rune(prompt); len(r) > 120 {
 			prompt = string(r[:120]) + "…"
 		}
-		slog.Info("stream start", "agent", targetAgentID, "prompt", prompt, "system_prompt_len", len(pool.BaseSystemPrompt()))
+		slog.Info(
+			"stream start",
+			"agent",
+			targetAgentID,
+			"prompt",
+			prompt,
+			"system_prompt_len",
+			len(pool.BaseSystemPrompt()),
+		)
 		sendErr := pool.Send(targetAgentID, content)
 		// A missing focus target falls back to the root rather than failing the
 		// send: a sub-agent may have been closed while it was focused.

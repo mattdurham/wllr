@@ -50,7 +50,7 @@ func (i InputArea) Update(msg tea.Msg) (InputArea, tea.Cmd) {
 	switch m := msg.(type) {
 	case tea.KeyPressMsg:
 		switch m.String() {
-		case "enter":
+		case keyEnter:
 			content := strings.TrimSpace(i.ta.Value())
 			if content == "" {
 				return i, nil

@@ -224,6 +224,10 @@ func init() {
 	// A tree selection switches the transcript and input target. The host owns
 	// the routing; the extension owns what to render.
 	OnCommand("agents:focus", onAgentsFocus)
+	// History restore rewrites the main agent's history in place; the harness
+	// fires this so the transcript owner re-renders it (otherwise the replay
+	// happens in context only and the chat goes blank).
+	OnCommand("agents:transcript_rebuild", onTranscriptRebuild)
 
 	// Use the raw before_tool_call event so we get the AgentID field too.
 	OnBeforeToolCall(onBeforeToolCall)
@@ -604,6 +608,17 @@ func onAgentsFocus(args []string) {
 	SetFocusedAgent(id)
 	RebuildTranscriptFor(id)
 	Notify("Focused " + id)
+}
+
+// onTranscriptRebuild re-renders the transcript for the given agent id (empty
+// means the root agent) from its current history, without touching focus. Used
+// by the harness after a history restore replaces the agent's history.
+func onTranscriptRebuild(args []string) {
+	id := ""
+	if len(args) > 0 {
+		id = args[0]
+	}
+	RebuildTranscriptFor(id)
 }
 
 func onBeforeToolCall(payload json.RawMessage) {

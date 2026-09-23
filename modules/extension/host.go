@@ -2473,14 +2473,16 @@ type hostSessionInfo struct {
 // handleListSessions enumerates session files host-side, because the WASM
 // sandbox cannot reliably list or stat them (no working directory, stale
 // clock). It walks base — root-level .jsonl files plus files one level of
-// subdirectories deep — returns entries with real host mtimes, newest first,
-// capped at limit, excluding the caller's current file. Requires PermFileRead.
+// subdirectories deep, or only the directory given by dir when set — returns
+// entries with real host mtimes, newest first, capped at limit, excluding the
+// caller's current file. Requires PermFileRead.
 func (h *Host) handleListSessions(ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
 	if ext == nil || !ext.HasPermission(sdk.PermFileRead) {
 		return sdk.HostCallResponse{Error: "list_sessions: permission denied: requires file_read"}
 	}
 	var params struct {
 		Base    string `json:"base"`
+		Dir     string `json:"dir"`
 		Exclude string `json:"exclude"`
 		Limit   int    `json:"limit"`
 	}
@@ -2497,7 +2499,7 @@ func (h *Host) handleListSessions(ext *Extension, req sdk.HostCallRequest) sdk.H
 	if params.Limit <= 0 {
 		params.Limit = 25
 	}
-	entries, err := listSessionFiles(params.Base, params.Exclude, params.Limit)
+	entries, err := listSessionFiles(params.Base, params.Dir, params.Exclude, params.Limit)
 	if err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("list_sessions: %v", err)}
 	}
@@ -2505,13 +2507,15 @@ func (h *Host) handleListSessions(ext *Extension, req sdk.HostCallRequest) sdk.H
 	return sdk.HostCallResponse{Result: result}
 }
 
-// listSessionFiles walks base (root-level .jsonl files plus files one level of
-// subdirectories deep) and returns hostSessionInfo entries with real host mtimes,
-// newest first, capped at limit, excluding paths equal to exclude.
-func listSessionFiles(base, exclude string, limit int) ([]hostSessionInfo, error) {
+// listSessionFiles returns hostSessionInfo entries with real host mtimes,
+// newest first, capped at limit, excluding paths equal to exclude. When dir is
+// empty it walks base (root-level .jsonl files plus files one level of
+// subdirectories deep); when dir is set it lists only the .jsonl files directly
+// inside dir, so a caller can scope the listing to one project's sessions.
+func listSessionFiles(base, dir, exclude string, limit int) ([]hostSessionInfo, error) {
 	type meta struct {
-		path  string
 		mtime time.Time
+		path  string
 	}
 	dedup := map[string]bool{}
 	var metas []meta
@@ -2526,24 +2530,37 @@ func listSessionFiles(base, exclude string, limit int) ([]hostSessionInfo, error
 		}
 		metas = append(metas, meta{path: p, mtime: info.ModTime()})
 	}
-	root, err := os.ReadDir(base)
-	if err != nil {
-		return nil, err
-	}
-	for _, e := range root {
-		if e.IsDir() {
-			sub, serr := os.ReadDir(filepath.Join(base, e.Name()))
-			if serr != nil {
+	if dir != "" {
+		sub, err := os.ReadDir(dir)
+		if err != nil {
+			return nil, err
+		}
+		for _, f := range sub {
+			if f.IsDir() || !strings.HasSuffix(f.Name(), ".jsonl") {
 				continue
 			}
-			for _, f := range sub {
-				if f.IsDir() || !strings.HasSuffix(f.Name(), ".jsonl") {
+			add(filepath.Join(dir, f.Name()))
+		}
+	} else {
+		root, err := os.ReadDir(base)
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range root {
+			if e.IsDir() {
+				sub, serr := os.ReadDir(filepath.Join(base, e.Name()))
+				if serr != nil {
 					continue
 				}
-				add(filepath.Join(base, e.Name(), f.Name()))
+				for _, f := range sub {
+					if f.IsDir() || !strings.HasSuffix(f.Name(), ".jsonl") {
+						continue
+					}
+					add(filepath.Join(base, e.Name(), f.Name()))
+				}
+			} else if strings.HasSuffix(e.Name(), ".jsonl") {
+				add(filepath.Join(base, e.Name()))
 			}
-		} else if strings.HasSuffix(e.Name(), ".jsonl") {
-			add(filepath.Join(base, e.Name()))
 		}
 	}
 	sort.Slice(metas, func(i, j int) bool { return metas[i].mtime.After(metas[j].mtime) })
@@ -2584,8 +2601,8 @@ func sessionPreview(path string) string {
 		space := true
 		var b strings.Builder
 		for _, r := range m.Content {
-			switch {
-			case r == ' ' || r == '\t' || r == '\n' || r == '\r':
+			switch r {
+			case ' ', '\t', '\n', '\r':
 				if !space {
 					b.WriteRune(' ')
 				}

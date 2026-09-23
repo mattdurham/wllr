@@ -15,8 +15,8 @@ type SpawnOpts struct {
 	SystemPrompt      string
 	Name              string
 	ModelName         string
-	ContextWindow     int64
 	Tools             []fantasy.AgentTool
+	ContextWindow     int64
 	TurnTimeout       time.Duration
 	ThinkingBudget    int
 }

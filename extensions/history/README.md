@@ -37,12 +37,13 @@ landed in a single `""` subdirectory with 2022 timestamps. The filename id uses
 
 `/history` runs a **two-step picker**:
 
-1. **Select a session.** Lists up to the 20 most recent sessions (across all
-   cwds), newest first, each showing its timestamp and a preview of the first
-   user message. (The in-progress current session is excluded.) Listing is done
-   **host-side** via the `list_sessions` host_call with real host mtimes and
-   previews, because the WASM sandbox cannot reliably enumerate or stat the
-   host filesystem.
+1. **Select a session.** Lists up to the 20 most recent sessions **for the
+   current project** (the per-cwd directory the active session writes into),
+   newest first, each showing its timestamp and a preview of the first user
+   message. The in-progress current session is excluded. `/history all` widens
+   the listing to every folder's sessions. Listing is done **host-side** via
+   the `list_sessions` host_call with real host mtimes and previews, because
+   the WASM sandbox cannot reliably enumerate or stat the host filesystem.
 2. **Select a resume point.** Lists every message in that session, numbered and
    tagged `you`/`asst` with a one-line preview.
 
@@ -50,6 +51,14 @@ Selecting a message calls `AgentResetHistory` with the messages **up to and
 including** that index, so the agent's context becomes exactly that prefix and
 the next turn continues from there. Selecting the last message resumes the whole
 conversation. A notification reports how many of N messages were replayed.
+
+The restored conversation is **re-rendered into the transcript**: after
+`AgentResetHistory`, the harness resets the chat area and fires
+`agents:transcript_rebuild` with the main agent id, and the transcript-owning
+agents extension rebuilds the view from the agent's history (the same
+`RebuildTranscriptFor` used by `/agents` focus, without the focus switch or
+notification). Without that rebuild the replay lands in context only and the
+chat goes blank.
 
 > The picker is the standard host `ShowPicker` overlay (not a modal). A modal is
 > only used for the "no sessions found" / "could not load" messages. The second
@@ -79,7 +88,8 @@ conversation. A notification reports how many of N messages were replayed.
 
 | Command | Effect |
 |---------|--------|
-| `/history` | Browse sessions, pick a resume point, replay context up to it |
+| `/history` | Browse the current project's sessions, pick a resume point, replay context up to it |
+| `/history all` | Same, but list sessions from every folder |
 
 Internal picker callbacks (not user-facing commands): `history:session_selected`
 (session → message picker) and `history:message_selected` (message → replay).
@@ -138,9 +148,12 @@ The `/history` picker calls the `list_sessions` host_call (host handler in
 `.jsonl` files plus files one subdirectory deep), stats each file for its real
 mtime, extracts the first non-empty user message as a preview, sorts newest
 first, and caps at `limit` (default 25), excluding the current session file.
-This requires `file_read`; the bundled extension is trusted and receives it
-automatically. Message *loading* (`loadMessages`) still happens in-guest — the
-guest filesystem is readable for file contents; only stat/mtime and reliable
+An optional `dir` param scopes the walk to a single session directory — the
+default `/history` passes its own per-cwd directory so only the current
+project's sessions are listed; `/history all` omits it. This requires
+`file_read`; the bundled extension is trusted and receives it automatically.
+Message *loading* (`loadMessages`) still happens in-guest — the guest
+filesystem is readable for file contents; only stat/mtime and reliable
 enumeration needed the host.
 
 ## What is recorded

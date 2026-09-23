@@ -33,23 +33,9 @@ const localModelManualFieldCallback = "__wllr:local_manual_field"
 // interactive local-model setup flow instead of failing outright.
 var ErrLocalModelSetupNeeded = errors.New("local model setup needed")
 
-// LocalModelChoice is one model discovered by probing a local OpenAI-compatible
-// endpoint's /models listing.
-type LocalModelChoice struct {
-	ID            string
-	Name          string
-	ContextWindow int64
-}
-
-// LocalModelEntry is a local model chosen or manually entered by the user,
-// ready to be persisted and applied as the active provider/model.
-type LocalModelEntry struct {
-	ID            string
-	Name          string
-	BaseURL       string
-	APIKey        string
-	ContextWindow int64
-}
+// defaultLocalModelPlaceholder is the example model ID shown in the manual
+// entry prompt and reused wherever a representative local model ID is needed.
+const defaultLocalModelPlaceholder = "llama3.2"
 
 // showLocalModelSetupMsg starts the local-model setup flow by opening the
 // base-URL prompt. Emitted when SelectProviderFn reports ErrLocalModelSetupNeeded.
@@ -57,24 +43,6 @@ type showLocalModelSetupMsg struct{}
 
 // localModelBaseURLEnteredMsg carries the base URL submitted from the setup prompt.
 type localModelBaseURLEnteredMsg struct{ URL string }
-
-// LocalModelProbeStatus classifies the outcome of probing a base URL, so the
-// setup flow can distinguish a wrong/unreachable endpoint (which should be
-// re-prompted, not silently downgraded) from one that responded with nothing
-// usable (which falls back to manual entry).
-type LocalModelProbeStatus int
-
-const (
-	// LocalModelProbeOK means the endpoint returned at least one usable model.
-	LocalModelProbeOK LocalModelProbeStatus = iota
-	// LocalModelProbeUnreachable means the request itself failed to complete
-	// (bad URL, connection refused, timeout, DNS failure) — the endpoint is
-	// likely misconfigured, so the user should be asked to re-enter it.
-	LocalModelProbeUnreachable
-	// LocalModelProbeEmpty means the endpoint was reached but returned no
-	// usable models (empty list, unexpected shape) — falls back to manual entry.
-	LocalModelProbeEmpty
-)
 
 // localModelProbeResultMsg carries the outcome of probing a base URL for an
 // OpenAI-compatible model list.
@@ -104,7 +72,7 @@ type localModelManualField struct {
 // localModelManualFields is the ordered manual-entry field sequence: model id,
 // display name, context window, and an optional API key.
 var localModelManualFields = []localModelManualField{
-	{Title: "Model ID  (enter · esc)", Placeholder: "llama3.2"},
+	{Title: "Model ID  (enter · esc)", Placeholder: defaultLocalModelPlaceholder},
 	{Title: "Display name  (enter · esc)", Placeholder: "Llama 3.2"},
 	{Title: "Context window in tokens  (enter · esc)", Placeholder: "131072"},
 	{Title: "API key — optional, enter to skip  (enter · esc)", Placeholder: ""},
