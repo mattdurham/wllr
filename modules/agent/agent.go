@@ -1098,6 +1098,9 @@ func (a *Agent) finishTurn(ctx context.Context, err error, ctxErr error, onDone 
 			} else if derr := a.pool.Deliver(a.creatorID, sdk.Message{
 				Role:    sdk.RoleUser,
 				Content: idleMsg,
+				// Model-visible (the orchestrator reads it) but not conversation,
+				// so the transcript does not render it as a user bubble.
+				Type: sdk.MessageTypeProtocol,
 			}, true); derr != nil && !errors.Is(derr, ErrAgentNotFound) {
 				slog.Warn(
 					"finishTurn: failed to notify creator of idle",

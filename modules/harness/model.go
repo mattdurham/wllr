@@ -677,7 +677,11 @@ func (m *Model) wireMainAgentCallbacks(p *tea.Program) {
 			return
 		}
 		for _, message := range messages {
-			if message.Type == sdk.MessageTypeSystem || strings.TrimSpace(message.Content) == "" {
+			// Control and protocol messages are not conversation: the transcript
+			// must not echo them as user prompts.
+			if message.Type == sdk.MessageTypeSystem ||
+				message.Type == sdk.MessageTypeProtocol ||
+				strings.TrimSpace(message.Content) == "" {
 				continue
 			}
 			payload, _ := json.Marshal(sdk.BeforeAgentStartPayload{
@@ -2334,8 +2338,13 @@ func (m Model) View() tea.View {
 	if m.consoleVisible && !m.console.IsEmpty() {
 		sb.WriteString(m.renderConsole())
 	}
-	if sl := m.renderStatusLine(); sl != "" {
-		sb.WriteString(sl + "\n")
+	// A full-screen overlay owns the display. Rendering the statusline over it
+	// draws a second copy of the status text across the overlay's rows, which is
+	// what made the agent tree look garbled.
+	if !m.overlayActive() {
+		if sl := m.renderStatusLine(); sl != "" {
+			sb.WriteString(sl + "\n")
+		}
 	}
 	sb.WriteString(inputBox)
 
@@ -2763,4 +2772,11 @@ func dispatchAgentPrompt(extHost *extension.Host) func(agentID, content string, 
 			)
 		}()
 	}
+}
+
+// overlayActive reports whether a full-screen overlay (text input, agent tree,
+// picker, or modal) currently owns the display. Those views render their own
+// chrome, so the statusline must not be drawn on top of them.
+func (m Model) overlayActive() bool {
+	return m.textInput.IsActive() || m.agentTree.IsActive() || m.picker.IsActive() || m.modalContent != ""
 }

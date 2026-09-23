@@ -578,3 +578,49 @@ func TestIdleNotification_MultipleWorkersCoalesce(t *testing.T) {
 		}
 	}
 }
+
+// Lifecycle notifications must stay model-visible — the orchestrator reads them
+// to learn a child finished — while being typed so the transcript does not
+// render them as user bubbles. The existing idle test asserts delivery; this
+// pins the type that keeps them out of the chat.
+func TestIdleNotification_IsProtocolTyped(t *testing.T) {
+	pool := agent.NewPool()
+	creator, err := pool.Spawn("main", &tokenStreamLM{tokens: []string{"ack"}}, agent.SpawnOpts{})
+	if err != nil {
+		t.Fatalf("Spawn creator: %v", err)
+	}
+	worker, err := pool.Spawn("main/worker", &tokenStreamLM{tokens: []string{"done"}}, agent.SpawnOpts{})
+	if err != nil {
+		t.Fatalf("Spawn worker: %v", err)
+	}
+	worker.SetCreatorID("main")
+
+	creatorDone := make(chan error, 1)
+	creator.SetOnDone(func(e error) { creatorDone <- e })
+	workerDone := make(chan error, 1)
+	worker.SetOnDone(func(e error) { workerDone <- e })
+
+	if err := pool.Send("main/worker", "task"); err != nil {
+		t.Fatalf("Send worker: %v", err)
+	}
+	if err := waitDone(t, workerDone, 5*time.Second, "worker"); err != nil {
+		t.Fatalf("worker: %v", err)
+	}
+	if err := waitDone(t, creatorDone, 5*time.Second, "creator"); err != nil {
+		t.Fatalf("creator: %v", err)
+	}
+
+	found := false
+	for _, m := range creator.History() {
+		if !strings.Contains(m.Content, "agent_idle") {
+			continue
+		}
+		found = true
+		if m.Type != sdk.MessageTypeProtocol {
+			t.Errorf("idle notification type = %q, want %q", m.Type, sdk.MessageTypeProtocol)
+		}
+	}
+	if !found {
+		t.Fatal("creator history has no idle notification")
+	}
+}

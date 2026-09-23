@@ -624,3 +624,28 @@ not just the prompt observer that exposed it.
 a data race — all access is correctly synchronized through a mutex that is simply
 never released. The regression test asserts liveness (Spawn returns while the
 callback contends on a held lock), which is the only reliable detector.
+
+## 39. Protocol messages are model-visible but not conversation
+
+*Added: 2026-09-22*
+
+**Decision:** Add `sdk.MessageTypeProtocol` for the lifecycle notifications the
+host sends to a parent (`agent_idle`, `agent_failed`). They are delivered as
+before — model-visible — but the transcript skips them.
+
+**Rationale:** These were delivered with no type, which makes them `normal`.
+That is right for the model: the orchestrator must see `agent_idle` to learn a
+child finished, and it is what wakes the parent. It is wrong for the transcript,
+which rendered each one as a user bubble containing raw JSON. Focusing a
+sub-agent therefore showed a wall of `{"event":"agent_idle",...}` envelopes
+instead of the conversation.
+
+Neither existing type fits. `system` is not recorded in history and never
+reaches the model, which would break orchestration. `steering` is recorded but
+filtered from the LLM context, which would also break it. Protocol is the third
+case: reaches the model, stays out of the transcript.
+
+**Consequence:** `sdkToFantasyMessages` deliberately does **not** filter
+`protocol` — that is the whole point. The transcript filters it in three places
+(history replay, the main agent's turn-start dispatch, and the sub-agent prompt
+observer), so a lifecycle envelope can never be mistaken for a user prompt.

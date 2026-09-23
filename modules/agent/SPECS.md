@@ -720,3 +720,11 @@ are coalesced by the creator's drain-until-empty into a single turn. This is int
 **Invariant:** `creatorID` is set by `Spawner.Spawn` (from `SpawnRequest.CallerID`) or via
 `Agent.SetCreatorID`. It must be set before the agent's first turn completes for the
 notification to fire on that turn.
+
+**Invariant:** lifecycle notifications (`agent_idle`, `agent_failed`) are
+delivered with `sdk.MessageTypeProtocol`. They MUST remain model-visible —
+`sdkToFantasyMessages` must not filter them, because the orchestrator relies on
+`agent_idle` to learn a child finished and it is what wakes the parent. They are
+not conversation, so consumers that render or record prompts must skip
+`protocol`. `system` is unsuitable (never reaches the model) and `steering` is
+unsuitable (filtered from the LLM context); both would break orchestration.

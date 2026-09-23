@@ -16,6 +16,12 @@ const (
 	// MessageTypeSystem is a Go-level control message (e.g. shutdown_request,
 	// AGENT_SHUTDOWN). Never sent to the LLM; not recorded in history.
 	MessageTypeSystem MessageType = "system"
+	// MessageTypeProtocol is an internal protocol message (e.g. the agent_idle
+	// or agent_failed lifecycle notifications the host sends to a parent). It
+	// IS model-visible — the orchestrator reads it to learn that a child
+	// finished — but it is not conversation: it must not be rendered as a chat
+	// bubble, and it is not recorded as a user prompt.
+	MessageTypeProtocol MessageType = "protocol"
 )
 
 // Message is a chat message.

@@ -219,8 +219,10 @@ func RebuildTranscriptFor(id string) {
 		_ = json.Unmarshal([]byte(result), &hist)
 	}
 	for _, m := range hist.Messages {
-		// System messages are broker/lifecycle traffic, not conversation.
-		if m.Type == "system" || strings.TrimSpace(m.Content) == "" {
+		// Control and protocol messages are broker/lifecycle traffic, not
+		// conversation. They are model-visible (the orchestrator relies on them)
+		// but must not render as user bubbles.
+		if m.Type == "system" || m.Type == "protocol" || strings.TrimSpace(m.Content) == "" {
 			continue
 		}
 		switch m.Role {

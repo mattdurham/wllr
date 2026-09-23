@@ -154,6 +154,7 @@ func (s *Spawner) Spawn(ctx context.Context, req extension.SpawnRequest) error {
 			} else if deliverErr := pool.Deliver(target, sdk.Message{
 				Role:    sdk.RoleUser,
 				Content: msg,
+				Type:    sdk.MessageTypeProtocol,
 			}, true); deliverErr != nil && !errors.Is(deliverErr, ErrAgentNotFound) {
 				slog.Error("sub-agent: failed to notify creator of error", "agent", subID, "creator", target, "sendErr", deliverErr)
 			}
@@ -166,7 +167,9 @@ func (s *Spawner) Spawn(ctx context.Context, req extension.SpawnRequest) error {
 		subID := req.ID
 		a.SetOnTurnStart(func(content string, messages []sdk.Message) {
 			for _, m := range messages {
-				if m.Type == sdk.MessageTypeSystem || strings.TrimSpace(m.Content) == "" {
+				if m.Type == sdk.MessageTypeSystem ||
+					m.Type == sdk.MessageTypeProtocol ||
+					strings.TrimSpace(m.Content) == "" {
 					continue
 				}
 				promptFn(subID, m.Content, true)
