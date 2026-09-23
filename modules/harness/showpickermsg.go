@@ -9,4 +9,7 @@ type ShowPickerMsg struct {
 	Title    string
 	Callback string
 	Items    []sdk.ShowPickerItem
+	// Split requests the two-pane layout: type-to-filter list on the left,
+	// highlighted item's Preview on the right.
+	Split bool
 }

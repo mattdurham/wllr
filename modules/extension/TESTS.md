@@ -312,3 +312,9 @@ tool name, final result, and error flag.
 **Scenario:** A non-trusted extension without the `ui` permission calls `ui_patch`.
 **Setup:** Load minimal.wasm, `ext.trusted = false`, install a `testUIBridge`.
 **Assertion:** The response carries a permission-denied error.
+
+### TestHost_ShowPicker_SplitParamsPassed
+
+**Scenario:** A `show_picker` call with `split: true` and an item carrying multi-line `preview` text.
+**Setup:** Install a `testUIBridge` capturing the `ShowPickerParams` passed through.
+**Assertion:** `Split`, `Title`, `Callback`, and the item's `Preview` arrive at the bridge unchanged.

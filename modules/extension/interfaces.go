@@ -141,7 +141,10 @@ type CapabilityProvider interface {
 type UIBridge interface {
 	Notify(text string)
 	ShowModal(text string)
-	ShowPicker(title string, items []sdk.ShowPickerItem, callback string)
+	// ShowPicker opens the interactive picker overlay. Params.Split requests
+	// the two-pane layout: a type-to-filter list on the left and the
+	// highlighted item's Preview text on the right.
+	ShowPicker(params sdk.ShowPickerParams)
 	// ShowAgentTree opens the interactive agent tree overlay. Selecting a node
 	// fires EventOnCommand with the supplied callback and the agent ID.
 	ShowAgentTree(params sdk.ShowAgentTreeParams)

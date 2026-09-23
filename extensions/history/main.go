@@ -196,9 +196,12 @@ func nowRFC() string {
 
 // ─── /history → session picker ───────────────────────────────────────────────
 
-// handleHistoryCommand shows the session picker. By default it lists only the
-// current project's sessions (the per-cwd directory this session writes into);
-// `/history all` widens the listing to every folder's sessions.
+// handleHistoryCommand shows the session browser: a two-pane split view with
+// the session list on the left (type to filter — matching covers the label,
+// path, first-message preview, and full conversation transcript) and the
+// highlighted conversation rendered on the right. By default it lists only
+// the current project's sessions (the per-cwd directory this session writes
+// into); `/history all` widens the listing to every folder's sessions.
 func handleHistoryCommand(args []string) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -226,9 +229,14 @@ func handleHistoryCommand(args []string) {
 			ID:       s.Path,
 			Label:    formatTimestamp(s.Timestamp),
 			Sublabel: s.Preview,
+			Preview:  transcriptPreview(s.Path),
 		})
 	}
-	ShowPicker("Select a session  (↑↓ · enter · esc)", items, "history:session_selected")
+	ShowPickerSplit(
+		"Select a session  (type to filter · ↑↓ · pgup/pgdn preview · enter · esc)",
+		items,
+		"history:session_selected",
+	)
 }
 
 // ─── Session selected → show message picker (choose resume point) ────────────

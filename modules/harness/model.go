@@ -950,7 +950,11 @@ func (m Model) updateWindow(msg tea.Msg) (Model, tea.Cmd, bool) {
 		return m, nil, true
 
 	case ShowPickerMsg:
-		m.picker.Open(msg.Title, msg.Items, msg.Callback)
+		if msg.Split {
+			m.picker.OpenSplit(msg.Title, msg.Items, msg.Callback)
+		} else {
+			m.picker.Open(msg.Title, msg.Items, msg.Callback)
+		}
 		m.picker.SetSize(m.width, m.chatHeight())
 		return m, nil, true
 	case ShowTextInputMsg:

@@ -288,3 +288,17 @@ a model, and typing/backspace filtering in the searchable picker.
 | High | `TestEscInOverlaysDoesNotCancelTurn` | esc in modal, picker, text input while a turn runs | each closes the overlay and the turn keeps running |
 | High | `TestModel_Esc_ClosesModalWithoutCancellingTurn` | esc with a modal open and a live turn | modal closes, no "cancelling…", agent still running |
 | Medium | `TestAgentTree_EscCloses` | esc on the agent tree | tree closes |
+
+## Split picker (pickersplit_test.go)
+
+| Level | Test | Scenario | Assertion |
+|-------|------|----------|-----------|
+| High | `TestSplitPicker_RendersBothPanes` | OpenSplit at 80×20 | output is exactly height lines; left pane shows labels, right pane shows only the highlighted item's preview |
+| High | `TestSplitPicker_PreviewFollowsSelection` | move down | right pane swaps to the new item's preview |
+| Medium | `TestSplitPicker_EmptyPreviewFallsBackToSublabel` | item without Preview | Sublabel renders in the right pane |
+| High | `TestSplitPicker_FiltersOnPreviewContent` | type text matching only a preview | list narrows to that item; enter selects it |
+| Medium | `TestSplitPicker_SelectionResetRestartsPreviewScroll` | pgdown then down | preview scroll resets to 0 on selection change |
+| Medium | `TestSplitPicker_PgUpClampsAtTop` | pgup at scroll 0 | clamps to 0 |
+| High | `TestSplitPicker_PgDownScrollsPreviewNotList` | pgdown with a long preview | selection stays; previewScroll advances |
+| High | `TestShowPickerMsg_SplitOpensSplitPicker` | ShowPickerMsg with Split | picker opens searchable + preview; view shows preview pane |
+| High | `TestShowPickerMsg_PlainOpensSinglePane` | ShowPickerMsg without Split | picker opens without the split layout |

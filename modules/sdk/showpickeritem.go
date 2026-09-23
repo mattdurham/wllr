@@ -7,4 +7,8 @@ type ShowPickerItem struct {
 	ID       string `json:"id"`
 	Label    string `json:"label"`
 	Sublabel string `json:"sublabel,omitempty"`
+	// Preview is optional multi-line content shown in the right pane of a
+	// split picker (ShowPickerParams.Split). When empty the split picker
+	// falls back to Sublabel.
+	Preview string `json:"preview,omitempty"`
 }

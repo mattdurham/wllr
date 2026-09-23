@@ -1480,7 +1480,7 @@ func (h *Host) handleShowPicker(req sdk.HostCallRequest) sdk.HostCallResponse {
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("show_picker: %v", err)}
 	}
-	h.uiBridge().ShowPicker(params.Title, params.Items, params.Callback)
+	h.uiBridge().ShowPicker(params)
 	return sdk.HostCallResponse{}
 }
 

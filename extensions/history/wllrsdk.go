@@ -304,6 +304,20 @@ func ShowPicker(title string, items []PickerItem, callback string) {
 	})
 }
 
+// ShowPickerSplit opens an interactive two-pane picker: a type-to-filter list
+// on the left half and each item's Preview text on the right half for the
+// highlighted row (ccresume-style conversation browser). Typing filters the
+// list against label, id, sublabel, and preview content; pgup/pgdn scroll the
+// preview pane; enter fires the same callback as ShowPicker.
+func ShowPickerSplit(title string, items []PickerItem, callback string) {
+	_sdkCall("show_picker", map[string]any{
+		"title":    title,
+		"items":    items,
+		"callback": callback,
+		"split":    true,
+	})
+}
+
 // AgentResetHistory replaces the main agent's conversation history and
 // rebuilds the chat view from the supplied messages.
 func AgentResetHistory(messages []Message) {

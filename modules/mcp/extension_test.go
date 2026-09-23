@@ -15,17 +15,17 @@ type testUIBridge struct {
 	onToolResult   func(id, result string, isError bool)
 }
 
-func (b *testUIBridge) Notify(_ string)                                       {}
-func (b *testUIBridge) ShowModal(_ string)                                    {}
-func (b *testUIBridge) ShowAgentTree(_ sdk.ShowAgentTreeParams)               {}
-func (b *testUIBridge) SetFocusedAgent(_ string)                              {}
-func (b *testUIBridge) ShowPicker(_ string, _ []sdk.ShowPickerItem, _ string) {}
-func (b *testUIBridge) ShowTextInput(_, _, _, _ string)                       {}
-func (b *testUIBridge) Abort()                                                {}
-func (b *testUIBridge) SetStatus(_, _ string)                                 {}
-func (b *testUIBridge) GetStatusInfo() sdk.StatusInfo                         { return sdk.StatusInfo{} }
-func (b *testUIBridge) SendMessage(_ sdk.Message)                             {}
-func (b *testUIBridge) RegisterCommand(_, _ string, _ bool) error             { return nil }
+func (b *testUIBridge) Notify(_ string)                           {}
+func (b *testUIBridge) ShowModal(_ string)                        {}
+func (b *testUIBridge) ShowAgentTree(_ sdk.ShowAgentTreeParams)   {}
+func (b *testUIBridge) SetFocusedAgent(_ string)                  {}
+func (b *testUIBridge) ShowPicker(_ sdk.ShowPickerParams)         {}
+func (b *testUIBridge) ShowTextInput(_, _, _, _ string)           {}
+func (b *testUIBridge) Abort()                                    {}
+func (b *testUIBridge) SetStatus(_, _ string)                     {}
+func (b *testUIBridge) GetStatusInfo() sdk.StatusInfo             { return sdk.StatusInfo{} }
+func (b *testUIBridge) SendMessage(_ sdk.Message)                 {}
+func (b *testUIBridge) RegisterCommand(_, _ string, _ bool) error { return nil }
 func (b *testUIBridge) RegisterTool(tool sdk.Tool) error {
 	if b.onRegisterTool != nil {
 		return b.onRegisterTool(tool)

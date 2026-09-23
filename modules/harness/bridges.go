@@ -32,14 +32,14 @@ type earlyUIBridge struct {
 	cmds *Registry
 }
 
-func (e *earlyUIBridge) Notify(_ string)                                       {}
-func (e *earlyUIBridge) ShowModal(_ string)                                    {}
-func (e *earlyUIBridge) ShowPicker(_ string, _ []sdk.ShowPickerItem, _ string) {}
-func (e *earlyUIBridge) ShowAgentTree(_ sdk.ShowAgentTreeParams)               {}
-func (e *earlyUIBridge) SetFocusedAgent(_ string)                              {}
-func (e *earlyUIBridge) ShowTextInput(_, _, _, _ string)                       {}
-func (e *earlyUIBridge) Abort()                                                {}
-func (e *earlyUIBridge) SetStatus(_, _ string)                                 {}
+func (e *earlyUIBridge) Notify(_ string)                         {}
+func (e *earlyUIBridge) ShowModal(_ string)                      {}
+func (e *earlyUIBridge) ShowPicker(_ sdk.ShowPickerParams)       {}
+func (e *earlyUIBridge) ShowAgentTree(_ sdk.ShowAgentTreeParams) {}
+func (e *earlyUIBridge) SetFocusedAgent(_ string)                {}
+func (e *earlyUIBridge) ShowTextInput(_, _, _, _ string)         {}
+func (e *earlyUIBridge) Abort()                                  {}
+func (e *earlyUIBridge) SetStatus(_, _ string)                   {}
 func (e *earlyUIBridge) GetStatusInfo() sdk.StatusInfo {
 	return sdk.StatusInfo{Statuses: map[string]string{}}
 }
@@ -384,11 +384,11 @@ func (b *harnessUIBridge) ShowModal(text string) {
 	b.prog.Send(ShowModalMsg{Text: text})
 }
 
-func (b *harnessUIBridge) ShowPicker(title string, items []sdk.ShowPickerItem, callback string) {
+func (b *harnessUIBridge) ShowPicker(params sdk.ShowPickerParams) {
 	if b.prog == nil {
 		return
 	}
-	b.prog.Send(ShowPickerMsg{Title: title, Items: items, Callback: callback})
+	b.prog.Send(ShowPickerMsg{Title: params.Title, Items: params.Items, Callback: params.Callback, Split: params.Split})
 }
 
 // ShowAgentTree opens the interactive agent tree; a node selection is routed

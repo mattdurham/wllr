@@ -190,7 +190,7 @@ func (b *testTeamBridge) List() ([]string, error) {
 type testUIBridge struct {
 	onNotify          func(text string)
 	onShowModal       func(text string)
-	onShowPicker      func(title string, items []sdk.ShowPickerItem, callback string)
+	onShowPicker      func(params sdk.ShowPickerParams)
 	onShowTextInput   func(title, placeholder, initialValue, callback string)
 	onAbort           func()
 	onSetStatus       func(key, value string)
@@ -225,9 +225,9 @@ func (b *testUIBridge) ShowModal(text string) {
 
 func (b *testUIBridge) ShowAgentTree(_ sdk.ShowAgentTreeParams) {}
 func (b *testUIBridge) SetFocusedAgent(_ string)                {}
-func (b *testUIBridge) ShowPicker(title string, items []sdk.ShowPickerItem, callback string) {
+func (b *testUIBridge) ShowPicker(params sdk.ShowPickerParams) {
 	if b.onShowPicker != nil {
-		b.onShowPicker(title, items, callback)
+		b.onShowPicker(params)
 	}
 }
 
@@ -2360,6 +2360,27 @@ func TestHost_UIMethods_PermissionDenied(t *testing.T) {
 		if resp.Error == "" {
 			t.Fatalf("%s: expected permission denied", tc.name)
 		}
+	}
+}
+
+func TestHost_ShowPicker_SplitParamsPassed(t *testing.T) {
+	h := NewHost(nil)
+	var got sdk.ShowPickerParams
+	h.SetUIBridge(&testUIBridge{onShowPicker: func(params sdk.ShowPickerParams) { got = params }})
+
+	ext := &Extension{name: "x", subscriptions: map[sdk.EventType]bool{}, store: NewStore()}
+	resp := h.routeHostCall(context.Background(), nil, ext, sdk.HostCallRequest{
+		Method: sdk.MethodShowPicker,
+		Params: []byte(
+			`{"title":"t","callback":"cb","split":true,"items":[{"id":"a","label":"A","preview":"line1\nline2"}]}`,
+		),
+	})
+	if resp.Error != "" {
+		t.Fatalf("show_picker: %s", resp.Error)
+	}
+	if !got.Split || got.Title != "t" || got.Callback != "cb" || len(got.Items) != 1 ||
+		got.Items[0].Preview != "line1\nline2" {
+		t.Fatalf("split params not passed through: %+v", got)
 	}
 }
 

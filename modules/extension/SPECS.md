@@ -301,6 +301,8 @@ cross-provider tier switching), keeping the host provider-agnostic.
 
 **Invariant:** `show_text_input` (`MethodShowTextInput`) requires no permission, mirroring `show_picker`. `handleShowTextInput` unmarshals `sdk.ShowTextInputParams` and calls `UIBridge.ShowTextInput(title, placeholder, initialValue, callback)`; a missing `UIBridge` or malformed params produce an error response.
 
+**Invariant:** `show_picker` (`MethodShowPicker`) requires no permission. `handleShowPicker` unmarshals `sdk.ShowPickerParams` and forwards the whole struct to `UIBridge.ShowPicker(params)`, so `Split` and per-item `Preview` reach the harness picker without an interface change per field; a missing `UIBridge` or malformed params produce an error response.
+
 **Invariant:** `get_context_usage` (`MethodGetContextUsage`) requires no permission. It is a
 read-only observability call. When the `AgentBridge` is nil or not yet installed, the handler
 returns a zero-valued `sdk.ContextUsage` (all fields zero) rather than an error, consistent

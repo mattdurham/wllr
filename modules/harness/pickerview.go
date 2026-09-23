@@ -16,5 +16,8 @@ type PickerView struct {
 	width        int
 	height       int
 	searchable   bool
+	preview      bool
 	active       bool
+	// previewScroll is the scroll offset of the right preview pane.
+	previewScroll int
 }

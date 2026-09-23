@@ -1,5 +1,9 @@
 # Knowledge Log
 
+## 2026-09-23
+
+* **Update**: `/history` session selection now uses the split picker — `ShowPickerParams.Split` + per-item `Preview` in `modules/sdk`, split rendering/filtering/pgup-pgdn in `PickerView`, and a capped `transcriptPreview` in the history extension. Documented in harness SPECS/NOTES/TESTS, sdk SPECS invariant 18, extension SPECS/TESTS, `docs/extensions.md`, and the history README.
+
 ## 2026-08-08
 
 * **Update**: Recorded the local-model context-window resolution decision (config entry > endpoint > nothing; window-less results clear the pool's window) and updated the statusline package doc with the `ctx:P%/R%` + `C<n>` indicators.

@@ -17,6 +17,7 @@ var (
 				Foreground(lipgloss.Color("#FFFFFF"))
 	pickerLabelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
 	pickerTitleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#89CFF0"))
+	pickerDimStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
 )
 
 // PickerView is a fullscreen overlay list picker shown instead of the chat.
@@ -29,6 +30,8 @@ func (p *PickerView) Open(title string, items []sdk.ShowPickerItem, callback str
 	p.selectedIdx = 0
 	p.scrollOffset = 0
 	p.searchable = false
+	p.preview = false
+	p.previewScroll = 0
 	p.query = ""
 	p.filtered = nil
 	p.active = true
@@ -41,6 +44,14 @@ func (p *PickerView) OpenSearch(title string, items []sdk.ShowPickerItem, callba
 	p.filterItems()
 }
 
+// OpenSplit opens the two-pane picker: a type-to-filter list on the left half
+// and the highlighted item's Preview text on the right half (ccresume-style
+// conversation browser).
+func (p *PickerView) OpenSplit(title string, items []sdk.ShowPickerItem, callback string) {
+	p.OpenSearch(title, items, callback)
+	p.preview = true
+}
+
 // Close deactivates the picker.
 func (p *PickerView) Close() {
 	p.active = false
@@ -49,6 +60,8 @@ func (p *PickerView) Close() {
 	p.query = ""
 	p.filtered = nil
 	p.searchable = false
+	p.preview = false
+	p.previewScroll = 0
 }
 
 // IsActive reports whether the picker overlay is currently shown.
@@ -137,6 +150,7 @@ func (p *PickerView) HandleKey(kp tea.KeyPressMsg) (selected bool, id string, ca
 	case "up":
 		if p.selectedIdx > 0 {
 			p.selectedIdx--
+			p.previewScroll = 0
 			if p.selectedIdx < p.scrollOffset {
 				p.scrollOffset = p.selectedIdx
 			}
@@ -144,6 +158,7 @@ func (p *PickerView) HandleKey(kp tea.KeyPressMsg) (selected bool, id string, ca
 	case "down":
 		if p.selectedIdx < count-1 {
 			p.selectedIdx++
+			p.previewScroll = 0
 			visible := p.visibleRows()
 			if p.selectedIdx >= p.scrollOffset+visible {
 				p.scrollOffset = p.selectedIdx - visible + 1
@@ -159,6 +174,17 @@ func (p *PickerView) HandleKey(kp tea.KeyPressMsg) (selected bool, id string, ca
 			p.query = ""
 			p.filterItems()
 		}
+	case "pgup", "pgdown":
+		if p.preview {
+			step := p.visibleRows()
+			if kp.String() == "pgup" {
+				step = -step
+			}
+			p.previewScroll += step
+			if p.previewScroll < 0 {
+				p.previewScroll = 0
+			}
+		}
 	default:
 		if p.searchable && kp.Text != "" {
 			p.query += kp.Text
@@ -172,12 +198,16 @@ func (p *PickerView) filterItems() {
 	p.filtered = p.filtered[:0]
 	query := strings.ToLower(strings.TrimSpace(p.query))
 	for i, item := range p.Items {
-		if query == "" || strings.Contains(strings.ToLower(item.Label+" "+item.ID+" "+item.Sublabel), query) {
+		// Preview participates in matching so split pickers can filter on the
+		// conversation content itself, not just the label row.
+		haystack := item.Label + " " + item.ID + " " + item.Sublabel + " " + item.Preview
+		if query == "" || strings.Contains(strings.ToLower(haystack), query) {
 			p.filtered = append(p.filtered, i)
 		}
 	}
 	p.selectedIdx = 0
 	p.scrollOffset = 0
+	p.previewScroll = 0
 }
 
 // visibleRows returns how many items fit in the content area.
@@ -195,6 +225,166 @@ func (p *PickerView) View() string {
 	if p.width < 10 {
 		p.width = 10
 	}
+	if p.preview {
+		return p.viewSplit()
+	}
+	return p.viewSingle()
+}
+
+// fitRunes truncates s to at most w runes and pads with spaces to exactly w.
+func fitRunes(s string, w int) string {
+	r := []rune(s)
+	if len(r) > w {
+		r = r[:w]
+	}
+	if len(r) < w {
+		return string(r) + strings.Repeat(" ", w-len(r))
+	}
+	return string(r)
+}
+
+// viewSplit renders the two-pane layout: the filterable item list on the left
+// half and the highlighted item's Preview text on the right half, like a
+// conversation browser (ccresume-style). Output is exactly p.height lines.
+func (p *PickerView) viewSplit() string {
+	innerWidth := p.width - 2
+	paneTotal := p.width - 7 // borders + spacing around the two panes
+	if paneTotal < 4 {
+		paneTotal = 4
+	}
+	leftW := paneTotal / 2
+	rightW := paneTotal - leftW
+
+	var sb strings.Builder
+
+	// Top border with title.
+	titleStr := " " + p.Title + " "
+	titleRunes := len([]rune(titleStr))
+	fillLen := innerWidth - titleRunes
+	if fillLen < 0 {
+		fillLen = 0
+	}
+	topFill := strings.Repeat("─", fillLen)
+	sb.WriteString(
+		pickerBorderStyle.Render(
+			"╭",
+		) + pickerTitleStyle.Render(
+			titleStr,
+		) + pickerBorderStyle.Render(
+			topFill+"╮",
+		) + "\n",
+	)
+
+	visible := p.visibleRows()
+	previewLines := p.previewPaneLines(rightW, visible)
+
+	count := len(p.Items)
+	if p.searchable {
+		count = len(p.filtered)
+	}
+	end := p.scrollOffset + visible
+	if end > count {
+		end = count
+	}
+
+	for row := 0; row < visible; row++ {
+		i := p.scrollOffset + row
+		leftCell := strings.Repeat(" ", leftW)
+		if i < end {
+			idx := i
+			if p.searchable {
+				idx = p.filtered[i]
+			}
+			item := p.Items[idx]
+			cell := item.Label
+			if item.Sublabel != "" {
+				cell = item.Label + "  " + item.Sublabel
+			}
+			if i == p.selectedIdx {
+				leftCell = pickerSelectedStyle.Render(fitRunes(cell, leftW))
+			} else {
+				leftCell = pickerLabelStyle.Render(fitRunes(cell, leftW))
+			}
+		}
+		rightCell := strings.Repeat(" ", rightW)
+		if row < len(previewLines) {
+			rightCell = previewLines[row]
+		}
+		sb.WriteString(
+			pickerBorderStyle.Render("│") + " " + leftCell + " " +
+				pickerBorderStyle.Render("│") + " " + rightCell + " " +
+				pickerBorderStyle.Render("│") + "\n",
+		)
+	}
+
+	// Footer hint.
+	hint := " search: " + p.query + " · ↑↓ select · pgup/pgdn preview · enter · esc "
+	hintRunes := len([]rune(hint))
+	botFill := innerWidth - hintRunes
+	if botFill < 0 {
+		botFill = 0
+		hr := []rune(hint)
+		if len(hr) > innerWidth {
+			hr = hr[:innerWidth]
+		}
+		hint = string(hr)
+	}
+	sb.WriteString(pickerBorderStyle.Render("╰"+hint+strings.Repeat("─", botFill)+"╯") + "\n")
+
+	return sb.String()
+}
+
+// previewPaneLines renders the right-pane content for the highlighted item:
+// its Preview text (falling back to Sublabel), hard-wrapped to width, sliced
+// from previewScroll, and styled. Returns at most visible entries.
+func (p *PickerView) previewPaneLines(width, visible int) []string {
+	idx := -1
+	count := len(p.Items)
+	if p.searchable {
+		count = len(p.filtered)
+	}
+	if count > 0 && p.selectedIdx >= 0 && p.selectedIdx < count {
+		idx = p.selectedIdx
+		if p.searchable {
+			idx = p.filtered[idx]
+		}
+	}
+	if idx < 0 || idx >= len(p.Items) {
+		return nil
+	}
+	item := p.Items[idx]
+	text := item.Preview
+	if strings.TrimSpace(text) == "" {
+		text = item.Sublabel
+	}
+	if strings.TrimSpace(text) == "" {
+		return []string{pickerDimStyle.Render(fitRunes("(no preview)", width))}
+	}
+	wrapped := wrapModalLines(strings.Split(text, "\n"), width)
+	maxScroll := len(wrapped) - visible
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	if p.previewScroll > maxScroll {
+		p.previewScroll = maxScroll
+	}
+	if p.previewScroll < 0 {
+		p.previewScroll = 0
+	}
+	start := p.previewScroll
+	end := start + visible
+	if end > len(wrapped) {
+		end = len(wrapped)
+	}
+	out := make([]string, 0, end-start)
+	for _, line := range wrapped[start:end] {
+		out = append(out, pickerLabelStyle.Render(fitRunes(line, width)))
+	}
+	return out
+}
+
+// viewSingle renders the classic single-pane list picker.
+func (p *PickerView) viewSingle() string {
 	innerWidth := p.width - 2 // subtract ╭ and ╮
 	contentWidth := innerWidth - 2
 	if contentWidth < 1 {

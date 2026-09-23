@@ -26,7 +26,7 @@ func (b *sceneUIBridge) Notify(string)                                      {}
 func (b *sceneUIBridge) ShowModal(string)                                   {}
 func (b *sceneUIBridge) ShowAgentTree(sdk.ShowAgentTreeParams)              {}
 func (b *sceneUIBridge) SetFocusedAgent(string)                             {}
-func (b *sceneUIBridge) ShowPicker(string, []sdk.ShowPickerItem, string)    {}
+func (b *sceneUIBridge) ShowPicker(sdk.ShowPickerParams)                    {}
 func (b *sceneUIBridge) ShowTextInput(string, string, string, string)       {}
 func (b *sceneUIBridge) Abort()                                             {}
 func (b *sceneUIBridge) SetStatus(string, string)                           {}

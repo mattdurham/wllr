@@ -831,6 +831,42 @@ Requires permission: `ui`
 
 ---
 
+### `show_picker`
+
+Open an interactive fullscreen picker overlay. On selection the harness fires
+an `on_command` event with the given callback name and the selected item's `id`
+as the single argument; register an `on_command` handler to receive it. No
+permission required.
+
+```json
+{"method": "show_picker", "params": {
+  "title": "Select a session",
+  "callback": "myext:item_selected",
+  "items": [
+    {"id": "a.jsonl", "label": "2026-09-22 10:00",
+     "sublabel": "first session", "preview": "you:\n  hello"}
+  ],
+  "split": true
+}}
+```
+
+| Field            | Type    | Description                                                             |
+|------------------|---------|-------------------------------------------------------------------------|
+| `title`          | string  | Picker header text.                                                     |
+| `callback`       | string  | `on_command` name fired on selection with `[item.id]` as args.          |
+| `items`          | array   | `{id, label, sublabel?, preview?}` entries.                             |
+| `items[].preview`| string  | Optional multi-line text for the split picker's right pane.             |
+| `split`          | bool    | Optional. Requests the two-pane layout described below.                 |
+
+When `split` is set the picker renders side by side: the left half is the item
+list with **type-to-filter** (the query matches label, id, sublabel, and
+preview content), and the right half shows the highlighted item's `preview`
+(falling back to `sublabel`). `pgup`/`pgdn` scroll the preview without moving
+the selection. Without `split`, the classic single-pane list is shown and
+`preview` is ignored. Bundled user: the `history` extension's session browser.
+
+---
+
 ## Lifecycle Events
 
 Events are dispatched to subscribed extensions via `_on_event`. The `sdk.Event`

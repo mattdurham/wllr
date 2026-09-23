@@ -802,3 +802,28 @@ the process ends when the turn does rather than waiting for a keystroke.
 
 Because the renderer is off there is no transcript to read the answer from, so
 the completed response is written to an injected writer.
+
+## Split picker — /history gets a two-pane conversation browser (2026-09-23)
+
+**Decision:** `PickerView` gains a split mode (`OpenSplit`): the filterable item
+list occupies the left half of the overlay and the highlighted item's
+`ShowPickerItem.Preview` text fills the right half, mirroring ccresume's
+conversation browser. `ShowPickerParams.Split` opts an extension's
+`show_picker` call into it; items carry optional multi-line `Preview` text that
+also participates in type-to-filter matching. pgup/pgdn scroll the preview pane
+without moving the list selection, and any selection change resets the preview
+scroll to the top.
+
+**Rationale:** The old `/history` flow was two flat pickers with no filtering
+and no way to see a conversation before committing to it — the only preview was
+a 70-character first-message excerpt. Browsers-as-lists force users to open
+each session blind. A 50/50 split with live preview and content filtering (the
+query matches the full transcript text, not just labels) turns history review
+into a single interactive step.
+
+**Consequence:** Previews travel inside the `show_picker` payload for every
+listed item at once, so the extension caps them (the history extension bounds
+each transcript to 200 wrapped lines with per-message line caps). This keeps
+the flow synchronous — no highlight-changed callback round-trip through WASM —
+at the cost of loading previews the user may never look at, which is bounded
+and cheap relative to a re-entrant lazy-load protocol.

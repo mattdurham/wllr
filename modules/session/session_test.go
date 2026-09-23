@@ -26,16 +26,16 @@ func (f *fakeRenderer) AddNotification(
 ) {
 	f.notifications = append(f.notifications, t)
 }
-func (f *fakeRenderer) SetStreaming(_ bool, _ error)                          {}
-func (f *fakeRenderer) ShowModal(_ string)                                    {}
-func (f *fakeRenderer) ShowPicker(_ string, _ []sdk.ShowPickerItem, _ string) {}
-func (f *fakeRenderer) AddToolCall(_, _, _, _ string)                         {}
-func (f *fakeRenderer) UpdateToolCall(_, _, _ string, _ bool, _ string)       {}
-func (f *fakeRenderer) SetStatus(_, _ string)                                 {}
-func (f *fakeRenderer) AppendConsoleLine(_ string)                            {}
-func (f *fakeRenderer) ClearConsole()                                         {}
-func (f *fakeRenderer) Abort()                                                {}
-func (f *fakeRenderer) ResetHistory(_ []sdk.Message) error                    { return nil }
+func (f *fakeRenderer) SetStreaming(_ bool, _ error)                    {}
+func (f *fakeRenderer) ShowModal(_ string)                              {}
+func (f *fakeRenderer) ShowPicker(_ sdk.ShowPickerParams)               {}
+func (f *fakeRenderer) AddToolCall(_, _, _, _ string)                   {}
+func (f *fakeRenderer) UpdateToolCall(_, _, _ string, _ bool, _ string) {}
+func (f *fakeRenderer) SetStatus(_, _ string)                           {}
+func (f *fakeRenderer) AppendConsoleLine(_ string)                      {}
+func (f *fakeRenderer) ClearConsole()                                   {}
+func (f *fakeRenderer) Abort()                                          {}
+func (f *fakeRenderer) ResetHistory(_ []sdk.Message) error              { return nil }
 
 func TestWire_ReturnsSession(t *testing.T) {
 	ctx := context.Background()

@@ -10,7 +10,9 @@ timestamp: 2026-07-01T13:10:47Z
 The `history` built-in extension is the **sole session store**. It records every
 turn (messages + tool calls) to append-only JSONL under
 `~/.wllr/sessions/<sanitized-cwd>/`, and `/history` runs a two-step picker:
-pick a session, then pick the exact message to resume from — replaying that
+pick a session in a **two-pane split browser** (type-to-filter list on the
+left, the highlighted conversation rendered on the right — the split mode of
+`ShowPickerSplit`), then pick the exact message to resume from — replaying that
 prefix of context back into the agent via `AgentResetHistory`.
 
 # Source

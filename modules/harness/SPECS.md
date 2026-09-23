@@ -375,6 +375,7 @@ configured and at least one turn has completed. Updated once per `StreamDoneMsg`
 | `ToolCallStartMsg{AgentID,ID,...}` | agent → TUI  | Agent dispatched a tool call                                    |
 | `ToolCallDoneMsg{AgentID,ID,...}`  | OnAfterToolCall → TUI | Tool call completed                                     |
 | `ShowModalMsg{Text}`        | any → TUI          | Open the modal overlay                                          |
+| `ShowPickerMsg{Title,Callback,Items,Split}` | extension → TUI | Open the picker overlay; `Split` requests the two-pane layout (type-to-filter list left, highlighted item's `Preview` right) |
 | `abortStreamMsg`            | OnAbort/Esc → TUI  | Cancel the active agent turn                                    |
 | `dispatchOnCommandMsg`      | command → TUI      | Dispatch EventOnCommand for an extension-registered command     |
 | `streamTickMsg`             | internal timer     | Drive the "working." animated indicator                         |

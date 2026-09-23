@@ -20,8 +20,10 @@ type Renderer interface {
 	SetStreaming(active bool, err error)
 	// ShowModal opens a modal overlay with the given text.
 	ShowModal(text string)
-	// ShowPicker opens an interactive item picker.
-	ShowPicker(title string, items []sdk.ShowPickerItem, callback string)
+	// ShowPicker opens an interactive item picker. Params.Split requests the
+	// two-pane layout with type-to-filter on the left and the highlighted
+	// item's Preview on the right.
+	ShowPicker(params sdk.ShowPickerParams)
 	// AddToolCall records a tool call start.
 	AddToolCall(id, agentID, toolName, input string)
 	// UpdateToolCall records a tool call completion.

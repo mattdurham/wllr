@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -200,6 +201,90 @@ func TestFormatTimestamp(t *testing.T) {
 		if got := formatTimestamp(tc.raw); got != tc.want {
 			t.Errorf("formatTimestamp(%q) = %q, want %q", tc.raw, got, tc.want)
 		}
+	}
+}
+
+func TestTranscriptPreview_BasicLayout(t *testing.T) {
+	path := writeJSONL(
+		t,
+		hdr,
+		`{"type":"message","role":"user","content":"hello world"}`,
+		`{"type":"tool_call","tool_name":"read_file"}`,
+		`{"type":"message","role":"assistant","content":"line one\nline two"}`,
+	)
+	got := transcriptPreview(path)
+	want := "you:\n  hello world\n\nasst:\n  line one\n  line two"
+	if got != want {
+		t.Errorf("transcriptPreview = %q, want %q", got, want)
+	}
+}
+
+func TestTranscriptPreview_MissingFileEmpty(t *testing.T) {
+	if got := transcriptPreview(filepath.Join(t.TempDir(), "nope.jsonl")); got != "" {
+		t.Errorf("transcriptPreview(missing) = %q, want empty", got)
+	}
+}
+
+func TestTranscriptPreview_LongLineWrapped(t *testing.T) {
+	long := strings.Repeat("x", previewWrapWidth+10)
+	path := writeJSONL(t, hdr, `{"type":"message","role":"user","content":"`+long+`"}`)
+	got := transcriptPreview(path)
+	lines := strings.Split(got, "\n")
+	// marker + two wrapped continuation lines
+	if len(lines) != 3 {
+		t.Fatalf("got %d lines, want 3 (marker + 2 wrapped): %q", len(lines), got)
+	}
+	if got := len([]rune(strings.TrimSpace(lines[1]))); got != previewWrapWidth {
+		t.Errorf("wrapped line width = %d, want %d", got, previewWrapWidth)
+	}
+}
+
+func TestTranscriptPreview_TotalCap(t *testing.T) {
+	// Many alternating messages: the preview must stop at maxPreviewLines with
+	// an elision marker instead of growing unbounded. Roles alternate because
+	// loadMessages collapses consecutive same-role entries.
+	var b strings.Builder
+	b.WriteString(hdr + "\n")
+	for i := 0; i < 40; i++ {
+		b.WriteString(
+			`{"type":"message","role":"user","content":"` + strings.Repeat("w", previewWrapWidth) + `"}` + "\n",
+		)
+		b.WriteString(
+			`{"type":"message","role":"assistant","content":"` + strings.Repeat("a", previewWrapWidth) + `"}` + "\n",
+		)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "big.jsonl")
+	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got := transcriptPreview(path)
+	lines := strings.Split(got, "\n")
+	if len(lines) > maxPreviewLines+1 {
+		t.Errorf("preview has %d lines, want at most %d + 1 marker", len(lines), maxPreviewLines)
+	}
+	if !strings.HasSuffix(got, "lines)") {
+		t.Errorf("preview should end with an elision marker, got tail %q", got[max(0, len(got)-60):])
+	}
+}
+
+func TestTranscriptPreview_PerMessageCap(t *testing.T) {
+	// One message longer than maxPreviewMsgLines must not dominate: it is
+	// truncated with a per-message marker and the next message still appears.
+	// The repeats use a raw string so \n stays JSON-escaped on the wire.
+	long := strings.Repeat(`a\n`, maxPreviewMsgLines+10)
+	path := writeJSONL(
+		t,
+		hdr,
+		`{"type":"message","role":"user","content":"`+long+`"}`,
+		`{"type":"message","role":"assistant","content":"after"}`,
+	)
+	got := transcriptPreview(path)
+	if !strings.Contains(got, "asst:") || !strings.Contains(got, "after") {
+		t.Errorf("preview should include the later message beyond the cap, got %q", got)
+	}
+	if !strings.Contains(got, "…") {
+		t.Errorf("preview should mark the truncated message, got %q", got)
 	}
 }
 

@@ -37,13 +37,18 @@ landed in a single `""` subdirectory with 2022 timestamps. The filename id uses
 
 `/history` runs a **two-step picker**:
 
-1. **Select a session.** Lists up to the 20 most recent sessions **for the
-   current project** (the per-cwd directory the active session writes into),
-   newest first, each showing its timestamp and a preview of the first user
-   message. The in-progress current session is excluded. `/history all` widens
-   the listing to every folder's sessions. Listing is done **host-side** via
-   the `list_sessions` host_call with real host mtimes and previews, because
-   the WASM sandbox cannot reliably enumerate or stat the host filesystem.
+1. **Select a session.** A **two-pane split view** (ccresume-style): the left
+   half lists up to the 20 most recent sessions **for the current project**
+   (the per-cwd directory the active session writes into), newest first, each
+   showing its timestamp and a preview of the first user message; the right
+   half renders the highlighted conversation as a `you:`/`asst:` transcript.
+   **Typing filters the list live** — the query matches the label, path,
+   first-message preview, *and the full conversation text*. `pgup`/`pgdn`
+   scroll the preview pane; `enter` proceeds; `esc` cancels. The in-progress
+   current session is excluded. `/history all` widens the listing to every
+   folder's sessions. Listing is done **host-side** via the `list_sessions`
+   host_call with real host mtimes and previews, because the WASM sandbox
+   cannot reliably enumerate or stat the host filesystem.
 2. **Select a resume point.** Lists every message in that session, numbered and
    tagged `you`/`asst` with a one-line preview.
 
@@ -60,11 +65,17 @@ agents extension rebuilds the view from the agent's history (the same
 notification). Without that rebuild the replay lands in context only and the
 chat goes blank.
 
-> The picker is the standard host `ShowPicker` overlay (not a modal). A modal is
-> only used for the "no sessions found" / "could not load" messages. The second
-> picker is opened from the first picker's selection callback
-> (`history:session_selected`), and the replay happens in the second callback
-> (`history:message_selected`), coordinated by the `pendingSessionPath` var.
+> The session browser is the host `ShowPickerSplit` overlay (the standard
+> picker in its two-pane split mode), not a modal. A modal is only used for the
+> "no sessions found" / "could not load" messages. The second picker is opened
+> from the first picker's selection callback (`history:session_selected`), and
+> the replay happens in the second callback (`history:message_selected`),
+> coordinated by the `pendingSessionPath` var.
+>
+> The transcript preview is capped (`transcriptPreview` in sessionio.go): each
+> message contributes at most `maxPreviewMsgLines` wrapped lines and the whole
+> preview at most `maxPreviewLines`, with `…` markers at each cut, so the
+> `show_picker` payload stays bounded for 20 listed sessions.
 
 ### Replay normalization
 
@@ -104,15 +115,14 @@ and receives all permissions automatically.
 ```
 extensions/history/
 ├── main.go            # wasip1: init, event handlers, pickers (requires the host)
-├── sessionio.go       # host-testable: loadMessages + sanitizePath (no build tag)
+├── sessionio.go       # host-testable: loadMessages + transcriptPreview + sanitizePath (no build tag)
 ├── sessionio_test.go  # unit tests for the above (run on host)
 ├── messageentry.go    # JSONL message entry (shared)
 ├── sessionheader.go   # JSONL session header (wasip1)
 ├── toolcallentry.go   # JSONL tool-call entry (wasip1)
-├── sessioninfo.go     # session list row (wasip1)
 ├── storedmsg.go       # normalized message (shared)
 ├── message.go         # AgentResetHistory wire type (wasip1)
-├── pickeritem.go      # ShowPicker item (wasip1)
+├── pickeritem.go      # ShowPicker item incl. split-mode Preview (wasip1)
 └── wllrsdk.go         # copied SDK boilerplate (wasip1)
 ```
 

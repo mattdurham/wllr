@@ -90,30 +90,30 @@ func TestCapabilityProvider_InterfaceSatisfied(t *testing.T) {
 // fakeUIBridge satisfies UIBridge.
 type fakeUIBridge struct{}
 
-func (f *fakeUIBridge) Notify(_ string)                                       {}
-func (f *fakeUIBridge) ShowModal(_ string)                                    {}
-func (f *fakeUIBridge) ShowAgentTree(_ sdk.ShowAgentTreeParams)               {}
-func (f *fakeUIBridge) SetFocusedAgent(_ string)                              {}
-func (f *fakeUIBridge) ShowPicker(_ string, _ []sdk.ShowPickerItem, _ string) {}
-func (f *fakeUIBridge) ShowTextInput(_, _, _, _ string)                       {}
-func (f *fakeUIBridge) Abort()                                                {}
-func (f *fakeUIBridge) SetStatus(_, _ string)                                 {}
-func (f *fakeUIBridge) GetStatusInfo() sdk.StatusInfo                         { return sdk.StatusInfo{} }
-func (f *fakeUIBridge) SendMessage(_ sdk.Message)                             {}
-func (f *fakeUIBridge) RegisterCommand(_, _ string, _ bool) error             { return nil }
-func (f *fakeUIBridge) RegisterTool(_ sdk.Tool) error                         { return nil }
-func (f *fakeUIBridge) SetSystemPrompt(_ string)                              {}
-func (f *fakeUIBridge) AppendSystemPrompt(_ string)                           {}
-func (f *fakeUIBridge) SetModel(_, _ string) error                            { return nil }
-func (f *fakeUIBridge) ResetHistory(_ []sdk.Message) error                    { return nil }
-func (f *fakeUIBridge) ToolResult(_, _ string, _ bool)                        {}
-func (f *fakeUIBridge) AfterToolCall(_, _, _, _ string, _ bool)               {}
-func (f *fakeUIBridge) ConsoleOutput(_ string)                                {}
-func (f *fakeUIBridge) ConsoleClear()                                         {}
-func (f *fakeUIBridge) CreateArea(_ sdk.UIArea) error                         { return nil }
-func (f *fakeUIBridge) PatchUI(_ sdk.UIPatchParams) error                     { return nil }
-func (f *fakeUIBridge) RemoveArea(_ string)                                   {}
-func (f *fakeUIBridge) UpdateArea(_ sdk.UIUpdateAreaParams) error             { return nil }
+func (f *fakeUIBridge) Notify(_ string)                           {}
+func (f *fakeUIBridge) ShowModal(_ string)                        {}
+func (f *fakeUIBridge) ShowAgentTree(_ sdk.ShowAgentTreeParams)   {}
+func (f *fakeUIBridge) SetFocusedAgent(_ string)                  {}
+func (f *fakeUIBridge) ShowPicker(_ sdk.ShowPickerParams)         {}
+func (f *fakeUIBridge) ShowTextInput(_, _, _, _ string)           {}
+func (f *fakeUIBridge) Abort()                                    {}
+func (f *fakeUIBridge) SetStatus(_, _ string)                     {}
+func (f *fakeUIBridge) GetStatusInfo() sdk.StatusInfo             { return sdk.StatusInfo{} }
+func (f *fakeUIBridge) SendMessage(_ sdk.Message)                 {}
+func (f *fakeUIBridge) RegisterCommand(_, _ string, _ bool) error { return nil }
+func (f *fakeUIBridge) RegisterTool(_ sdk.Tool) error             { return nil }
+func (f *fakeUIBridge) SetSystemPrompt(_ string)                  {}
+func (f *fakeUIBridge) AppendSystemPrompt(_ string)               {}
+func (f *fakeUIBridge) SetModel(_, _ string) error                { return nil }
+func (f *fakeUIBridge) ResetHistory(_ []sdk.Message) error        { return nil }
+func (f *fakeUIBridge) ToolResult(_, _ string, _ bool)            {}
+func (f *fakeUIBridge) AfterToolCall(_, _, _, _ string, _ bool)   {}
+func (f *fakeUIBridge) ConsoleOutput(_ string)                    {}
+func (f *fakeUIBridge) ConsoleClear()                             {}
+func (f *fakeUIBridge) CreateArea(_ sdk.UIArea) error             { return nil }
+func (f *fakeUIBridge) PatchUI(_ sdk.UIPatchParams) error         { return nil }
+func (f *fakeUIBridge) RemoveArea(_ string)                       {}
+func (f *fakeUIBridge) UpdateArea(_ sdk.UIUpdateAreaParams) error { return nil }
 
 var _ extension.UIBridge = (*fakeUIBridge)(nil)
 
