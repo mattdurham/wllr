@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mattdurham/wllr/modules/sdk"
 )
 
@@ -329,6 +330,112 @@ func TestResolveConstraintEdgeCases(t *testing.T) {
 	// 100% — full terminal
 	if v, ok := resolveConstraint("100%", 80); !ok || v != 80 {
 		t.Fatalf("100%% of 80 must be 80, got %d ok=%v", v, ok)
+	}
+}
+
+// Issue #45 regression: a bordered fill-width node holding long prose and inline
+// code must render with all four borders aligned on every row, at any width,
+// with word boundaries intact.
+//
+// The issue suspected styleFromProps sized the box to the full available width
+// while subtracting border/padding only from the inner width, leaving a
+// fill-width box four columns too wide. Measurement disproves that: lipgloss v2
+// Width() is border-box (Render subtracts horizontalBorderSize before wrapping
+// and re-adds it when drawing the border), so the box is exactly width wide and
+// the inner width is width-border-padding. This test pins that contract.
+func TestSceneRenderFillWidthBoxBordersAlign(t *testing.T) {
+	cases := []struct {
+		name string
+		text string
+		// exact is true when the text contains no hyphen, so a correct wrap can
+		// be rejoined with a single space and must reproduce the source
+		// character for character. That is what rules out fused words such as
+		// `invocation.The`.
+		exact bool
+	}{
+		{
+			name: "prose with inline code",
+			text: "Good question — let me ground the answer in the actual timing " +
+				"constants and config rather than guessing, by checking the acceptance " +
+				"package's poll intervals and the gate `invocation`. The Makefile " +
+				"confirms the race build is the gate.",
+			exact: true,
+		},
+		{
+			name: "prose with hyphenated inline code",
+			text: "The Makefile confirms `test -race -count=1` is the gate, so let me " +
+				"pull the relevant constants and check how they flow through the pool.",
+			// A hyphen is a legitimate wrap point, so rejoining inserts a space
+			// that the source does not have; assert character conservation only.
+			exact: false,
+		},
+	}
+
+	for _, tc := range cases {
+		for _, width := range []int{80, 120, 200} {
+			s := NewSceneRenderer()
+			if err := s.CreateArea(sdk.UIArea{ID: "chat", Placement: sdk.UIAreaMain}); err != nil {
+				t.Fatalf("create area: %v", err)
+			}
+			if err := s.ApplyPatch(sdk.UIPatchParams{Area: "chat", Ops: []sdk.UIPatchOp{
+				{Op: sdk.UIOpSetRoot, Node: &sdk.UINode{ID: "root", Type: sdk.UINodeVStack, Children: []sdk.UINode{
+					{ID: "a1", Type: sdk.UINodeText, Text: tc.text, Props: transcriptMessageBoxProps("accent")},
+				}}},
+			}}); err != nil {
+				t.Fatalf("patch: %v", err)
+			}
+
+			lines := strings.Split(s.Render("chat", width), "\n")
+			// The message-box props add a bottom margin; drop the blank line it
+			// leaves below the box.
+			for len(lines) > 0 && strings.TrimSpace(ansi.Strip(lines[len(lines)-1])) == "" {
+				lines = lines[:len(lines)-1]
+			}
+			if len(lines) < 3 {
+				t.Fatalf("%s width %d: expected a bordered box, got %d line(s): %q",
+					tc.name, width, len(lines), lines)
+			}
+
+			// Every row must occupy exactly the available width.
+			for i, line := range lines {
+				if got := ansi.StringWidth(line); got != width {
+					t.Errorf("%s width %d: line %d is %d columns, want exactly %d: %q",
+						tc.name, width, i, got, width, ansi.Strip(line))
+				}
+			}
+
+			top, bottom := ansi.Strip(lines[0]), ansi.Strip(lines[len(lines)-1])
+			if !strings.HasPrefix(top, "╭") || !strings.HasSuffix(top, "╮") {
+				t.Errorf("%s width %d: top border not aligned: %q", tc.name, width, top)
+			}
+			if !strings.HasPrefix(bottom, "╰") || !strings.HasSuffix(bottom, "╯") {
+				t.Errorf("%s width %d: bottom border not aligned: %q", tc.name, width, bottom)
+			}
+
+			// Every body row must carry exactly one border column at each edge.
+			var rows []string
+			for i, line := range lines[1 : len(lines)-1] {
+				plain := ansi.Strip(line)
+				runes := []rune(plain)
+				if runes[0] != '│' || runes[len(runes)-1] != '│' {
+					t.Errorf("%s width %d: body row %d borders misaligned: %q", tc.name, width, i, plain)
+				}
+				if strings.Contains(plain, "││") {
+					t.Errorf("%s width %d: body row %d has a doubled border: %q", tc.name, width, i, plain)
+				}
+				rows = append(rows, strings.TrimSpace(string(runes[1:len(runes)-1])))
+			}
+
+			joined := strings.Join(rows, " ")
+			if tc.exact && joined != tc.text {
+				t.Errorf("%s width %d: wrapping lost word boundaries:\n got %q\nwant %q",
+					tc.name, width, joined, tc.text)
+			}
+			if got, want := strings.ReplaceAll(joined, " ", ""), strings.ReplaceAll(tc.text, " ", ""); got != want {
+				t.Errorf("%s width %d: wrapping lost or duplicated characters:\n got %q\nwant %q",
+					tc.name, width, got, want)
+			}
+		}
 	}
 }
 

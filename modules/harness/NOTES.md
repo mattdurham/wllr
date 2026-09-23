@@ -827,3 +827,47 @@ each transcript to 200 wrapped lines with per-message line caps). This keeps
 the flow synchronous — no highlight-changed callback round-trip through WASM —
 at the cost of loading previews the user may never look at, which is bounded
 and cheap relative to a re-entrant lazy-load protocol.
+
+## Issue #45 — the garble was never in the transcript (2026-09-23)
+
+**Decision:** Measure by display width everywhere a bordered box is built by
+hand, and clamp each row to the content width before padding. `wrapRunes` and
+truncateRunes` now use `ansi.Hardwrap`/`ansi.Truncate` instead of `len([]rune)`,
+and `renderToolActivity`, `renderInputBox` and `renderConsole` truncate the
+content line to the content width rather than letting a negative pad collapse to
+zero. The transcript message-box path (`styleFromProps`/`renderNode`) is
+**unchanged**, because measurement showed it was already correct.
+
+**Rationale:** Issue #45 blamed a fill-width bordered box being four columns too
+wide, on the theory that lipgloss applies padding and border *outside* the set
+width. That is wrong for lipgloss v2: `Style.Render` does
+`width -= horizontalBorderSize` before wrapping and adds the border back when
+drawing it, so `Width()` is border-box and `styleFromProps` sizing a `fill` node
+to the available width yields a box exactly that wide. Every stated hypothesis in
+the issue was tested directly and disproven — double-wrap is idempotent at a
+fixed width, the streaming append path and the final render produce identically
+shaped boxes, and a sweep of widths 20–200 through the real `WindowSizeMsg` path
+found **zero** overflowing lines (also with ANSI markdown, long unbreakable
+tokens, tabs, dividers, and notify nodes).
+
+The defect that does reproduce the reported symptoms is elsewhere: panes that
+pad content by hand. When a content line is wider than the pane, `pad` goes
+negative, collapses to zero, and the row is emitted wider than the terminal. The
+terminal then hard-wraps that row, the wrapped remainder lands beside the next
+row's border, and bubbletea's cursor tracking desynchronises — which is exactly
+the doubled borders (`││`), fused corners (`────╮│`), stray trailing padding and
+apparent fused words in the report, and why the garble showed up in the
+*transcript* even though the transcript's own lines were correct. The trigger was
+`wrapRunes` measuring rune count: a tool preview of 40 emoji renders an
+80-column line for a 40-column budget.
+
+**Consequence:** `TestSceneRenderFillWidthBoxBordersAlign` pins the transcript
+box contract (exact width, single border column per edge, word boundaries
+preserved) so a future change cannot silently regress it, and
+`TestViewNeverExceedsTerminalWidth` asserts the composed view never exceeds the
+terminal across widths 20–200. Both were confirmed to fail when the fix is
+reverted. Note that `lipgloss.Wrap` treats a hyphen as a break point, so a
+hyphenated token such as `` `test -race -count=1` `` legitimately wraps mid-token
+and rejoining its rows inserts a space; the word-boundary assertion therefore
+requires exact equality only for hyphen-free prose and falls back to character
+conservation otherwise.

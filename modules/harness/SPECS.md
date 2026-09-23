@@ -166,7 +166,7 @@ there is no built-in message renderer.
 - `SetSize(width, height)`: resizes the viewport and re-applies `externalContent`; if the viewport was at the tail before resize, it remains at the tail afterward.
 - `ScrollUp(n)` / `ScrollDown(n)`: scroll the viewport.
 - `AddToolCall(id, name, input)` / `UpdateToolCall(id, isError, output)` / `ClearToolLog()`: maintain the per-turn tool log.
-- `ToolActivityLines(width, height)`: renders the most recent tool log entries as compact single-line status rows, truncated to `width` runes and capped at `height` rows.
+- `ToolActivityLines(width, height)`: renders the most recent tool log entries as compact status rows, hard-wrapped to `width` **display columns** and capped at `height` rows. Measurement is by display width, not rune count: a rune-count split under-measures wide characters (emoji, CJK), emitting rows wider than the pane.
 - `ToolLogModal()`: renders the tool log for the `/tools` modal.
 - `View()`: returns the viewport view.
 
@@ -207,6 +207,7 @@ The caller (`View`) adds top and bottom blank-line margins to vertically center 
 
 - Always reads `m.agentPool.TokenCount()` live (so sub-agent tokens are reflected immediately).
 - Uses `lipgloss.Width` (not `len([]rune)`) for padding to correctly account for ANSI escape sequences in the textarea output.
+- Clamps each row to the content width before padding, so a mis-sized textarea cannot emit a row wider than the terminal (issue #45).
 
 ---
 
@@ -849,7 +850,7 @@ The main chat transcript content is produced by a WASM extension (the bundled `a
 - `Model.streamContent` accumulates streamed assistant text from `TokenMsg` so the completed response can be captured for `OnMessageEnd`/logging; it is reset on `StreamDoneMsg` and `/clear`.
 - `Model.pushNotification(text)` dispatches `sdk.EventNotify` (in a goroutine) so the transcript-owning extension renders notifications; it no longer writes to `ChatView`.
 - `renderScenes` always skips the `chat` area (it is rendered inside the viewport, not stacked below it). Non-chat scene areas are rendered above the chat viewport; their height is subtracted by `chatHeight()` so the chat history viewport is what shrinks when extra UI appears.
-- `renderToolActivity()` renders a persistent pane below the chat viewport with the latest three tool calls. Long command previews wrap across rows instead of being hard-truncated; when no tools have run this turn, the pane renders as three empty content rows. Rows for non-main agents include the agent ID so sub-agent activity is distinguishable from main-agent tool calls.
+- `renderToolActivity()` renders a persistent pane below the chat viewport with the latest three tool calls. Long command previews wrap across rows instead of being hard-truncated; when no tools have run this turn, the pane renders as three empty content rows. Rows for non-main agents include the agent ID so sub-agent activity is distinguishable from main-agent tool calls. Each row is clamped to the content width before padding so the pane can never emit a row wider than the terminal.
 
 **Invariants:**
 
@@ -857,3 +858,4 @@ The main chat transcript content is produced by a WASM extension (the bundled `a
 - If no extension creates the `chat` area (e.g. the `agents` extension is not loaded), `refreshWASMChat` no-ops and the viewport is empty — there is no fallback renderer.
 - `/clear` resets the transcript area to empty. History-restore resets it and then dispatches `agents:transcript_rebuild` (main agent id) so the restored history is re-rendered into the transcript; the replay must be visible, not only present in agent context.
 - The per-turn tool log is cleared at turn start (`submitToAgent`) and surfaced via `/tools`; it is independent of the transcript and also feeds the persistent tool activity pane.
+- **Invariant (#45):** No line of the composed view may exceed the terminal width. Panes that build bordered boxes by hand (tool activity, input box, console) clamp each content row to the content width before padding, and content-derived text is measured by display width rather than rune count. An over-wide row is hard-wrapped by the terminal, which lands the wrapped remainder beside the following row's border and desynchronises the repaint into doubled borders (`││`) and fused corners (`────╮│`). The transcript message box itself satisfies this by construction: lipgloss v2 `Width()` is border-box, so `styleFromProps` sizing a `fill` node to the available width yields a box exactly that wide.

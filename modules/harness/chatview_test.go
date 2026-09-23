@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestChatView_SetExternalContent_FollowsWhenAtBottom(t *testing.T) {
@@ -138,6 +140,50 @@ func TestChatView_ViewOmitsViewportPaddingRows(t *testing.T) {
 
 	if got := c.View(); got != "hello" {
 		t.Fatalf("View() = %q, want only transcript content", got)
+	}
+}
+
+// wrapRunes must measure display width, not rune count. A rune-count split
+// under-measures wide characters (emoji, CJK) and emits lines wider than the
+// pane, which the terminal then hard-wraps into the doubled-border garble of
+// issue #45.
+func TestWrapRunes_UsesDisplayWidth(t *testing.T) {
+	emoji := strings.Repeat("🎉", 40) // 40 runes, 80 columns
+	lines := wrapRunes(emoji, 20)
+	if len(lines) == 0 {
+		t.Fatal("wrapRunes returned no lines")
+	}
+	for i, line := range lines {
+		if got := ansi.StringWidth(line); got > 20 {
+			t.Fatalf("line %d is %d columns wide, want <= 20: %q", i, got, line)
+		}
+	}
+	if joined := strings.Join(lines, ""); joined != emoji {
+		t.Fatalf("wrapRunes lost content: got %q want %q", joined, emoji)
+	}
+}
+
+func TestWrapRunes_ShortStringUnchanged(t *testing.T) {
+	if got := wrapRunes("hello", 20); len(got) != 1 || got[0] != "hello" {
+		t.Fatalf("wrapRunes = %#v, want [hello]", got)
+	}
+}
+
+// truncateRunes must measure display width for the same reason: a rune-count
+// truncation leaves wide characters overflowing the pane that renders them.
+func TestTruncateRunes_UsesDisplayWidth(t *testing.T) {
+	emoji := strings.Repeat("🎉", 40)
+	if got := ansi.StringWidth(truncateRunes(emoji, 20)); got > 20 {
+		t.Fatalf("truncateRunes produced %d columns, want <= 20", got)
+	}
+	if got := ansi.StringWidth(truncateRunes("日本語のテキスト", 8)); got > 8 {
+		t.Fatalf("truncateRunes CJK produced %d columns, want <= 8", got)
+	}
+	if got := truncateRunes("short", 20); got != "short" {
+		t.Fatalf("truncateRunes should pass through text that fits, got %q", got)
+	}
+	if got := truncateRunes("", 20); got != "" {
+		t.Fatalf("truncateRunes empty = %q, want empty", got)
 	}
 }
 

@@ -44,6 +44,9 @@ log, and reset behavior are covered by `wasmchat_test.go`, `tui_test.go`, and
 | `TestChatView_SetExternalContent_PreservesScrollback` | transcript content grows while user is scrolled up | set external content, scroll up, then replace with more lines | viewport offset is preserved and does not jump to bottom |
 | `TestChatView_ToolActivityLines_ShowsLastThreeAndMatchesDoneByID` | compact tool rows use the latest entries and completion matches by ID | add four calls, complete the second by ID | latest three rows render; matching entry is done with its sub-agent label, last pending is unchanged |
 | `TestChatView_UpdateToolCall_CreatesEntryForMissingStart` | completion arrives without a visible start (e.g. legacy/sub-agent bridge edge) | update an unknown tool call ID with agent/tool metadata | a completed log row is created and rendered with the sub-agent label |
+| `TestWrapRunes_UsesDisplayWidth` | wide characters must not overflow a wrapped tool row | wrap 40 emoji at 20 columns | every line is ≤ 20 display columns and content is preserved |
+| `TestWrapRunes_ShortStringUnchanged` | text that already fits is not rewritten | wrap "hello" at 20 columns | single unchanged line |
+| `TestTruncateRunes_UsesDisplayWidth` | wide characters must not overflow a truncated row | truncate 40 emoji at 20, and CJK at 8 | result is within the requested display width; short/empty input passes through |
 
 ---
 
@@ -218,6 +221,7 @@ The following scenarios are not currently covered and should be added:
 | `TestSceneAppendTextRejectsNonText` | `append_text` on a vstack node | Returns an error |
 | `TestSceneAreasByPlacement` | Create areas across placements | Sidebar areas returned in creation order |
 | `TestSceneUnknownNodeTypeRendersEmpty` | `set_root` with an unknown node type | Render does not panic |
+| `TestSceneRenderFillWidthBoxBordersAlign` | Issue #45: a bordered `fill`-width node with long prose and inline code, at 80/120/200 columns | Every row is exactly the available width; top/bottom borders start and end with the corner glyphs; each body row has exactly one border column per edge and no `││`; rejoining the wrapped rows reproduces the source text (exact for hyphen-free prose, character-conserving otherwise) |
 
 ### Missing / Recommended Tests
 
@@ -244,6 +248,7 @@ a model, and typing/backspace filtering in the searchable picker.
 | `TestResetHistoryMsg_ResetsAndDispatchesRebuild` | history restore with a real (empty) extension host | transcript wiped; cmd dispatches `agents:transcript_rebuild` without error |
 | `TestResetHistoryMsg_NilHost_ResetsOnly` | history restore with nil extHost | transcript still wiped; nil cmd (no dispatch possible) |
 | `TestTranscriptRebuildEvent_Payload` | event construction | `EventOnCommand` named `agents:transcript_rebuild` with the agent id as the sole arg |
+| `TestViewNeverExceedsTerminalWidth` | Issue #45: composed view with a transcript box and a tool preview containing wide characters, across widths 20–200 | No view line is wider than the terminal, so the terminal never hard-wraps a box row into doubled borders or fused corners |
 
 ## Model Tiers (commands_test.go)
 

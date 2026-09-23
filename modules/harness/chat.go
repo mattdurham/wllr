@@ -8,6 +8,7 @@ import (
 
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mattdurham/wllr/modules/agent"
 )
 
@@ -115,17 +116,16 @@ func (c *ChatView) ToolActivityLines(width, height int) []string {
 
 const toolActivityEntryLimit = 3
 
+// wrapRunes hard-wraps s into lines of at most width display columns. It
+// measures display width (via ansi.Hardwrap), not rune count: a rune-count
+// split under-measures wide characters (emoji, CJK) and emits lines wider than
+// the pane, which the terminal then hard-wraps and shreds the box borders with
+// (issue #45).
 func wrapRunes(s string, width int) []string {
-	if width <= 0 || len([]rune(s)) <= width {
+	if width <= 0 || ansi.StringWidth(s) <= width {
 		return []string{s}
 	}
-	runes := []rune(s)
-	lines := make([]string, 0, (len(runes)+width-1)/width)
-	for len(runes) > width {
-		lines = append(lines, string(runes[:width]))
-		runes = runes[width:]
-	}
-	return append(lines, string(runes))
+	return strings.Split(ansi.Hardwrap(s, width, true), "\n")
 }
 
 // Update handles viewport scrolling.
@@ -182,18 +182,21 @@ func toolInputPreview(input string) string {
 	return ""
 }
 
+// truncateRunes shortens s to at most width display columns, appending an
+// ellipsis when it does not fit. It measures display width (via ansi.Truncate),
+// not rune count, so wide characters cannot push the result past width and
+// overflow the pane that renders it (issue #45).
 func truncateRunes(s string, width int) string {
 	if width <= 0 {
 		return s
 	}
-	r := []rune(s)
-	if len(r) <= width {
+	if ansi.StringWidth(s) <= width {
 		return s
 	}
 	if width == 1 {
 		return "…"
 	}
-	return string(r[:width-1]) + "…"
+	return ansi.Truncate(s, width, "…")
 }
 
 // ToolLogModal returns a formatted string for display in the modal overlay.

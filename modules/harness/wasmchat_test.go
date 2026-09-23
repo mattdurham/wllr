@@ -7,6 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+	lipgloss "charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mattdurham/wllr/modules/extension"
 	"github.com/mattdurham/wllr/modules/sdk"
 )
@@ -244,6 +247,48 @@ func TestRenderScenes_SkipsChatArea(t *testing.T) {
 	// must not also stack it below the chat.
 	if got := m.renderScenes(); strings.Contains(got, "transcript text") {
 		t.Fatalf("renderScenes must skip the chat area: %q", got)
+	}
+}
+
+// Issue #45 regression: no line of the composed view may be wider than the
+// terminal. An over-wide line is hard-wrapped by the terminal, which lands the
+// wrapped remainder beside the following row's border and desynchronises the
+// whole repaint into doubled borders (`││`) and fused corners (`────╮│`).
+//
+// The transcript message box itself is correct at every width; the panes that
+// pad content by hand were not, because tool previews were wrapped by rune
+// count rather than display width.
+func TestViewNeverExceedsTerminalWidth(t *testing.T) {
+	const prose = "Good question — let me ground the answer in the actual timing " +
+		"constants and config rather than guessing, by checking the acceptance " +
+		"package's poll intervals and the gate `invocation`."
+	widePreview := `{"command":"echo '` + strings.Repeat("🎉", 40) + `' "}`
+
+	for _, width := range []int{20, 40, 60, 79, 80, 81, 83, 100, 120, 200} {
+		m := New(nil, "main", nil)
+		next, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: 30})
+		m = next.(Model)
+
+		m.scene = NewSceneRenderer()
+		if err := m.scene.CreateArea(sdk.UIArea{ID: wasmChatAreaID, Placement: sdk.UIAreaMain}); err != nil {
+			t.Fatalf("create area: %v", err)
+		}
+		if err := m.scene.ApplyPatch(sdk.UIPatchParams{Area: wasmChatAreaID, Ops: []sdk.UIPatchOp{
+			{Op: sdk.UIOpSetRoot, Node: &sdk.UINode{ID: wasmChatRootID, Type: sdk.UINodeVStack, Children: []sdk.UINode{
+				{ID: "a1", Type: sdk.UINodeText, Text: prose, Props: transcriptMessageBoxProps("accent")},
+			}}},
+		}}); err != nil {
+			t.Fatalf("patch: %v", err)
+		}
+		m.chat.AddToolCall("t1", "main", "exec", widePreview)
+		m.refreshWASMChat()
+
+		for i, line := range strings.Split(m.View().Content, "\n") {
+			if got := lipgloss.Width(line); got > width {
+				t.Fatalf("width %d: view line %d is %d columns, want <= %d: %q",
+					width, i, got, width, ansi.Strip(line))
+			}
+		}
 	}
 }
 

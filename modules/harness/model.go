@@ -17,6 +17,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/fantasy"
 	lipgloss "charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mattdurham/wllr/modules/agent"
 	"github.com/mattdurham/wllr/modules/extension"
 	"github.com/mattdurham/wllr/modules/sdk"
@@ -2577,11 +2578,11 @@ func (m Model) renderInputBox() string {
 	taLines := strings.Split(strings.TrimRight(m.input.View(), "\n"), "\n")
 	var body strings.Builder
 	for _, line := range taLines {
+		// Clamp before padding so a mis-sized textarea cannot emit a row wider
+		// than the terminal and desynchronise the whole repaint (issue #45).
+		line = ansi.Truncate(line, contentWidth, "")
 		visible := lipgloss.Width(line)
-		pad := contentWidth - visible
-		if pad < 0 {
-			pad = 0
-		}
+		pad := max(0, contentWidth-visible)
 		body.WriteString(b.Render("│") + " " + line + strings.Repeat(" ", pad) + " " + b.Render("│") + "\n")
 	}
 
@@ -2714,11 +2715,13 @@ func (m Model) renderToolActivity() string {
 	}
 	body := strings.Builder{}
 	for _, line := range lines {
+		// Clamp before padding. A line wider than the pane would push the row
+		// past the terminal width; the terminal's hard wrap then lands the
+		// wrapped remainder beside the next row's border, which is the doubled
+		// border / fused corner garble in issue #45.
+		line = ansi.Truncate(line, contentWidth, "")
 		visible := lipgloss.Width(line)
-		pad := contentWidth - visible
-		if pad < 0 {
-			pad = 0
-		}
+		pad := max(0, contentWidth-visible)
 		body.WriteString(
 			b.Render("│") + " " + dimText.Render(line) + strings.Repeat(" ", pad) + " " + b.Render("│") + "\n",
 		)
@@ -2766,11 +2769,11 @@ func (m Model) renderConsole() string {
 	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
 	body := strings.Builder{}
 	for _, line := range lines {
+		// Clamp before padding so a console line wider than the pane cannot
+		// overflow the terminal (issue #45).
+		line = ansi.Truncate(line, innerWidth-2, "")
 		visible := lipgloss.Width(line)
-		pad := innerWidth - 2 - visible
-		if pad < 0 {
-			pad = 0
-		}
+		pad := max(0, innerWidth-2-visible)
 		body.WriteString(
 			b.Render("│") + " " + dimText.Render(line) + strings.Repeat(" ", pad) + " " + (b.Render("│") + "\n"),
 		)
