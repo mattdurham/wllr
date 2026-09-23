@@ -1092,9 +1092,7 @@ func httpPost(url string, headers map[string]string, body []byte) (int, []byte, 
 		req.Header.Set(k, v)
 	}
 
-	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(
-		req,
-	) //nolint:gosec // URL is from user config; SSRF is intentional
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -1115,9 +1113,7 @@ func httpGet(url string, headers map[string]string) (int, []byte, error) {
 		req.Header.Set(k, v)
 	}
 
-	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(
-		req,
-	) //nolint:gosec // URL is from user config; SSRF is intentional
+	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
 	if err != nil {
 		return 0, nil, err
 	}

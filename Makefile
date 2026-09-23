@@ -43,10 +43,20 @@ INSTALL_BIN ?= $(HOME)/.local/bin
 EXT_DIR     := $(HOME)/.wllr/extensions
 GOCACHE     ?= $(CURDIR)/.cache/go-build
 GOLANGCI_LINT_CACHE ?= $(CURDIR)/.cache/golangci-lint
+# Toolchain used to BUILD the code-quality tools in install-tools. Keep in sync
+# with the `go` directive in go.mod. Without a pin, `go install pkg@latest`
+# builds each tool with whatever Go that tool's own go.mod pins — which can lag
+# the repo's Go version. golangci-lint then refuses to run: "the Go language
+# version used to build golangci-lint is lower than the targeted Go version".
+GO_TOOLCHAIN ?= go1.27.0
 WASM_COMPILER ?= auto
 TINYGO ?= tinygo
 TINYGO_MODE ?= docker
-TINYGO_IMAGE ?= tinygo/tinygo:latest
+# Pinned rather than :latest so WASM builds don't silently drift. The tag must
+# ship a Go that satisfies go.mod — e.g. tinygo/tinygo:latest was 0.41.1
+# (go1.26.2) and refused to build after go.mod moved to go 1.27.0 ("requires go
+# version 1.19 through 1.26"). Bump this when go.mod's Go version moves.
+TINYGO_IMAGE ?= tinygo/tinygo:0.42.0
 TINYGO_FLAGS ?= -buildmode=c-shared -target=wasi -opt=z
 export GOCACHE
 export GOLANGCI_LINT_CACHE
@@ -116,15 +126,19 @@ $(BUILTINS):
 	mkdir -p $(BUILTINS)
 
 # Install all code quality tools
+#
+# Built with $(GO_TOOLCHAIN) (kept in sync with go.mod above) so the tools'
+# Go version always matches what this repo targets. See the GO_TOOLCHAIN
+# comment near the top of this file for why the pin matters.
 install-tools:
-	@echo "==> Installing code quality tools..."
-	@go install go.uber.org/nilaway/cmd/nilaway@latest
-	@go install github.com/dkorunic/betteralign/cmd/betteralign@latest
-	@go install mvdan.cc/gofumpt@latest
-	@go install github.com/segmentio/golines@latest
-	@go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
-	@go install golang.org/x/tools/cmd/deadcode@latest
-	@go install honnef.co/go/tools/cmd/staticcheck@latest
+	@echo "==> Installing code quality tools (built with $(GO_TOOLCHAIN))..."
+	@GOTOOLCHAIN=$(GO_TOOLCHAIN) go install go.uber.org/nilaway/cmd/nilaway@latest
+	@GOTOOLCHAIN=$(GO_TOOLCHAIN) go install github.com/dkorunic/betteralign/cmd/betteralign@latest
+	@GOTOOLCHAIN=$(GO_TOOLCHAIN) go install mvdan.cc/gofumpt@latest
+	@GOTOOLCHAIN=$(GO_TOOLCHAIN) go install github.com/segmentio/golines@latest
+	@GOTOOLCHAIN=$(GO_TOOLCHAIN) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+	@GOTOOLCHAIN=$(GO_TOOLCHAIN) go install golang.org/x/tools/cmd/deadcode@latest
+	@GOTOOLCHAIN=$(GO_TOOLCHAIN) go install honnef.co/go/tools/cmd/staticcheck@latest
 	@echo "==> All tools installed!"
 
 # Nil safety checks
