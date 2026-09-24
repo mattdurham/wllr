@@ -1,11 +1,14 @@
 package harness
 
 import (
+	"context"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/mattdurham/wllr/modules/agent"
+	"github.com/mattdurham/wllr/modules/extension"
 	"github.com/mattdurham/wllr/modules/sdk"
 )
 
@@ -145,5 +148,156 @@ func TestFocusedAgentStatusClearsWhenAgentClosed(t *testing.T) {
 	}
 	if got := bridge.GetStatusInfo().Statuses["agent"]; got != "" {
 		t.Fatalf("agent status after close = %q, want empty (focus falls back to root)", got)
+	}
+}
+
+// spawnFocusedKid spawns a sub-agent, focuses it, and returns the model. The
+// caller decides when to close it, which is what makes focus stale.
+func spawnFocusedKid(t *testing.T, m Model) Model {
+	t.Helper()
+	if _, err := m.agentPool.Spawn("main/kid", newMockLM("hi"), agent.SpawnOpts{
+		ModelName: "fake", ContextWindow: 1000,
+	}); err != nil {
+		t.Fatalf("spawn sub-agent: %v", err)
+	}
+	m, _ = callUpdate(m, FocusAgentMsg{AgentID: "main/kid"})
+	if m.focusedAgent != "main/kid" {
+		t.Fatalf("focusedAgent = %q, want main/kid", m.focusedAgent)
+	}
+	return m
+}
+
+// A focused sub-agent that closes must hand the transcript back to the root.
+// The harness owns focus and an agent self-closes after processing its shutdown
+// request, so without reconciliation the statusline reads as the root while the
+// transcript still shows the closed agent's conversation.
+func TestFocusedAgentCloseReturnsTranscriptToRoot(t *testing.T) {
+	m := newTestModel()
+	m.width = 60
+	m.scene = newSceneWithChat(t, "kid transcript")
+	m = spawnFocusedKid(t, m)
+
+	if err := m.agentPool.Close("main/kid"); err != nil {
+		t.Fatalf("close sub-agent: %v", err)
+	}
+
+	// Reconciliation rides the 1-second extension tick.
+	m, _ = callUpdate(m, extensionTickMsg{})
+
+	if m.focusedAgent != "" {
+		t.Fatalf("focusedAgent = %q, want empty (root) after the focused agent closed", m.focusedAgent)
+	}
+	if got := m.live.getStatus("agent"); got != "" {
+		t.Fatalf("agent status = %q, want empty", got)
+	}
+	if got := m.scene.Render(wasmChatAreaID, 60); got != "" {
+		t.Fatalf("transcript should be emptied for the root rebuild, got %q", got)
+	}
+}
+
+// Reconciliation must also ask the transcript-owning extension to rebuild, or
+// the transcript stays blank instead of showing the root conversation.
+func TestReconcileFocusedAgent_DispatchesRootRebuild(t *testing.T) {
+	m := newTestModel()
+	m.extHost = extension.NewHost(nil)
+	ctx := context.Background()
+	defer func() { _ = m.extHost.Close(ctx) }()
+	m.width = 60
+	m.scene = newSceneWithChat(t, "kid transcript")
+	m = spawnFocusedKid(t, m)
+
+	if err := m.agentPool.Close("main/kid"); err != nil {
+		t.Fatalf("close sub-agent: %v", err)
+	}
+
+	cmd := m.reconcileFocusedAgent()
+	if cmd == nil {
+		t.Fatal("reconcile should dispatch a root rebuild once the focused agent is gone")
+	}
+	if m.focusedAgent != "" {
+		t.Fatalf("focusedAgent = %q, want empty (root)", m.focusedAgent)
+	}
+
+	res := cmd()
+	evtResult, ok := res.(ExtensionEventResultMsg)
+	if !ok {
+		t.Fatalf("rebuild cmd returned %T, want ExtensionEventResultMsg", res)
+	}
+	if evtResult.Err != nil {
+		t.Fatalf("rebuild dispatch error: %v", evtResult.Err)
+	}
+}
+
+// A focus target that still exists must be left alone: closing one sub-agent
+// must not disturb focus on another.
+func TestReconcileFocusedAgent_KeepsLiveFocus(t *testing.T) {
+	m := newTestModel()
+	m.width = 60
+	m.scene = newSceneWithChat(t, "kid transcript")
+	m = spawnFocusedKid(t, m)
+
+	if cmd := m.reconcileFocusedAgent(); cmd != nil {
+		t.Fatal("a live focused agent must not be reconciled away")
+	}
+	if m.focusedAgent != "main/kid" {
+		t.Fatalf("focusedAgent = %q, want main/kid", m.focusedAgent)
+	}
+	if got := m.live.getStatus("agent"); got != "main/kid" {
+		t.Fatalf("agent status = %q, want main/kid", got)
+	}
+	if got := m.scene.Render(wasmChatAreaID, 60); !strings.Contains(got, "kid transcript") {
+		t.Fatalf("live focus must not clear the transcript, got %q", got)
+	}
+}
+
+// Root focus is the resting state, so there is nothing to reconcile.
+func TestReconcileFocusedAgent_RootFocusIsNoOp(t *testing.T) {
+	m := newTestModel()
+	if cmd := m.reconcileFocusedAgent(); cmd != nil {
+		t.Fatal("root focus needs no reconciliation")
+	}
+}
+
+// Reconciliation fires once per stale focus. Repeating it would re-clear the
+// transcript and re-notify on every tick.
+func TestReconcileFocusedAgent_Idempotent(t *testing.T) {
+	m := newTestModel()
+	m.extHost = extension.NewHost(nil)
+	ctx := context.Background()
+	defer func() { _ = m.extHost.Close(ctx) }()
+	m.width = 60
+	m.scene = newSceneWithChat(t, "kid transcript")
+	m = spawnFocusedKid(t, m)
+	if err := m.agentPool.Close("main/kid"); err != nil {
+		t.Fatalf("close sub-agent: %v", err)
+	}
+
+	if cmd := m.reconcileFocusedAgent(); cmd == nil {
+		t.Fatal("first reconcile should dispatch a root rebuild")
+	}
+	if cmd := m.reconcileFocusedAgent(); cmd != nil {
+		t.Fatal("reconcile must not repeat once focus is back on the root")
+	}
+}
+
+// Without an extension host there is nothing to rebuild through, but focus must
+// still be reset so input and the statusline stop naming a dead agent.
+func TestReconcileFocusedAgent_NilHostStillResetsFocus(t *testing.T) {
+	m := newTestModel()
+	m.width = 60
+	m.scene = newSceneWithChat(t, "kid transcript")
+	m = spawnFocusedKid(t, m)
+	if err := m.agentPool.Close("main/kid"); err != nil {
+		t.Fatalf("close sub-agent: %v", err)
+	}
+
+	if cmd := m.reconcileFocusedAgent(); cmd != nil {
+		t.Fatal("with no extension host there is nothing to rebuild through")
+	}
+	if m.focusedAgent != "" {
+		t.Fatalf("focusedAgent = %q, want empty (root)", m.focusedAgent)
+	}
+	if got := m.live.getStatus("agent"); got != "" {
+		t.Fatalf("agent status = %q, want empty", got)
 	}
 }

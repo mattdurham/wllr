@@ -430,6 +430,14 @@ The bundled `statusline` extension renders this as its `agent:<id>` segment,
 showing `agent:main` for the root. It refreshes on the 1-second `tick` event, so
 the segment tracks a focus change within a second.
 
+The harness reconciles the other half of focus on the same tick. When the focused
+agent is gone it resets focus to the root, drops the `agent` key, and dispatches
+the reserved `agents:transcript_rebuild` callback with an empty ID so a
+transcript-owning extension re-renders the root conversation. An extension that
+owns the transcript should register that callback (the bundled `agents`
+extension does) rather than waiting for a `focus` command, which is only sent when
+the user picks a node from the tree.
+
 ---
 
 ### `notify`

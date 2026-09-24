@@ -1797,6 +1797,9 @@ func (m Model) updateExtension(msg tea.Msg) (Model, tea.Cmd, bool) {
 
 	case extensionTickMsg:
 		cmds := []tea.Cmd{tea.Tick(time.Second, func(time.Time) tea.Msg { return extensionTickMsg{} })}
+		if cmd := m.reconcileFocusedAgent(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		if m.extHost != nil {
 			extHost := m.extHost
 			cmds = append(cmds, func() tea.Msg {
@@ -1934,6 +1937,43 @@ func (m *Model) resetChatArea() {
 		{Op: sdk.UIOpSetRoot, Node: &sdk.UINode{ID: wasmChatRootID, Type: sdk.UINodeVStack}},
 	}})
 	m.chat.SetExternalContent("")
+}
+
+// reconcileFocusedAgent returns focus to the root when the focused sub-agent has
+// closed. The harness owns focus, and an agent self-closes after processing its
+// shutdown request without telling the extension that focused it. Focus and the
+// transcript are reconciled together here so they cannot disagree: the
+// statusline already reads as the root once the agent is gone (the status key is
+// dropped in GetStatusInfo), so leaving the transcript pinned to the closed
+// agent would show two different agents at once.
+//
+// Returns a command asking the transcript-owning extension to rebuild for the
+// root, or nil when focus needs no reconciliation: it is already the root, it
+// still names a live agent, or there is no pool to check against.
+func (m *Model) reconcileFocusedAgent() tea.Cmd {
+	if m.focusedAgent == "" || m.focusedAgent == m.mainAgentID || m.agentPool == nil {
+		return nil
+	}
+	if m.agentPool.Get(m.focusedAgent) != nil {
+		return nil
+	}
+
+	m.focusedAgent = ""
+	m.live.setStatus("agent", "")
+	m.resetChatArea()
+	root := m.mainAgentID
+	if root == "" {
+		root = "main"
+	}
+	m.pushNotification("Focused agent closed — transcript returned to " + root)
+	if m.extHost == nil {
+		return nil
+	}
+	extHost := m.extHost
+	return func() tea.Msg {
+		results, err := extHost.DispatchEvent(context.Background(), transcriptRebuildEvent(""))
+		return ExtensionEventResultMsg{Results: results, Err: err}
+	}
 }
 
 // chatWidth returns the content width available to the chat viewport.

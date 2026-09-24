@@ -910,3 +910,40 @@ already uses to label the transcript's owner. Covered by
 the latter was confirmed to fail when the pool check is removed. The statusline
 extension itself remains untested in CI: it is `//go:build wasip1` and its module
 is separate, so the contract is pinned on the harness side.
+
+## Focus reconciliation on agent close (2026-09-23)
+
+**Decision:** the fix for the mismatch flagged in #44 (split out as #46) lives in
+the harness, on the existing 1-second `extensionTickMsg`, rather than in the
+`agents` extension. `reconcileFocusedAgent` checks whether `focusedAgent` still
+names a live agent; if not, it resets focus to the root, clears the `agent`
+status key, empties the transcript area, and dispatches
+`agents:transcript_rebuild` with an empty ID.
+
+**Rationale:** the statusline was made self-correcting in #44 by validating the
+ID against the pool, which left the two halves of the UI able to disagree — the
+statusline read as the root while the transcript still showed the closed agent's
+conversation. The harness owns `focusedAgent`, and it is also the only component
+that can see pool removal, so reconciliation belongs there. The `agents`
+extension could not have fixed it: it is never told that a sub-agent closed. Its
+`focusedAgentID` copy is set only from `SetFocusedAgent`/`RebuildTranscriptFor`,
+and an agent self-closes from `finishTurn` after processing its shutdown request,
+notifying only its creator via an `AGENT_SHUTDOWN` system message — the extension
+registers no handler for agent messages at all. Polling on the tick also covers
+every close path uniformly (self-close, `shutdown_agent`, `shutdown_team`,
+extension-initiated `Close`) instead of patching each one.
+
+**Consequences:** focus loss is detected within one tick, matching the
+statusline's existing latency rather than adding a new class of delay. Two
+details follow from doing it on the tick:
+
+- Reconciliation must fire once per stale focus. Resetting `focusedAgent` to the
+  root is what makes the next tick a no-op; without it the transcript would be
+  re-cleared and the notification re-sent every second.
+- `resetChatArea` empties the transcript, so the rebuild dispatch is what makes
+  the root conversation visible. Without the dispatch the transcript would go
+  blank, the same failure mode documented for history restore.
+
+Covered by `TestFocusedAgentCloseReturnsTranscriptToRoot`, which was confirmed to
+fail when the tick wiring is removed, plus the direct `reconcileFocusedAgent`
+cases for live focus, root focus, idempotence, and a nil host.

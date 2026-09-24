@@ -220,6 +220,20 @@ func TestTranscriptRebuildEvent_Payload(t *testing.T) {
 	}
 }
 
+// An empty agent id means the root agent. Focus reconciliation rebuilds through
+// this empty-arg form after the focused sub-agent closes, so the extension can
+// tell it apart from a named-agent rebuild.
+func TestTranscriptRebuildEvent_EmptyArgMeansRoot(t *testing.T) {
+	evt := transcriptRebuildEvent("")
+	var p sdk.OnCommandPayload
+	if err := json.Unmarshal(evt.Payload, &p); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if p.Name != TranscriptRebuildCallback || len(p.Args) != 1 || p.Args[0] != "" {
+		t.Fatalf("payload = %+v, want name %q args [\"\"]", p, TranscriptRebuildCallback)
+	}
+}
+
 // Without an extension host there is nothing to rebuild through; the reset
 // must still happen and no cmd may be returned.
 func TestResetHistoryMsg_NilHost_ResetsOnly(t *testing.T) {

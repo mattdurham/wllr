@@ -583,6 +583,23 @@ extension turns into a transcript switch. Focus is also published as the `agent`
 status key so a statusline extension can display it; see the status contract in
 the `StatusUpdateMsg` routing section below.
 
+**Invariant:** focus and the transcript are reconciled together. An agent
+self-closes after processing its shutdown request without telling the extension
+that focused it, so on each `extensionTickMsg` the harness checks whether
+`focusedAgent` still names a live agent. When it does not, `reconcileFocusedAgent`
+resets focus to the root, clears the `agent` status key, empties the transcript
+area, and dispatches `agents:transcript_rebuild` with an empty ID so the root
+conversation is re-rendered. Reconciling both halves is the point: the statusline
+already reads as the root once the agent is gone (the key is dropped in
+`GetStatusInfo`), so leaving the transcript pinned to the closed agent would show
+two different agents at once. Reconciliation fires once per stale focus, and a
+live focus target is never disturbed — closing one sub-agent does not move focus
+off another. Covered by `TestFocusedAgentCloseReturnsTranscriptToRoot`,
+`TestReconcileFocusedAgent_DispatchesRootRebuild`,
+`TestReconcileFocusedAgent_KeepsLiveFocus`,
+`TestReconcileFocusedAgent_RootFocusIsNoOp`, and
+`TestReconcileFocusedAgent_Idempotent`.
+
 **Invariant:** sub-agent streamed text is dispatched as `EventToken` with the
 producing agent's ID (`dispatchSegmentedTokens`), while remaining absent from the
 main transcript. Each agent gets its own batcher so coalescing windows are
@@ -844,7 +861,10 @@ selection paths update live state first, then dispatch `EventModelChanged`.
   agent is no longer in the pool — an agent self-closes after processing its
   shutdown request without telling the extension that focused it, so reporting the
   stale ID would leave readers naming an agent that does not exist. Focus
-  therefore reads as the root once the focused sub-agent is gone.
+  therefore reads as the root once the focused sub-agent is gone. The same
+  removal also triggers focus reconciliation on the extension tick, which rebuilds
+  the transcript for the root, so the statusline and the transcript cannot
+disagree (see the agent-tree section).
 - `statusLineHeight()` returns 0 for empty areas, so layout is unaffected before the
   extension initialises.
 - `UIAreaStatus` areas are excluded from `renderScenes()` to prevent double-rendering.

@@ -248,6 +248,7 @@ a model, and typing/backspace filtering in the searchable picker.
 | `TestResetHistoryMsg_ResetsAndDispatchesRebuild` | history restore with a real (empty) extension host | transcript wiped; cmd dispatches `agents:transcript_rebuild` without error |
 | `TestResetHistoryMsg_NilHost_ResetsOnly` | history restore with nil extHost | transcript still wiped; nil cmd (no dispatch possible) |
 | `TestTranscriptRebuildEvent_Payload` | event construction | `EventOnCommand` named `agents:transcript_rebuild` with the agent id as the sole arg |
+| `TestTranscriptRebuildEvent_EmptyArgMeansRoot` | event construction with an empty id | the empty-arg root rebuild is distinguishable from a named-agent rebuild |
 | `TestViewNeverExceedsTerminalWidth` | Issue #45: composed view with a transcript box and a tool preview containing wide characters, across widths 20–200 | No view line is wider than the terminal, so the terminal never hard-wraps a box row into doubled borders or fused corners |
 
 ## Model Tiers (commands_test.go)
@@ -287,6 +288,12 @@ a model, and typing/backspace filtering in the searchable picker.
 | High | `TestAgentTreeSelectionDispatchesFocusCallback` | enter on a node | dispatches EventOnCommand with the agent ID |
 | High | `TestFocusPublishesAgentStatus` | focus a sub-agent, then the root | the `agent` status follows focus; empty means the root |
 | High | `TestFocusedAgentStatusClearsWhenAgentClosed` | close the focused sub-agent | the `agent` status is dropped, so readers fall back to the root |
+| High | `TestFocusedAgentCloseReturnsTranscriptToRoot` | close the focused sub-agent, then tick | focus resets to the root, the status clears, and the transcript is emptied for the rebuild |
+| High | `TestReconcileFocusedAgent_DispatchesRootRebuild` | focused agent gone, host present | dispatches the root rebuild and resets focus |
+| High | `TestReconcileFocusedAgent_KeepsLiveFocus` | focus names a live agent | no rebuild, no reset; the transcript is untouched |
+| Medium | `TestReconcileFocusedAgent_RootFocusIsNoOp` | focus is already the root | no command, no state change |
+| Medium | `TestReconcileFocusedAgent_Idempotent` | reconcile twice | fires once; the second call is a no-op |
+| Medium | `TestReconcileFocusedAgent_NilHostStillResetsFocus` | no extension host | focus and status still reset; no rebuild command |
 
 ## Esc and overlay precedence (tui_test.go)
 
