@@ -64,6 +64,17 @@ type Host struct {
 	// need the real launch directory must take it from the host.
 	cwd string
 
+	// configMu guards the config-isolation paths below.
+	configMu sync.RWMutex
+
+	// extensionsRoot is the directory holding per-extension folders, each with
+	// its own config.yaml. sharedConfigPath is the app-level config file that
+	// holds every group in one document. Together they let the host keep one
+	// extension's configuration out of reach of another. Set via
+	// SetConfigIsolation before extensions are loaded.
+	extensionsRoot   string
+	sharedConfigPath string
+
 	// Bus is the shared event stream. All DispatchEvent calls publish here
 	// in addition to dispatching to WASM extensions.
 	Bus *EventBus
@@ -213,6 +224,135 @@ func (h *Host) SetCapabilities(c CapabilityProvider) {
 	h.mu.Lock()
 	h.capabilities = c
 	h.mu.Unlock()
+}
+
+// SetConfigIsolation records where extension configuration lives so the host
+// can keep one extension's configuration out of reach of another.
+// extensionsRoot is the directory holding per-extension folders
+// (<root>/<name>/config.yaml); sharedConfigPath is the app-level config file
+// that holds every group in one document. Must be called before loading
+// extensions. When unset, config isolation is not enforced (tests, embedders).
+func (h *Host) SetConfigIsolation(extensionsRoot, sharedConfigPath string) {
+	h.configMu.Lock()
+	h.extensionsRoot = extensionsRoot
+	h.sharedConfigPath = sharedConfigPath
+	h.configMu.Unlock()
+}
+
+// configIsolation snapshots the configured config-isolation paths.
+func (h *Host) configIsolation() (root, shared string) {
+	h.configMu.RLock()
+	defer h.configMu.RUnlock()
+	return h.extensionsRoot, h.sharedConfigPath
+}
+
+// isSafeConfigGroup reports whether group can name an extension directory:
+// non-empty and free of path separators or traversal segments.
+func isSafeConfigGroup(group string) bool {
+	if group == "" || group == "." || group == ".." {
+		return false
+	}
+	return !strings.ContainsAny(group, `/\`)
+}
+
+// isLoadedExtension reports whether name identifies a currently loaded extension.
+func (h *Host) isLoadedExtension(name string) bool {
+	if name == "" {
+		return false
+	}
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for _, ext := range h.extensions {
+		if ext.name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// groupIsForeignExtensionConfig reports whether group names an extension other
+// than caller whose configuration must stay private. A group is foreign when it
+// is a loaded extension name or an installed extension directory under the
+// extensions root (installed but not currently loaded). Groups that name no
+// extension — such as the app-level "wllr" group — are not foreign and remain
+// readable.
+func (h *Host) groupIsForeignExtensionConfig(caller, group string) bool {
+	if group == "" || group == caller {
+		return false
+	}
+	if h.isLoadedExtension(group) {
+		return true
+	}
+	root, _ := h.configIsolation()
+	if root == "" || !isSafeConfigGroup(group) {
+		return false
+	}
+	info, err := os.Stat(filepath.Join(root, group))
+	return err == nil && info.IsDir()
+}
+
+// resolveConfigPath returns a cleaned absolute path for p, resolving symlinks
+// so a symlinked config file cannot slip past the access check. It resolves the
+// deepest existing ancestor and rejoins the remainder, so a path that does not
+// exist yet (e.g. a file about to be created) normalizes consistently with
+// existing paths — otherwise a symlinked temp root would compare unequal to its
+// own children.
+func resolveConfigPath(p string) string {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		abs = filepath.Clean(p)
+	}
+	dir := abs
+	var rest []string
+	for {
+		if resolved, rerr := filepath.EvalSymlinks(dir); rerr == nil {
+			if len(rest) == 0 {
+				return resolved
+			}
+			return filepath.Join(append([]string{resolved}, rest...)...)
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return abs
+		}
+		rest = append([]string{filepath.Base(dir)}, rest...)
+		dir = parent
+	}
+}
+
+// configAccessDenied reports whether the caller may not read or write path
+// because it is another extension's configuration or the shared app config.
+// An extension may always touch its own configuration file.
+func (h *Host) configAccessDenied(caller, path string) bool {
+	if path == "" {
+		return false
+	}
+	root, shared := h.configIsolation()
+	target := resolveConfigPath(path)
+	if shared != "" && target == resolveConfigPath(shared) {
+		return true
+	}
+	if root == "" {
+		return false
+	}
+	if caller != "" && target == resolveConfigPath(filepath.Join(root, caller, "config.yaml")) {
+		return false
+	}
+	rel, err := filepath.Rel(resolveConfigPath(root), target)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false
+	}
+	// Under the extensions root: only configuration files are protected, so an
+	// extension can still read another extension's WASM or data files.
+	return filepath.Base(target) == "config.yaml"
+}
+
+// extensionName returns the display name of a caller, or "" for a nil caller.
+func extensionName(ext *Extension) string {
+	if ext == nil {
+		return ""
+	}
+	return ext.name
 }
 
 // SetMCPBridge installs the MCP bridge.
@@ -912,6 +1052,11 @@ func (h *Host) handleReadFile(ext *Extension, req sdk.HostCallRequest) sdk.HostC
 	if params.Path == "" {
 		return sdk.HostCallResponse{Error: "read_file: path is required"}
 	}
+	if h.configAccessDenied(extensionName(ext), params.Path) {
+		return sdk.HostCallResponse{
+			Error: "read_file: permission denied: cannot access another extension's config",
+		}
+	}
 	content, err := h.capabilityProvider().ReadFile(params.Path)
 	if err != nil {
 		return sdk.HostCallResponse{Error: err.Error()}
@@ -937,6 +1082,11 @@ func (h *Host) handleWriteFile(ext *Extension, req sdk.HostCallRequest) sdk.Host
 	if params.Path == "" {
 		return sdk.HostCallResponse{Error: "write_file: path is required"}
 	}
+	if h.configAccessDenied(extensionName(ext), params.Path) {
+		return sdk.HostCallResponse{
+			Error: "write_file: permission denied: cannot modify another extension's config",
+		}
+	}
 	if err := h.capabilityProvider().WriteFile(params.Path, params.Content); err != nil {
 		return sdk.HostCallResponse{Error: err.Error()}
 	}
@@ -960,6 +1110,11 @@ func (h *Host) handleAppendFile(ext *Extension, req sdk.HostCallRequest) sdk.Hos
 	}
 	if params.Path == "" {
 		return sdk.HostCallResponse{Error: "append_file: path is required"}
+	}
+	if h.configAccessDenied(extensionName(ext), params.Path) {
+		return sdk.HostCallResponse{
+			Error: "append_file: permission denied: cannot modify another extension's config",
+		}
 	}
 	if err := h.capabilityProvider().AppendFile(params.Path, params.Content); err != nil {
 		return sdk.HostCallResponse{Error: err.Error()}
@@ -1041,14 +1196,21 @@ func (h *Host) handleConfigRead(ext *Extension, req sdk.HostCallRequest) sdk.Hos
 	if h.capabilityProvider() == nil {
 		return sdk.HostCallResponse{Error: "config_read: not supported by host"}
 	}
-	group := ""
-	if ext != nil {
-		group = ext.name
-	}
+	caller := extensionName(ext)
+	group := caller
 	var params struct {
 		Group string `json:"group"`
 	}
 	if len(req.Params) > 0 && json.Unmarshal(req.Params, &params) == nil && params.Group != "" {
+		// An extension may read its own group and app-level groups, but never
+		// another extension's configuration: config may carry that extension's
+		// own policy (notably the permissions deny lists), so reading it would
+		// let one extension learn and subvert another's rules.
+		if h.groupIsForeignExtensionConfig(caller, params.Group) {
+			return sdk.HostCallResponse{
+				Error: "config_read: permission denied: cannot read another extension's config",
+			}
+		}
 		group = params.Group
 	}
 	data, err := h.capabilityProvider().ConfigRead(group)
@@ -1652,7 +1814,7 @@ func (h *Host) findExtensionByModule(m api.Module) *Extension {
 // Load reads the WASM file at path, loads a companion manifest if present,
 // validates exports, calls _init, and registers the extension.
 // User extensions loaded via Load are not trusted; they receive only the
-// permissions declared in their companion <basename>.json manifest.
+// permissions declared in their extension.yaml manifest.
 func (h *Host) Load(ctx context.Context, path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -1773,44 +1935,48 @@ func (h *Host) loadExtension(
 	return nil
 }
 
-// loadManifest reads a companion manifest alongside the WASM file. The manifest
-// may be JSON (<basename>.json) or YAML (<basename>.yaml / <basename>.yml); the
-// JSON form is the canonical format, YAML is accepted for parity with build-time
-// metadata. Missing manifests return nil (zero permissions). Malformed manifests
-// are logged at warn level and return nil. Permission names are normalized
-// against the SDK constants: unknown names are dropped and reported via the
-// logger so failures are diagnosable.
+// loadManifest reads the companion manifest alongside the WASM file. The
+// canonical manifest is extension.yaml in the WASM's directory — one manifest
+// per extension folder, the file the build installs next to the binary.
+// <basename>.yaml and <basename>.yml are also accepted, and the legacy JSON
+// manifest (<basename>.json) is read last for older installs. Missing manifests
+// return nil (zero permissions). A malformed manifest is logged at warn level
+// and returns nil: the first-found manifest wins, so a broken extension.yaml
+// fails closed rather than silently falling through to a stale legacy file.
+// Permission names are normalized against the SDK constants: unknown names are
+// dropped and reported via the logger so failures are diagnosable.
 func loadManifest(wasmPath string, logger *slog.Logger) *sdk.ExtensionManifest {
+	dir := filepath.Dir(wasmPath)
 	base := strings.TrimSuffix(wasmPath, ".wasm")
-	manifestPath := base + ".json"
-	data, err := os.ReadFile(manifestPath)
-	format := "json"
-	if err != nil {
-		// Fall back to YAML manifests for parity with build metadata.
-		manifestPath = base + ".yaml"
-		data, err = os.ReadFile(manifestPath)
+	candidates := []struct {
+		path   string
+		format string
+	}{
+		{filepath.Join(dir, "extension.yaml"), "yaml"},
+		{base + ".yaml", "yaml"},
+		{base + ".yml", "yaml"},
+		{base + ".json", "json"},
+	}
+	for _, c := range candidates {
+		data, err := os.ReadFile(c.path)
 		if err != nil {
-			manifestPath = base + ".yml"
-			data, err = os.ReadFile(manifestPath)
-			if err != nil {
+			continue
+		}
+		var manifest sdk.ExtensionManifest
+		if c.format == "yaml" {
+			if yerr := yaml.Unmarshal(data, &manifest); yerr != nil {
+				logger.Warn("extension: manifest parse error", "path", c.path, "err", yerr)
 				return nil
 			}
-		}
-		format = "yaml"
-	}
-	var manifest sdk.ExtensionManifest
-	if format == "yaml" {
-		if yerr := yaml.Unmarshal(data, &manifest); yerr != nil {
-			logger.Warn("extension: manifest parse error", "path", manifestPath, "err", yerr)
+		} else if jerr := json.Unmarshal(data, &manifest); jerr != nil {
+			logger.Warn("extension: manifest parse error", "path", c.path, "err", jerr)
 			return nil
 		}
-	} else if jerr := json.Unmarshal(data, &manifest); jerr != nil {
-		logger.Warn("extension: manifest parse error", "path", manifestPath, "err", jerr)
-		return nil
+		// Normalize and validate permission names against SDK constants.
+		manifest.Permissions = normalizePermissions(manifest.Permissions, logger, c.path)
+		return &manifest
 	}
-	// Normalize and validate permission names against SDK constants.
-	manifest.Permissions = normalizePermissions(manifest.Permissions, logger, manifestPath)
-	return &manifest
+	return nil
 }
 
 // normalizePermissions drops unknown permission names and logs each one so

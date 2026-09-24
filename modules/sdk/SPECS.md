@@ -231,7 +231,7 @@ No payload fields — the event carries no structured data beyond the event type
 **Invariants:**
 
 1. All extensions — trusted built-ins and untrusted user extensions alike — are held to their declared permissions (least privilege). Trusted built-ins loaded via `Host.LoadBytes` declare permissions explicitly; the host caller (`cmd/main.go`) sources them from checked-in built-in permission manifests (`cmd/builtins/<name>.manifest.json`), which are the source of truth and independent of the compiled WASM bytes. `Host.HasPermission` returns true only for explicitly granted permissions. An extension granted `file_read`/`file_write` cannot call `exec`, `http_post`, `http_get`, or `mcp_spawn`. Built-in permission loading fails closed: a missing, unreadable, malformed, or unknown-permission manifest yields zero permissions (with a warning), never an implicit all-permissions grant.
-2. Untrusted extensions (loaded via `Host.Load`) declare permissions in a companion manifest. The canonical format is `<basename>.json` (`{"permissions":["file_read",...]}`); YAML (`<basename>.yaml`/`.yml`) is accepted for parity with build metadata. Permission names are normalized against the SDK constants — unknown names are dropped and reported at load time.
+2. Untrusted extensions (loaded via `Host.Load`) declare permissions in a companion manifest. The canonical format is `extension.yaml` in the extension's directory; `<basename>.yaml`/`.yml` are also accepted, and the legacy `<basename>.json` manifest is read last for older installs. The first-found manifest wins, so a malformed canonical manifest fails closed instead of falling through to a stale legacy file. Permission names are normalized against the SDK constants — unknown names are dropped and reported at load time.
 3. Undeclared permissions are denied; the `request_permission` host_call returns an error response.
 
 ### ExtensionManifest
@@ -372,7 +372,7 @@ wire contract** section above.
 | `MethodGetOS`             | `"get_os"`             | Returns the host operating system and architecture strings    |
 | `MethodHostInfo`          | `"host_info"`          | Returns host ground truth: `cwd`, `now` (RFC3339Nano), `os`, `arch` (no permission required) |
 | `MethodListSessions`      | `"list_sessions"`      | List session files under `base` — or only the directory given by optional `dir` — with host mtimes, newest first, up to `limit`, excluding `exclude` (requires PermFileRead) |
-| `MethodConfigRead`        | `"config_read"`        | Read the calling extension's config group, or an explicit `group`, from the shared config file |
+| `MethodConfigRead`        | `"config_read"`        | Read the calling extension's configuration, preferring `<extensions dir>/<name>/config.yaml`, or an explicit `group` from the shared config file |
 | `MethodModal`             | `"modal"`              | Display text in a modal overlay window                        |
 | `MethodSetSystemPrompt`   | `"set_system_prompt"`  | Replace the base system prompt on all agents                  |
 | `MethodAppendSystemPrompt`| `"append_system_prompt"`| Append text to the existing base system prompt               |

@@ -496,6 +496,76 @@ func TestHost_Load_YAMLManifestPermissions(t *testing.T) {
 	}
 }
 
+func TestHost_Load_ExtensionYAMLManifest_PreferredOverJSON(t *testing.T) {
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer func() { _ = h.Close(ctx) }()
+
+	path := writeWASM(t, "minimal.wasm", minimalWASM)
+	// Both manifests present: extension.yaml (canonical) must win over the
+	// legacy <basename>.json so a stale JSON copy cannot shadow the YAML.
+	if err := os.WriteFile(filepath.Join(filepath.Dir(path), "extension.yaml"), []byte("permissions:\n  - file_read\n"), 0o600); err != nil {
+		t.Fatalf("write extension.yaml: %v", err)
+	}
+	if err := os.WriteFile(strings.TrimSuffix(path, ".wasm")+".json", []byte(`{"permissions":["exec"]}`), 0o600); err != nil {
+		t.Fatalf("write legacy json manifest: %v", err)
+	}
+	if err := h.Load(ctx, path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	ext := h.extensions[0]
+	if !ext.HasPermission(sdk.PermFileRead) {
+		t.Error("expected file_read from extension.yaml")
+	}
+	if ext.HasPermission(sdk.PermExec) {
+		t.Error("legacy JSON manifest must be ignored when extension.yaml is present")
+	}
+}
+
+func TestHost_Load_ExtensionYAML_IgnoresMetadataKeys(t *testing.T) {
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer func() { _ = h.Close(ctx) }()
+
+	path := writeWASM(t, "minimal.wasm", minimalWASM)
+	// name/enabled/wasm are informational keys the host does not consume; the
+	// manifest must still parse and grant its permissions.
+	yaml := "name: minimal\nenabled: true\nwasm: minimal.wasm\npermissions:\n  - ui\n"
+	if err := os.WriteFile(filepath.Join(filepath.Dir(path), "extension.yaml"), []byte(yaml), 0o600); err != nil {
+		t.Fatalf("write extension.yaml: %v", err)
+	}
+	if err := h.Load(ctx, path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	ext := h.extensions[0]
+	if !ext.HasPermission(sdk.PermUI) {
+		t.Error("expected ui permission from extension.yaml with metadata keys present")
+	}
+}
+
+func TestHost_Load_MalformedExtensionYAML_FailsClosed(t *testing.T) {
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer func() { _ = h.Close(ctx) }()
+
+	path := writeWASM(t, "minimal.wasm", minimalWASM)
+	// A malformed canonical manifest must fail closed rather than fall through
+	// to a stale legacy JSON manifest beside it.
+	if err := os.WriteFile(filepath.Join(filepath.Dir(path), "extension.yaml"), []byte("permissions: [\n"), 0o600); err != nil {
+		t.Fatalf("write extension.yaml: %v", err)
+	}
+	if err := os.WriteFile(strings.TrimSuffix(path, ".wasm")+".json", []byte(`{"permissions":["exec"]}`), 0o600); err != nil {
+		t.Fatalf("write legacy json manifest: %v", err)
+	}
+	if err := h.Load(ctx, path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	ext := h.extensions[0]
+	if ext.HasPermission(sdk.PermExec) {
+		t.Error("malformed extension.yaml must fail closed, not fall through to legacy JSON")
+	}
+}
+
 func TestHost_Load_MalformedManifest_SilentlyDenied(t *testing.T) {
 	ctx := context.Background()
 	h := NewHost(nil)

@@ -86,8 +86,12 @@ and `log.md` use their reserved OKF structures.
 
 - Main config path: `WLLR_CONFIG` if set, otherwise
   `~/.config/wllr/config.yaml`.
-- Config format: flat YAML object keyed by group name. The main app reads the
-  `wllr` group; extensions read their own group names.
+- Config format: YAML. The shared file is a flat object keyed by group name; the
+  main app reads the `wllr` group; extensions read their own group names.
+- Extension config: each extension's settings live in its own folder at
+  `~/.wllr/extensions/<name>/config.yaml`, whose contents are that extension's
+  config. The shared file's `<name>` group is the fallback when the file is
+  absent.
 - Installed optional extensions: `~/.wllr/extensions/<name>/`.
 - Runtime logs: `~/.wllr/logs/`.
 - Session history: `~/.wllr/sessions/`.

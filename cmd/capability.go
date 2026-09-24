@@ -75,7 +75,56 @@ func (p *osCapabilityProvider) HTTPGet(url string, headers map[string]string) (i
 }
 
 func (p *osCapabilityProvider) ConfigRead(group string) (json.RawMessage, error) {
-	return loadConfigGroup(group)
+	raw, err := loadConfigGroup(group)
+	if err != nil {
+		return nil, err
+	}
+	if group == wllrConfigGroup {
+		raw = redactWllrAPIKeys(raw)
+	}
+	return raw, nil
+}
+
+// redactWllrAPIKeys removes local model API keys from the app-level "wllr"
+// group before an extension sees it. The group is readable by extensions (the
+// bundled context extension reads it for prompt_override and prompt_files), and
+// it carries local_models[].api_key values no extension needs, so the keys are
+// stripped rather than exposed through config_read. Unmarshalable data — which
+// json.Marshal should never produce here — fails closed to an empty object
+// rather than leaking the raw group.
+func redactWllrAPIKeys(raw json.RawMessage) json.RawMessage {
+	var group map[string]json.RawMessage
+	if json.Unmarshal(raw, &group) != nil {
+		return raw
+	}
+	modelsRaw, ok := group["local_models"]
+	if !ok {
+		return raw
+	}
+	var models []map[string]json.RawMessage
+	if json.Unmarshal(modelsRaw, &models) != nil {
+		return raw
+	}
+	stripped := false
+	for _, m := range models {
+		if _, ok := m["api_key"]; ok {
+			delete(m, "api_key")
+			stripped = true
+		}
+	}
+	if !stripped {
+		return raw
+	}
+	encoded, err := json.Marshal(models)
+	if err != nil {
+		return json.RawMessage("{}")
+	}
+	group["local_models"] = encoded
+	out, err := json.Marshal(group)
+	if err != nil {
+		return json.RawMessage("{}")
+	}
+	return out
 }
 
 func (p *osCapabilityProvider) FormatMarkdown(markdown string) string {

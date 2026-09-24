@@ -101,7 +101,7 @@ func LoadConfig() (*Config, error) {
 	}
 
 	// Provider precedence: env WLLR_PROVIDER > persisted selection
-	// (config.json wllr.provider) > built-in default.
+	// (config.yaml wllr.provider) > built-in default.
 	if cfg.Provider == "" {
 		cfg.Provider = savedProvider()
 	}
@@ -110,7 +110,7 @@ func LoadConfig() (*Config, error) {
 		cfg.Provider = providerAnthropic
 	}
 
-	// Model precedence: env WLLR_MODEL > persisted selection (config.json wllr.model)
+	// Model precedence: env WLLR_MODEL > persisted selection (config.yaml wllr.model)
 	// > provider-specific built-in default. The persisted value is written by the
 	// /model picker and setup wizard.
 	if cfg.Model == "" {

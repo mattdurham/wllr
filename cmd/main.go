@@ -176,6 +176,17 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 	// Wire OS capabilities via the CapabilityProvider interface.
 	h.SetCapabilities(newOSCapabilityProvider(pool))
 
+	// One-time migration: extension groups stored in the app config file move
+	// to each extension's own config.yaml, so extension config is never read
+	// from the app config file.
+	migrateLegacyExtensionConfigs()
+
+	// Keep each extension's configuration private: config_read is scoped to the
+	// caller, and the file capabilities refuse another extension's config.yaml
+	// (or the app config) so one extension cannot read or rewrite another's
+	// rules — notably the permissions deny lists.
+	h.SetConfigIsolation(wllrExtensionsDir(), configPath())
+
 	// Create the harness model BEFORE loading extensions so that
 	// OnRegisterCommand (wired in harness.New) is set when _init and
 	// session_start handlers call register_command.
@@ -937,7 +948,7 @@ func registerAgentStatusTool(h *extension.Host, pool *agent.AgentPool) {
 
 // loadBuiltinExtensions loads the trusted built-in WASM extensions with
 // least-privilege permissions sourced from the checked-in permission manifests
-// in cmd/builtins (<name>.manifest.json). The manifest is the source of truth,
+// in cmd/builtins (<name>.manifest.yaml). The manifest is the source of truth,
 // independent of the compiled WASM bytes: if the WASM is ever compromised to
 // call exec, http_post, http_get, or mcp_spawn, the host still denies it because
 // the declared manifest grants only what each built-in legitimately needs.
@@ -976,7 +987,7 @@ func loadBuiltinExtensions(ctx context.Context, h *extension.Host) {
 // permissions and is independent of the compiled WASM bytes. Fails closed:
 // a missing or malformed manifest returns nil (zero permissions).
 func builtinManifestPermissions(name string) []sdk.Permission {
-	data, err := builtinFS.ReadFile("builtins/" + name + ".manifest.json")
+	data, err := builtinFS.ReadFile("builtins/" + name + ".manifest.yaml")
 	if err != nil {
 		slog.Warn(
 			"wllr: built-in permission manifest missing; granting zero permissions",
@@ -988,15 +999,15 @@ func builtinManifestPermissions(name string) []sdk.Permission {
 		return nil
 	}
 	var manifest struct {
-		Permissions []sdk.Permission `json:"permissions"`
+		Permissions []sdk.Permission `yaml:"permissions"`
 	}
-	if jerr := json.Unmarshal(data, &manifest); jerr != nil {
+	if uerr := yaml.Unmarshal(data, &manifest); uerr != nil {
 		slog.Warn(
 			"wllr: built-in permission manifest malformed; granting zero permissions",
 			"extension",
 			name,
 			"error",
-			jerr,
+			uerr,
 		)
 		return nil
 	}
@@ -1046,10 +1057,70 @@ func configPath() string {
 	return filepath.Join(home, ".config", "wllr", "config.yaml")
 }
 
-// loadConfigGroup reads the config file and returns the JSON blob for the given group.
-// Returns {} if the group does not exist. The config file is a flat YAML object
-// keyed by group name (extension name or "wllr" for the main app).
+// extensionConfigPath returns the per-extension config file for an extension
+// name, or "" when the name cannot be a directory (empty, or containing path
+// separators or traversal segments). The file is
+// <wllr home>/extensions/<name>/config.yaml, so an extension's configuration
+// lives beside its WASM and no two extensions can collide in a shared file.
+func extensionConfigPath(name string) string {
+	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+		return ""
+	}
+	return filepath.Join(wllrExtensionsDir(), name, "config.yaml")
+}
+
+// yamlConfigToJSON parses a YAML config document and re-encodes it as JSON.
+// Every caller of loadConfigGroup json.Unmarshals the result, so config always
+// crosses that boundary as JSON even though the on-disk format is YAML.
+func yamlConfigToJSON(data []byte, origin string) (json.RawMessage, error) {
+	var value any
+	if err := yaml.Unmarshal(data, &value); err != nil {
+		return nil, fmt.Errorf("config %s: parse error: %w", origin, err)
+	}
+	if value == nil {
+		return json.RawMessage("{}"), nil
+	}
+	out, err := json.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("config %s: marshal error: %w", origin, err)
+	}
+	return json.RawMessage(out), nil
+}
+
+// loadConfigGroup returns the config for a group as JSON.
+//
+// The app-level "wllr" group lives in the app config file (configPath()), a
+// flat YAML document whose `wllr` key holds the group; that file is the wllr
+// group's own home, not a shared pool. Every other group is an extension's
+// config and lives at <wllr home>/extensions/<name>/config.yaml, where the
+// file's contents ARE the group's config. Extension groups are never read from
+// the app config file: an extension's settings live beside its WASM, so the app
+// config cannot hold a shadowed second copy of an extension's rules.
+// migrateLegacyExtensionConfigs moves legacy keys out of the app config at
+// startup.
+//
+// Returns {} when the group's file (or the app group's key) is absent.
 func loadConfigGroup(group string) (json.RawMessage, error) {
+	if group == wllrConfigGroup {
+		return loadWllrGroup()
+	}
+	path := extensionConfigPath(group)
+	if path == "" {
+		return json.RawMessage("{}"), nil
+	}
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return json.RawMessage("{}"), nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return yamlConfigToJSON(data, path)
+}
+
+// loadWllrGroup returns the app-level "wllr" group from the app config file,
+// which is a flat YAML document keyed by group name.
+func loadWllrGroup() (json.RawMessage, error) {
 	data, err := os.ReadFile(configPath())
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -1057,28 +1128,101 @@ func loadConfigGroup(group string) (json.RawMessage, error) {
 		}
 		return nil, err
 	}
-
-	// Parse YAML into map
 	var all map[string]yaml.Node
 	if err := yaml.Unmarshal(data, &all); err != nil {
 		return nil, fmt.Errorf("config: parse error: %w", err)
 	}
-	if v, ok := all[group]; ok {
-		// Decode the YAML node and re-encode as JSON. Marshaling the node back
-		// to YAML would emit YAML for a YAML source file, but every caller
-		// json.Unmarshals this result, so the group must always be JSON here.
-		var value any
-		if err := v.Decode(&value); err != nil {
-			return nil, fmt.Errorf("config: decode error: %w", err)
-		}
-		out, err := json.Marshal(value)
-		if err != nil {
-			return nil, fmt.Errorf("config: marshal error: %w", err)
-		}
-		return json.RawMessage(out), nil
+	v, ok := all[wllrConfigGroup]
+	if !ok {
+		return json.RawMessage("{}"), nil
 	}
+	var value any
+	if err := v.Decode(&value); err != nil {
+		return nil, fmt.Errorf("config: decode error: %w", err)
+	}
+	out, err := json.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("config: marshal error: %w", err)
+	}
+	return json.RawMessage(out), nil
+}
 
-	return json.RawMessage("{}"), nil
+// migrateLegacyExtensionConfigs moves extension groups out of the app config
+// file into each extension's own config.yaml. Older installs stored every
+// group — extension settings included — in one flat file, which loadConfigGroup
+// used to fall back to. The fallback is gone, so at startup each legacy
+// non-wllr key is moved (never copied) to
+// <wllr home>/extensions/<name>/config.yaml when that file does not already
+// exist, and dropped when it does (the per-extension file is authoritative).
+// The "wllr" group and any key that cannot name an extension stay in place, so
+// unknown data is never discarded. Best-effort: a failed move keeps the legacy
+// key and logs a warning; once no extension keys remain the migration is a
+// no-op that leaves the file untouched.
+func migrateLegacyExtensionConfigs() {
+	path := configPath()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return // no app config, nothing to migrate
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		fmt.Fprintf(os.Stderr, "wllr: config migration: %s: parse error: %v\n", path, err)
+		return
+	}
+	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return
+	}
+	pairs := doc.Content[0].Content
+	remaining := make([]*yaml.Node, 0, len(pairs))
+	changed := false
+	for i := 0; i+1 < len(pairs); i += 2 {
+		keyNode, valueNode := pairs[i], pairs[i+1]
+		target := extensionConfigPath(keyNode.Value)
+		if target == "" || keyNode.Value == wllrConfigGroup {
+			remaining = append(remaining, keyNode, valueNode)
+			continue
+		}
+		_, statErr := os.Stat(target)
+		switch {
+		case os.IsNotExist(statErr) && valueNode.Tag == "!!null":
+			changed = true // empty legacy value, nothing to carry over
+		case os.IsNotExist(statErr):
+			out, mErr := yaml.Marshal(valueNode)
+			if mErr == nil {
+				mErr = writeExtensionConfigFile(target, out)
+			}
+			if mErr != nil {
+				fmt.Fprintf(os.Stderr, "wllr: config migration: %s: %v\n", target, mErr)
+				remaining = append(remaining, keyNode, valueNode)
+				continue
+			}
+			changed = true // moved; drop the legacy key
+		case statErr != nil:
+			remaining = append(remaining, keyNode, valueNode) // cannot tell; keep the key
+		default:
+			changed = true // the per-extension file exists and wins; drop the stale key
+		}
+	}
+	if !changed {
+		return
+	}
+	doc.Content[0].Content = remaining
+	out, err := yaml.Marshal(&doc)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "wllr: config migration: %s: %v\n", path, err)
+		return
+	}
+	if err := replaceConfigFile(path, out); err != nil {
+		fmt.Fprintf(os.Stderr, "wllr: config migration: %s: %v\n", path, err)
+	}
+}
+
+// writeExtensionConfigFile creates or replaces an extension's config.yaml.
+func writeExtensionConfigFile(path string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0o600)
 }
 
 // httpPost performs an HTTP POST request and returns the status code and body.

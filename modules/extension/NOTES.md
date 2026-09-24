@@ -100,7 +100,7 @@ authoritative event cursor API.
 
 *Added: 2026-05-06*
 
-**Decision:** Extensions are classified as either trusted (built-in) or untrusted (user-supplied). Trusted extensions bypass all permission checks. Untrusted extensions declare required permissions in a companion `<basename>.json` manifest.
+**Decision:** Extensions are classified as either trusted (built-in) or untrusted (user-supplied). Trusted extensions bypass all permission checks. Untrusted extensions declare required permissions in a companion `extension.yaml` manifest (legacy `<basename>.json` manifests are still read last for older installs).
 
 **Rationale:** Built-in extensions are compiled into the binary and vetted at development time — shipping them with a manifest and requiring permission review would add friction without security benefit. User extensions, by contrast, are arbitrary code loaded from disk at runtime; restricting them to declared permissions limits the blast radius of a malicious or buggy extension. Separating the two classes with a `trusted bool` flag is the simplest design that achieves this split.
 
@@ -384,3 +384,29 @@ implementations.
 **Rationale:** `show_picker` only covers selection from a fixed list; several planned flows (e.g. entering a free-form value such as a local endpoint URL or model name) need arbitrary text input, not a choice among known options. Rather than growing `show_picker`'s params with a "freeform" mode (which would blur its single responsibility and complicate the picker overlay's rendering/key-handling), a second, narrowly-scoped primitive mirrors `show_picker`'s existing plumbing (host_call constant, params struct, `UIBridge` method, harness message, overlay widget) so extensions get a single-string result via the same `EventOnCommand` delivery shape they already handle for pickers.
 
 **Consequence:** All `UIBridge` implementations (test stubs in `host_test.go`, `interfaces_test.go`, `mcp/extension_test.go`, `wasmchat_test.go`, and the `earlyUIBridge`/`harnessUIBridge` pair) must implement `ShowTextInput`. The harness renders the overlay with a new `TextInputView` widget backed by `charm.land/bubbles/v2/textinput`, reusing `PickerView`'s border/title/label styles for visual consistency.
+
+## 32. Config isolation between extensions
+
+**Decision:** keep one extension's configuration out of reach of another by
+enforcing isolation in the host at the two seams config can be reached through —
+`config_read` and the file capabilities — rather than relying on convention.
+
+**Context:** `config_read` defaulted the group to the caller but let an explicit
+`group` param override it with no check, so any extension could read any group,
+including another extension's config (`permissions`, whose config carries the
+deny lists). Separately, the file capabilities (`read_file`/`write_file`/
+`append_file`) accepted arbitrary paths gated only by a permission, so an
+extension holding `file_write` could overwrite another extension's `config.yaml`
+or the shared config.
+
+**Rationale:** the config API was never the only way to reach a config file, so
+guarding `config_read` alone would have been defeated by `write_file`. Both seams
+share one predicate, so the guarantee holds whichever capability is used. The
+caller is taken from the originating WASM module, not a param, so it cannot be
+spoofed. Groups that name no extension stay readable, preserving the `context`
+extension's read of the app-level `wllr` group. Paths are resolved before
+comparison so symlinks and `..` cannot bypass the check.
+
+**Consequence:** `SetConfigIsolation` must be called at startup (`cmd/main.go`
+does, before loading extensions) or the checks are inert. Any future
+`config_write` host call must apply the same caller scoping.

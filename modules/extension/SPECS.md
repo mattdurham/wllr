@@ -66,7 +66,7 @@ NewHost
 
 Host.Load(path)
   ├─ os.ReadFile
-  ├─ loadManifestPermissions              (reads <basename>.json / .yaml / .yml for permissions)
+  ├─ loadManifestPermissions              (reads extension.yaml, or <basename>.yaml/.yml/.json for older installs)
   ├─ runtime.InstantiateWithConfig        (WithStartFunctions() — no auto _start/_main)
   │   ├─ WithFSConfig: WithDirMount("/", "/")   (full filesystem read access)
   │   └─ WithEnv: all host env vars passed through
@@ -217,7 +217,7 @@ The full set of dispatched methods is:
 | `MethodHTTPPost`              | `handleHTTPPost`                                 |
 | `MethodHTTPGet`               | `handleHTTPGet` (requires `network_read`)        |
 | `MethodFormatMarkdown`        | `handleFormatMarkdown` (requires `ui`)           |
-| `MethodConfigRead`            | `handleConfigRead` (default caller group; optional `{"group":"wllr"}` override) |
+| `MethodConfigRead`            | `handleConfigRead` (caller's own group; app-level `group` allowed, another extension's group denied) |
 | `MethodAgentSpawn`            | `handleAgentSpawn`                               |
 | `MethodAgentClose`            | `handleAgentClose`                               |
 | `MethodAgentSendMessage`      | `handleAgentSendMessage`                         |
@@ -421,7 +421,7 @@ Each `Extension` carries:
 
 **Invariant:** All extensions — trusted built-ins and untrusted user extensions — must have a permission explicitly granted to pass `HasPermission`. An extension granted only `file_read`/`file_write` can never call `exec`, `http_post`, `http_get`, `mcp_spawn`, or drive the UI.
 
-`Host.Load` loads the companion manifest (`<basename>.json`, or `.yaml`/`.yml` for parity with build metadata) alongside the WASM file and populates `ext.permissions` from `ExtensionManifest.Permissions`. Missing manifests result in zero permissions; malformed manifests are logged at warn level and result in zero permissions. Permission names are normalized against the SDK constants: unknown names are dropped and reported via the logger so failures are diagnosable.
+`Host.Load` loads the companion manifest (`extension.yaml` in the extension's directory; `<basename>.yaml`/`.yml` are also accepted, and the legacy `<basename>.json` manifest is read last for older installs) alongside the WASM file and populates `ext.permissions` from `ExtensionManifest.Permissions`. The first-found manifest wins: a malformed canonical manifest fails closed (zero permissions, warn-logged) rather than falling through to a stale legacy file. Missing manifests result in zero permissions; malformed manifests are logged at warn level and result in zero permissions. Permission names are normalized against the SDK constants: unknown names are dropped and reported via the logger so failures are diagnosable.
 
 `Host.LoadBytes(ctx, name, data, trusted, perms...)` loads embedded built-in WASM from in-memory bytes without an on-disk companion manifest; the `perms` variadic is the complete least-privilege permission grant. The caller (`cmd/main.go`) sources these `perms` from the checked-in built-in permission manifests (`cmd/builtins/<name>.manifest.json`) — the manifest is the source of truth, independent of the compiled WASM bytes. Loading fails closed: a missing, unreadable, malformed, or unknown-permission manifest yields zero permissions (with a warning), never an implicit all-permissions grant. This mirrors the untrusted `Host.Load` path so built-ins and user extensions are held to the same manifest-anchored contract.
 
@@ -526,3 +526,37 @@ Files that trigger this requirement when modified:
 - `extension/host.go` — `host_call` dispatch map and method implementations
 - `sdk/types.go` — event types, payload structs, permission constants
 - Any file that adds or removes constants under `sdk.Method*` or `sdk.Event*`
+
+## 20. Config Isolation (config_read and the file capabilities)
+
+An extension's configuration is private to that extension. The host enforces
+this at two seams, because config is reachable through both.
+
+**`config_read` is caller-scoped.** The group defaults to the calling
+extension's name. An explicit `group` is honored only when it does not name
+another extension: `groupIsForeignExtensionConfig` rejects a group that is a
+loaded extension or an installed extension directory under the extensions root,
+and the call fails with `config_read: permission denied: cannot read another
+extension's config`. Groups that name no extension (such as the app-level `wllr`
+group, read by the bundled `context` extension) stay readable. Because the
+app-level group carries `local_models[].api_key`, the provider strips those
+keys from the `wllr` response: extensions reading app config get every value
+they need except provider credentials. The caller is
+identified by the WASM module a call originates from, so an extension cannot
+claim another's name.
+
+**The file capabilities are path-guarded.** `read_file`, `write_file`, and
+`append_file` reject a path that resolves to another extension's `config.yaml`
+or to the shared app config, so they cannot be used to reach around
+`config_read`. An extension keeps full access to its own `config.yaml` and to
+every non-config path. Paths are resolved (symlinks and traversal segments
+included) before comparison, so neither can smuggle a foreign config path past
+the check.
+
+Isolation is configured once at startup via
+`SetConfigIsolation(extensionsRoot, sharedConfigPath)`. With nothing configured
+the checks are inert, so embedders and tests are unaffected.
+
+There is no `config_write` host call — config is read-only to extensions. That is
+precisely why the file guard matters: otherwise `write_file` would be the
+de-facto config writer, letting one extension rewrite another's rules.

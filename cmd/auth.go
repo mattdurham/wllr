@@ -54,7 +54,7 @@ func (c authCredential) isExpired() bool {
 }
 
 // authPath returns the path to the auth file. It honors WLLR_AUTH for tests and
-// otherwise sits next to config.json.
+// otherwise sits next to config.yaml.
 func authPath() string {
 	if p := os.Getenv("WLLR_AUTH"); p != "" {
 		return p

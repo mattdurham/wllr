@@ -16,7 +16,9 @@ func wllrExtensionsDir() string {
 }
 
 // loadExtensionsFromSubdirs scans dir for subdirectories, loading the first
-// *.wasm file found in each subdirectory (alongside an optional <name>.json manifest).
+// *.wasm file found in each subdirectory (alongside its extension.yaml manifest).
+// A missing dir loads nothing and is not an error: a fresh install with no
+// extensions is a fine default state.
 func loadExtensionsFromSubdirs(ctx context.Context, h *extension.Host, dir string) []string {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

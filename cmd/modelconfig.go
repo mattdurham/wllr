@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -33,10 +34,10 @@ func readConfigGroups() map[string]json.RawMessage {
 	return all
 }
 
-// The persisted model selection lives in the shared config file
-// (~/.config/wllr/config.json) under the "wllr" group as {"model": "<id>"}.
-// This is the same flat, group-keyed JSON that loadConfigGroup reads for
-// extensions; here we read/write the "wllr" group's model field directly.
+// The persisted model selection lives in the app config file
+// (~/.config/wllr/config.yaml) under the "wllr" group as {"model": "<id>"}.
+// loadConfigGroup routes the "wllr" group to this file; every other group is an
+// extension's config, which lives in its own folder instead.
 
 // wllrConfigGroup is the config group holding core wllr settings.
 const wllrConfigGroup = "wllr"
@@ -157,18 +158,30 @@ func removeWllrField(field string) error {
 	return writeWllrConfig(all)
 }
 
-// writeWllrConfig serializes the config object and atomically replaces the
-// config file. Temp file + rename keeps readers from observing a partial file.
-// The output is JSON, which is a YAML subset, so the file stays parseable as
-// the YAML the config format documents while matching the bytes existing
-// tooling already writes.
+// writeWllrConfig serializes the config object as YAML and atomically replaces
+// the app config file. YAML is the documented config format and the format the
+// loaders expect, so the file is written as YAML rather than as JSON (a YAML
+// subset) that only happened to parse.
 func writeWllrConfig(all map[string]json.RawMessage) error {
-	path := configPath()
-	out, err := json.MarshalIndent(all, "", "  ")
+	nodes := make(map[string]any, len(all))
+	for group, raw := range all {
+		var value any
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return fmt.Errorf("config: encode group %q: %w", group, err)
+		}
+		nodes[group] = value
+	}
+	out, err := yaml.Marshal(nodes)
 	if err != nil {
 		return err
 	}
+	return replaceConfigFile(configPath(), out)
+}
 
+// replaceConfigFile atomically replaces path with data: the write goes to a
+// temp file in the same directory and is renamed over the target, so readers
+// never observe a partial file.
+func replaceConfigFile(path string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -177,14 +190,14 @@ func writeWllrConfig(all map[string]json.RawMessage) error {
 		return err
 	}
 	tmp := f.Name()
-	if _, err := f.Write(out); err != nil {
+	if _, err := f.Write(data); err != nil {
 		_ = f.Close()
-		_ = os.Remove(tmp) //nolint:gosec // tmp is returned by os.CreateTemp in the config directory.
+		_ = os.Remove(tmp) //nolint:gosec // tmp is returned by os.CreateTemp in the target directory.
 		return err
 	}
 	if err := f.Close(); err != nil {
-		_ = os.Remove(tmp) //nolint:gosec // tmp is returned by os.CreateTemp in the config directory.
+		_ = os.Remove(tmp) //nolint:gosec // tmp is returned by os.CreateTemp in the target directory.
 		return err
 	}
-	return os.Rename(tmp, path) //nolint:gosec // tmp is returned by os.CreateTemp in the config directory.
+	return os.Rename(tmp, path) //nolint:gosec // tmp is returned by os.CreateTemp in the target directory.
 }

@@ -36,7 +36,7 @@ func TestLoadConfig_ExtensionsDir(t *testing.T) {
 }
 
 func TestLoadConfig_ModelDefault(t *testing.T) {
-	withConfigPath(t) // isolate from any real ~/.config/wllr/config.json (persisted model)
+	withConfigPath(t) // isolate from any real ~/.config/wllr/config.yaml (persisted model)
 	t.Setenv("ANTHROPIC_API_KEY", "key")
 	t.Setenv("WLLR_MODEL", "")
 

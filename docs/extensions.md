@@ -897,6 +897,82 @@ the selection. Without `split`, the classic single-pane list is shown and
 
 ---
 
+## Configuration
+
+An extension's settings live in its **own folder**, beside its WASM:
+
+```
+~/.wllr/extensions/<name>/
+  <name>.wasm
+  extension.yaml         # permission grant + priority
+  config.yaml            # extension settings (this section)
+```
+
+The contents of `config.yaml` **are** the extension's config — no group key wraps
+them. Read it with the `config_read` host call:
+
+```json
+{"method": "config_read", "params": {}}
+```
+
+No params are needed: the host resolves the *calling* extension's own folder.
+Pass an explicit `group` to read a named group instead (the bundled `context`
+extension reads the app-level `wllr` group this way):
+
+```json
+{"method": "config_read", "params": {"group": "wllr"}}
+```
+
+Resolution order:
+
+1. `<extensions dir>/<name>/config.yaml` — the extension's own file, whose
+   contents are the config. There is no fallback: extension settings are never
+   read from the app config file. `migrateLegacyExtensionConfigs` moves legacy
+   `<name>` keys out of the app config at startup, so an old shared-config copy
+   is carried into the per-extension file once and then ignored.
+
+The format is **YAML**. An absent file yields `{}`, so a missing config is an
+empty object rather than an error. A malformed extension config is an error
+rather than a silent empty object, so a typo is visible.
+
+### Isolation
+
+Configuration is private to the extension that owns it, and the host enforces
+this rather than leaving it to convention:
+
+- **`config_read` is caller-scoped.** An extension may read its own group and
+  app-level groups; a `group` naming *another extension* is denied. The caller is
+  identified by the WASM module the call comes from, so it cannot claim another
+  extension's name. The app-level `wllr` group is readable, but the provider
+  strips `local_models[].api_key` from it — no extension needs provider
+  credentials.
+- **The file capabilities are path-guarded.** `read_file`, `write_file`, and
+  `append_file` refuse to touch another extension's `config.yaml`, or the shared
+  config file, so they cannot be used to reach around `config_read` and rewrite
+  it. An extension keeps access to its own config file and every non-config path.
+- **Symlinks and traversal are resolved first**, so a `..` segment or a symlink
+  cannot smuggle a foreign config path past the check.
+
+This matters most for the `permissions` extension: its config carries the command
+and environment-variable deny lists, so one extension reading — or rewriting —
+that file would let it learn and subvert the sandbox.
+
+Example `~/.wllr/extensions/permissions/config.yaml`:
+
+```yaml
+exec:
+  deny_commands:
+    - sed
+  deny_env_vars:
+    - AWS_ACCESS_KEY_ID
+```
+
+Extensions **read** config only — there is no `config_write`. Hand-edit the file
+and restart, or use `/reload`, which re-runs each extension's `_init` and so
+re-reads its configuration.
+
+---
+
 ## Lifecycle Events
 
 Events are dispatched to subscribed extensions via `_on_event`. The `sdk.Event`

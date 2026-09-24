@@ -1,3 +1,2 @@
-name: otel-traces
-enabled: true
-wasm: otel-traces.wasm
+permissions:
+    - network_write

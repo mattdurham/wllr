@@ -143,7 +143,7 @@ provider's available models (the active one is marked). Selecting a model:
 
 - rebuilds the main agent's language model,
 - updates the context window,
-- **persists** the choice to `~/.config/wllr/config.json` (`wllr.model`), so it
+- **persists** the choice to `~/.config/wllr/config.yaml` (`wllr.model`), so it
   is the default next launch.
 
 ```
@@ -152,7 +152,7 @@ provider's available models (the active one is marked). Selecting a model:
 ```
 
 **Model precedence at startup:** `WLLR_MODEL` (env) > persisted selection
-(`config.json`) > built-in default (`claude-sonnet-4-6`).
+(`config.yaml`) > built-in default (`claude-sonnet-4-6`).
 
 ### Model tiers
 
@@ -263,7 +263,7 @@ Levels are provider-agnostic and map to each provider's native mechanism:
 | `xhigh`   | 65536 | xhigh | 65536 |
 
 The selection applies to the running main agent immediately and is **persisted**
-to `config.json` (`wllr.thinking`), so it survives restarts. Startup precedence:
+to `config.yaml` (`wllr.thinking`), so it survives restarts. Startup precedence:
 persisted level, else `off`.
 
 The model list is a curated catalog (`cmd/modelcatalog.go`) covering Anthropic,
@@ -281,15 +281,14 @@ it. The API's `context_length` is used for compaction.
 ### Prompt configuration
 
 The bundled prompt WASM reads optional prompt settings from the `wllr` group in
-`~/.config/wllr/config.json`:
+`~/.config/wllr/config.yaml`:
 
-```json
-{
-  "wllr": {
-    "prompt_override": "Plain text replacing the built-in prompt.",
-    "prompt_files": ["docs/agent-guidance.md", "~/.wllr/team-prompt.md"]
-  }
-}
+```yaml
+wllr:
+  prompt_override: Plain text replacing the built-in prompt.
+  prompt_files:
+    - docs/agent-guidance.md
+    - ~/.wllr/team-prompt.md
 ```
 
 `prompt_files` are loaded in order. Relative paths resolve from the launch
@@ -298,29 +297,21 @@ loads global and project `AGENTS.md`/`CLAUDE.md` context automatically.
 
 ### Local provider config
 
-Configure local models in `~/.config/wllr/config.json` under the `wllr` group:
+Configure local models in `~/.config/wllr/config.yaml` under the `wllr` group:
 
-```json
-{
-  "wllr": {
-    "provider": "local",
-    "model": "qwen/qwen3-coder-next",
-    "local_models": [
-      {
-        "id": "qwen/qwen3-coder-next",
-        "name": "Qwen3 Coder Next",
-        "base_url": "http://localhost:1234/v1",
-        "context_window": 262144
-      },
-      {
-        "id": "deepseek-v4-flash",
-        "name": "Dwarfstar 4 Flash",
-        "base_url": "http://localhost:8000/v1",
-        "context_window": 300000
-      }
-    ]
-  }
-}
+```yaml
+wllr:
+  provider: local
+  model: qwen/qwen3-coder-next
+  local_models:
+    - id: qwen/qwen3-coder-next
+      name: Qwen3 Coder Next
+      base_url: http://localhost:1234/v1
+      context_window: 262144
+    - id: deepseek-v4-flash
+      name: Dwarfstar 4 Flash
+      base_url: http://localhost:8000/v1
+      context_window: 300000
 ```
 
 `api_key` is optional per local model and omitted for endpoints that do not

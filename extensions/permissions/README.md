@@ -15,23 +15,25 @@ rules for `read_file`, `write_file`, and `exec` tools.
 
 ## Configuration
 
-Configure the extension in the shared wllr config file
-(`~/.config/wllr/config.yaml`, or `$WLLR_CONFIG`), under the `permissions`
-group. The file is one YAML object keyed by group name:
+Configure the extension in its own private config file,
+`~/.wllr/extensions/permissions/config.yaml`. The file contents are the config
+itself — there is no wrapper key. `$WLLR_CONFIG` does not apply (it relocates
+the app config, not extension configs). If you are upgrading from a wllr that
+kept a `permissions` group inside `~/.config/wllr/config.yaml`, startup
+migrates it here automatically and removes the old key.
 
 ```yaml
-permissions:
-  read:
-    allow: ["*"]  # Allow reading from anywhere (default)
-    deny: []      # No read restrictions
-  write:
-    allow: ["~/source", "~/documents", "/tmp"]  # Only allow writing here
-    deny: ["/etc", "/sys", "/proc"]            # Always deny these
-  # Optional command policy; no commands are denied unless configured here.
-  exec:
-    deny_commands: ["sed", "perl"]
-    deny_env_vars: ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]
-    deny_shell_operators: false
+read:
+  allow: ["*"]  # Allow reading from anywhere (default)
+  deny: []      # No read restrictions
+write:
+  allow: ["~/source", "~/documents", "/tmp"]  # Only allow writing here
+  deny: ["/etc", "/sys", "/proc"]            # Always deny these
+# Optional command policy; no commands are denied unless configured here.
+exec:
+  deny_commands: ["sed", "perl"]
+  deny_env_vars: ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]
+  deny_shell_operators: false
 ```
 
 Command rules match the executable at the start of each simple command,
@@ -47,13 +49,12 @@ variables. It is off until you configure it — like `deny_commands`, an empty
 list denies nothing. A typical AWS configuration:
 
 ```yaml
-permissions:
-  exec:
-    deny_env_vars:
-      - AWS_ACCESS_KEY_ID
-      - AWS_SECRET_ACCESS_KEY
-      - AWS_SESSION_TOKEN
-      - AWS_SECURITY_TOKEN
+exec:
+  deny_env_vars:
+    - AWS_ACCESS_KEY_ID
+    - AWS_SECRET_ACCESS_KEY
+    - AWS_SESSION_TOKEN
+    - AWS_SECURITY_TOKEN
 ```
 
 The check is a case-insensitive substring match over the whole command, so it
@@ -89,34 +90,31 @@ agent runs in.
 
 **Allow read everywhere, restrict writes to home directory:**
 ```yaml
-permissions:
-  read:
-    allow: ["*"]
-  write:
-    allow: ["~"]
-    deny: []
+read:
+  allow: ["*"]
+write:
+  allow: ["~"]
+  deny: []
 ```
 
 **Strict mode — only allow specific directories:**
 ```yaml
-permissions:
-  read:
-    allow: ["~/source", "~/documents"]
-    deny: []
-  write:
-    allow: ["~/source"]
-    deny: []
+read:
+  allow: ["~/source", "~/documents"]
+  deny: []
+write:
+  allow: ["~/source"]
+  deny: []
 ```
 
 **Protect system directories:**
 ```yaml
-permissions:
-  read:
-    allow: ["*"]
-    deny: []
-  write:
-    allow: ["*"]
-    deny: ["/etc", "/sys", "/proc", "/boot", "/dev"]
+read:
+  allow: ["*"]
+  deny: []
+write:
+  allow: ["*"]
+  deny: ["/etc", "/sys", "/proc", "/boot", "/dev"]
 ```
 
 ## Build

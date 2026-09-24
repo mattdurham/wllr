@@ -5,13 +5,15 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	yaml "gopkg.in/yaml.v3"
 )
 
 // withConfigPath points WLLR_CONFIG at a temp file for the duration of a test.
 func withConfigPath(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	path := filepath.Join(dir, "config.json")
+	path := filepath.Join(dir, "config.yaml")
 	t.Setenv("WLLR_CONFIG", path)
 	return path
 }
@@ -107,8 +109,8 @@ func TestSaveModel_PreservesOtherGroups(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	var all map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &all); err != nil {
+	var all map[string]any
+	if err := yaml.Unmarshal(raw, &all); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
 	// Other group preserved.
@@ -116,15 +118,15 @@ func TestSaveModel_PreservesOtherGroups(t *testing.T) {
 		t.Error("permissions group was dropped")
 	}
 	// wllr group keeps context_window AND gains model.
-	var wllr map[string]json.RawMessage
-	if err := json.Unmarshal(all["wllr"], &wllr); err != nil {
-		t.Fatalf("parse wllr group: %v", err)
+	wllr, ok := all["wllr"].(map[string]any)
+	if !ok {
+		t.Fatalf("wllr group = %#v, want a mapping", all["wllr"])
 	}
 	if _, ok := wllr["context_window"]; !ok {
 		t.Error("wllr.context_window was dropped")
 	}
-	if got := string(wllr["model"]); got != `"gemini-3-pro-preview"` {
-		t.Errorf("wllr.model = %s, want quoted gemini-3-pro-preview", got)
+	if got := wllr["model"]; got != "gemini-3-pro-preview" {
+		t.Errorf("wllr.model = %v, want gemini-3-pro-preview", got)
 	}
 }
 
@@ -175,19 +177,19 @@ func TestSaveLocalModels_PreservesOtherGroups(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	var all map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &all); err != nil {
+	var all map[string]any
+	if err := yaml.Unmarshal(raw, &all); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
 	if _, ok := all["permissions"]; !ok {
 		t.Error("permissions group was dropped")
 	}
-	var wllr map[string]json.RawMessage
-	if err := json.Unmarshal(all["wllr"], &wllr); err != nil {
-		t.Fatalf("parse wllr group: %v", err)
+	wllr, ok := all["wllr"].(map[string]any)
+	if !ok {
+		t.Fatalf("wllr group = %#v, want a mapping", all["wllr"])
 	}
-	if got := string(wllr["provider"]); got != `"local"` {
-		t.Errorf("wllr.provider = %s, want quoted local", got)
+	if got := wllr["provider"]; got != "local" {
+		t.Errorf("wllr.provider = %v, want local", got)
 	}
 	if _, ok := wllr["local_models"]; !ok {
 		t.Error("wllr.local_models was not written")

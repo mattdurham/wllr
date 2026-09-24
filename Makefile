@@ -101,22 +101,20 @@ optional-extensions:
 	mkdir -p $(EXT_DIR)/websearch
 	mkdir -p $(EXT_DIR)/context $(EXT_DIR)/skills $(EXT_DIR)/tasks $(EXT_DIR)/task-runner $(EXT_DIR)/lsp $(EXT_DIR)/permissions $(EXT_DIR)/mcp-bridge $(EXT_DIR)/otel-traces $(EXT_DIR)/websearch
 	$(WASM_BUILD) $(EXT_DIR)/skills/skills.wasm extensions/skills
-	cp extensions/skills/skills.json $(EXT_DIR)/skills/
+	cp extensions/skills/extension.yaml $(EXT_DIR)/skills/
 	$(WASM_BUILD) $(EXT_DIR)/tasks/tasks.wasm extensions/tasks
-	cp extensions/tasks/tasks.json $(EXT_DIR)/tasks/
+	cp extensions/tasks/extension.yaml $(EXT_DIR)/tasks/
 	$(WASM_BUILD) $(EXT_DIR)/task-runner/task-runner.wasm extensions/task-runner
-	cp extensions/task-runner/task-runner.json $(EXT_DIR)/task-runner/
+	cp extensions/task-runner/extension.yaml $(EXT_DIR)/task-runner/
 	$(WASM_BUILD) $(EXT_DIR)/lsp/lsp.wasm extensions/lsp
-	cp extensions/lsp/extension.json $(EXT_DIR)/lsp/lsp.json
+	cp extensions/lsp/extension.yaml $(EXT_DIR)/lsp/
 	$(WASM_BUILD) $(EXT_DIR)/permissions/permissions.wasm extensions/permissions
 	$(WASM_BUILD) $(EXT_DIR)/mcp-bridge/mcp-bridge.wasm extensions/mcp-bridge
-	cp extensions/permissions/extension.yaml $(EXT_DIR)/permissions/
-	cp extensions/mcp-bridge/mcp-bridge.json $(EXT_DIR)/mcp-bridge/
+	cp extensions/mcp-bridge/extension.yaml $(EXT_DIR)/mcp-bridge/
 	$(WASM_BUILD) $(EXT_DIR)/otel-traces/otel-traces.wasm extensions/otel-traces
 	cp extensions/otel-traces/extension.yaml $(EXT_DIR)/otel-traces/
-	cp extensions/otel-traces/otel-traces.json $(EXT_DIR)/otel-traces/
 	$(WASM_BUILD) $(EXT_DIR)/websearch/websearch.wasm extensions/websearch
-	cp extensions/websearch/websearch.json $(EXT_DIR)/websearch/
+	cp extensions/websearch/extension.yaml $(EXT_DIR)/websearch/
 	@echo "Installed optional extensions to $(EXT_DIR)"
 
 $(DIST_DIR):

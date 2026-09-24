@@ -64,6 +64,35 @@ single-claim behavior, and truncated-tail versus earlier corruption handling.
 
 - `Load` returns a non-nil error.
 
+#### TestHost_Load_ExtensionYAMLManifest_PreferredOverJSON
+
+**Scenario:** Both the canonical and a legacy manifest exist.
+**Setup:** Write `extension.yaml` granting `file_read` and `<name>.json` granting `exec` beside the WASM, then `Load`.
+**Assertions:**
+
+- `file_read` is granted; `exec` is not — `extension.yaml` wins, the legacy JSON is ignored.
+
+#### TestHost_Load_ExtensionYAML_IgnoresMetadataKeys
+
+**Scenario:** The canonical manifest carries informational keys.
+**Setup:** `extension.yaml` with `name`/`enabled`/`wasm` keys plus `permissions: [ui]`.
+**Assertions:**
+
+- The manifest parses; `ui` is granted (unknown keys are ignored).
+
+#### TestHost_Load_MalformedExtensionYAML_FailsClosed
+
+**Scenario:** The canonical manifest is malformed but a valid legacy JSON manifest exists.
+**Setup:** Broken `extension.yaml` plus a valid `<name>.json` granting `exec`.
+**Assertions:**
+
+- Zero permissions: the first-found (canonical) manifest wins, so a broken one never falls through to a stale legacy file.
+
+#### TestHost_Load_JSONManifestPermissions, TestHost_Load_YAMLManifestPermissions, TestHost_Load_MalformedManifest_SilentlyDenied, TestHost_Load_UnknownPermission_Ignored, TestHost_Load_NoManifest_ZeroPermissions
+
+**Scenario:** Legacy manifest forms and permission normalization.
+**Assertions:** declared permissions are granted exactly; malformed manifests yield zero permissions (warn-logged); unknown permission names are dropped; a missing manifest yields zero permissions.
+
 #### TestHost_DispatchEvent_NotSubscribed
 
 **Scenario:** Extension is loaded but has not subscribed to the dispatched event.
@@ -318,3 +347,32 @@ tool name, final result, and error flag.
 **Scenario:** A `show_picker` call with `split: true` and an item carrying multi-line `preview` text.
 **Setup:** Install a `testUIBridge` capturing the `ShowPickerParams` passed through.
 **Assertion:** `Split`, `Title`, `Callback`, and the item's `Preview` arrive at the bridge unchanged.
+
+## Config Isolation Between Extensions (configisolation_test.go)
+
+### ConfigRead Denies a Foreign Extension's Group
+
+**Scenario:** One extension must not read another's configuration through
+`config_read`.
+**Setup:** A host with `SetConfigIsolation` pointed at a temp extensions root and
+a temp shared config, a recording capability provider, and two loaded extensions
+(`permissions` and `evil`).
+**Assertion:** `evil` reading `group: "permissions"` is denied and the provider
+is never called; the same holds when `permissions` exists on disk but is not
+loaded; own-group reads and the app-level `wllr` group still succeed.
+
+### File Capabilities Cannot Reach Around ConfigRead
+
+**Scenario:** `read_file`/`write_file`/`append_file` must not touch another
+extension's config.
+**Setup:** A caller holding `file_write`/`file_read` attempts a foreign
+`config.yaml`, the shared config, a traversal path that resolves to a foreign
+config, and an unrelated file.
+**Assertion:** The config targets are denied before the provider is called; the
+unrelated path and the caller's own `config.yaml` pass through unchanged.
+
+### Config Isolation Is Inert When Unconfigured
+
+**Scenario:** Embedders and tests that never call `SetConfigIsolation` keep the
+old behaviour.
+**Assertion:** A foreign group read and an arbitrary write both succeed.
