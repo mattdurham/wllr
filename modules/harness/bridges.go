@@ -452,6 +452,14 @@ func (b *harnessUIBridge) GetStatusInfo() sdk.StatusInfo {
 	}
 	live.mu.RUnlock()
 
+	// A focused sub-agent can vanish without the focusing extension being told:
+	// an agent self-closes once it has processed its shutdown request. Reporting
+	// a dead ID would leave the statusline naming an agent that no longer
+	// exists, so drop the key — focus has fallen back to the root.
+	if id := statuses["agent"]; id != "" && b.pool != nil && b.pool.Get(id) == nil {
+		delete(statuses, "agent")
+	}
+
 	info := sdk.StatusInfo{
 		Provider: provider,
 		Model:    modelName,

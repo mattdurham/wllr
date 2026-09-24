@@ -408,6 +408,28 @@ extension reads these values and may surface them in the status scene area.
 
 No response result.
 
+#### Harness-owned status keys
+
+The harness publishes these keys itself. They are read-only from an extension's
+point of view; use `set_status` only for your own keys.
+
+| Key      | Meaning                                                            |
+|----------|--------------------------------------------------------------------|
+| `agent`  | Focused agent ID; absent when the root agent has focus.             |
+| `think`  | Active reasoning level.                                            |
+| `ctx`    | Context usage as `used/max`. `ctx rem` is the legacy max-only form. |
+| `stream` | In-flight stream state (`error`, `cancelling…`, `queuing…`).        |
+
+`agent` is the focused agent: the agent that receives user input and owns the
+transcript. An absent or empty value means the root agent. If the focused agent
+no longer exists — an agent self-closes after processing its shutdown request —
+the harness omits the key, so a reader sees focus fall back to the root instead
+of a dead agent ID.
+
+The bundled `statusline` extension renders this as its `agent:<id>` segment,
+showing `agent:main` for the root. It refreshes on the 1-second `tick` event, so
+the segment tracks a focus change within a second.
+
 ---
 
 ### `notify`

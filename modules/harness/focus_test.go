@@ -95,3 +95,55 @@ func TestAgentTreeSelectionDispatchesFocusCallback(t *testing.T) {
 		t.Fatalf("callback = %+v, want %s with [main]", d, AgentTreeCallback)
 	}
 }
+
+// Focus is published as the "agent" status so a statusline extension can show
+// which agent input targets. An empty value means the root, which the reader
+// renders with its own root label.
+func TestFocusPublishesAgentStatus(t *testing.T) {
+	m := newTestModel()
+	if _, err := m.agentPool.Spawn("main/kid", newMockLM("hi"), agent.SpawnOpts{
+		ModelName: "fake", ContextWindow: 1000,
+	}); err != nil {
+		t.Fatalf("spawn sub-agent: %v", err)
+	}
+	bridge := &harnessUIBridge{pool: m.agentPool, live: m.live}
+
+	if got := bridge.GetStatusInfo().Statuses["agent"]; got != "" {
+		t.Fatalf("initial agent status = %q, want empty (root)", got)
+	}
+
+	m, _ = callUpdate(m, FocusAgentMsg{AgentID: "main/kid"})
+	if got := bridge.GetStatusInfo().Statuses["agent"]; got != "main/kid" {
+		t.Fatalf("agent status = %q, want main/kid", got)
+	}
+
+	m, _ = callUpdate(m, FocusAgentMsg{AgentID: ""})
+	if got := bridge.GetStatusInfo().Statuses["agent"]; got != "" {
+		t.Fatalf("agent status after root focus = %q, want empty", got)
+	}
+}
+
+// A focused sub-agent can close without the focusing extension being told: the
+// agent self-closes after processing its shutdown request. The status must fall
+// back to the root rather than naming an agent that no longer exists.
+func TestFocusedAgentStatusClearsWhenAgentClosed(t *testing.T) {
+	m := newTestModel()
+	if _, err := m.agentPool.Spawn("main/kid", newMockLM("hi"), agent.SpawnOpts{
+		ModelName: "fake", ContextWindow: 1000,
+	}); err != nil {
+		t.Fatalf("spawn sub-agent: %v", err)
+	}
+	bridge := &harnessUIBridge{pool: m.agentPool, live: m.live}
+
+	m, _ = callUpdate(m, FocusAgentMsg{AgentID: "main/kid"})
+	if got := bridge.GetStatusInfo().Statuses["agent"]; got != "main/kid" {
+		t.Fatalf("agent status = %q, want main/kid", got)
+	}
+
+	if err := m.agentPool.Close("main/kid"); err != nil {
+		t.Fatalf("close sub-agent: %v", err)
+	}
+	if got := bridge.GetStatusInfo().Statuses["agent"]; got != "" {
+		t.Fatalf("agent status after close = %q, want empty (focus falls back to root)", got)
+	}
+}

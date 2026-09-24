@@ -285,6 +285,8 @@ a model, and typing/backspace filtering in the searchable picker.
 | High | `TestSubmitRoutesToFocusedAgent` | focus a sub-agent | focus state is set and input targets it |
 | High | `TestSubmitFallsBackWhenFocusedAgentGone` | focus a closed agent | falls back to the root instead of dropping input |
 | High | `TestAgentTreeSelectionDispatchesFocusCallback` | enter on a node | dispatches EventOnCommand with the agent ID |
+| High | `TestFocusPublishesAgentStatus` | focus a sub-agent, then the root | the `agent` status follows focus; empty means the root |
+| High | `TestFocusedAgentStatusClearsWhenAgentClosed` | close the focused sub-agent | the `agent` status is dropped, so readers fall back to the root |
 
 ## Esc and overlay precedence (tui_test.go)
 

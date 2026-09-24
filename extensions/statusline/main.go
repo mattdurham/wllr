@@ -14,6 +14,7 @@
 //	  sl-sep1        (text, "  ")
 //	  sl-model       (text)
 //	  sl-sep2        (text, "  ")
+//	  sl-agent       (text, fg:muted)   — "agent:<id>"; "agent:main" for the root
 //	  sl-sep3        (text, "  ")
 //	  sl-working     (text, fg:accent)  — empty when idle
 //	  sl-ctx         (text, fg:muted)   — "ctx:P%/R%" when a context window is configured
@@ -40,6 +41,7 @@ const (
 	sep1ID     = "sl-sep1"
 	modelID    = "sl-model"
 	sep2ID     = "sl-sep2"
+	agentID    = "sl-agent"
 	sep3ID     = "sl-sep3"
 	workingID  = "sl-working"
 	ctxID      = "sl-ctx"
@@ -51,6 +53,7 @@ const (
 var (
 	lastProvider    string
 	lastModel       string
+	lastAgent       string // focused-agent segment text
 	lastWorking     string // rendered working indicator text or ""
 	lastCtx         string // ctx text or "" when no window configured
 	lastCompactions int    // cumulative successful compactions this session
@@ -136,6 +139,7 @@ func patchAll() {
 		UIText(sep1ID, "  "),
 		{ID: modelID, Type: "text", Text: modelLabel(lastModel)},
 		UIText(sep2ID, "  "),
+		{ID: agentID, Type: "text", Text: lastAgent, Props: &muted},
 		UIText(sep3ID, "  "),
 		{ID: workingID, Type: "text", Text: lastWorking, Props: &accent},
 	}
@@ -194,11 +198,13 @@ func renderWorking(info StatusInfo) string {
 func syncDynamicStatus(info StatusInfo) bool {
 	working := renderWorking(info)
 	ctx := renderContext(info)
-	if working == lastWorking && ctx == lastCtx {
+	agent := renderAgent(info)
+	if working == lastWorking && ctx == lastCtx && agent == lastAgent {
 		return false
 	}
 	lastWorking = working
 	lastCtx = ctx
+	lastAgent = agent
 	return true
 }
 
@@ -218,6 +224,26 @@ func renderContext(info StatusInfo) string {
 		return "  ctx:" + remaining
 	}
 	return "  ctx:" + value
+}
+
+// rootAgentLabel is the segment text shown when the root agent has focus. An
+// empty focused-agent status means the root, which is the first node in the
+// tree rather than a special case — the same convention the bundled agents
+// extension uses when it labels the transcript's owner.
+const rootAgentLabel = "main"
+
+// renderAgent renders the focused-agent segment ("agent:<id>"). An absent or
+// empty "agent" status means the root agent, so the segment never renders
+// empty.
+func renderAgent(info StatusInfo) string {
+	id := ""
+	if info.Statuses != nil {
+		id = strings.TrimSpace(info.Statuses["agent"])
+	}
+	if id == "" {
+		id = rootAgentLabel
+	}
+	return "agent:" + id
 }
 
 // renderCompactions renders the session's successful-compaction count ("C<n>").

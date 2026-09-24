@@ -579,7 +579,9 @@ an empty focus means the root agent — the root is the default, not a special
 case, so the same path serves main and sub-agents. A focus target that has been
 closed falls back to the root rather than losing the message. Focusing a node
 dispatches `EventOnCommand` with `AgentTreeCallback` and the agent ID, which the
-extension turns into a transcript switch.
+extension turns into a transcript switch. Focus is also published as the `agent`
+status key so a statusline extension can display it; see the status contract in
+the `StatusUpdateMsg` routing section below.
 
 **Invariant:** sub-agent streamed text is dispatched as `EventToken` with the
 producing agent's ID (`dispatchSegmentedTokens`), while remaining absent from the
@@ -836,6 +838,13 @@ selection paths update live state first, then dispatch `EventModelChanged`.
 
 - The `statusline` area is always present from `New()` onwards (empty tree until the
   extension sets a root on `session_start`).
+- `get_status_info` publishes the focused agent as `statuses["agent"]`:
+  `FocusAgentMsg` sets it, an empty value deletes the key, and an absent key means
+  the root agent. `harnessUIBridge.GetStatusInfo` drops the entry when the named
+  agent is no longer in the pool — an agent self-closes after processing its
+  shutdown request without telling the extension that focused it, so reporting the
+  stale ID would leave readers naming an agent that does not exist. Focus
+  therefore reads as the root once the focused sub-agent is gone.
 - `statusLineHeight()` returns 0 for empty areas, so layout is unaffected before the
   extension initialises.
 - `UIAreaStatus` areas are excluded from `renderScenes()` to prevent double-rendering.

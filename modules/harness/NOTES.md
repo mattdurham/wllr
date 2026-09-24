@@ -871,3 +871,42 @@ hyphenated token such as `` `test -race -count=1` `` legitimately wraps mid-toke
 and rejoining its rows inserts a space; the word-boundary assertion therefore
 requires exact equality only for hyphen-free prose and falls back to character
 conservation otherwise.
+
+## Focused agent in the statusline (2026-09-23)
+
+**Decision:** issue #44 asked for the focused agent to appear in the statusline,
+and offered two mechanisms — a new `OnAgentFocusChanged` event, or a
+`get_status_info` field plus a refresh trigger. We used the status field: the
+harness already published focus as the `agent` status key (`FocusAgentMsg` →
+`live.setStatus("agent", …)` → `harnessUIBridge.GetStatusInfo`), added when focus
+routing landed, but **nothing consumed it**. So no new SDK surface was needed.
+
+**Rationale:** the data path already existed and was documented as the supported
+read mechanism (`set_status` → `get_status_info`); a dedicated event would have
+meant a new payload type, harness dispatch, an `OnAgentFocusChanged` helper, and
+synchronised edits to the base SDK plus all 14 extension copies of `wllrsdk.go`.
+The cost of reusing the status key is one comparison in the statusline's
+`syncDynamicStatus` and a new `sl-agent` node. The trade-off is latency: the
+statusline learns of a focus change on the 1-second `tick` event rather than
+immediately, which is acceptable for a display-only segment.
+
+**Two gaps closed beyond the segment itself:**
+
+1. The statusline's change detection compared only *working* and *ctx*, so an
+   idle focus change would not have repainted even on the tick. `lastAgent` now
+   participates in the comparison.
+2. Focus was never cleared when the focused sub-agent closed. Agents self-close
+   from `finishTurn` after processing a shutdown request and notify only their
+   creator (an `AGENT_SHUTDOWN` system message), so no extension is told to
+   release focus. `GetStatusInfo` therefore validates the ID against the pool and
+   omits the key when the agent is gone, which makes the segment self-correcting
+   rather than depending on every close path remembering to reset focus.
+
+**Consequence:** `statuses["agent"]` is now a documented contract in
+`docs/extensions.md` ("Harness-owned status keys"), with `agent:main` as the
+root label — the same empty-means-root convention the bundled `agents` extension
+already uses to label the transcript's owner. Covered by
+`TestFocusPublishesAgentStatus` and `TestFocusedAgentStatusClearsWhenAgentClosed`;
+the latter was confirmed to fail when the pool check is removed. The statusline
+extension itself remains untested in CI: it is `//go:build wasip1` and its module
+is separate, so the contract is pinned on the harness side.
