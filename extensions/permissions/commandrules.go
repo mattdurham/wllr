@@ -6,17 +6,20 @@ import (
 )
 
 // ExecRules contains only user-configured command policy. Empty rules allow all
-// commands, with one exception: a command naming an AWS credential variable is
-// always refused (see credentialEnvVars) regardless of configuration.
+// commands, so a command is refused only by something the user configured:
+// an executable in DenyCommands, one missing from a non-empty AllowCommands,
+// a shell operator when DenyShellOperators is set, or an environment variable
+// named in DenyEnvVars (see findDeniedEnvVar).
 type ExecRules struct {
 	AllowCommands      []string `json:"allow_commands"`
 	DenyCommands       []string `json:"deny_commands"`
+	DenyEnvVars        []string `json:"deny_env_vars"`
 	DenyShellOperators bool     `json:"deny_shell_operators"`
 }
 
 func checkCommandPermission(command string, rules ExecRules) (bool, string) {
-	if name, found := findCredentialEnvVar(command); found {
-		return false, "command references AWS credential variable " + name
+	if name, found := findDeniedEnvVar(command, rules.DenyEnvVars); found {
+		return false, "command references denied environment variable " + name
 	}
 	if rules.DenyShellOperators && hasShellOperator(command) {
 		return false, "shell operators are not allowed"
@@ -136,10 +139,8 @@ func splitShellSegments(command string) []string {
 		if segment := strings.TrimSpace(string(runes[start:i])); segment != "" {
 			segments = append(segments, segment)
 		}
-		if i+1 < len(runes) && (r == '&' || r == '|') && runes[i+1] == r {
-			// The second operator rune is harmless as the next iteration sees it
-			// and produces an empty segment.
-		}
+		// A doubled operator (&&, ||) leaves the second rune to start the next
+		// segment, which is empty and therefore skipped.
 		start = i + 1
 	}
 	if segment := strings.TrimSpace(string(runes[start:])); segment != "" {

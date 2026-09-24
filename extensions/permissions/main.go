@@ -33,9 +33,17 @@ func init() {
 	Subscribe("before_tool_call")
 
 	SetStatus("permissions", "active")
-	Logf("info", "permissions: initialized (read allow=%v deny=%v, write allow=%v deny=%v, exec allow=%v deny=%v)",
-		config.Read.Allow, config.Read.Deny, config.Write.Allow, config.Write.Deny,
-		config.Exec.AllowCommands, config.Exec.DenyCommands)
+	Logf(
+		"info",
+		"permissions: initialized (read allow=%v deny=%v, write allow=%v deny=%v, exec allow=%v deny=%v deny_env_vars=%v)",
+		config.Read.Allow,
+		config.Read.Deny,
+		config.Write.Allow,
+		config.Write.Deny,
+		config.Exec.AllowCommands,
+		config.Exec.DenyCommands,
+		config.Exec.DenyEnvVars,
+	)
 }
 
 // loadConfig reads the extension configuration from the host.

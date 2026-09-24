@@ -10,55 +10,59 @@ rules for `read_file`, `write_file`, and `exec` tools.
 - **Path matching** with support for exact paths, prefix matching, and glob patterns
 - **Tilde expansion** — `~/source` expands to your home directory
 - **Command rules** — optionally allow or deny executables such as `sed`
-- **AWS credential guard** — always refuses commands that name a secret-bearing AWS variable
+- **Environment variable guard** — refuse commands naming variables you list in `deny_env_vars`
 - **Optional** — only enforces permissions when loaded
 
 ## Configuration
 
-Configure the extension via `~/.config/wllr/config.toml`:
+Configure the extension in the shared wllr config file
+(`~/.config/wllr/config.yaml`, or `$WLLR_CONFIG`), under the `permissions`
+group. The file is one YAML object keyed by group name:
 
-```toml
-[extensions.permissions]
-# Read permissions
-[extensions.permissions.read]
-allow = ["*"]  # Allow reading from anywhere (default)
-deny = []      # No read restrictions
-
-# Write permissions
-[extensions.permissions.write]
-allow = ["~/source", "~/documents", "/tmp"]  # Only allow writing to these directories
-deny = ["/etc", "/sys", "/proc"]             # Explicitly deny system directories
-
-# Optional command policy; no commands are denied unless configured here.
-[extensions.permissions.exec]
-deny_commands = ["sed", "perl"]
-deny_shell_operators = false
+```yaml
+permissions:
+  read:
+    allow: ["*"]  # Allow reading from anywhere (default)
+    deny: []      # No read restrictions
+  write:
+    allow: ["~/source", "~/documents", "/tmp"]  # Only allow writing here
+    deny: ["/etc", "/sys", "/proc"]            # Always deny these
+  # Optional command policy; no commands are denied unless configured here.
+  exec:
+    deny_commands: ["sed", "perl"]
+    deny_env_vars: ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]
+    deny_shell_operators: false
 ```
 
 Command rules match the executable at the start of each simple command,
 including commands separated by `;`, `&&`, `||`, pipes, or newlines. Paths such
 as `/usr/bin/sed` match `sed`. Set `allow_commands` to make the list an
 allowlist. This is a pragmatic filter rather than a complete shell parser;
-`deny_shell_operators = true` rejects common shell composition as well.
+`deny_shell_operators: true` rejects common shell composition as well.
 
-### AWS credential variables
+### Denied environment variables
 
-Independently of the rules above, a command naming any of these variables is
-always refused:
+`exec.deny_env_vars` refuses any command that names one of the listed
+variables. It is off until you configure it — like `deny_commands`, an empty
+list denies nothing. A typical AWS configuration:
 
-- `AWS_ACCESS_KEY_ID`
-- `AWS_SECRET_ACCESS_KEY`
-- `AWS_SESSION_TOKEN`
-- `AWS_SECURITY_TOKEN`
+```yaml
+permissions:
+  exec:
+    deny_env_vars:
+      - AWS_ACCESS_KEY_ID
+      - AWS_SECRET_ACCESS_KEY
+      - AWS_SESSION_TOKEN
+      - AWS_SECURITY_TOKEN
+```
 
 The check is a case-insensitive substring match over the whole command, so it
-catches lowercased patterns (`env | grep aws_secret_access_key`) and the
-assignment form (`AWS_ACCESS_KEY_ID=... go test`) as well as expansions. It is
-not configurable and applies even with an otherwise empty, permissive config.
-
-Variables that select or locate credentials rather than carry them —
-`AWS_PROFILE`, `AWS_SHARED_CREDENTIALS_FILE`, `AWS_CONFIG_FILE` — are not
-matched, so ordinary workflows like `AWS_PROFILE=prod aws s3 ls` keep working.
+catches lowercase patterns (`env | grep aws_secret_access_key`), `printenv
+NAME`, and the assignment form (`AWS_ACCESS_KEY_ID=... go test`) as well as
+`$NAME` expansions. Variable names that select or locate credentials rather
+than carry them (`AWS_PROFILE`, `AWS_SHARED_CREDENTIALS_FILE`, `AWS_CONFIG_FILE`)
+are deliberately not in the example above, so workflows like
+`AWS_PROFILE=prod aws s3 ls` keep working.
 
 **This is a guard rail, not a boundary.** It stops the direct form (an agent
 spelling out the variable to copy it), but it cannot see through
@@ -84,51 +88,56 @@ agent runs in.
 ### Examples
 
 **Allow read everywhere, restrict writes to home directory:**
-```toml
-[extensions.permissions.read]
-allow = ["*"]
-
-[extensions.permissions.write]
-allow = ["~"]
-deny = []
+```yaml
+permissions:
+  read:
+    allow: ["*"]
+  write:
+    allow: ["~"]
+    deny: []
 ```
 
 **Strict mode — only allow specific directories:**
-```toml
-[extensions.permissions.read]
-allow = ["~/source", "~/documents"]
-deny = []
-
-[extensions.permissions.write]
-allow = ["~/source"]
-deny = []
+```yaml
+permissions:
+  read:
+    allow: ["~/source", "~/documents"]
+    deny: []
+  write:
+    allow: ["~/source"]
+    deny: []
 ```
 
 **Protect system directories:**
-```toml
-[extensions.permissions.read]
-allow = ["*"]
-deny = []
-
-[extensions.permissions.write]
-allow = ["*"]
-deny = ["/etc", "/sys", "/proc", "/boot", "/dev"]
+```yaml
+permissions:
+  read:
+    allow: ["*"]
+    deny: []
+  write:
+    allow: ["*"]
+    deny: ["/etc", "/sys", "/proc", "/boot", "/dev"]
 ```
 
 ## Build
 
+The extension is compiled to WASM. Use the repo's pinned TinyGo toolchain:
+
 ```bash
-cd extensions/permissions
-GOOS=wasip1 GOARCH=wasm go build -o permissions.wasm .
+make optional-extensions
+```
+
+Or build it alone (TinyGo 0.42.0 is the pinned version):
+
+```bash
+./scripts/build-wasm-extension.sh /tmp/permissions.wasm extensions/permissions
 ```
 
 ## Install
 
-```bash
-cp permissions.wasm ~/.config/wllr/extensions/
-```
-
-The extension will be loaded automatically on next wllr startup. Use `/reload` to hot-reload without restarting.
+`make optional-extensions` installs it to
+`~/.wllr/extensions/permissions/permissions.wasm`, where wllr loads it
+automatically on next startup. Use `/reload` to hot-reload without restarting.
 
 ## Behavior
 
@@ -156,10 +165,8 @@ Check logs with wllr's debug output or log file.
 
 ## Uninstall
 
-Remove the extension file:
+Remove the extension directory and restart wllr (or use `/reload`):
 
 ```bash
-rm ~/.config/wllr/extensions/permissions.wasm
+rm -rf ~/.wllr/extensions/permissions
 ```
-
-Then restart wllr or use `/reload`.
