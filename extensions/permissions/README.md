@@ -10,6 +10,7 @@ rules for `read_file`, `write_file`, and `exec` tools.
 - **Path matching** with support for exact paths, prefix matching, and glob patterns
 - **Tilde expansion** — `~/source` expands to your home directory
 - **Command rules** — optionally allow or deny executables such as `sed`
+- **AWS credential guard** — always refuses commands that name a secret-bearing AWS variable
 - **Optional** — only enforces permissions when loaded
 
 ## Configuration
@@ -39,6 +40,31 @@ including commands separated by `;`, `&&`, `||`, pipes, or newlines. Paths such
 as `/usr/bin/sed` match `sed`. Set `allow_commands` to make the list an
 allowlist. This is a pragmatic filter rather than a complete shell parser;
 `deny_shell_operators = true` rejects common shell composition as well.
+
+### AWS credential variables
+
+Independently of the rules above, a command naming any of these variables is
+always refused:
+
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+- `AWS_SESSION_TOKEN`
+- `AWS_SECURITY_TOKEN`
+
+The check is a case-insensitive substring match over the whole command, so it
+catches lowercased patterns (`env | grep aws_secret_access_key`) and the
+assignment form (`AWS_ACCESS_KEY_ID=... go test`) as well as expansions. It is
+not configurable and applies even with an otherwise empty, permissive config.
+
+Variables that select or locate credentials rather than carry them —
+`AWS_PROFILE`, `AWS_SHARED_CREDENTIALS_FILE`, `AWS_CONFIG_FILE` — are not
+matched, so ordinary workflows like `AWS_PROFILE=prod aws s3 ls` keep working.
+
+**This is a guard rail, not a boundary.** It stops the direct form (an agent
+spelling out the variable to copy it), but it cannot see through
+`printenv`/`env` with no arguments, `cat /proc/self/environ`, or indirect
+expansion. Treat it as one layer; keep credentials out of the environment the
+agent runs in.
 
 ### Permission Rules
 

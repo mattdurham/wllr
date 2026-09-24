@@ -5,8 +5,9 @@ import (
 	"strings"
 )
 
-// ExecRules contains only user-configured command policy. Empty rules allow
-// all commands for backwards compatibility.
+// ExecRules contains only user-configured command policy. Empty rules allow all
+// commands, with one exception: a command naming an AWS credential variable is
+// always refused (see credentialEnvVars) regardless of configuration.
 type ExecRules struct {
 	AllowCommands      []string `json:"allow_commands"`
 	DenyCommands       []string `json:"deny_commands"`
@@ -14,6 +15,9 @@ type ExecRules struct {
 }
 
 func checkCommandPermission(command string, rules ExecRules) (bool, string) {
+	if name, found := findCredentialEnvVar(command); found {
+		return false, "command references AWS credential variable " + name
+	}
 	if rules.DenyShellOperators && hasShellOperator(command) {
 		return false, "shell operators are not allowed"
 	}
