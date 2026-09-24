@@ -11,14 +11,17 @@ import (
 // a shell operator when DenyShellOperators is set, or an environment variable
 // named in DenyEnvVars (see findDeniedEnvVar).
 type ExecRules struct {
-	AllowCommands      []string `json:"allow_commands"`
-	DenyCommands       []string `json:"deny_commands"`
-	DenyEnvVars        []string `json:"deny_env_vars"`
-	DenyShellOperators bool     `json:"deny_shell_operators"`
+	AllowCommands      []string      `json:"allow_commands"`
+	DenyCommands       []CommandRule `json:"deny_commands"`
+	DenyEnvVars        []EnvVarRule  `json:"deny_env_vars"`
+	DenyShellOperators bool          `json:"deny_shell_operators"`
 }
 
 func checkCommandPermission(command string, rules ExecRules) (bool, string) {
-	if name, found := findDeniedEnvVar(command, rules.DenyEnvVars); found {
+	if name, msg, found := findDeniedEnvVar(command, rules.DenyEnvVars); found {
+		if msg != "" {
+			return false, msg
+		}
 		return false, "command references denied environment variable " + name
 	}
 	if rules.DenyShellOperators && hasShellOperator(command) {
@@ -29,7 +32,10 @@ func checkCommandPermission(command string, rules ExecRules) (bool, string) {
 		return len(rules.AllowCommands) == 0, "no executable command found"
 	}
 	for _, name := range commands {
-		if matchesCommandRule(name, rules.DenyCommands) {
+		if rule, ok := matchCommandRule(name, rules.DenyCommands); ok {
+			if rule.Message != "" {
+				return false, rule.Message
+			}
 			return false, "command " + name + " is denied"
 		}
 		if len(rules.AllowCommands) > 0 && !matchesCommandRule(name, rules.AllowCommands) {
@@ -77,6 +83,26 @@ func matchesCommandRule(name string, rules []string) bool {
 		}
 	}
 	return false
+}
+
+// matchCommandRule returns the first deny rule whose pattern matches name, so
+// the caller can use the rule's message when set. Normalization mirrors
+// matchesCommandRule. An empty pattern (an object rule missing its match key)
+// never matches — the rule is inert.
+func matchCommandRule(name string, rules []CommandRule) (CommandRule, bool) {
+	for _, rule := range rules {
+		pattern := filepath.Base(strings.Trim(strings.TrimSpace(rule.Command), "'\""))
+		if pattern == "" {
+			continue
+		}
+		if pattern == "*" || strings.EqualFold(name, pattern) {
+			return rule, true
+		}
+		if matched, _ := filepath.Match(pattern, name); matched {
+			return rule, true
+		}
+	}
+	return CommandRule{}, false
 }
 
 func hasShellOperator(command string) bool {
