@@ -37,3 +37,20 @@ Represents a tool advertised by an MCP server.
 | `Description`  | `description`  | string          | Human-readable tool description              |
 | `InputSchema`  | `inputSchema`  | json.RawMessage | MCP input JSON Schema, preserved verbatim    |
 | `OutputSchema` | `outputSchema` | json.RawMessage | Optional MCP output JSON Schema, preserved verbatim |
+
+### Config
+
+The set of configured MCP servers, loaded from the mcp-bridge extension's own
+config file, `<wllr home>/extensions/mcp-bridge/config.yaml` (YAML). The
+file's contents ARE the config; there is no shared-config fallback.
+
+**Invariants:**
+7. `LoadConfig` reads only the mcp-bridge extension's own config.yaml and never
+   the app config file; extension config lives beside the extension's WASM.
+8. Servers are declared under the `servers` key; the legacy `mcpServers` key is
+   accepted when `servers` is absent (the startup migration preserves it
+   verbatim when moving an old mcp-bridge group into this file).
+9. A missing config file yields an empty config, never an error: no MCP
+   servers configured is a fine default state.
+10. A malformed config file is an error, so a typo'd rule never silently
+    disables every MCP server.

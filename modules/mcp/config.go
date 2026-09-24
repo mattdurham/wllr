@@ -3,62 +3,66 @@ package mcp
 // NOTE: Any changes to this file must be reflected in the corresponding SPECS.md or NOTES.md.
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+
+	yaml "gopkg.in/yaml.v3"
 )
 
-// Config holds the configuration for all MCP servers.
+// Config holds the configuration for all MCP servers. It is the mcp-bridge
+// extension's own config: the file's contents ARE the config.
 type Config struct {
-	MCPServers map[string]ServerConfig `json:"mcpServers"`
+	MCPServers map[string]ServerConfig `json:"servers"`
 }
 
-// LoadConfig loads MCP server configuration from the wllr config file.
-// It looks for the "mcp-bridge" key in the shared config.
+// LoadConfig loads MCP server configuration from the mcp-bridge extension's
+// own config file, <wllr home>/extensions/mcp-bridge/config.yaml. Extension
+// configs live beside their WASM, never in the app config file, so there is
+// no shared-config fallback.
+//
+// Servers are declared under the `servers` key as name -> {command, args, env}.
+// The legacy `mcpServers` key (the shared-config-era name, which the startup
+// migration preserves verbatim when moving an mcp-bridge group into this file)
+// is accepted when `servers` is absent.
+//
+// A missing file is an empty config: no MCP servers configured is a fine
+// default state.
 func LoadConfig() (*Config, error) {
 	path := configPath()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			// No config file means no MCP servers configured
 			return &Config{MCPServers: make(map[string]ServerConfig)}, nil
 		}
 		return nil, fmt.Errorf("read config: %w", err)
 	}
 
-	// Parse the config file as a flat map
-	var all map[string]json.RawMessage
-	if err := json.Unmarshal(data, &all); err != nil {
+	var raw struct {
+		Servers    map[string]ServerConfig `yaml:"servers"`
+		MCPServers map[string]ServerConfig `yaml:"mcpServers"`
+	}
+	if err := yaml.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
-
-	// Look for mcp-bridge key
-	mcpData, ok := all["mcp-bridge"]
-	if !ok {
-		return &Config{MCPServers: make(map[string]ServerConfig)}, nil
+	servers := raw.Servers
+	if servers == nil {
+		servers = raw.MCPServers
 	}
-
-	var cfg Config
-	if err := json.Unmarshal(mcpData, &cfg); err != nil {
-		return nil, fmt.Errorf("parse mcp-bridge config: %w", err)
+	if servers == nil {
+		servers = make(map[string]ServerConfig)
 	}
-
-	if cfg.MCPServers == nil {
-		cfg.MCPServers = make(map[string]ServerConfig)
-	}
-
-	return &cfg, nil
+	return &Config{MCPServers: servers}, nil
 }
 
-// configPath returns the path to the shared wllr config file.
+// configPath returns the mcp-bridge extension's own config file. It matches
+// the host's per-extension layout so config_read and this loader always see
+// the same file. WLLR_CONFIG intentionally does not apply: it relocates the
+// app config file, not extension configs.
 func configPath() string {
-	if p := os.Getenv("WLLR_CONFIG"); p != "" {
-		return p
-	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return ".wllr/config.json"
+		return filepath.Join(".wllr", "extensions", "mcp-bridge", "config.yaml")
 	}
-	return filepath.Join(home, ".config", "wllr", "config.json")
+	return filepath.Join(home, ".wllr", "extensions", "mcp-bridge", "config.yaml")
 }

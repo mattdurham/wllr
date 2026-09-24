@@ -8,39 +8,32 @@ MCP (Model Context Protocol) is a standard protocol for connecting AI assistants
 
 ## Configuration
 
-Configure MCP servers in `~/.config/wllr/config.json`:
+MCP servers are configured in the mcp-bridge extension's own config file,
+`~/.wllr/extensions/mcp-bridge/config.yaml`. Extension configs are private to
+the extension and never live in the app config file (`~/.config/wllr/config.yaml`);
+the file's contents ARE the config. A missing file simply means no MCP servers
+configured:
 
-```json
-{
-  "wllr": {
-    "provider": "anthropic",
-    "model": "claude-3-5-sonnet-20241022"
-  },
-  "mcp-bridge": {
-    "mcpServers": {
-      "filesystem": {
-        "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
-        "env": {}
-      },
-      "brave-search": {
-        "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-brave-search"],
-        "env": {
-          "BRAVE_API_KEY": "your-api-key-here"
-        }
-      },
-      "github": {
-        "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-github"],
-        "env": {
-          "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_..."
-        }
-      }
-    }
-  }
-}
+```yaml
+servers:
+  filesystem:
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+    env: {}
+  brave-search:
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-brave-search"]
+    env:
+      BRAVE_API_KEY: your-api-key-here
+  github:
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-github"]
+    env:
+      GITHUB_PERSONAL_ACCESS_TOKEN: ghp_...
 ```
+
+The legacy `mcpServers` key from the old shared-config format is accepted when
+`servers` is absent.
 
 ## Available MCP Servers
 

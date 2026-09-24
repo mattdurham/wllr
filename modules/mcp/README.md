@@ -6,7 +6,7 @@ The MCP (Model Context Protocol) bridge enables wllr to discover and invoke tool
 
 The MCP bridge consists of:
 
-- **Config** (`config.go`): Loads MCP server configuration from `~/.config/wllr/config.json`
+- **Config** (`config.go`): Loads MCP server configuration from the mcp-bridge extension's own config file (`~/.wllr/extensions/mcp-bridge/config.yaml`)
 - **Protocol** (`protocol.go`): JSON-RPC 2.0 protocol types for MCP communication
 - **Server** (`server.go`): Manages individual MCP server subprocesses via stdio
 - **Bridge** (`bridge.go`): Coordinates multiple MCP servers and routes tool calls
@@ -14,33 +14,32 @@ The MCP bridge consists of:
 
 ## Configuration
 
-Add MCP servers to your wllr config file (`~/.config/wllr/config.json`):
+MCP servers are configured in the mcp-bridge extension's own config file
+(`~/.wllr/extensions/mcp-bridge/config.yaml`). Extension configs are private
+to the extension and never live in the app config file; the file's contents
+ARE the config. A missing file simply means no MCP servers configured:
 
-```json
-{
-  "mcp-bridge": {
-    "mcpServers": {
-      "filesystem": {
-        "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
-        "env": {}
-      },
-      "brave-search": {
-        "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-brave-search"],
-        "env": {
-          "BRAVE_API_KEY": "your-api-key-here"
-        }
-      }
-    }
-  }
-}
+```yaml
+servers:
+  filesystem:
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+    env: {}
+  brave-search:
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-brave-search"]
+    env:
+      BRAVE_API_KEY: your-api-key-here
 ```
+
+The legacy `mcpServers` key from the old shared-config format is accepted when
+`servers` is absent, so a config moved here by wllr's startup migration keeps
+working.
 
 ## How It Works
 
 1. **Startup**: On wllr startup, the MCP bridge:
-   - Loads configuration from `~/.config/wllr/config.json`
+   - Loads configuration from `~/.wllr/extensions/mcp-bridge/config.yaml`
    - Spawns each configured MCP server as a subprocess
    - Performs the MCP `initialize` handshake
    - Calls `tools/list` to discover available tools

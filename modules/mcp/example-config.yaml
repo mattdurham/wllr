@@ -1,0 +1,8 @@
+# Example mcp-bridge extension config.
+# Install at: ~/.wllr/extensions/mcp-bridge/config.yaml
+# The file's contents ARE the config. A missing file means no MCP servers.
+servers:
+  filesystem:
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+    env: {}
