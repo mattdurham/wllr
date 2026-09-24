@@ -5,16 +5,15 @@ package main
 import (
 	"encoding/json"
 	"path/filepath"
-	"strings"
 )
-
-// Config holds the permission rules loaded from the extension config.
-
-// PathRules holds allow and deny lists for a permission type.
 
 var config Config
 
 func init() {
+	// Native path-rule logic calls this indirection; point it at the host's
+	// get_env before anything reads config.
+	getEnv = GetEnv
+
 	// Load configuration from the host.
 	if err := loadConfig(); err != nil {
 		Logf("error", "permissions: failed to load config: %v", err)
@@ -32,17 +31,35 @@ func init() {
 	// Subscribe to before_tool_call to intercept file and configured exec rules.
 	Subscribe("before_tool_call")
 
+	// The summary prints bare patterns; rules now carry an optional message
+	// that would bloat the line.
+	denyCmds := make([]string, 0, len(config.Exec.DenyCommands))
+	for _, r := range config.Exec.DenyCommands {
+		denyCmds = append(denyCmds, r.Command)
+	}
+	denyVars := make([]string, 0, len(config.Exec.DenyEnvVars))
+	for _, r := range config.Exec.DenyEnvVars {
+		denyVars = append(denyVars, r.EnvVar)
+	}
+	denyRead := make([]string, 0, len(config.Read.Deny))
+	for _, r := range config.Read.Deny {
+		denyRead = append(denyRead, r.Path)
+	}
+	denyWrite := make([]string, 0, len(config.Write.Deny))
+	for _, r := range config.Write.Deny {
+		denyWrite = append(denyWrite, r.Path)
+	}
 	SetStatus("permissions", "active")
 	Logf(
 		"info",
 		"permissions: initialized (read allow=%v deny=%v, write allow=%v deny=%v, exec allow=%v deny=%v deny_env_vars=%v)",
 		config.Read.Allow,
-		config.Read.Deny,
+		denyRead,
 		config.Write.Allow,
-		config.Write.Deny,
+		denyWrite,
 		config.Exec.AllowCommands,
-		config.Exec.DenyCommands,
-		config.Exec.DenyEnvVars,
+		denyCmds,
+		denyVars,
 	)
 }
 
@@ -124,106 +141,22 @@ func handleEvent(evt Event) *EventResponse {
 	path = filepath.Clean(path)
 
 	// Check permission.
-	allowed := checkPermission(path, rules)
+	allowed, denyMessage := checkPermission(path, rules)
 	if !allowed {
-		Logf("warn", "permissions: blocked %s to %s", payload.ToolName, path)
-		// Return a tool_result error immediately to block the operation.
-		ToolResult(payload.ToolCallID, "Permission denied: "+path, true)
+		if denyMessage != "" {
+			Logf("warn", "permissions: blocked %s to %s: %s", payload.ToolName, path, denyMessage)
+			ToolResult(payload.ToolCallID, "Permission denied: "+denyMessage, true)
+		} else {
+			Logf("warn", "permissions: blocked %s to %s", payload.ToolName, path)
+			// Return a tool_result error immediately to block the operation.
+			ToolResult(payload.ToolCallID, "Permission denied: "+path, true)
+		}
 		// Return a response that blocks the event from proceeding.
 		return &EventResponse{Block: true}
 	}
 
 	Logf("debug", "permissions: allowed %s to %s", payload.ToolName, path)
 	return nil
-}
-
-// checkPermission returns true if path is allowed by rules.
-// Algorithm:
-// 1. If deny list matches, reject.
-// 2. If allow list matches, accept.
-// 3. If allow list is empty or contains "*", accept.
-// 4. Otherwise reject.
-func checkPermission(path string, rules PathRules) bool {
-	// Check deny list first.
-	for _, pattern := range rules.Deny {
-		if matchPath(path, pattern) {
-			return false
-		}
-	}
-
-	// Check allow list.
-	if len(rules.Allow) == 0 {
-		// No allow rules means allow all (if not denied).
-		return true
-	}
-	for _, pattern := range rules.Allow {
-		if matchPath(path, pattern) {
-			return true
-		}
-	}
-
-	// No match in allow list.
-	return false
-}
-
-// matchPath checks if path matches pattern.
-// Patterns can be:
-//   - "*" — matches everything
-//   - absolute path — exact match or prefix match
-//   - path with trailing "/" — prefix match
-//   - glob pattern (simple * wildcard)
-func matchPath(path, pattern string) bool {
-	if pattern == "*" {
-		return true
-	}
-
-	// Clean both paths for comparison.
-	path = filepath.Clean(path)
-	pattern = filepath.Clean(pattern)
-
-	// Expand ~ to home directory.
-	path = expandTilde(path)
-	pattern = expandTilde(pattern)
-
-	// Check for exact match.
-	if path == pattern {
-		return true
-	}
-
-	// Check for prefix match (pattern ends with /).
-	// e.g., /home/user/source/ matches /home/user/source/file.txt
-	if strings.HasSuffix(pattern, string(filepath.Separator)) {
-		return strings.HasPrefix(path, pattern)
-	}
-
-	// Check if path is under pattern directory.
-	// e.g., /home/user/source matches /home/user/source/file.txt
-	if strings.HasPrefix(path, pattern+string(filepath.Separator)) {
-		return true
-	}
-
-	// Simple glob matching with * wildcard.
-	matched, _ := filepath.Match(pattern, path)
-	return matched
-}
-
-// expandTilde expands ~ to the user's home directory.
-func expandTilde(path string) string {
-	if !strings.HasPrefix(path, "~") {
-		return path
-	}
-	// Get HOME from environment.
-	home, err := GetEnv("HOME")
-	if err != nil || home == "" {
-		return path
-	}
-	if path == "~" {
-		return home
-	}
-	if strings.HasPrefix(path, "~/") {
-		return filepath.Join(home, path[2:])
-	}
-	return path
 }
 
 func main() {}
