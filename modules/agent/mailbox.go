@@ -3,6 +3,7 @@ package agent
 // NOTE: Any changes to this file must be reflected in the corresponding SPECS.md or NOTES.md.
 
 import (
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -22,17 +23,27 @@ import (
 type mailbox struct {
 	msgs []sdk.Message
 	mu   sync.RWMutex
+	// nextID numbers IDs assigned by append to messages that arrive without
+	// one. Queued-message IDs are what make ID-based delete/edit usable while
+	// a turn is running (indexes shift as messages arrive; IDs do not).
+	nextID int
 }
 
 // append adds msg to the queue. Messages with blank content are dropped (and
 // logged against agentID) — empty content causes Anthropic API rejection
-// ("text content blocks must be non-empty"). Thread-safe.
+// ("text content blocks must be non-empty"). Messages without an ID get one
+// assigned ("q<n>") so queue_peek can report a stable selector for
+// delete/edit; a caller-supplied ID is preserved. Thread-safe.
 func (b *mailbox) append(agentID string, msg sdk.Message) {
 	if strings.TrimSpace(msg.Content) == "" {
 		slog.Warn("agent: dropping inbox message with empty content", "agent", agentID, "role", msg.Role)
 		return
 	}
 	b.mu.Lock()
+	if msg.ID == "" {
+		b.nextID++
+		msg.ID = fmt.Sprintf("q%d", b.nextID)
+	}
 	b.msgs = append(b.msgs, msg)
 	b.mu.Unlock()
 }
@@ -44,6 +55,20 @@ func (b *mailbox) drain() []sdk.Message {
 	b.msgs = nil
 	b.mu.Unlock()
 	return msgs
+}
+
+// clear atomically removes all queued messages and returns how many were
+// removed. Unlike deleteByIndex/editByIndex it is safe to call while the
+// agent's turn is running: Submit drains the inbox at turn start and the
+// post-turn drain re-checks it at turn end, so a concurrent clear simply
+// makes both drains observe an empty queue and cleared messages are never
+// replayed into a later turn. Thread-safe.
+func (b *mailbox) clear() int {
+	b.mu.Lock()
+	n := len(b.msgs)
+	b.msgs = nil
+	b.mu.Unlock()
+	return n
 }
 
 // len returns the number of queued messages without draining. Thread-safe.

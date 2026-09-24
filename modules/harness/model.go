@@ -36,9 +36,17 @@ type liveState struct {
 	model       string
 	width       int
 	tokens      int
-	mu          sync.RWMutex
-	streaming   bool
-	hasError    bool
+	// Geometry of the [ clear ] button in the queued-messages pane header,
+	// recorded by View on the last render. queueRow is the 0-based terminal
+	// row of the pane header; queueBtnStart/End are the inclusive 0-based
+	// columns of the button. queueBtnEnd <= queueBtnStart means "no button on
+	// screen" (queue empty, pane hidden, or terminal too narrow).
+	queueRow      int
+	queueBtnStart int
+	queueBtnEnd   int
+	mu            sync.RWMutex
+	streaming     bool
+	hasError      bool
 }
 
 func (s *liveState) setStreaming(v bool, start time.Time, hasErr bool) {
@@ -57,6 +65,23 @@ func (s *liveState) setWidth(w int) {
 	s.mu.Lock()
 	s.width = w
 	s.mu.Unlock()
+}
+
+// setQueueGeom records the clear button's screen geometry from the latest
+// render. end <= start encodes "no clickable button".
+func (s *liveState) setQueueGeom(row, btnStart, btnEnd int) {
+	s.mu.Lock()
+	s.queueRow = row
+	s.queueBtnStart = btnStart
+	s.queueBtnEnd = btnEnd
+	s.mu.Unlock()
+}
+
+// queueGeom returns the clear button's screen geometry from the latest render.
+func (s *liveState) queueGeom() (row, btnStart, btnEnd int) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.queueRow, s.queueBtnStart, s.queueBtnEnd
 }
 
 func (s *liveState) setModel(model string) {
@@ -915,6 +940,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if n, cmd, ok := m.updateExtension(msg); ok {
 		return n, cmd
 	}
+	if n, cmd, ok := m.updateMouseClick(msg); ok {
+		return n, cmd
+	}
 
 	// Forward to sub-models.
 	var cmds []tea.Cmd
@@ -1082,6 +1110,8 @@ func (m Model) updateKeyPress(msg tea.Msg) (Model, tea.Cmd, bool) {
 		m.modalContent = m.chat.ToolLogModal()
 		m.modalScroll = 0
 		return m, nil, true
+	case keyClearQueue:
+		return m.clearMainQueue()
 	// Explicit chat scroll — pgup/pgdown work while typing without
 	// triggering the viewport's default vim-style key bindings.
 	case "pgup":
@@ -1113,6 +1143,49 @@ func (m Model) mainTurnActive() bool {
 func (m Model) cancelActiveTurn() {
 	m.cancelMainTurn()
 	m.live.setStatus("stream", "cancelling…")
+}
+
+// clearMainQueue discards every message queued for the main agent and reports
+// the outcome through a notification. It works while a turn is running: the
+// inbox is drained at turn boundaries, so a clear simply empties it (see
+// agent.Agent.ClearInbox). This is the deliberate cancel semantics of issue
+// #48 option (a): a cancel preserves the queue; only an explicit clear
+// discards it.
+func (m Model) clearMainQueue() (Model, tea.Cmd, bool) {
+	if m.agentPool == nil {
+		return m, nil, false
+	}
+	n, err := m.agentPool.ClearInbox(m.mainAgentID)
+	if err != nil {
+		m.pushNotification(fmt.Sprintf("⚠ could not clear queue: %v", err))
+		return m, nil, true
+	}
+	if n > 0 {
+		m.pushNotification(fmt.Sprintf("Cleared %d queued message(s)", n))
+	} else {
+		m.pushNotification("Queue is already empty")
+	}
+	return m, nil, true
+}
+
+// updateMouseClick handles left-clicks on the queued-messages pane's
+// [ clear ] button. The button's screen geometry is recorded by View on the
+// previous render; a click is honored only when it lands inside those cells.
+// Overlays suppress it: a full-screen modal owns the display and the recorded
+// geometry may be stale behind it.
+func (m Model) updateMouseClick(msg tea.Msg) (Model, tea.Cmd, bool) {
+	click, ok := msg.(tea.MouseClickMsg)
+	if !ok || click.Button != tea.MouseLeft {
+		return m, nil, false
+	}
+	if m.overlayActive() {
+		return m, nil, false
+	}
+	row, start, end := m.live.queueGeom()
+	if end <= start || click.Y != row || click.X < start || click.X > end {
+		return m, nil, false
+	}
+	return m.clearMainQueue()
 }
 
 // cancelMainTurn cancels only the primary agent's in-flight turn. Sub-agents
@@ -2465,10 +2538,18 @@ func (m Model) View() tea.View {
 		// queue cannot push the input box below the visible screen. Keep the
 		// render decision in sync with the layout calculation.
 		if m.queuedHeight(len(queued)) > 0 {
-			if queuedView := m.renderQueuedMessagesFrom(queued); queuedView != "" {
+			if queuedView, btnStart, btnEnd := m.renderQueuedMessagesFrom(queued); queuedView != "" {
+				// Record the clear button's absolute screen position for mouse
+				// clicks: the pane header lands on the first row after every
+				// line already written to sb (each ends with "\n").
+				m.live.setQueueGeom(strings.Count(sb.String(), "\n"), btnStart, btnEnd)
 				sb.WriteString(queuedView)
 				sb.WriteString("\n")
+			} else {
+				m.live.setQueueGeom(0, 0, 0)
 			}
+		} else {
+			m.live.setQueueGeom(0, 0, 0)
 		}
 		if tools := m.renderToolActivity(); tools != "" {
 			sb.WriteString(tools)
@@ -2686,12 +2767,17 @@ func (m Model) toolActivityHeight() int {
 }
 
 func (m Model) renderQueuedMessages() string {
-	return m.renderQueuedMessagesFrom(m.snapshotQueuedMessages())
+	view, _, _ := m.renderQueuedMessagesFrom(m.snapshotQueuedMessages())
+	return view
 }
 
-func (m Model) renderQueuedMessagesFrom(queued []sdk.Message) string {
+// renderQueuedMessagesFrom renders the queued-messages pane and returns it
+// together with the clear button's inclusive 0-based column range in the
+// header row (btnEnd < btnStart means "no button rendered" — terminal too
+// narrow for the label, fill, button, and corner).
+func (m Model) renderQueuedMessagesFrom(queued []sdk.Message) (string, int, int) {
 	if len(queued) == 0 {
-		return ""
+		return "", 0, 0
 	}
 
 	width := m.width
@@ -2711,11 +2797,26 @@ func (m Model) renderQueuedMessagesFrom(queued []sdk.Message) string {
 	if totalQueued > showCount {
 		label = fmt.Sprintf("─ Queued (%d total, showing latest %d)", totalQueued, showCount)
 	}
-	fillWidth := innerWidth - lipgloss.Width(label)
-	if fillWidth < 0 {
-		fillWidth = 0
+	// The [ clear ] button sits right before the closing corner. On terminals
+	// too narrow to fit label + fill + button, fall back to the original
+	// button-less header and leave the click target unset (ctrl+x still
+	// clears).
+	btn := "[ clear ]"
+	btnWidth := lipgloss.Width(btn)
+	fillWidth := innerWidth - lipgloss.Width(label) - btnWidth - 1
+	btnStart, btnEnd := 0, 0
+	var header string
+	if fillWidth >= 0 {
+		btnStart = 1 + lipgloss.Width(label) + fillWidth
+		btnEnd = btnStart + btnWidth - 1
+		header = border.Render("╭" + label + strings.Repeat("─", fillWidth) + btn + " ╮")
+	} else {
+		fillWidth = innerWidth - lipgloss.Width(label)
+		if fillWidth < 0 {
+			fillWidth = 0
+		}
+		header = border.Render("╭" + label + strings.Repeat("─", fillWidth) + "╮")
 	}
-	header := border.Render("╭" + label + strings.Repeat("─", fillWidth) + "╮")
 
 	lines := make([]string, 0, len(queued))
 	for _, msg := range queued {
@@ -2759,7 +2860,7 @@ func (m Model) renderQueuedMessagesFrom(queued []sdk.Message) string {
 		)
 	}
 	footer := border.Render("╰" + strings.Repeat("─", innerWidth) + "╯")
-	return header + "\n" + body.String() + footer
+	return header + "\n" + body.String() + footer, btnStart, btnEnd
 }
 
 func (m Model) renderToolActivity() string {

@@ -196,6 +196,32 @@ func TestSpawner_Spawn_AgentIdentitySuffix(t *testing.T) {
 	}
 }
 
+// TestSpawner_QueueCancellationGuidance pins the queue-guidance lines of the
+// agent-identity suffix: every sub-agent must learn that mid-turn messages
+// queue for its next turn and how to cancel them (issue #48 cancel semantics).
+func TestSpawner_QueueCancellationGuidance(t *testing.T) {
+	pool := agent.NewPool()
+	pool.SetProvider(testutil.NewFakeProvider())
+	pool.SetDefaultModelName("fake-model")
+	spawner := agent.NewSpawner(pool, nil, nil)
+	if err := spawner.Spawn(context.Background(), extension.SpawnRequest{
+		ID:           "main/worker",
+		SystemPrompt: "base prompt",
+	}); err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	a := pool.Get("main/worker")
+	if a == nil {
+		t.Fatal("agent main/worker not in pool")
+	}
+	sp := a.SystemPrompt()
+	for _, want := range []string{"queued for your next turn", "queue_peek()", "queue_cancel()", "queue_cancel(index: N)"} {
+		if !strings.Contains(sp, want) {
+			t.Errorf("expected queue guidance to contain %q; got: %q", want, sp)
+		}
+	}
+}
+
 func TestSpawner_Spawn_NoProvider(t *testing.T) {
 	// With no provider set, LanguageModelForModel should fail.
 	pool := agent.NewPool()

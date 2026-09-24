@@ -26,7 +26,9 @@ func (f *fakeAgentBridge) MainAgentContextUsage() sdk.ContextUsage { return sdk.
 
 func (f *fakeAgentBridge) SnapshotInbox(_ string) ([]sdk.Message, error) { return nil, nil }
 
-func (f *fakeAgentBridge) DeleteFromInbox(_ string, _ int, _ string) (int, error)     { return 0, nil }
+func (f *fakeAgentBridge) DeleteFromInbox(_ string, _ int, _ string) (int, error) { return 0, nil }
+
+func (f *fakeAgentBridge) ClearInbox(_ string) (int, error)                           { return 0, nil }
 func (f *fakeAgentBridge) EditInboxMessage(_ string, _ int, _ string, _ string) error { return nil }
 
 // compile-time check

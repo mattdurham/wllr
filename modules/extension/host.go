@@ -741,6 +741,9 @@ func (h *Host) buildDispatch() map[string]func(ctx context.Context, ext *Extensi
 		sdk.MethodMailboxEdit: func(_ context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleMailboxEdit(ext, req)
 		},
+		sdk.MethodMailboxClear: func(_ context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleMailboxClear(ext, req)
+		},
 		sdk.MethodQueuedMessages: func(_ context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleQueuedMessages(ext, req)
 		},
@@ -1481,7 +1484,14 @@ func (h *Host) handleMailboxDelete(ext *Extension, req sdk.HostCallRequest) sdk.
 	if params.ByIndex == nil && params.ByMessageID == "" {
 		return sdk.HostCallResponse{Error: "mailbox_delete: at least one of by_index or by_message_id must be provided"}
 	}
-	deleted, err := h.AgentBridge().DeleteFromInbox(params.ID, *params.ByIndex, params.ByMessageID)
+	// ByIndex is a pointer because a by-message-ID request omits it; the bridge
+	// convention is -1 for "not provided" — dereferencing nil here crashed the
+	// host call (recovered by wazero as a trap) on every ID-only delete.
+	byIndex := -1
+	if params.ByIndex != nil {
+		byIndex = *params.ByIndex
+	}
+	deleted, err := h.AgentBridge().DeleteFromInbox(params.ID, byIndex, params.ByMessageID)
 	if err != nil {
 		return sdk.HostCallResponse{Error: err.Error()}
 	}
@@ -1508,11 +1518,37 @@ func (h *Host) handleMailboxEdit(ext *Extension, req sdk.HostCallRequest) sdk.Ho
 	if params.NewContent == "" {
 		return sdk.HostCallResponse{Error: "mailbox_edit: new_content must be non-empty (Anthropic invariant)"}
 	}
-	err := h.AgentBridge().EditInboxMessage(params.ID, *params.ByIndex, params.ByMessageID, params.NewContent)
+	// Same nil-deref guard as handleMailboxDelete: -1 means "not provided".
+	byIndex := -1
+	if params.ByIndex != nil {
+		byIndex = *params.ByIndex
+	}
+	err := h.AgentBridge().EditInboxMessage(params.ID, byIndex, params.ByMessageID, params.NewContent)
 	if err != nil {
 		return sdk.HostCallResponse{Error: err.Error()}
 	}
 	return sdk.HostCallResponse{}
+}
+
+func (h *Host) handleMailboxClear(ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+	if h.AgentBridge() == nil {
+		return sdk.HostCallResponse{Error: "mailbox_clear: not supported by host"}
+	}
+	var params struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return sdk.HostCallResponse{Error: fmt.Sprintf("mailbox_clear: %v", err)}
+	}
+	if params.ID == "" {
+		return sdk.HostCallResponse{Error: "mailbox_clear: id must be non-empty"}
+	}
+	removed, err := h.AgentBridge().ClearInbox(params.ID)
+	if err != nil {
+		return sdk.HostCallResponse{Error: err.Error()}
+	}
+	result, _ := json.Marshal(map[string]int{"removed": removed})
+	return sdk.HostCallResponse{Result: result}
 }
 
 func (h *Host) handleQueuedMessages(ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {

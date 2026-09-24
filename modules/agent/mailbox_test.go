@@ -112,3 +112,81 @@ func TestMailbox_ConcurrentAppendDrain(t *testing.T) {
 func msgKey(w, i int) string {
 	return fmt.Sprintf("w%d-%02d", w, i)
 }
+
+func TestMailbox_Clear(t *testing.T) {
+	var b mailbox
+	if n := b.clear(); n != 0 {
+		t.Fatalf("clear on empty mailbox returned %d, want 0", n)
+	}
+	b.append("a", sdk.Message{Role: sdk.RoleUser, Content: "one"})
+	b.append("a", sdk.Message{Role: sdk.RoleUser, Content: "two"})
+	b.append("a", sdk.Message{Role: sdk.RoleUser, Content: "three"})
+	if n := b.clear(); n != 3 {
+		t.Errorf("clear returned %d, want 3", n)
+	}
+	if b.len() != 0 {
+		t.Errorf("len after clear = %d, want 0", b.len())
+	}
+	if got := b.snapshot(); len(got) != 0 {
+		t.Errorf("snapshot after clear = %+v, want empty", got)
+	}
+	if n := b.clear(); n != 0 {
+		t.Errorf("second clear returned %d, want 0", n)
+	}
+}
+
+// TestMailbox_ClearVsDrainRace pins that clear and drain interleave cleanly
+// under the race detector: each message must be observed by exactly one of
+// the two operations, and both must end with an empty mailbox.
+func TestMailbox_ClearVsDrainRace(t *testing.T) {
+	var b mailbox
+	const total = 200
+	for i := 0; i < total; i++ {
+		b.append("a", sdk.Message{Role: sdk.RoleUser, Content: msgKey(0, i)})
+	}
+	var mu sync.Mutex
+	observed := 0
+	var wg sync.WaitGroup
+	for g := 0; g < 8; g++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				var n int
+				if g%2 == 0 {
+					n = b.clear()
+				} else {
+					n = len(b.drain())
+				}
+				mu.Lock()
+				observed += n
+				mu.Unlock()
+				if n == 0 {
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	if observed != total {
+		t.Errorf("clear/drain observed %d messages, want exactly %d (no loss, no duplication)", observed, total)
+	}
+	if b.len() != 0 {
+		t.Errorf("mailbox not empty after concurrent clear/drain: %d", b.len())
+	}
+}
+
+// TestMailbox_AppendAssignsIDs pins the ID assignment rule: messages without
+// an ID get q<n>; supplied IDs are preserved. Queued-message IDs are what make
+// ID-based delete/edit usable while a turn is running (indexes shift; IDs do
+// not).
+func TestMailbox_AppendAssignsIDs(t *testing.T) {
+	var b mailbox
+	b.append("a1", sdk.Message{Role: sdk.RoleUser, Content: "one"})
+	b.append("a1", sdk.Message{Role: sdk.RoleUser, Content: "two", ID: "custom-9"})
+	b.append("a1", sdk.Message{Role: sdk.RoleUser, Content: "three"})
+	got := b.snapshot()
+	if got[0].ID != "q1" || got[1].ID != "custom-9" || got[2].ID != "q2" {
+		t.Fatalf("IDs: %q %q %q, want q1 custom-9 q2", got[0].ID, got[1].ID, got[2].ID)
+	}
+}

@@ -261,13 +261,15 @@ No key is forwarded to the input area while the modal is open.
 
 ---
 
-## 16. Key Handling: Esc, Ctrl+C
+## 16. Key Handling: Esc, Ctrl+C, Ctrl+X
 
-- If `m.streaming == true` or any agent in the pool reports `IsRunning()`, `Esc` calls `m.agentPool.CancelAll()` (cancels main and all sub-agents), sets status to "cancelling…", and does not quit.
-- Active-turn cancellation has priority over modal, picker, autocomplete, and input Esc handling.
-- If `m.streaming == false`, `Esc` is not a global hotkey. It may still be consumed by active pickers, modals, autocomplete, or the input component.
+- With no overlay open, `Esc` during an active **main-agent** turn cancels **only the main agent's turn** (`cancelMainTurn` → `main.Cancel()`), sets status to "cancelling…", and does not quit. Sub-agents are deliberately left running — esc means "stop what I asked you for", not "abandon everything I delegated"; sub-agent lifecycle belongs to `shutdown_agent`/`shutdown_team`. (Issue #48 corrected this section: it previously claimed `CancelAll()`.)
+- Active-turn cancellation has priority over modal, picker, autocomplete, and input Esc handling: an open overlay owns `Esc` and dismisses the dialog instead of cancelling the turn behind it.
+- If the main agent has no turn in flight, `Esc` is not a global hotkey. It may still be consumed by active pickers, modals, autocomplete, or the input component.
 - `Ctrl+C` always returns `tea.Quit`, regardless of streaming state.
 - `Ctrl+Q` always quits regardless of streaming state.
+- `Ctrl+X` (issue #48) discards every message queued for the main agent and pushes a notification with the discarded count. It works while a turn is running (`agent.Agent.ClearInbox` is deliberately ungated; see agent SPECS §3). Overlays own the keyboard first, so ctrl+x does not fire behind a modal/picker.
+- A left-click on the `[ clear ]` button in the queued-messages pane header does the same as ctrl+x. The button's screen geometry is recorded by `View` into `liveState`; clicks land only within those cells (issue #48).
 
 ---
 
@@ -472,7 +474,7 @@ Appends the canonical-transcript `recall` tool (`agent.RecallTool()`) to `base` 
 ```
 ┌──────────────────────────────────────┐
 │  chat viewport (scrollable)          │  area: "chat", height = m.height - statusLineHeight - inputBoxHeight - dropdownHeight - bottomGutterHeight
-│  queued message pane (optional)      │  `Queued` header; pending main-agent inbox messages stay outside history
+│  queued message pane (optional)      │  `Queued` header; pending main-agent inbox messages stay outside history; header carries a clickable `[ clear ]` button (issue #48)
 │  tool activity pane                  │  3 content lines + border
 │  [optional: suggestion dropdown]     │  dropdownHeight = min(8, len(suggestions)) + 2 borders (0 when hidden)
 │  [or: modal overlay (centered)]      │  height = chatHeight * 8/10, vertically centered

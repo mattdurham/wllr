@@ -72,6 +72,10 @@ type AgentBridge interface {
 	// DeleteFromInbox removes messages from the agent's inbox.
 	// At least one of byIndex or byMessageID must be provided.
 	DeleteFromInbox(id string, byIndex int, byMessageID string) (int, error)
+	// ClearInbox discards all pending inbox messages for an agent and returns
+	// how many were removed. Allowed while the agent is running (the inbox is
+	// re-checked at turn boundaries; a concurrent clear simply empties it).
+	ClearInbox(id string) (int, error)
 	// EditInboxMessage updates a message in the agent's inbox.
 	// At least one of byIndex or byMessageID must be provided.
 	// Content must be non-empty (Anthropic invariant).

@@ -305,26 +305,35 @@ func (p *AgentPool) SnapshotInbox(id string) ([]sdk.Message, error) {
 	return a.SnapshotInbox(), nil
 }
 
-// DeleteFromInbox removes message(s) from an agent's inbox.
+// DeleteFromInbox removes message(s) from an agent's inbox. Gating is
+// selective inside Agent.DeleteFromInbox: by-message-ID works while the agent
+// is running (IDs are stable), by-index requires an idle agent.
 func (p *AgentPool) DeleteFromInbox(id string, byIndex int, byMessageID string) (int, error) {
 	a := p.Get(id)
 	if a == nil {
 		return 0, ErrAgentNotFound
 	}
-	if a.IsRunning() {
-		return 0, errors.New("cannot modify inbox while agent is running")
-	}
 	return a.DeleteFromInbox(byIndex, byMessageID)
 }
 
-// EditInboxMessage updates a message's content.
+// ClearInbox discards all pending inbox messages for an agent and returns how
+// many were removed. Unlike DeleteFromInbox it is allowed while the agent is
+// running: see Agent.ClearInbox for the safety argument.
+func (p *AgentPool) ClearInbox(id string) (int, error) {
+	a := p.Get(id)
+	if a == nil {
+		return 0, ErrAgentNotFound
+	}
+	return a.ClearInbox(), nil
+}
+
+// EditInboxMessage updates a message's content. Gating is selective inside
+// Agent.EditInboxMessage: by-message-ID works while the agent is running,
+// by-index requires an idle agent.
 func (p *AgentPool) EditInboxMessage(id string, byIndex int, byMessageID string, newContent string) error {
 	a := p.Get(id)
 	if a == nil {
 		return ErrAgentNotFound
-	}
-	if a.IsRunning() {
-		return errors.New("cannot modify inbox while agent is running")
 	}
 	return a.EditInboxMessage(byIndex, byMessageID, newContent)
 }

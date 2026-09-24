@@ -40,6 +40,7 @@ type testAgentBridge struct {
 	onMainAgentContextUsage func() sdk.ContextUsage
 	onSnapshotInbox         func(id string) ([]sdk.Message, error)
 	onDeleteFromInbox       func(id string, byIndex int, byMessageID string) (int, error)
+	onClearInbox            func(id string) (int, error)
 	onEditInboxMessage      func(id string, byIndex int, byMessageID string, newContent string) error
 }
 
@@ -123,6 +124,13 @@ func (b *testAgentBridge) SnapshotInbox(id string) ([]sdk.Message, error) {
 func (b *testAgentBridge) DeleteFromInbox(id string, byIndex int, byMessageID string) (int, error) {
 	if b.onDeleteFromInbox != nil {
 		return b.onDeleteFromInbox(id, byIndex, byMessageID)
+	}
+	return 0, nil
+}
+
+func (b *testAgentBridge) ClearInbox(id string) (int, error) {
+	if b.onClearInbox != nil {
+		return b.onClearInbox(id)
 	}
 	return 0, nil
 }

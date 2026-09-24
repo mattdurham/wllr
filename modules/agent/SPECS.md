@@ -108,7 +108,7 @@ the most recent tool identity.
 
 The inbox is the unexported `mailbox` type (`mailbox.go`): it owns the message slice and the `sync.RWMutex` guarding it, and is embedded by value in `*Agent` as the `inbox` field. The `Agent.AppendInbox`/`DrainInbox`/`InboxLen` methods are thin forwarders to `mailbox.append`/`drain`/`len`. The mailbox is the **message store only** — it does not own turn-execution state (`isRunning`), which remains the Agent's concern.
 
-`AppendInbox` enqueues messages for delivery before the next turn. `DrainInbox` atomically retrieves and clears all queued messages. `Submit` calls `DrainInbox` at the start of each turn and **appends** inbox messages after the conversation history (inbox messages appear after prior history, making them the most-recent messages visible to the LLM). See NOTES.md §16.
+`AppendInbox` enqueues messages for delivery before the next turn. `DrainInbox` atomically retrieves and clears all queued messages. `Submit` calls `DrainInbox` at the start of each turn and **appends** inbox messages after the conversation history (inbox messages appear after prior history, making them the most-recent messages visible to the LLM). See NOTES.md §16. `ClearInbox` discards all queued messages and returns how many were removed — it is the bulk-delete path behind the UI's ctrl+x / [ clear ] button and `mailbox_clear` (issue #48). `mailbox.append` assigns an ID (`q<n>`) to messages that arrive without one so `queue_peek` can report a stable selector for ID-based delete/edit; caller-supplied IDs are preserved.
 
 **Invariant:** Inbox messages are delivered in FIFO order and always appear as the most recent messages in the prompt. Messages appended before `Submit` is called are guaranteed to be visible within that turn. Messages appended after `Submit` has called `DrainInbox` will appear in the next turn.
 
@@ -117,6 +117,10 @@ The inbox is the unexported `mailbox` type (`mailbox.go`): it owns the message s
 **Invariant:** `DrainInbox` is atomic — no message is lost between `AppendInbox` and `DrainInbox` regardless of concurrent calls. This is guaranteed by the mailbox's internal mutex.
 
 **Invariant:** `mailbox.append` drops messages whose content is blank (empty or whitespace-only) and logs a warning, because the Anthropic API rejects empty text content blocks. This is the single enforcement point for the non-empty-content rule.
+
+**Invariant:** `ClearInbox` is deliberately **not** gated on `IsRunning`. Clearing is a discard operation and safe mid-turn: `Submit` drains the inbox at turn start and the post-turn drain re-checks it at turn end, so a concurrent clear simply makes both drains observe an empty queue and cleared messages are never replayed into a later turn. See NOTES.md issue #48 entry.
+
+**Invariant:** `DeleteFromInbox`/`EditInboxMessage` gate **selectively**. The by-index paths require an idle agent (indexes shift as messages arrive, so an index is only meaningful against a quiescent snapshot). The by-message-ID paths are **not** gated: IDs are stable while messages arrive, so a mid-turn delete/edit has no snapshot problem — either the drain takes the message first (the op finds nothing) or the op wins (the drain misses it); the message is delivered or changed, never duplicated or replayed. This is what lets a running agent cancel one of its own queued messages (`queue_cancel(message_id)`).
 
 **Invariant:** the mailbox does not filter by `MessageType`. Filtering is done at `sdkToFantasyMessages` conversion time. `sdk.MessageTypeSystem` messages survive the inbox cycle intact but are never recorded in history (see §9 streamTurn) and never reach the LLM context.
 
@@ -577,7 +581,7 @@ func (s *Spawner) Spawn(ctx context.Context, req extension.SpawnRequest) error
 
 `Spawner` creates sub-agents in a pool with appropriate callbacks and conventions. It encapsulates:
 
-- Agent-identity system prompt suffix injection (`## Your Agent Identity` section with agent ID).
+- Agent-identity system prompt suffix injection (`## Your Agent Identity` section with agent ID, the send_message reporting convention, and queue guidance: mid-turn messages queue for the next turn; queue_peek lists them, queue_cancel discards all or one, cancelled messages cannot be recovered).
 - Parent ID derivation from the `/` convention in `req.ID` (e.g. `"main/coder"` → parent `"main"`).
 - Provider-option construction for extended thinking (`ThinkingBudget > 0`).
 - Model resolution through the pool's model factory, including an optional

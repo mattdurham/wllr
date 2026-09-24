@@ -19,6 +19,10 @@ the tool call as failed with plain-text messages such as
 - `list_agents` returns live agents with running and pending-message state.
 - `create_team`, `add_to_team`, `get_team`, and `shutdown_team` manage teams.
 - `send_message` queues a message and wakes the target agent.
+- `queue_peek` / `queue_cancel` (queue extension) inspect and cancel messages
+  queued for an agent — your own queue by default, or a descendant's by
+  `agent_id`; never the orchestrator's or a sibling's. See
+  extensions/queue/README.md.
 
 When coordinating durable work, use the tasks extension as the source of truth:
 pass `list_id`, `task_id`, and `attempt_id`, report outcomes with

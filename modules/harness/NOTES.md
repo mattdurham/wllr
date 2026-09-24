@@ -975,3 +975,41 @@ reads the transcript per call, not once at construction.
 Covered by `recalltool_test.go`: append for a known agent, preserve existing
 tools, no-op for an unknown agent or nil pool, and no shadowing of an
 extension-owned name.
+
+## Queued messages are clearable, not auto-discarded (2026-09-24)
+
+Issue #48. After an Esc-cancel the queue was stranded: displayed, not sent,
+not removable — and on the next submit the stale messages were silently folded
+into an unrelated prompt.
+
+**Cancel semantics: option (a), preserve.** Esc-cancel stops the running turn
+and leaves the queue exactly as it was (`finishTurn` already skipped the drain
+on canceled turns; see agent NOTES §42 for why clearing mid-turn is safe).
+Preserving respects the mental model that Esc means "stop what I asked for" —
+the messages the user typed are user input, and the harness should neither
+silently execute them (option (b), which re-triggers a turn right after the
+interrupt) nor silently destroy them (option (c)). The fix is to make the
+stored queue actionable instead of changing what Esc does.
+
+**Three discard paths, one action:** `ctrl+x` (see SPECS §16), a left-click on
+the `[ clear ]` button rendered in the pane header, and `/queue clear
+<agent-id>` via the queue extension's new `mailbox_clear` host call. All three
+land on `agent.AgentPool.ClearInbox` and report the discarded count through a
+notification — the issue's "if messages are discarded, a notification says how
+many" criterion.
+
+**Mouse geometry comes from the render, not from layout math.** The pane is
+rendered inline between the chat viewport and the tool activity, so its
+absolute row depends on everything above it. Rather than re-deriving that sum
+in the click handler (which would drift from `View` exactly when someone adds
+a pane), `View` records the button's row and column range into `liveState`
+(shared pointer, since `Model` is a value type) and the click handler matches
+against the last render's geometry. end <= start encodes "no button" — queue
+empty, pane hidden, or terminal too narrow for label + fill + button + corner.
+There is deliberately no whole-header click target: accidental clears of typed
+input are worse than a slightly smaller hitbox.
+
+**ctrl+x over the alternates:** not bound by zellij defaults or the local
+config, not a terminal signal or flow-control key, and not a readline editing
+key. The pre-existing ctrl+t/ctrl+q conflicts with zellij noted in the issue
+are left for a separate report.

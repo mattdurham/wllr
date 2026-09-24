@@ -290,6 +290,14 @@ caller need not know its ID. The result is `{id, messages}` — an object even
 when the history is empty, so a caller can distinguish "no messages yet" from a
 failed call. An unknown agent id is an error response.
 
+**Invariant:** `mailbox_clear` (`MethodMailboxClear`) requires no permission,
+matching the other mailbox methods. Param `id` names the agent; an empty id is
+an error. Unlike `mailbox_delete`/`mailbox_edit`, the underlying
+`AgentBridge.ClearInbox` is **not** gated on the agent running: clearing is a
+discard operation that is safe mid-turn (see agent SPECS §3), which is the
+common window in which the UI clears the queue (issue #48). The result is
+`{"removed": N}` — the count of discarded messages, so callers can report it.
+
 **Invariant:** `set_model` (`MethodSetModel`) param `model` is a model ID or a
 configured model-tier name; param `thinking` is an optional provider-agnostic
 reasoning level. At least one is required. `handleSetModel` delegates to

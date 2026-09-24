@@ -408,6 +408,10 @@ func (b *poolAgentBridge) DeleteFromInbox(id string, byIndex int, byMessageID st
 	return b.pool.DeleteFromInbox(id, byIndex, byMessageID)
 }
 
+func (b *poolAgentBridge) ClearInbox(id string) (int, error) {
+	return b.pool.ClearInbox(id)
+}
+
 func (b *poolAgentBridge) EditInboxMessage(id string, byIndex int, byMessageID string, newContent string) error {
 	return b.pool.EditInboxMessage(id, byIndex, byMessageID, newContent)
 }

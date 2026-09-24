@@ -111,6 +111,10 @@ func (e *earlyAgentBridge) DeleteFromInbox(_ string, _ int, _ string) (int, erro
 	return 0, fmt.Errorf("not started")
 }
 
+func (e *earlyAgentBridge) ClearInbox(_ string) (int, error) {
+	return 0, fmt.Errorf("not started")
+}
+
 func (e *earlyAgentBridge) EditInboxMessage(_ string, _ int, _ string, _ string) error {
 	return fmt.Errorf("not started")
 }
@@ -291,6 +295,13 @@ func (b *harnessAgentBridge) DeleteFromInbox(id string, byIndex int, byMessageID
 		return 0, fmt.Errorf("no agent pool")
 	}
 	return b.pool.DeleteFromInbox(id, byIndex, byMessageID)
+}
+
+func (b *harnessAgentBridge) ClearInbox(id string) (int, error) {
+	if b.pool == nil {
+		return 0, fmt.Errorf("no agent pool")
+	}
+	return b.pool.ClearInbox(id)
 }
 
 func (b *harnessAgentBridge) EditInboxMessage(id string, byIndex int, byMessageID string, newContent string) error {

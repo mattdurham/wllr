@@ -746,3 +746,74 @@ registered the name, so an extension keeps ownership of `recall`.
 session file already covers the durable, user-facing record), surfacing recall
 in the UI beyond the existing tool-call pane and compaction notice, and
 transcript-scoped recall for the open `#42` acceptance item about the statusline.
+
+## 42. Clearing the inbox is ungated; index edits are not (2026-09-24)
+
+Issue #48 asked for a way to discard queued messages from the UI, which
+required a bulk clear that works while a turn is running — the exact window in
+which a user looks at the queue pane and changes their mind.
+
+**Decision:** `Agent.ClearInbox` / `mailbox.clear` are deliberately **not**
+gated on `IsRunning`, unlike `DeleteFromInbox` and `EditInboxMessage`. The gate
+on the index-based methods exists because a by-index target is only meaningful
+against a quiescent snapshot — mid-turn, the snapshot the user is looking at
+may already have been drained and replayed, so an edit/delete by index can hit
+the wrong message or silently no-op. Clearing has no such target: it discards
+*everything*, and the safety argument is structural rather than temporal.
+`Submit` drains the inbox at turn start; the post-turn drain re-checks it at
+turn end. A concurrent clear simply makes both drains observe an empty queue,
+so cleared messages are never replayed into a later turn. The only loss case
+is a message appended in the same instant as the clear — acceptable for a
+discard operation, and unavoidable without cross-operation transactions the
+UI does not need.
+
+**Cancel semantics (issue #48 option (a)):** Esc-cancel deliberately preserves
+the queue. `finishTurn` already skipped the drain on failed/canceled turns, so
+after a cancel the queued messages stay visible in the pane and the user — not
+the harness — decides: drain them into the next submit (pre-existing
+`Submit` behavior), or discard them via ctrl+x / the `[ clear ]` button /
+`/queue clear`. Auto-draining after a cancel (option (b)) was rejected because
+it re-triggers a turn immediately after an interrupt — exactly what Esc was
+meant to stop; auto-clearing (option (c)) was rejected because Esc should not
+destroy typed input the user cannot undo.
+
+Covered by `inbox_clear_test.go` (cancel preserves the queue; clear works
+mid-turn and nothing replays afterwards) and `mailbox_test.go`
+(`TestMailbox_ClearVsDrainRace`: concurrent clear/drain lose and duplicate
+nothing).
+
+**Queue-cancellation guidance in the agent-identity suffix:** every sub-agent's
+system prompt (Spawner.Spawn) now teaches the queue model — messages sent
+mid-turn queue for the next turn — and the cancel path: `queue_peek()` lists
+pending messages, `queue_cancel()` discards all (or `queue_cancel(index: N)`
+one), and cancelled messages cannot be recovered. The identity suffix is the
+one site every spawn path shares (agents extension, task-runner, teams), so
+the guidance lives there rather than only in the create_agent prompt assembly.
+The tools themselves are registered by the queue extension; the ownership rule
+(self or descendants only) is enforced extension-side — see
+extensions/queue/README.md.
+
+**Stable inbox IDs + selective gating for mid-turn single-message cancel:**
+subagents calling `queue_cancel(index: N)` on their own queue always failed —
+an agent is by definition running when it makes the call, and the by-index
+delete path was gated on `IsRunning`. Fix is two parts. (1) `mailbox.append`
+assigns an ID (`q<n>`) to every message that arrives without one, so
+`queue_peek` can hand the agent a stable selector. (2) `DeleteFromInbox` and
+`EditInboxMessage` now gate only their by-index paths: indexes shift as
+messages arrive and are only meaningful against a quiescent snapshot, while
+IDs are stable — a mid-turn by-ID op either loses the race to the drain (finds
+nothing) or wins (the drain misses the message); either way the outcome is
+exact (delivered or cancelled/edited, never duplicated or replayed). The
+pool-level blanket `IsRunning` gates were removed in favour of the Agent's
+selective checks. Pre-existing bugs fixed along the way, all in the queue
+extension: its local `queueCall` returned the raw host_call envelope instead
+of the unwrapped Result (same bug the agents extension had fixed for
+agent_list — every /queue command parsed zero values), `mailbox_snapshot`'s
+`{"messages": [...]}` wrapper was parsed as a bare array, and `by_index` was
+sent as a JSON string where the host expects a number (broke `/queue delete`,
+`/queue edit`, and single-message `queue_cancel`).
+
+Covered by `inbox_clear_test.go` (by-ID delete and edit work while running;
+by-index stays gated; mailbox assigns/preserves IDs), `mailbox_test.go`
+(`TestMailbox_AppendAssignsIDs`), and the queue extension's native tests
+(envelope unwrap, ownership rule, input validation).

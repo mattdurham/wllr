@@ -321,11 +321,22 @@ a child only when the user asks you to inspect it; do not poll.
   request graceful shutdown
 - is_running=false: agent is idle; review its final message or task output
 - pending_messages>0: messages are queued for the next turn; the child may not
-  have read your latest message yet
+  have read your latest message yet — cancel them with queue_cancel(agent_id)
+  if they are obsolete
 - shutdown_requested=true: graceful shutdown has been requested but the agent may
   still be finishing its current turn; do not assume it has stopped
 history_limit is accepted for compatibility, but live state is the reliable
 liveness signal.
+
+**queue_peek(agent_id?)** / **queue_cancel(agent_id?, index?, message_id?)**
+Inspect and cancel messages queued for an agent — your own queue by default, or
+one of your own sub-agents by agent_id. A message sent to a working agent
+queues for its next turn; when the user asks to cancel a queued message, or a
+queued instruction becomes obsolete, cancel it instead of pinging the agent
+about it. queue_peek lists pending messages with their 0-based index;
+queue_cancel with no index/message_id discards the whole queue, and with an
+index or message_id cancels just that message. Both work while the agent is
+running. Cancelled messages cannot be recovered.
 
 **create_team(name)** / **add_to_team(team_id, agent_id)** / **shutdown_team(team_id)**
 Group agents for coordinated work. shutdown_team stops all members at once.

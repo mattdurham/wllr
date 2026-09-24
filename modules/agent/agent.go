@@ -251,15 +251,34 @@ func (a *Agent) SnapshotInbox() []sdk.Message {
 	return a.inbox.snapshot()
 }
 
+// ClearInbox discards all pending inbox messages and returns how many were
+// removed. Unlike DeleteFromInbox/EditInboxMessage this is deliberately NOT
+// gated on IsRunning: clearing is a discard operation and is safe mid-turn.
+// Submit drains the inbox at turn start and the post-turn drain re-checks it
+// at turn end, so a concurrent clear simply makes both drains observe an
+// empty queue — cleared messages are never replayed into a later turn. The
+// index-based delete/edit methods stay gated because their by-index targets
+// are only meaningful against a quiescent inbox snapshot. Thread-safe.
+func (a *Agent) ClearInbox() int {
+	return a.inbox.clear()
+}
+
 // DeleteFromInbox removes messages from the agent's inbox.
 // At least one of byIndex or byMessageID must be provided.
 // Returns count of deleted messages, or error.
+//
+// The by-index path is gated on IsRunning: an index is only meaningful against
+// a quiescent snapshot, and a message queued between snapshot and delete
+// shifts every following index. The by-message-ID path is deliberately NOT
+// gated: IDs are stable while messages arrive, so deleting by ID mid-turn has
+// no snapshot problem — either the drain takes the message first (delete finds
+// nothing, count 0) or the delete wins (the drain misses it). Both outcomes
+// are exact: the message is delivered or cancelled, never duplicated or
+// replayed into a later turn. This is what lets a running agent cancel one of
+// its own queued messages (queue_cancel(message_id)).
 func (a *Agent) DeleteFromInbox(byIndex int, byMessageID string) (int, error) {
 	if byIndex < 0 && byMessageID == "" {
 		return 0, errors.New("at least one of byIndex or byMessageID must be provided")
-	}
-	if a.IsRunning() {
-		return 0, errors.New("cannot modify inbox while agent is running")
 	}
 	if byMessageID != "" {
 		count := 0
@@ -272,6 +291,9 @@ func (a *Agent) DeleteFromInbox(byIndex int, byMessageID string) (int, error) {
 		}
 		return count, nil
 	}
+	if a.IsRunning() {
+		return 0, errors.New("cannot modify inbox while agent is running")
+	}
 	if byIndex >= 0 && byIndex < len(a.inbox.msgs) {
 		a.inbox.deleteByIndex(byIndex)
 		return 1, nil
@@ -281,6 +303,9 @@ func (a *Agent) DeleteFromInbox(byIndex int, byMessageID string) (int, error) {
 
 // EditInboxMessage updates a message's content.
 // Content must be non-empty (Anthropic invariant).
+// The by-index path is gated on IsRunning (indexes shift as messages arrive);
+// the by-message-ID path is not (IDs are stable — same argument as
+// DeleteFromInbox).
 func (a *Agent) EditInboxMessage(byIndex int, byMessageID string, newContent string) error {
 	if strings.TrimSpace(newContent) == "" {
 		return errors.New("content must be non-empty")
@@ -288,15 +313,15 @@ func (a *Agent) EditInboxMessage(byIndex int, byMessageID string, newContent str
 	if byIndex < 0 && byMessageID == "" {
 		return errors.New("at least one of byIndex or byMessageID must be provided")
 	}
-	if a.IsRunning() {
-		return errors.New("cannot modify inbox while agent is running")
-	}
 	if byMessageID != "" {
 		old := a.inbox.editByID(byMessageID, sdk.Message{Content: newContent})
 		if old == nil {
 			return errors.New("message not found")
 		}
 		return nil
+	}
+	if a.IsRunning() {
+		return errors.New("cannot modify inbox while agent is running")
 	}
 	if byIndex >= 0 && byIndex < len(a.inbox.msgs) {
 		a.inbox.editByIndex(byIndex, sdk.Message{Content: newContent})

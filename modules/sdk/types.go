@@ -210,6 +210,7 @@ const (
 	MethodMailboxSnapshot = "mailbox_snapshot"
 	MethodMailboxDelete   = "mailbox_delete"
 	MethodMailboxEdit     = "mailbox_edit"
+	MethodMailboxClear    = "mailbox_clear"
 	// MethodQueuedMessages returns all pending queued messages for an agent.
 	MethodQueuedMessages = "queued_messages"
 

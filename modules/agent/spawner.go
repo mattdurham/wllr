@@ -96,8 +96,15 @@ func (s *Spawner) Spawn(ctx context.Context, req extension.SpawnRequest) error {
 	if fullSystemPrompt != "" {
 		fullSystemPrompt += "\n\n"
 	}
+	// The identity suffix is every sub-agent's shared ground truth: its ID, how
+	// to report back, and how its queue behaves (messages sent mid-turn wait for
+	// the next turn) plus how to cancel them via the queue extension's tools.
 	fullSystemPrompt += "## Your Agent Identity\nYour agent ID is: " + req.ID +
-		"\nTo report results back to the orchestrator, call send_message with agent_id=\"main\"."
+		"\nTo report results back to the orchestrator, call send_message with agent_id=\"main\"." +
+		"\n\nMessages sent to you while you are working are queued for your next turn. " +
+		"If a queued message should not be acted on, cancel it: queue_peek() lists your pending messages, " +
+		"queue_cancel() discards them all, or queue_cancel(index: N) cancels one. " +
+		"A cancelled message cannot be recovered, so only cancel when the message is obsolete."
 
 	opts := SpawnOpts{
 		SystemPrompt:  fullSystemPrompt,
