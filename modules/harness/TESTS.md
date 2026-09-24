@@ -316,3 +316,15 @@ a model, and typing/backspace filtering in the searchable picker.
 | High | `TestSplitPicker_PgDownScrollsPreviewNotList` | pgdown with a long preview | selection stays; previewScroll advances |
 | High | `TestShowPickerMsg_SplitOpensSplitPicker` | ShowPickerMsg with Split | picker opens searchable + preview; view shows preview pane |
 | High | `TestShowPickerMsg_PlainOpensSinglePane` | ShowPickerMsg without Split | picker opens without the split layout |
+
+## Recall tool registration (recalltool_test.go)
+
+Issue #42. The harness, not the extension host, registers the agent-scoped
+`recall` tool, because the transcript it reads belongs to a specific agent.
+
+| Level | Test | Scenario | Assertion |
+|-------|------|----------|-----------|
+| High | `TestWithRecallTool_AppendsForKnownAgent` | main agent exists | tool list gains exactly one tool named `recall` |
+| High | `TestWithRecallTool_PreservesExistingTools` | an unrelated tool is already registered | the existing tool keeps its place and recall is appended |
+| High | `TestWithRecallTool_UnknownAgentLeavesBaseUnchanged` | unknown agent ID, and nil pool | base returned unchanged, no panic |
+| High | `TestWithRecallTool_DoesNotShadowExtensionTool` | an extension already registered `recall` | the extension's tool is kept and no duplicate is added |

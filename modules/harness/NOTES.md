@@ -912,7 +912,6 @@ extension itself remains untested in CI: it is `//go:build wasip1` and its modul
 is separate, so the contract is pinned on the harness side.
 
 ## Focus reconciliation on agent close (2026-09-23)
-
 **Decision:** the fix for the mismatch flagged in #44 (split out as #46) lives in
 the harness, on the existing 1-second `extensionTickMsg`, rather than in the
 `agents` extension. `reconcileFocusedAgent` checks whether `focusedAgent` still
@@ -947,3 +946,32 @@ details follow from doing it on the tick:
 Covered by `TestFocusedAgentCloseReturnsTranscriptToRoot`, which was confirmed to
 fail when the tick wiring is removed, plus the direct `reconcileFocusedAgent`
 cases for live focus, root focus, idempotence, and a nil host.
+
+## Recall tool registration (2026-09-23)
+
+Issue #42. `withRecallTool` appends the agent-scoped `recall` tool to every
+agent's tool list, main and sub-agent alike.
+
+The harness registers it rather than the extension host, because the tool reads
+`Agent.CanonicalTranscript()` — state that belongs to one specific agent.
+`BuildFantasyTools` serves host-registered tools and has no access to a running
+agent's transcript, and routing the tool through a WASM extension would put the
+transcript on the far side of an ABI for no benefit.
+
+Two details are deliberate:
+
+- **Registering for sub-agents too.** Every agent compacts, so every agent can
+  lose detail it later needs. Restricting recall to the main agent would leave
+  a sub-agent unable to recover its own earlier commands and output.
+- **Yielding to an extension-owned `recall`.** An extension that already
+  registers a tool by that name keeps ownership; the harness adds nothing rather
+  than creating a duplicate name in the tool list, which providers handle
+  inconsistently.
+
+The transcript is created lazily by `CanonicalTranscript()` rather than at spawn,
+so the tool works for an agent built as a zero value (as several tests do) and
+reads the transcript per call, not once at construction.
+
+Covered by `recalltool_test.go`: append for a known agent, preserve existing
+tools, no-op for an unknown agent or nil pool, and no shadowing of an
+extension-owned name.

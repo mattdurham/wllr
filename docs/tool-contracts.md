@@ -147,6 +147,66 @@ Output:
 - `recent` is an array of `{ "role": string, "preview": string }`.
 - Fatal errors: missing `agent_id`, unknown agent. Error text is plain text.
 
+### `recall`
+
+Searches the agent's canonical session transcript for the verbatim record of
+earlier messages, tool calls, and tool output. Use after context compaction has
+summarized older turns, when exact commands, paths, error messages, or the
+precise wording of an earlier instruction are needed.
+
+Unlike the other native tools this one is agent-scoped: the harness registers it
+per agent (main and sub-agents) because each agent owns its own transcript. An
+extension that registers a tool already named `recall` keeps ownership of the
+name; the harness then adds nothing.
+
+Input (all fields optional, but at least one filter is required):
+
+- `query` string. Case-insensitive substring matched against entry content.
+  The primary retrieval mode.
+- `tool` string. Restricts results to one tool's calls and results, matched
+  case-insensitively against the tool name (for example `exec`).
+- `path` string. Case-insensitive substring matched against entry content,
+  typically a file path.
+- `from` integer. Inclusive lower bound on entry sequence numbers. `0` or
+  omitted means unbounded.
+- `to` integer. Inclusive upper bound on entry sequence numbers. `0` or omitted
+  means unbounded.
+- `limit` integer. Maximum entries returned. Omitted uses a default of 200.
+
+Output:
+
+- Plain text. Each entry is rendered with its stable source pointer and a
+  kind/role header, for example:
+
+  ```
+  [r7] tool_result exec (seq 7) — output:
+  FAIL: connection refused on port 5433
+  ```
+
+- The result opens by stating the material is the exact pre-compaction
+  canonical transcript and that it takes precedence over any summary.
+- The result ends with a footer reporting how many entries were shown within
+  the token budget, and notes when more entries matched so the caller can
+  narrow the query.
+- Output never exceeds the derived token budget (a twentieth of the agent's
+  context window, capped at 4000 tokens and floored at 500), so recall cannot
+  overflow the context window.
+
+Behavior:
+
+- At least one of `query`, `tool`, `path`, or a `from`/`to` range must be
+  supplied. Values are whitespace-trimmed first, so a blank `query` does not
+  count as a filter. No filter returns `is_error: true` with a plain-text
+  message naming the requirement.
+- Malformed JSON returns `is_error: true` naming the parse failure.
+- `from` greater than `to`, or a negative bound, returns `is_error: true` naming
+  the constraint.
+- An empty transcript, or a query that matches nothing, is a normal result (not
+  an error) with guidance to broaden the search.
+- Every entry rendered carries its source pointer, which stays stable for the
+  life of the session, so the model can cite exact material rather than
+  paraphrasing a summary.
+
 ## Agents Extension
 
 ### `create_agent`

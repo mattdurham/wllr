@@ -35,7 +35,7 @@ Package `agent` manages sub-agents and teams for the bob harness. Each `Agent` w
   compaction sizing use the model the sub-agent actually runs. This lets the
   host apply a configured working tier that may live on a different provider
   than the session model, which the single-provider `modelFactory` cannot express.
-- Individual `Agent` fields (inbox, cancel, history, onToken, onDone, onToolCall, onTurnStart, toolsFn, systemPrompt) carry their own per-field mutexes. Callers never need to hold pool-level locks when calling agent methods.
+- Individual `Agent` fields (inbox, cancel, history, canonical, onToken, onDone, onToolCall, onTurnStart, toolsFn, systemPrompt) carry their own per-field mutexes. Callers never need to hold pool-level locks when calling agent methods.
 
 **Invariant (re-entrancy):** no agent callback may be invoked on a stack that a
 host call can be on. `Submit` is reachable from `agent_deliver`, `agent_run`, and
@@ -745,3 +745,131 @@ delivered with `sdk.MessageTypeProtocol`. They MUST remain model-visible —
 not conversation, so consumers that render or record prompts must skip
 `protocol`. `system` is unsuitable (never reaches the model) and `steering` is
 unsuitable (filtered from the LLM context); both would break orchestration.
+
+---
+
+## 16. Canonical Transcript and Recall
+
+Compaction (§9) is intentionally lossy: it replaces older turns in the
+model-visible `a.history` with a summary. The **canonical transcript** is the
+non-lossy half of that hybrid model. It is an append-only record of every
+message, tool call, and tool result for a session, and compaction never touches
+it. The `recall` tool lets the model read it back, so detail that compaction
+summarized away remains retrievable at its exact original wording.
+
+```go
+type Transcript struct { /* entries, seq, mu */ }
+
+type TranscriptEntry struct {
+    ID        string    // stable source pointer: "u1", "a2", "t3", "r4"
+    Seq       int       // monotonic; also encoded in ID
+    Role      string    // "user"/"assistant" for messages; empty for tool entries
+    Kind      string    // TranscriptKindMessage | ToolCall | ToolResult
+    ToolName  string    // tool that produced a call/result entry
+    Content   string    // verbatim text
+    Timestamp time.Time
+}
+```
+
+`Agent.CanonicalTranscript()` returns the agent's transcript, creating it on
+first use. Creation is lazy rather than done at spawn so a zero-value `Agent`
+(as tests construct) behaves identically to a spawned one.
+
+### Recording contract
+
+The transcript is written from `executeTurn` at the same two points as
+`a.history`, under the same conditions, so the two never disagree about what
+constitutes conversation:
+
+| Source | History | Transcript |
+|---|---|---|
+| Explicit turn content (non-empty) | recorded | recorded as a message entry |
+| Drained inbox messages on the empty-content drain path | recorded unless `system` | recorded unless `system` |
+| Assistant text (after placeholder substitution) | recorded | recorded as a message entry |
+| Client-side tool call | not recorded | recorded as a tool_call entry |
+| Client-side tool result | not recorded | recorded as a tool_result entry |
+
+**Invariant:** the transcript is append-only. No entry is removed or rewritten,
+so an entry ID issued at record time remains a valid source pointer for the life
+of the agent. `Snapshot` returns a copy; callers cannot mutate stored entries.
+
+**Invariant:** the transcript is never passed to `compactHistory` and compaction
+never mutates it. This is the "compaction does not destroy the canonical
+transcript" guarantee, and it is asserted against a real compaction in
+`canonical_test.go`.
+
+**Invariant:** `system` messages are excluded from both history and the
+`transcript`. A Go-level control message (`shutdown_request`, steering, etc.) is
+not conversation and must not become recallable content. `steering` messages are
+recorded (matching history) but remain filtered from the LLM context by
+`sdkToFantasyMessages`.
+
+**Invariant:** empty content is not recorded as a message (matches the history
+contract; the provider rejects empty text blocks). A tool call with empty input
+*is* recorded — the call happened, and the absence of arguments is information. A
+tool result with empty output is not recorded.
+
+**Invariant:** provider-executed tool calls and results are not recorded. They
+are model-owned rather than client work, matching the existing `onToolCall`
+filter in `streamTurn`.
+
+### Search and budgeting
+
+```go
+type RecallQuery struct {
+    Text  string // case-insensitive substring on Content
+    Tool  string // case-insensitive exact match on ToolName
+    Path  string // case-insensitive substring on Content
+    From  int    // inclusive seq lower bound; 0 = unbounded
+    To    int    // inclusive seq upper bound; 0 = unbounded
+    Limit int    // 0 = DefaultRecallLimit (200); negative = unlimited
+}
+
+func (t *Transcript) Search(q RecallQuery) (matches []TranscriptEntry, total int)
+func RenderRecall(entries []TranscriptEntry, total int, budgetTokens int64) string
+func recallBudgetForWindow(contextWindow int64) int64
+```
+
+Every non-zero `RecallQuery` field is an additional AND filter; an empty query
+matches everything. Matches are returned in chronological order. `total` is the
+pre-cap match count, so a caller can tell the model that a query was too broad
+rather than presenting a partial result as complete.
+
+**Invariant:** `RenderRecall` output never exceeds `budgetTokens * 4` bytes,
+header, notice, and footer included. The proof is structural: the content budget
+is `maxChars - len(header) - recallFooterReserve`, so the assembled string fits
+`maxChars` whenever the footer fits its reserve, and a final clamp enforces the
+bound unconditionally. Recall therefore cannot overflow the model context window.
+
+**Invariant:** a non-positive budget is never treated as "unbounded" — it falls
+back to `DefaultRecallTokenBudget` (4,000 tokens). An unresolved context window
+is not a licence to return unbounded text.
+
+**Invariant:** a single entry larger than the whole budget is still returned
+(truncated with a `…[truncated]` marker) rather than yielding an empty result.
+
+**Invariant:** every rendered entry carries its source pointer (`[r7]`) and a
+kind/role header, and the result states that the material is the exact
+pre-compaction canonical record. Without that provenance a model may treat
+recalled detail as contradicting its context rather than supplementing it.
+
+### The recall tool
+
+`Agent.RecallTool()` returns a `fantasy.AgentTool` named `recall`. It is
+registered for the main agent and for every sub-agent by the harness
+(`withRecallTool`), because all agents compact. It reads the transcript at call
+time, so a tool constructed before the transcript exists still works.
+
+**Invariant:** the tool never returns a Go error. Invalid input (malformed JSON,
+inverted range, negative bounds, no filter supplied) is reported as a
+tool-error response so the model can correct itself, matching the convention of
+the other tools in this codebase.
+
+**Invariant:** at least one filter (`query`, `tool`, `path`, or a `from`/`to`
+range) is required. An unfiltered recall would dump the session and consume the
+very context the transcript exists to protect. Values are whitespace-trimmed
+before this check, so a blank query does not count as a filter.
+
+**Invariant:** the output budget is `recallBudgetForWindow(a.ContextWindow())` —
+a twentieth of the window, capped at `DefaultRecallTokenBudget` and floored at
+500 tokens. A smaller window therefore yields a smaller recall.

@@ -679,3 +679,70 @@ callback.
 all access is correctly synchronized through a mutex that is never released.
 Tests assert liveness instead: a call must return while a lock the callback needs
 is held. That assertion fails in seconds when the inline call is reinstated.
+
+---
+
+## 41. Canonical transcript and recall — compaction is lossy, retrieval is not
+
+*Added: 2026-09-23*
+
+**Decision:** Keep an in-memory, append-only **canonical transcript** on each
+`Agent` alongside `a.history`, and expose it to the model through a `recall`
+tool. Compaction continues to rewrite `a.history` exactly as before; it never
+touches the transcript.
+
+**Rationale:** Compaction is deliberately lossy — that is what makes a long
+session runnable — but it was lossy with no recovery path. `executeTurn` does
+`history = result.History; a.history = history`, so the originals were gone from
+the agent's memory the moment a summary replaced them. A summary is the wrong
+shape for exact detail: a model that needs the precise error text, command, or
+path it saw forty turns ago cannot reconstruct it from prose, and asking it to
+try produces confident invention.
+
+The persisted session file (`extensions/history`) was the only surviving record,
+but it was insufficient in two ways and unsuitable in a third. It recorded only
+the root agent's messages, and only tool *inputs* — never tool output — so an
+exact command result or error message was unrecoverable even from disk. And it
+lives behind a WASM extension in a separate `wasip1` module, which is the wrong
+place for something the turn path needs to read.
+
+This follows the VCC idea the issue cites: keep the canonical transcript intact
+and searchable, and let the model retrieve exact material with source pointers
+rather than trusting a summary. The transcript is the retrieval source; the
+summary stays the model's working context.
+
+**Why in-memory rather than reusing the session file.** The transcript is written
+where conversation is recorded — the same two points in `executeTurn` that write
+`a.history` — so the two can never disagree about what constitutes conversation,
+and recording needs no file I/O, no parsing, and no sandbox access. It also
+extends the record where the file was weakest: tool results.
+
+**Why the tool lives in `modules/agent`.** The agent package already imports
+`fantasy`, so the recall tool is a `fantasy.AgentTool` built over the agent's own
+transcript with no new dependency and no cross-module callback. Registering it as
+a host native tool would have forced the host to reach into a running agent's
+state, and routing it through a WASM extension would have put the transcript on
+the far side of an ABI. The harness appends it per agent in `withRecallTool`,
+which covers sub-agents as well as main because every agent compacts.
+
+**Why the budget is a hard bound, not an estimate.** An unbounded recall would
+reintroduce the exact failure compaction exists to prevent, so `RenderRecall`
+reserves space for its own header and footer before filling content and clamps
+the assembled result. The test asserts the invariant directly (`len(out) <=
+budget*4`) rather than asserting that truncation happened. A non-positive budget
+falls back to the default instead of meaning "unbounded" — an unresolved context
+window is not a licence to dump the session.
+
+**Consequence:** `Agent` gains `canonical`/`canonicalMu` and
+`CanonicalTranscript()`; the transcript is created lazily so a zero-value `Agent`
+constructed in a test behaves like a spawned one. `streamTurn` gains an
+`OnToolResult` callback (the tool-result half was previously discarded) and
+`toolResultText` extracts text, error, or media-accompanying text. History
+recording is unchanged; the transcript mirrors it and additionally records tool
+calls and results. `withRecallTool` appends the tool unless an extension already
+registered the name, so an extension keeps ownership of `recall`.
+
+**Deliberately out of scope:** persisting the canonical transcript to disk (the
+session file already covers the durable, user-facing record), surfacing recall
+in the UI beyond the existing tool-call pane and compaction notice, and
+transcript-scoped recall for the open `#42` acceptance item about the statusline.

@@ -475,7 +475,7 @@ func (m *Model) SetProgram(p *tea.Program) {
 		mainID := m.mainAgentID
 
 		spawner := agent.NewSpawner(pool, func(agentID string) []fantasy.AgentTool {
-			return tools.BuildFantasyTools(extHostRef, agentID, logFnRef)
+			return withRecallTool(tools.BuildFantasyTools(extHostRef, agentID, logFnRef), pool, agentID)
 		}, func(text string) {
 			p.Send(NotifyMsg{Text: "⚠ " + text})
 		})
@@ -716,11 +716,39 @@ func (m *Model) wireMainAgentCallbacks(p *tea.Program) {
 	extHost := m.extHost
 	logFn := m.logFn
 	a.SetToolsFn(func() []fantasy.AgentTool {
-		return tools.BuildFantasyTools(extHost, agent.MainAgentID, logFn)
+		return withRecallTool(
+			tools.BuildFantasyTools(extHost, agent.MainAgentID, logFn),
+			m.agentPool,
+			agent.MainAgentID,
+		)
 	})
 	a.SetOnToolCall(func(id, toolName, input string) {
 		p.Send(ToolCallStartMsg{AgentID: mainID, ID: id, ToolName: toolName, Input: input})
 	})
+}
+
+// withRecallTool appends the canonical-transcript recall tool to base for the
+// named agent, if that agent exists. Recall is what makes compaction non-lossy
+// from the model's point of view: compaction rewrites the model-visible
+// history, and recall reads the verbatim transcript beside it (issue #42).
+//
+// A tool already named "recall" is left alone rather than shadowed, so an
+// extension that registers its own recall keeps ownership of the name.
+// Returns base unchanged when the agent is unknown or the name is taken.
+func withRecallTool(base []fantasy.AgentTool, pool *agent.AgentPool, agentID string) []fantasy.AgentTool {
+	for _, t := range base {
+		if t.Info().Name == agent.RecallToolName {
+			return base
+		}
+	}
+	if pool == nil {
+		return base
+	}
+	a := pool.Get(agentID)
+	if a == nil {
+		return base
+	}
+	return append(base, a.RecallTool())
 }
 
 // SetLogFn sets the logging function used for internal harness warnings

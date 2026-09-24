@@ -78,13 +78,13 @@ or unavailable.
 
 - `SetOnToken`: a batched token callback (see §5).
 - `SetOnDone`: calls flush on the batcher, then `p.Send(StreamDoneMsg{Err})`.
-- `SetToolsFn`: returns `tools.BuildFantasyTools(extHost, "main", logFn)`.
+- `SetToolsFn`: returns `withRecallTool(tools.BuildFantasyTools(extHost, "main", logFn), pool, "main")` — the extension/native tool set plus the agent-scoped `recall` tool.
 - `SetOnToolCall`: `p.Send(ToolCallStartMsg{AgentID: mainID, ID, ToolName, Input})`.
 - If the main agent is recovered after an `ErrAgentNotFound`, these callbacks
   and the dynamic tool function are wired onto the replacement before the user
   turn is retried.
 
-Sub-agents spawned via `harnessAgentBridge.Spawn` (delegated to `agent.Spawner`) receive similar wiring with the spawned agent's ID. Their token output is not routed to the main chat, but their tool-call starts are routed to the tool activity pane/log with `AgentID` populated.
+Sub-agents spawned via `harnessAgentBridge.Spawn` (delegated to `agent.Spawner`) receive similar wiring with the spawned agent's ID. Their token output is not routed to the main chat, but their tool-call starts are routed to the tool activity pane/log with `AgentID` populated. Their tool list is built the same way, through `withRecallTool`, so a sub-agent can retrieve its own pre-compaction detail.
 
 ---
 
@@ -446,6 +446,24 @@ Returns the current set of registered tools from `extHost.RegisteredTools()` as 
 **Invariant:** Returns nil if `extHost` is nil. Returns nil if no tools are registered.
 
 **Invariant:** `agentID` is forwarded to `ExecuteTool`, which includes it in `BeforeToolCallPayload.AgentID` and `AfterToolCallPayload.AgentID`.
+
+---
+
+## 21a. withRecallTool
+
+```go
+func withRecallTool(base []fantasy.AgentTool, pool *agent.AgentPool, agentID string) []fantasy.AgentTool
+```
+
+Appends the canonical-transcript `recall` tool (`agent.RecallTool()`) to `base` for the named agent. Registered for the main agent and every sub-agent, because every agent compacts and each owns its own transcript.
+
+**Invariant:** the harness registers this tool, not the extension host, because the transcript is agent-scoped state (`Agent.CanonicalTranscript()`). `BuildFantasyTools` serves host-registered tools and has no access to a running agent's transcript.
+
+**Invariant:** a tool already named `recall` in `base` suppresses the addition, so an extension that registers its own `recall` keeps ownership of the name rather than being shadowed by a duplicate.
+
+**Invariant:** an unknown `agentID` or a nil pool returns `base` unchanged — no recall tool and no nil dereference.
+
+**Invariant:** `base` is returned as a new slice when the tool is appended; existing entries keep their order. Covered by `recalltool_test.go`.
 
 ---
 

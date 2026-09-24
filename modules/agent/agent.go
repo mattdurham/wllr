@@ -69,6 +69,13 @@ type Agent struct {
 
 	history []sdk.Message
 
+	// canonical is the append-only canonical transcript: the verbatim record of
+	// every message, tool call, and tool result for this session. Compaction
+	// rewrites history but never touches canonical, which is what makes exact
+	// pre-compaction detail retrievable through the recall tool (issue #42).
+	// Created lazily by CanonicalTranscript; guarded by canonicalMu.
+	canonical *Transcript
+
 	opts SpawnOpts
 
 	// inbox is the agent's pending-message queue (see mailbox). It owns its own
@@ -126,6 +133,10 @@ type Agent struct {
 
 	// history is the conversation history for this agent (all completed turns).
 	historyMu sync.Mutex
+
+	// canonicalMu guards lazy creation of canonical. Held only for the brief
+	// init, never while reading the transcript (which has its own lock).
+	canonicalMu sync.Mutex
 
 	shutdownRequested atomic.Bool
 
@@ -357,12 +368,29 @@ func (a *Agent) SystemPrompt() string {
 }
 
 // History returns a snapshot of the agent's conversation history.
+// This is the model-visible history, which compaction rewrites. Use
+// CanonicalTranscript for the verbatim, never-compacted record.
 func (a *Agent) History() []sdk.Message {
 	a.historyMu.Lock()
 	h := make([]sdk.Message, len(a.history))
 	copy(h, a.history)
 	a.historyMu.Unlock()
 	return h
+}
+
+// CanonicalTranscript returns the agent's canonical transcript, creating it on
+// first use. The transcript is append-only and is never passed to compaction,
+// so entries recorded here survive every compaction run.
+//
+// Creation is lazy rather than done at spawn so a zero-value Agent (as several
+// tests construct) behaves identically to a spawned one.
+func (a *Agent) CanonicalTranscript() *Transcript {
+	a.canonicalMu.Lock()
+	defer a.canonicalMu.Unlock()
+	if a.canonical == nil {
+		a.canonical = NewTranscript()
+	}
+	return a.canonical
 }
 
 // LastSummary returns the most recent compaction summary.
@@ -1017,6 +1045,23 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 	a.history = append(a.history, sdk.Message{Role: sdk.RoleAssistant, Content: assistantText})
 	a.historyMu.Unlock()
 
+	// Mirror the same records into the canonical transcript under the same
+	// conditions as history (system control messages are not conversation and
+	// stay out of both). The transcript is never compacted, so this is what
+	// keeps a command, path, or error retrievable after a later compaction
+	// folds the turn into a summary.
+	canonical := a.CanonicalTranscript()
+	if content != "" {
+		canonical.RecordMessage(string(sdk.RoleUser), content)
+	} else {
+		for _, m := range inboxMsgs {
+			if m.Type != sdk.MessageTypeSystem {
+				canonical.RecordMessage(string(m.Role), m.Content)
+			}
+		}
+	}
+	canonical.RecordMessage(string(sdk.RoleAssistant), assistantText)
+
 	a.finishTurn(ctx, err, childCtx.Err(), onDone, inboxMsgs)
 }
 
@@ -1312,9 +1357,22 @@ func (a *Agent) streamTurn(
 		OnToolCall: func(toolCall fantasy.ToolCallContent) error {
 			if !toolCall.ProviderExecuted {
 				a.markToolCall(toolCall.ToolCallID, toolCall.ToolName)
+				a.CanonicalTranscript().RecordToolCall(toolCall.ToolName, toolCall.Input)
 			}
 			if onToolCall != nil && !toolCall.ProviderExecuted {
 				onToolCall(toolCall.ToolCallID, toolCall.ToolName, toolCall.Input)
+			}
+			return nil
+		},
+		OnToolResult: func(result fantasy.ToolResultContent) error {
+			// Record the tool's output, not just its input. The persisted session
+			// file only ever saw inputs, so an exact error message or command
+			// output was unrecoverable once compaction folded the turn away.
+			if result.ProviderExecuted {
+				return nil
+			}
+			if out := toolResultText(result.Result); out != "" {
+				a.CanonicalTranscript().RecordToolResult(result.ToolName, out)
 			}
 			return nil
 		},
@@ -1324,6 +1382,24 @@ func (a *Agent) streamTurn(
 		usage = contextUsageFromResult(res)
 	}
 	return collected, usage, err
+}
+
+// toolResultText extracts the display text of a tool result for the canonical
+// transcript. Errors carry their message and media results may carry
+// accompanying text; both are worth keeping. An unknown result type yields the
+// empty string and is simply not recorded.
+func toolResultText(result any) string {
+	switch v := result.(type) {
+	case fantasy.ToolResultOutputContentText:
+		return v.Text
+	case fantasy.ToolResultOutputContentError:
+		if v.Error != nil {
+			return v.Error.Error()
+		}
+	case fantasy.ToolResultOutputContentMedia:
+		return v.Text
+	}
+	return ""
 }
 
 // isContextTooLong returns true when the API rejected the request because the

@@ -138,3 +138,60 @@ mismatched endpoint overrides.
 | High | `TestSpawnerTokenObserverCarriesAgentID` | a spawned sub-agent streams text | the observer fires with the producing agent's ID, enabling live focused views |
 
 | High | `TestSpawnDoesNotBlockOnTurnStartCallback` | spawn while the caller holds a lock the turn-start callback needs | Spawn returns instead of invoking the callback on the spawning stack (regression for the create_agent deadlock) |
+
+## Canonical transcript and recall
+
+### transcript_test.go
+
+| Test | Scenario | Setup | Assertions |
+|------|----------|-------|------------|
+| `TestTranscript_RecordMessage_AssignsStableSequentialIDs` | ID scheme is stable and ordered | record user/assistant/user | IDs are `u1`, `a2`, `u3`; `Len` is 3 |
+| `TestTranscript_IDsAreUniqueAcrossKinds` | source pointers never collide | record message, tool call, tool result, message | every ID non-empty and unique |
+| `TestTranscript_RecordMessage_RejectsEmpty` | empty content is not a record | record `""`, `"   "`, `"\n\t"` | empty ID returned; `Len` stays 0 |
+| `TestTranscript_RecordToolCall_KeepsEmptyInput` | a call with no args still happened | record tool call with empty input | entry recorded |
+| `TestTranscript_SnapshotIsChronologicalAndCopied` | snapshot cannot corrupt storage | record two entries, mutate the snapshot | order preserved; stored entry unchanged by the mutation |
+| `TestTranscript_SearchByTextIsCaseInsensitiveSubstring` | primary retrieval mode | mixed-case content, lowercase query | one match, correct entry |
+| `TestTranscript_SearchByToolMatchesOnlyThatTool` | tool filter isolates calls/results | two tools plus a message | only that tool's entries; messages excluded |
+| `TestTranscript_SearchByPath` | path-oriented retrieval | two edit calls with different paths | only the matching path |
+| `TestTranscript_SearchByRangeIsInclusive` | range bounds are inclusive | three entries, `from=2,to=3` | seqs 2 and 3 returned |
+| `TestTranscript_SearchRangeOnly` | range alone is a valid query | five entries, `from=4` | the last two |
+| `TestTranscript_SearchLimitKeepsTotal` | truncation is reportable | ten matches, `limit=3` | 3 returned, `total` still 10 |
+| `TestTranscript_SearchNoMatchReturnsNilAndZero` | miss is not an error | unrelated query | nil matches, total 0 |
+| `TestTranscript_NilTranscriptIsSafe` | zero-value robustness | nil `*Transcript` | all methods safe, no panic |
+| `TestRenderRecall_RespectsTokenBudgetExactly` | hard output bound | 20 large tool results, 500-token budget | `len(out) <= budget*4` |
+| `TestRenderRecall_IncludesSourcePointers` | entries are citable | tool call + result | output contains IDs, kind headers, and content |
+| `TestRenderRecall_StatesProvenance` | model knows the material predates its summary | one message | output states canonical/pre-compaction provenance |
+| `TestRenderRecall_NoMatchesIsActionable` | miss gives recovery guidance | empty matches | actionable text, within budget |
+| `TestRenderRecall_TruncatesSingleOversizeEntry` | oversize entry stays retrievable | one 50k-char result, 200-token budget | entry present, truncated, within budget |
+| `TestRenderRecall_SignalsTruncatedMatches` | partial results are labelled | 50 matches, 300-token budget | output says more matched |
+| `TestRecallBudgetForWindow` | budget derivation | 0, -1, 1M, 4k, 2k windows | default, default, cap, scaled, floor |
+| `TestRenderRecall_NonPositiveBudgetUsesDefault` | zero budget is not unbounded | budgets 0 and -1 | output within the default budget |
+
+### recall_test.go
+
+| Test | Scenario | Setup | Assertions |
+|------|----------|-------|------------|
+| `TestRecallTool_InfoShape` | schema contract | agent recall tool | name `recall`; all six filters present; `Required` empty |
+| `TestRecallTool_Run_FindsExactPreCompactionDetail` | the core retrieval case | seeded transcript, query `port 5433` | exact output text plus source pointer returned |
+| `TestRecallTool_Run_FilterByTool` | filter by tool | seeded transcript, `tool=exec` | call and result returned; message excluded |
+| `TestRecallTool_Run_FilterByPath` | filter by path | extra edit call | matching path returned |
+| `TestRecallTool_Run_MessageRange` | range retrieval | `from=2,to=4` | seqs 2–4 returned; seq 1 excluded |
+| `TestRecallTool_Run_RequiresAtLeastOneFilter` | no unfiltered dumps | `{}`, blank query | error response naming the requirement |
+| `TestRecallTool_Run_RejectsMalformedInput` | input validation | truncated JSON | error response naming invalid JSON |
+| `TestRecallTool_Run_RejectsInvertedRange` | input validation | `from=9,to=2` | error response naming the range rule |
+| `TestRecallTool_Run_RejectsNegativeBounds` | input validation | `from=-1` | error response |
+| `TestRecallTool_Run_EmptyTranscriptIsNotAnError` | empty state is legitimate | agent with no entries | readable result, not an error |
+| `TestRecallTool_Run_BoundedByContextWindow` | window scales the budget | 200 large entries, 2k vs 1M windows | both within budget; small returns strictly less |
+| `TestRecallTool_ReadsTranscriptLazily` | tool built before the transcript | construct tool, record later | sees entries recorded afterwards |
+| `TestRecallTool_NilAgentIsReportedNotPanicked` | defensive | tool with no agent | error response, no panic |
+
+### canonical_test.go
+
+| Test | Scenario | Setup | Assertions |
+|------|----------|-------|------------|
+| `TestExecuteTurn_CompactionPreservesCanonicalTranscript` | **acceptance:** compaction must not destroy the transcript | seeded transcript, 212-message history over budget, usage above threshold | compaction ran; detail gone from `History()`; transcript intact; recall still returns the exact detail |
+| `TestExecuteTurn_CanonicalTranscriptDoesNotEnterHistory` | transcript is not compaction input | transcript entry then a turn | marker never appears in `History()` |
+| `TestExecuteTurn_RecordsMessagesInCanonicalTranscript` | both sides of a turn are recorded | one turn | two entries: user then assistant, correct kinds/roles |
+| `TestExecuteTurn_RecordsToolCallAndResultInCanonicalTranscript` | **command output is retrievable** | scripted client-side tool call returning a failure | call and result entries recorded; result text exact; findable by tool |
+| `TestCanonicalTranscript_SurvivesAcrossTurns` | append-only across turns | two turns | two new entries; earlier turn still retrievable |
+| `TestCanonicalTranscript_ExcludesSystemMessages` | control traffic is not conversation | inbox mixing a system and a protocol message, empty-prompt drain turn | system content absent; something else recorded (test is not vacuous) |
