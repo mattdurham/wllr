@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -24,6 +25,28 @@ func newTestPool() *agent.AgentPool {
 func newTestModel() Model {
 	pool := newTestPool()
 	return New(pool, "main", nil)
+}
+
+func TestAgentLifecycleEventPayload(t *testing.T) {
+	evt, err := agentLifecycleEvent(agent.AgentLifecycle{
+		AgentID: "main/worker",
+		Live:    1,
+		Main:    false,
+		Spawned: false,
+	})
+	if err != nil {
+		t.Fatalf("agentLifecycleEvent: %v", err)
+	}
+	if evt.Type != sdk.EventAgentLifecycle {
+		t.Fatalf("event type = %q, want %q", evt.Type, sdk.EventAgentLifecycle)
+	}
+	var got sdk.AgentLifecyclePayload
+	if err := json.Unmarshal(evt.Payload, &got); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if got.AgentID != "main/worker" || got.Live != 1 || got.Main || got.Spawned {
+		t.Fatalf("payload = %+v", got)
+	}
 }
 
 // callUpdate is a helper that calls Update and returns the concrete Model.

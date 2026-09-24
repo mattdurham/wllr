@@ -44,16 +44,18 @@ are `tasklist_create`, `tasks_create`, `tasks_claim`, `tasks_update`,
 | `EventNotify`                 | `"notify"`                  | Dispatched when a system notification line is shown in chat (NotifyPayload) |
 | `EventLog`                    | `"log"`                     | Dispatched with a batch (~30ms) of structured log records (LogBatchPayload) |
 | `EventModelChanged`           | `"model_changed"`           | Dispatched after active provider/model status changes (ModelChangedPayload) |
+| `EventAgentLifecycle`          | `"agent_lifecycle"`          | Dispatched after an agent is added to or removed from the pool              |
 
 **Invariants:**
 
 - The set of `EventType` string values must not change between ABI versions without a version bump.
 - An unknown `EventType` must be silently ignored by extensions (forward-compatibility).
-- There are exactly 18 defined event types.
+- There are exactly 19 defined event types.
 - `EventToken` carries a `TokenPayload{AgentID, Text}`; batches are coalesced by the harness so the WASM crossing rate stays bounded (~13/sec) regardless of provider speed.
 - `EventNotify` carries a `NotifyPayload{Text}`; it is dispatched for every notification line shown in the chat, regardless of origin (extension `notify` call, model change, reload, extension error). Handlers must not call `notify` to avoid a dispatch loop.
 - `EventLog` carries a `LogBatchPayload{Records []LogRecord}`; the host's slog handler coalesces records (~30ms) and forwards them so extensions can act as log sinks. The dispatch path is reentrancy-guarded — logs emitted while dispatching `EventLog` are not re-dispatched — so handlers must not rely on logging from within an `EventLog` handler.
 - `EventModelChanged` carries a `ModelChangedPayload{Provider, Model}` and is dispatched after the harness updates its live status state for provider/model changes.
+- `EventAgentLifecycle` carries an `AgentLifecyclePayload{AgentID, Live, Main, Spawned}` after each pool membership change. `Spawned=false` identifies a removal.
 
 ---
 
@@ -209,6 +211,15 @@ No payload fields — the event carries no structured data beyond the event type
 |------------|--------|-------------------------------------|
 | `provider` | string | Active provider identifier          |
 | `model`    | string | Active model identifier, if known   |
+
+### AgentLifecyclePayload (`EventAgentLifecycle`)
+
+| Field      | Type   | Description                                      |
+|------------|--------|--------------------------------------------------|
+| `agent_id` | string | ID of the agent whose membership changed         |
+| `live`     | int64  | Number of agents in the pool after the change    |
+| `main`     | bool   | Whether the changed agent is the root agent      |
+| `spawned`  | bool   | `true` for an addition, `false` for a removal    |
 
 ---
 

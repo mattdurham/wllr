@@ -1116,6 +1116,29 @@ event.
 
 ---
 
+### `agent_lifecycle`
+
+Fired after an agent is added to or removed from the pool. The event is
+subscription-gated and is emitted once for every affected agent, including
+descendants removed by a cascaded close. A removal uses `spawned: false`.
+
+```json
+{"agent_id": "main/worker", "live": 1, "main": false, "spawned": false}
+```
+
+| Field      | Type    | Description                                   |
+|------------|---------|-----------------------------------------------|
+| `agent_id` | string  | ID of the agent whose membership changed.    |
+| `live`     | integer | Number of agents remaining after the change. |
+| `main`     | boolean | Whether the changed agent is the root agent. |
+| `spawned`  | boolean | `true` for an addition, `false` for removal. |
+
+The event lets extensions release focus and remove stale agent rows when a
+child shuts itself down. It is delivered asynchronously from pool callbacks so
+an extension handler cannot re-enter the host on the pool's call stack.
+
+---
+
 ### `log`
 
 Fired with a coalesced batch (~30ms) of structured log records emitted by the

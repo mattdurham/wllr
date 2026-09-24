@@ -679,3 +679,21 @@ callback.
 all access is correctly synchronized through a mutex that is never released.
 Tests assert liveness instead: a call must return while a lock the callback needs
 is held. That assertion fails in seconds when the inline call is reinstated.
+
+## 41. Additive lifecycle observers
+
+*Added: 2026-09-24*
+
+**Decision:** `AgentPool` keeps the existing primary lifecycle observer and adds
+`AddLifecycleObserver` for independent callbacks. Both receive every spawn and
+close event.
+
+**Rationale:** The metrics server already owns `SetLifecycleObserver`, while the
+harness also needs pool membership events to keep extension-owned agent state in
+sync. Replacing the metrics callback would silently remove observability, and
+composing callbacks in `cmd` would couple the agent package to extension wiring.
+
+**Consequence:** `SetLifecycleObserver` retains replacement semantics for the
+primary callback; additive callbacks survive changes to that primary observer.
+Callbacks are copied under `dispatchMu` and invoked after pool locks are
+released, preserving the existing non-blocking observer contract.

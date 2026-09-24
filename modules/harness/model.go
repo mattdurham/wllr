@@ -110,6 +110,10 @@ type Model struct {
 	extHost   *extension.Host
 	live      *liveState // shared pointer updated in-place; safe for closure capture
 
+	// lifecycleDispatchInstalled prevents duplicate extension events if a caller
+	// reuses a model with SetProgram during a test or host reinitialisation.
+	lifecycleDispatchInstalled bool
+
 	// program is set after the bubbletea program starts so goroutines can
 	// send messages back. Set via SetProgram.
 	program *tea.Program
@@ -516,6 +520,21 @@ func (m *Model) SetProgram(p *tea.Program) {
 		// Wire context-usage dispatcher so agent turns forward EventContextUsage
 		// to WASM extensions without a circular import between agent and extension.
 		if pool != nil {
+			if !m.lifecycleDispatchInstalled {
+				m.lifecycleDispatchInstalled = true
+				pool.AddLifecycleObserver(func(ev agent.AgentLifecycle) {
+					evt, err := agentLifecycleEvent(ev)
+					if err != nil {
+						return
+					}
+					// Agent lifecycle callbacks can originate from an extension host
+					// call. Keep dispatch off that stack to avoid re-entering a
+					// non-reentrant WASM call mutex.
+					go func() {
+						_, _ = extHostRef.DispatchEvent(context.Background(), evt)
+					}()
+				})
+			}
 			pool.SetContextUsageDispatcher(
 				func(cu sdk.ContextUsage, compact bool, thresholdPct float64, compactions int) {
 					payload, _ := json.Marshal(
@@ -555,6 +574,21 @@ func (m *Model) SetProgram(p *tea.Program) {
 	}
 
 	m.wireMainAgentCallbacks(p)
+}
+
+// agentLifecycleEvent converts the agent package's plain observer value into
+// the stable SDK event consumed by extensions.
+func agentLifecycleEvent(ev agent.AgentLifecycle) (sdk.Event, error) {
+	payload, err := json.Marshal(sdk.AgentLifecyclePayload{
+		AgentID: ev.AgentID,
+		Live:    ev.Live,
+		Main:    ev.Main,
+		Spawned: ev.Spawned,
+	})
+	if err != nil {
+		return sdk.Event{}, err
+	}
+	return sdk.Event{Type: sdk.EventAgentLifecycle, Payload: payload}, nil
 }
 
 // interceptProviderRequest runs the before_provider_request transform chain via

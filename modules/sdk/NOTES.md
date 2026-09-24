@@ -305,3 +305,21 @@ therefore looked like the user had issued commands they never sent.
 a lifecycle notification) rather than a directly-sent prompt; `agent_id` names
 the agent the turn belongs to. Consumers that record or display prompts filter
 on both. The payload fields existed already — the SDK was dropping them.
+
+## 22. EventAgentLifecycle — pool membership updates
+
+*Added: 2026-09-24*
+
+**Decision:** Add `EventAgentLifecycle` (`"agent_lifecycle"`) with
+`AgentLifecyclePayload{AgentID, Live, Main, Spawned}`. The harness forwards the
+agent pool's existing lifecycle observer values to subscribed extensions.
+
+**Rationale:** An extension-owned agent tree can become stale when a child
+finishes a graceful shutdown: the pool removes it and sends `AGENT_SHUTDOWN` to
+the parent, but no extension event identifies the removed child. A stable pool
+event lets UI extensions release focus and remove stale rows without parsing
+model-visible protocol messages.
+
+**Consequence:** Event type count rises to 19. `Spawned=false` identifies a
+removal and is emitted for each descendant in a cascaded close. Existing
+extensions are unaffected because event delivery remains subscription-gated.

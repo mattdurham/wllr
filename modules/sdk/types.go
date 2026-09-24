@@ -48,6 +48,9 @@ const (
 	// EventModelChanged is dispatched after the active provider/model status
 	// changes. It lets display extensions update immediately without polling.
 	EventModelChanged EventType = "model_changed"
+	// EventAgentLifecycle is dispatched after an agent is added to or removed
+	// from the pool. The payload is an AgentLifecyclePayload.
+	EventAgentLifecycle EventType = "agent_lifecycle"
 )
 
 // Event is dispatched to extensions via _on_event.
@@ -73,6 +76,8 @@ const (
 // MessageEndPayload is the payload for EventMessageEnd.
 
 // ShutdownPayload is the payload for EventShutdown.
+
+// AgentLifecyclePayload is the payload for EventAgentLifecycle.
 
 // UsageStats holds token usage from a provider response.
 

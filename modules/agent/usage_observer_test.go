@@ -141,6 +141,26 @@ func TestLifecycleObserverReportsSpawnAndClose(t *testing.T) {
 	}
 }
 
+// TestLifecycleObserverCanBeAddedWithoutReplacingThePrimaryObserver covers
+// the harness's need to forward lifecycle events while metrics remains wired.
+func TestLifecycleObserverCanBeAddedWithoutReplacingThePrimaryObserver(t *testing.T) {
+	p := agent.NewPool()
+	var primary, additional int
+	p.SetLifecycleObserver(func(agent.AgentLifecycle) { primary++ })
+	p.AddLifecycleObserver(func(agent.AgentLifecycle) { additional++ })
+
+	a, err := p.Spawn("main/worker", &usageLM{}, agent.SpawnOpts{})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	if err := p.Close(a.ID()); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if primary != 2 || additional != 2 {
+		t.Fatalf("observer calls = primary %d, additional %d; want 2 each", primary, additional)
+	}
+}
+
 // TestUsageObserverCoversSubagents is the reason per-agent accounting is
 // possible: the observer fires for every agent, not just the main one.
 func TestUsageObserverCoversSubagents(t *testing.T) {

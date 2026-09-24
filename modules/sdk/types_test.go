@@ -67,6 +67,11 @@ func TestEventJSONRoundTrip(t *testing.T) {
 			evtType: sdk.EventShutdown,
 			payload: sdk.ShutdownPayload{Reason: "quit"},
 		},
+		{
+			name:    "agent_lifecycle",
+			evtType: sdk.EventAgentLifecycle,
+			payload: sdk.AgentLifecyclePayload{AgentID: "main/worker", Live: 2, Main: false, Spawned: false},
+		},
 	}
 
 	for _, tc := range events {
@@ -333,9 +338,10 @@ func TestEventTypeConstants(t *testing.T) {
 		sdk.EventNotify,
 		sdk.EventLog,
 		sdk.EventModelChanged,
+		sdk.EventAgentLifecycle,
 	}
-	if len(types) != 18 {
-		t.Errorf("expected 18 event types, got %d", len(types))
+	if len(types) != 19 {
+		t.Errorf("expected 19 event types, got %d", len(types))
 	}
 	for _, et := range types {
 		if et == "" {

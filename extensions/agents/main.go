@@ -231,6 +231,9 @@ func init() {
 
 	// Use the raw before_tool_call event so we get the AgentID field too.
 	OnBeforeToolCall(onBeforeToolCall)
+	// Keep the focused transcript and agent list in sync when a child closes
+	// itself, including graceful and cascaded shutdowns.
+	_sdkOn("agent_lifecycle", onAgentLifecycle)
 
 	// Register the WASM-driven chat transcript handlers (UI P4).
 	initChat()
@@ -507,6 +510,28 @@ progress, and questions. Never infer completion from TASK_DONE text or idle
 state, and inspect liveness before retrying or requeueing. Workers report before
 going idle. Never poll, sleep, or call wait_for_all.
 `)
+}
+
+// onAgentLifecycle removes closed agents from the extension-owned registry and
+// falls back to the root transcript when the focused child disappears. The
+// host sends one event per pool membership change, so this also covers a
+// parent close that cascades to descendants.
+func onAgentLifecycle(payload json.RawMessage) {
+	var p struct {
+		AgentID string `json:"agent_id"`
+		Spawned bool   `json:"spawned"`
+	}
+	if err := json.Unmarshal(payload, &p); err != nil || p.AgentID == "" || p.Spawned {
+		return
+	}
+
+	removeAgent(p.AgentID)
+	if p.AgentID != focusedAgentID {
+		return
+	}
+	focusedAgentID = ""
+	SetFocusedAgent("")
+	RebuildTranscriptFor("")
 }
 
 func onAgentsCommand(_ []string) {

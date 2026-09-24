@@ -45,8 +45,11 @@ type AgentPool struct {
 	// Set via SetUsageObserver.
 	usageObserver func(TurnUsage)
 	// lifecycleObserver, when set, is called whenever an agent is added to or
-	// removed from the pool. Set via SetLifecycleObserver.
-	lifecycleObserver func(AgentLifecycle)
+	// removed from the pool. Additional observers are registered with
+	// AddLifecycleObserver so instrumentation and extension dispatch can share
+	// the same pool without replacing one another.
+	lifecycleObserver  func(AgentLifecycle)
+	lifecycleObservers []func(AgentLifecycle)
 	// providerRequestInterceptor, when set, runs the before_provider_request
 	// transform chain just before each agent turn streams to the provider. It can
 	// redact the outgoing messages, reroute the model, or block the request.

@@ -21,13 +21,16 @@ Package `agent` manages sub-agents and teams for the bob harness. Each `Agent` w
   it streams. It runs on the agent's turn goroutine and must be non-blocking;
   the harness batches per agent before dispatching.
 
-- The optional `usageObserver` and `lifecycleObserver` are read/written under
-  `p.dispatchMu`. `observeTurn` reports a `TurnUsage` per turn (a start signal,
-  then a completion with token counts and duration); `observeLifecycle` reports
-  pool membership changes with the post-change live count. Both are invoked from
-  agent goroutines and must be safe for concurrent use and non-blocking. Pool
-  membership events are reported **after** releasing `p.mu`, never while holding
-  it, so an observer cannot deadlock against the pool.
+- The optional `usageObserver`, primary `lifecycleObserver`, and additive
+  `lifecycleObservers` are read/written under `p.dispatchMu`. `observeTurn`
+  reports a `TurnUsage` per turn (a start signal, then a completion with token
+  counts and duration); `observeLifecycle` reports pool membership changes with
+  the post-change live count. Both lifecycle registration methods are safe for
+  concurrent use. Observers are invoked from agent goroutines and must be safe
+  for concurrent use and non-blocking. Pool membership events are reported
+  **after** releasing `p.mu`, never while holding it, so an observer cannot
+  deadlock against the pool. `SetLifecycleObserver` replaces the primary
+  callback; `AddLifecycleObserver` appends an independent callback.
 - The optional `subagentResolver` is read/written under `p.mu`. `ResolveSubagentModel`
   consults it only when the spawn request omits a model name; an explicit model
   always resolves through `modelFactory` first. The resolver returns both the
