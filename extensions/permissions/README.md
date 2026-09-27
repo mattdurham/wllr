@@ -71,6 +71,39 @@ spelling out the variable to copy it), but it cannot see through
 expansion. Treat it as one layer; keep credentials out of the environment the
 agent runs in.
 
+### Custom denial messages
+
+Every deny rule — commands, environment variables, and paths — may carry an
+optional `message` returned verbatim to the agent when that rule blocks a
+call, so you can explain *why* (and what to do instead) at the rule site.
+Rules without a message keep the generic wording ("command sed is denied").
+Write a rule either as a bare string or as an object with the rule's match key
+plus an optional `message`:
+
+```yaml
+exec:
+  deny_commands:
+    - sed                                   # bare form: no message
+    - command: ruby                         # object form: with a message
+      message: "ruby is not permitted here; use the built-in file editing tools."
+  deny_env_vars:
+    - AWS_ACCESS_KEY_ID
+    - env_var: GITHUB_TOKEN
+      message: "The GitHub token must not be echoed into logs."
+read:
+  allow: ["*"]
+  deny:
+    - path: "~/.ssh/"
+      message: "SSH material is off limits."
+```
+
+Messages are plain strings returned as-is — they are not templates and cannot
+interpolate the tool call. A message-bearing rule enforces exactly where the
+same rule without a message would; only the wording differs. A malformed
+object rule (or one missing its match key) is inert — it matches nothing —
+rather than failing the whole config, so one bad entry cannot silently strip
+your policy to permissive defaults.
+
 ### Permission Rules
 
 1. **Deny takes precedence** — if a path matches a deny pattern, access is blocked

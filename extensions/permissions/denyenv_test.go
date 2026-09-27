@@ -5,20 +5,11 @@ import (
 	"testing"
 )
 
-// awsDenyEnvVars mirrors a typical user configuration: the secret-bearing AWS
-// variables listed under exec.deny_env_vars.
-var awsDenyEnvVars = []string{
-	"AWS_ACCESS_KEY_ID",
-	"AWS_SECRET_ACCESS_KEY",
-	"AWS_SESSION_TOKEN",
-	"AWS_SECURITY_TOKEN",
-}
-
 func TestFindDeniedEnvVar(t *testing.T) {
 	tests := []struct {
 		name     string
 		command  string
-		denyVars []string
+		denyVars []EnvVarRule
 		want     string
 		found    bool
 	}{
@@ -86,11 +77,20 @@ func TestFindDeniedEnvVar(t *testing.T) {
 			denyVars: awsDenyEnvVars,
 		},
 		{name: "unrelated command", command: "go test ./...", denyVars: awsDenyEnvVars},
-		{name: "blank entries are ignored", command: "echo hello", denyVars: []string{"", "  "}},
+		{
+			name:     "blank entries are ignored",
+			command:  "echo hello",
+			denyVars: []EnvVarRule{envRule(""), envRule("  ")},
+		},
+		{
+			name:     "object rule missing its match key is inert",
+			command:  "echo $AWS_SECRET_ACCESS_KEY",
+			denyVars: []EnvVarRule{{Message: "oops"}},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, found := findDeniedEnvVar(tt.command, tt.denyVars)
+			got, _, found := findDeniedEnvVar(tt.command, tt.denyVars)
 			if found != tt.found {
 				t.Fatalf("findDeniedEnvVar(%q) found = %v, want %v", tt.command, found, tt.found)
 			}
@@ -98,6 +98,26 @@ func TestFindDeniedEnvVar(t *testing.T) {
 				t.Fatalf("findDeniedEnvVar(%q) = %q, want %q", tt.command, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestFindDeniedEnvVarMessage pins that the matched rule's message is returned
+// so the caller can surface it verbatim (issue #49).
+func TestFindDeniedEnvVarMessage(t *testing.T) {
+	_, message, found := findDeniedEnvVar("echo $AWS_SECRET_ACCESS_KEY", []EnvVarRule{
+		envMsg("AWS_SECRET_ACCESS_KEY", "AWS secrets never leave the host."),
+	})
+	if !found {
+		t.Fatalf("findDeniedEnvVar found = false, want true")
+	}
+	if message != "AWS secrets never leave the host." {
+		t.Fatalf("message = %q, want the configured rule message", message)
+	}
+
+	// A message-less rule returns an empty message.
+	_, message, _ = findDeniedEnvVar("echo $AWS_SECRET_ACCESS_KEY", []EnvVarRule{envRule("AWS_SECRET_ACCESS_KEY")})
+	if message != "" {
+		t.Fatalf("message = %q, want empty for a message-less rule", message)
 	}
 }
 
@@ -152,7 +172,7 @@ func TestCheckCommandPermissionEnvVarsConfigDriven(t *testing.T) {
 	if allowed, _ := checkCommandPermission(command, ExecRules{}); !allowed {
 		t.Fatalf("checkCommandPermission(%q) with no config refused, want allowed", command)
 	}
-	rules := ExecRules{DenyEnvVars: []string{"AWS_SECRET_ACCESS_KEY"}}
+	rules := ExecRules{DenyEnvVars: []EnvVarRule{envRule("AWS_SECRET_ACCESS_KEY")}}
 	if allowed, _ := checkCommandPermission(command, rules); allowed {
 		t.Fatalf("checkCommandPermission(%q) with a configured deny_env_vars allowed, want refused", command)
 	}
@@ -184,12 +204,12 @@ func TestCheckCommandPermissionStillAllowsNonCredentials(t *testing.T) {
 		{
 			name:    "configured deny still applies",
 			command: "sed -i file",
-			rules:   ExecRules{DenyCommands: []string{"sed"}},
+			rules:   ExecRules{DenyCommands: []CommandRule{cmdRule("sed")}},
 		},
 		{
 			name:    "user can deny a non-AWS variable",
 			command: "echo $DATABASE_URL",
-			rules:   ExecRules{DenyEnvVars: []string{"DATABASE_URL"}},
+			rules:   ExecRules{DenyEnvVars: []EnvVarRule{envRule("DATABASE_URL")}},
 		},
 	}
 	for _, tt := range tests {
