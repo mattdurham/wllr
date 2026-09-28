@@ -1013,3 +1013,45 @@ input are worse than a slightly smaller hitbox.
 config, not a terminal signal or flow-control key, and not a readline editing
 key. The pre-existing ctrl+t/ctrl+q conflicts with zellij noted in the issue
 are left for a separate report.
+
+## /context is a modal over two views of the same window (2026-09-24)
+
+The statusline already shows the headline (`ctx:used/max` from
+`MainAgentContextUsage`); the user asked for a place to answer "what is
+consuming context?". The statusline is the wrong home for detail: it is a WASM
+extension fed by an aggregate-only event, and extending the payload means a
+TinyGo/Docker rebuild of every embedded builtin. The /context slash command
+avoids all of that: it is a harness builtin (`showContextMsg`, Instant) whose
+handler renders `agentPool.ContextBreakdown()` into the existing modal — pure
+Go, no wasm, computed on demand from live agent state.
+
+The modal shows two views: the provider-reported last-request input
+(authoritative) and the chars/4 estimate of the next request's buckets
+(attribution). The gap between them is surfaced with an explanation rather
+than scaled away — see modules/agent/NOTES.md §43 for why the gap is expected.
+
+Covered by `contextmodal_test.go` (sections, gap thresholds, comma) and the
+`/context` registration asserted in `commands_test.go`.
+
+*Addendum (2026-09-24):* the modal now attributes in detail — per-tool
+token rows under `tools`, a `largest prompts:` list (top-5 heaviest
+user/assistant messages), and a canonical side broken out `by type`
+(messages/tool calls/tool results, with the messages bucket split by role)
+and `tool traffic by tool` (capped at 10 with an `… and N more` line).
+Attribution data arrives as plain values on `ContextBreakdown` from the agent
+package (see agent NOTES §43 addendum); nil attribution maps — e.g. a stale
+snapshot — render totals only, which is what the legacy-snapshot test pins.
+
+## /context attributes the system prompt by source and tools by extension (2026-09-25)
+
+Two renderer decisions on top of the earlier breakdown:
+
+- The system prompt's "by source" list renders in ledger arrival order, not
+  sorted: prompt pieces read top-to-bottom in the actual prompt, and the
+  ledger's order IS that order (base report first, then each append). An
+  empty ledger renders no section at all — the plain total still stands.
+- Tool definitions group under their owning extension with a subtotal,
+  heaviest extension first. The group name comes from the pool's tool-owner
+  resolver (host registration records); ownerless tools (harness-native,
+  recall) group under "harness". Snapshots from before the owner field
+  existed render the old flat list — pinned by test.

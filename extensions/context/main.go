@@ -13,10 +13,23 @@ func init() {
 			Logf(2, "prompt: invalid session_start payload: %v", err)
 			return
 		}
-		prompt := buildPrompt(payload.Tools, payload.Commands)
+		prompt, parts := buildPromptParts(payload.Tools, payload.Commands)
 		if prompt != "" {
 			SetSystemPrompt(prompt)
-			Logf(1, "prompt: loaded system prompt (%d bytes)", len(prompt))
+			// Report the labeled decomposition so the /context breakdown can
+			// attribute the prompt's cost to its sources (built-in rules,
+			// tools list, prompt files, AGENTS.md, cwd note). The guest-side
+			// component type differs from cwd.go's host-testable mirror, so
+			// the part list is converted here.
+			components := make([]SystemPromptComponent, 0, len(parts))
+			for _, part := range parts {
+				components = append(components, SystemPromptComponent{
+					Source: part.Source,
+					Chars:  part.Chars,
+				})
+			}
+			SetSystemPromptComponents(components)
+			Logf(1, "prompt: loaded system prompt (%d bytes, %d components)", len(prompt), len(components))
 		}
 	})
 }

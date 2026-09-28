@@ -180,6 +180,15 @@ func registerBuiltins(r *Registry) {
 		},
 	})
 
+	r.Register(Command{
+		Name:    "context",
+		Desc:    "Show the context-window breakdown for the main agent",
+		Instant: true,
+		Handler: func(_ []string) tea.Cmd {
+			return func() tea.Msg { return showContextMsg{} }
+		},
+	})
+
 	// The history extension owns the implementation, but reserving its command
 	// here keeps /history usable if a generated WASM artifact is stale or absent.
 	r.Register(Command{

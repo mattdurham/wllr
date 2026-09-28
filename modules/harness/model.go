@@ -686,6 +686,19 @@ func (m *Model) wireMainAgentCallbacks(p *tea.Program) {
 	if m.agentPool == nil {
 		return
 	}
+	// The /context breakdown attributes tool-definition tokens to the extension
+	// that registered each tool. The host's registry is the source of truth;
+	// tools it doesn't know (harness-native, recall) carry no owner and the
+	// renderer labels them "harness".
+	if m.extHost != nil {
+		m.agentPool.SetToolOwnersFn(func() map[string]string {
+			owners := make(map[string]string)
+			for _, rt := range m.extHost.RegisteredTools() {
+				owners[rt.Tool.Name] = rt.OwnerName
+			}
+			return owners
+		})
+	}
 	a := m.agentPool.Get(m.mainAgentID)
 	if a == nil {
 		return
@@ -1562,6 +1575,15 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case showToolsMsg:
 		m.modalContent = m.chat.ToolLogModal()
+		m.modalScroll = 0
+		return m, nil, true
+
+	case showContextMsg:
+		if m.agentPool != nil {
+			m.modalContent = renderContextBreakdown(m.agentPool.ContextBreakdown())
+		} else {
+			m.modalContent = "No agent pool available."
+		}
 		m.modalScroll = 0
 		return m, nil, true
 

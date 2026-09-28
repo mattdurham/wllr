@@ -208,6 +208,7 @@ type testUIBridge struct {
 	onRegisterTool    func(tool sdk.Tool) error
 	onSetSystemPrompt func(prompt string)
 	onAppendSP        func(text string)
+	appendedSources   []string
 	onSetModel        func(value, thinking string) error
 	onResetHistory    func(messages []sdk.Message) error
 	onToolResult      func(toolCallID, result string, isError bool)
@@ -290,11 +291,14 @@ func (b *testUIBridge) SetSystemPrompt(prompt string) {
 	}
 }
 
-func (b *testUIBridge) AppendSystemPrompt(text string) {
+func (b *testUIBridge) AppendSystemPromptFrom(source, text string) {
 	if b.onAppendSP != nil {
 		b.onAppendSP(text)
 	}
+	b.appendedSources = append(b.appendedSources, source)
 }
+
+func (b *testUIBridge) SetSystemPromptComponents(_ []sdk.SystemPromptComponent) {}
 
 func (b *testUIBridge) SetModel(value, thinking string) error {
 	if b.onSetModel != nil {
@@ -758,6 +762,97 @@ func TestHost_Store_GetMiss(t *testing.T) {
 	if resp.Error == "" {
 		t.Error("expected error for missing key, got none")
 	}
+}
+
+func TestHost_AppendSystemPrompt_LabeledSource(t *testing.T) {
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer func() { _ = h.Close(ctx) }()
+
+	path := writeWASM(t, "minimal.wasm", minimalWASM)
+	if err := h.Load(ctx, path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	bridge := &testUIBridge{}
+	h.SetUIBridge(bridge)
+	ext := h.extensions[0]
+
+	resp := h.handleAppendSystemPrompt(ext, sdk.HostCallRequest{
+		Method: sdk.MethodAppendSystemPrompt,
+		Params: []byte(`{"text":"hello"}`),
+	})
+	if resp.Error != "" {
+		t.Fatalf("handleAppendSystemPrompt: %s", resp.Error)
+	}
+	// The calling extension's name labels the append — no cooperation needed.
+	if len(bridge.appendedSources) != 1 || bridge.appendedSources[0] != "minimal" {
+		t.Errorf("append sources = %v, want [minimal]", bridge.appendedSources)
+	}
+
+	// No caller (host-initiated): falls back to the generic label.
+	h.handleAppendSystemPrompt(nil, sdk.HostCallRequest{
+		Method: sdk.MethodAppendSystemPrompt,
+		Params: []byte(`{"text":"hi"}`),
+	})
+	if len(bridge.appendedSources) != 2 || bridge.appendedSources[1] != "extension" {
+		t.Errorf("append sources = %v, want second entry 'extension'", bridge.appendedSources)
+	}
+}
+
+func TestHost_SetSystemPromptComponents(t *testing.T) {
+	ctx := context.Background()
+	h := NewHost(nil)
+	defer func() { _ = h.Close(ctx) }()
+
+	path := writeWASM(t, "minimal.wasm", minimalWASM)
+	if err := h.Load(ctx, path); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	var got []sdk.SystemPromptComponent
+	bridge := &testUIBridge{}
+	// The fake drops components; use a wrapper to capture them.
+	type capturingBridge struct {
+		*testUIBridge
+	}
+	_ = capturingBridge{bridge} // keep the wrapper shape documented
+	capturing := &componentCapturingUIBridge{testUIBridge: bridge, captured: &got}
+	h.SetUIBridge(capturing)
+
+	resp := h.handleSetSystemPromptComponents(sdk.HostCallRequest{
+		Method: sdk.MethodSetSystemPromptComponents,
+		Params: []byte(
+			`{"components":[{"source":"built-in rules","chars":100},{"source":"file:/p/AGENTS.md","chars":200}]}`,
+		),
+	})
+	if resp.Error != "" {
+		t.Fatalf("handleSetSystemPromptComponents: %s", resp.Error)
+	}
+	if len(got) != 2 || got[0].Source != "built-in rules" || got[0].Chars != 100 ||
+		got[1].Source != "file:/p/AGENTS.md" {
+		t.Errorf("components = %v, want the reported pair", got)
+	}
+
+	// A malformed report is an error response, never a panic.
+	resp = h.handleSetSystemPromptComponents(sdk.HostCallRequest{
+		Method: sdk.MethodSetSystemPromptComponents,
+		Params: []byte(`{"components":"not-a-list"}`),
+	})
+	if resp.Error == "" {
+		t.Error("expected error for malformed components, got none")
+	}
+}
+
+// componentCapturingUIBridge records SetSystemPromptComponents payloads while
+// delegating everything else to testUIBridge.
+type componentCapturingUIBridge struct {
+	*testUIBridge
+	captured *[]sdk.SystemPromptComponent
+}
+
+func (b *componentCapturingUIBridge) SetSystemPromptComponents(components []sdk.SystemPromptComponent) {
+	*b.captured = components
 }
 
 func TestHost_RegisterTool_DuplicateRejected(t *testing.T) {

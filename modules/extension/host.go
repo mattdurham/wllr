@@ -603,8 +603,11 @@ func (h *Host) buildDispatch() map[string]func(ctx context.Context, ext *Extensi
 		sdk.MethodSetModel: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleSetModel(req)
 		},
-		sdk.MethodAppendSystemPrompt: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
-			return h.handleAppendSystemPrompt(req)
+		sdk.MethodAppendSystemPrompt: func(_ context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleAppendSystemPrompt(ext, req)
+		},
+		sdk.MethodSetSystemPromptComponents: func(_ context.Context, _ *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
+			return h.handleSetSystemPromptComponents(req)
 		},
 		sdk.MethodExec: func(ctx context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
 			return h.handleExec(ctx, ext, req)
@@ -950,7 +953,7 @@ func (h *Host) handleModal(req sdk.HostCallRequest) sdk.HostCallResponse {
 	return sdk.HostCallResponse{}
 }
 
-func (h *Host) handleAppendSystemPrompt(req sdk.HostCallRequest) sdk.HostCallResponse {
+func (h *Host) handleAppendSystemPrompt(ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse {
 	if h.uiBridge() == nil {
 		return sdk.HostCallResponse{Error: "append_system_prompt: not supported by host"}
 	}
@@ -960,7 +963,32 @@ func (h *Host) handleAppendSystemPrompt(req sdk.HostCallRequest) sdk.HostCallRes
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		return sdk.HostCallResponse{Error: fmt.Sprintf("append_system_prompt: %v", err)}
 	}
-	h.uiBridge().AppendSystemPrompt(params.Text)
+	// The calling extension's name labels the append in the /context
+	// breakdown's component ledger — no extension cooperation required.
+	source := extensionName(ext)
+	if source == "" {
+		source = "extension"
+	}
+	h.uiBridge().AppendSystemPromptFrom(source, params.Text)
+	return sdk.HostCallResponse{}
+}
+
+// handleSetSystemPromptComponents installs the prompt extension's decomposition
+// of the base system prompt it just set. No permission required — the payload
+// is display-only observability (the /context modal), and the pool ignores an
+// empty report, so a malformed call cannot erase attribution or affect the
+// actual prompt.
+func (h *Host) handleSetSystemPromptComponents(req sdk.HostCallRequest) sdk.HostCallResponse {
+	if h.uiBridge() == nil {
+		return sdk.HostCallResponse{Error: "set_system_prompt_components: not supported by host"}
+	}
+	var params struct {
+		Components []sdk.SystemPromptComponent `json:"components"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return sdk.HostCallResponse{Error: fmt.Sprintf("set_system_prompt_components: %v", err)}
+	}
+	h.uiBridge().SetSystemPromptComponents(params.Components)
 	return sdk.HostCallResponse{}
 }
 

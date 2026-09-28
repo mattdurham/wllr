@@ -877,3 +877,92 @@ before this check, so a blank query does not count as a filter.
 **Invariant:** the output budget is `recallBudgetForWindow(a.ContextWindow())` —
 a twentieth of the window, capped at `DefaultRecallTokenBudget` and floored at
 500 tokens. A smaller window therefore yields a smaller recall.
+
+## 17. Context Breakdown (/context)
+
+`Agent.ContextBreakdown()` returns a `ContextBreakdown`: the provider-reported
+usage of the most recently completed turn (`LastRequest`, the largest per-step
+input from `contextUsageFromResult`) plus estimated buckets for the NEXT
+request — system prompt, tool definitions, and history, all via the chars/4
+estimators shared with compaction.
+
+**Invariant:** the breakdown's LLM-facing history counts only user/assistant
+messages. System and steering messages held in history are reported separately
+as `FilteredTokens` because `sdkToFantasyMessages` never sends them.
+
+**Invariant:** tool calls and results are NOT breakdown buckets. History never
+contains them (they are recorded to the canonical transcript instead) and each
+`Submit` builds a fresh fantasy agent, so between turns there is no tool
+traffic in persistent context. `CanonicalChars`/`CanonicalEntries` report the
+transcript size as recallable-not-resident. The gap between `LastRequest` and
+the estimate sum is expected (within-turn tool traffic, prompt caching,
+heuristic error) and is surfaced by the caller, not hidden.
+
+**Attribution detail (per-tool, per-type, per-message):**
+
+- `ToolsByTool` lists every tool definition's individually-rounded chars/4
+  estimate, heaviest first. The aggregate `ToolTokens` remains total-chars/4;
+  per-tool values may trail it by up to `ToolCount-1` tokens of rounding.
+- `LargestMessages` surfaces the heaviest user/assistant history messages
+  (capped at `maxLargestMessages`), so a single pasted document is visible
+  above the by-role totals. System/steering messages are excluded by `Type`,
+  not by `Role` — a steering message carries `RoleUser` but never reaches the
+  provider.
+- `CanonicalByKind` splits the canonical transcript by entry kind
+  (message / tool call / tool result), `CanonicalMessagesByRole` further
+  splits the message kind by role, and `CanonicalByTool` attributes tool
+  traffic (call input + result output) to the producing tool, heaviest first.
+  These maps are nil on snapshots taken before attribution existed; the
+  renderer shows totals only in that case.
+- `SystemComponents` decomposes the system prompt into labeled sources
+  (see Prompt Component Ledger below). Each component's tokens are its
+  `Chars`/4. The list describes the base prompt only: an agent's SpawnOpts
+  prompt override (the subagent identity block) is not a component.
+- `ToolSize.Extension` names the extension that registered each tool, from
+  the pool's `ToolOwners()` resolver (the harness wires it to the extension
+  host's registration records). Tools registered outside an extension
+  context — harness-native tools and the recall tool — carry an empty
+  owner; the renderer labels them "harness".
+
+**Invariant:** all reads take the same locks the Submit paths use
+(`systemPromptMu`, `toolsFnMu`, `historyMu`, `lastUsageMu`, `lmMu` via
+`ContextWindow()`), so the snapshot is safe during a running turn — slightly
+stale, never torn. System-prompt and tools resolution mirrors Submit exactly:
+dynamic `toolsFn` beats `opts.Tools`; an override prompt and the SpawnOpts
+prompt combine with a blank line when both are set.
+
+**Invariant:** reading the canonical size does not create the transcript. An
+agent that has recorded nothing reports zero canonical size.
+
+`AgentPool.ContextBreakdown()` delegates to the main agent; when the main
+agent does not exist it returns the zero value. `Transcript.SizeChars()` sums
+verbatim entry characters under the transcript's read lock.
+
+**Prompt component ledger (per-source system prompt attribution):**
+
+The pool keeps `promptComponents []sdk.SystemPromptComponent` under
+`baseSystemPromptMu` alongside the base prompt it describes:
+
+- `SetBaseSystemPrompt` resets the ledger to a single fallback component
+  (`{source: "system prompt", chars: len(prompt)}`) — components that
+  described the replaced prompt must go.
+- `SetBaseSystemPromptComponents` installs the prompt extension's
+  authoritative decomposition (via the `set_system_prompt_components` host
+  call, which arrives immediately after the Set it describes). An empty or
+  nil report is ignored, so a malformed report degrades the /context modal,
+  never erases attribution.
+- `AppendBaseSystemPromptFrom(source, text)` appends a labeled component per
+  append; the unlabeled `AppendBaseSystemPrompt` records the generic
+  "extension" label. The extension host passes the calling extension's name
+  as the source, so appends are labeled without any extension cooperation.
+- `PromptComponents()` returns a defensive copy.
+
+**Invariant:** the ledger is display-only. Nothing rebuilds the prompt from
+it, so a stale or partial list only skews the /context modal. The ledger is
+mutated on every base-prompt mutation path, so it cannot describe a prompt
+that no longer exists.
+
+**Tool owner resolver:** `SetToolOwnersFn` installs the tool→extension
+resolver; `ToolOwners()` returns a snapshot (nil when no resolver is
+installed). Installed by the harness from the extension host; the snapshot
+is taken per breakdown call so extension reloads are reflected.

@@ -22,6 +22,15 @@ type promptCommand struct {
 	Desc string `json:"description"`
 }
 
+// promptComponent mirrors the host's sdk.SystemPromptComponent for the guest
+// side: one labeled slice of the final system prompt, reported via
+// set_system_prompt_components so the /context breakdown can attribute the
+// prompt's cost to its sources.
+type promptComponent struct {
+	Source string `json:"source"`
+	Chars  int    `json:"chars"`
+}
+
 func cwdNote(cwd string) string {
 	return "You are operating in the current working directory: " + cwd
 }
@@ -34,32 +43,32 @@ func globalPaths() []string {
 	return []string{filepath.Join(home, ".wllr", "AGENTS.md"), filepath.Join(home, ".wllr", "CLAUDE.md")}
 }
 
-func readFirst(paths []string) string {
+func readFirst(paths []string) (string, string) {
 	for _, path := range paths {
 		if data, err := os.ReadFile(path); err == nil && len(data) > 0 {
 			Log(1, "prompt: loaded "+path)
-			return strings.TrimSpace(string(data))
+			return strings.TrimSpace(string(data)), path
 		}
 	}
-	return ""
+	return "", ""
 }
 
-func findAndReadContextFile() string {
+func findAndReadContextFile() (string, string) {
 	cwd, err := os.Getwd()
 	if err != nil {
-		return ""
+		return "", ""
 	}
 	for dir := cwd; ; dir = filepath.Dir(dir) {
 		for _, filename := range []string{"AGENTS.md", "CLAUDE.md"} {
 			path := filepath.Join(dir, filename)
 			if data, readErr := os.ReadFile(path); readErr == nil && len(data) > 0 {
 				Log(1, "prompt: loaded "+path)
-				return strings.TrimSpace(string(data))
+				return strings.TrimSpace(string(data)), path
 			}
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return ""
+			return "", ""
 		}
 	}
 }
@@ -87,41 +96,91 @@ type promptConfig struct {
 	Files    []string `json:"prompt_files"`
 }
 
+// promptPart is one join unit of the final system prompt: the text plus the
+// source label reported to the host. The prompt extension glues the dynamic
+// tools/commands section onto the base part with "\n\n" (historical byte
+// layout); every later part joins with "\n\n---\n\n".
+type promptPart struct {
+	source string
+	text   string
+}
+
 func buildPrompt(tools []promptTool, commands []promptCommand) string {
+	prompt, _ := buildPromptParts(tools, commands)
+	return prompt
+}
+
+// buildPromptParts assembles the system prompt and, alongside it, the labeled
+// decomposition of what was included. Components are one entry per label; the
+// dynamic tools/commands label shares the base's join unit, so the components'
+// chars sum trails the prompt's real length only by the join separators.
+func buildPromptParts(tools []promptTool, commands []promptCommand) (string, []promptComponent) {
 	var cfg promptConfig
 	if raw := ConfigReadGroup("wllr"); raw != nil {
 		_ = json.Unmarshal(raw, &cfg)
 	}
-	return buildPromptWithConfig(tools, commands, cfg)
+	return buildPromptWithConfigParts(tools, commands, cfg)
 }
 
 func buildPromptWithConfig(tools []promptTool, commands []promptCommand, cfg promptConfig) string {
-	base := builtInPrompt
-	if dynamic := dynamicPrompt(tools, commands); dynamic != "" {
-		base += "\n\n" + dynamic
+	prompt, _ := buildPromptWithConfigParts(tools, commands, cfg)
+	return prompt
+}
+
+func buildPromptWithConfigParts(
+	tools []promptTool,
+	commands []promptCommand,
+	cfg promptConfig,
+) (string, []promptComponent) {
+	var parts []promptPart
+	var components []promptComponent
+	// addPart appends a join unit and its attribution label.
+	addPart := func(source, text string) {
+		if text == "" {
+			return
+		}
+		parts = append(parts, promptPart{source: source, text: text})
+		components = append(components, promptComponent{Source: source, Chars: len(text)})
 	}
+	// addLabel attributes text to its own label but glues it onto the most
+	// recent join unit, preserving the historical base+dynamic byte layout.
+	addLabel := func(source, text string) {
+		if text == "" {
+			return
+		}
+		if len(parts) > 0 {
+			parts[len(parts)-1].text += "\n\n" + text
+		} else {
+			parts = append(parts, promptPart{source: source, text: text})
+		}
+		components = append(components, promptComponent{Source: source, Chars: len(text)})
+	}
+
+	base := builtInPrompt
+	baseSource := "built-in rules"
 	if strings.TrimSpace(cfg.Override) != "" {
 		base = strings.TrimSpace(cfg.Override)
-		if dynamic := dynamicPrompt(tools, commands); dynamic != "" {
-			base += "\n\n" + dynamic
-		}
+		baseSource = "prompt_override"
 	}
+	addPart(baseSource, base)
+	addLabel("tools & commands", dynamicPrompt(tools, commands))
 	for _, path := range cfg.Files {
-		if text := readPromptFile(path); text != "" {
-			base += "\n\n---\n\n" + text
-		}
+		addPart("file:"+expandPromptPath(path), readPromptFile(path))
 	}
-	parts := []string{base}
-	if content := readFirst(globalPaths()); content != "" {
-		parts = append(parts, content)
+	if content, path := readFirst(globalPaths()); content != "" {
+		addPart("file:"+path, content)
 	}
-	if content := findAndReadContextFile(); content != "" {
-		parts = append(parts, content)
+	if content, path := findAndReadContextFile(); content != "" {
+		addPart("file:"+path, content)
 	}
 	if cwd, err := os.Getwd(); err == nil && cwd != "" {
-		parts = append(parts, cwdNote(cwd))
+		addPart("cwd note", cwdNote(cwd))
 	}
-	return strings.TrimSpace(strings.Join(parts, "\n\n---\n\n"))
+	texts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		texts = append(texts, part.text)
+	}
+	return strings.TrimSpace(strings.Join(texts, "\n\n---\n\n")), components
 }
 
 func readPromptFile(path string) string {

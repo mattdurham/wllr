@@ -268,9 +268,20 @@ The full set of dispatched methods is:
 
 **Invariant:** Dispatch handlers snapshot the bridge field under `h.mu.RLock()` via internal getter methods (`h.agentBridge()`, `h.uiBridge()`, etc.) so that the field transition from early stub to full implementation is race-free.
 
-**Invariant:** `PermExec` is required for `exec` and `mcp_spawn`; `PermFileRead` for `read_file`; `PermFileWrite` for `write_file`/`append_file`; `PermNetworkWrite` for `http_post`; `PermNetworkRead` for `http_get`; `PermUI` for `ui_create_area`/`ui_patch`/`ui_update_area`/`ui_remove_area` and `format_markdown`. `get_env`, `get_os`, agent/team/mailbox methods, `store_*`, `modal`, `notify`, `set_status`, `append_system_prompt`, and
+**Invariant:** `PermExec` is required for `exec` and `mcp_spawn`; `PermFileRead` for `read_file`; `PermFileWrite` for `write_file`/`append_file`; `PermNetworkWrite` for `http_post`; `PermNetworkRead` for `http_get`; `PermUI` for `ui_create_area`/`ui_patch`/`ui_update_area`/`ui_remove_area` and `format_markdown`. `get_env`, `get_os`, agent/team/mailbox methods, `store_*`, `modal`, `notify`, `set_status`, `append_system_prompt`, `set_system_prompt_components`, and
 `set_model` require no permission. If the extension is nil or lacks the
 required permission, the call returns a permission-denied error response.
+
+**Invariant:** `append_system_prompt` labels its caller: the host passes the
+calling extension's name as the source to
+`UIBridge.AppendSystemPromptFrom`, so the /context breakdown's prompt
+component ledger attributes every append to the extension that made it
+without extension cooperation. `set_system_prompt_components`
+(`MethodSetSystemPromptComponents`) requires no permission and carries the
+prompt extension's labeled decomposition of the prompt it just set — the
+payload is display-only observability (an empty report is ignored), so a
+misbehaving extension can at worst skew the /context modal, never the actual
+prompt or another extension's append labels.
 
 **Invariant:** `show_agent_tree` (`MethodShowAgentTree`) requires no permission
 and opens the interactive agent tree. The extension supplies a flat node list

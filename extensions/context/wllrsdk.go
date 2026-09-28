@@ -279,6 +279,25 @@ func AppendSystemPrompt(text string) {
 	_sdkCall("append_system_prompt", map[string]string{"text": text})
 }
 
+// SystemPromptComponent is one labeled slice of the base system prompt,
+// reported by SetSystemPromptComponents so the host's /context breakdown can
+// attribute the prompt's cost to its sources.
+type SystemPromptComponent struct {
+	Source string `json:"source"`
+	Chars  int    `json:"chars"`
+}
+
+// SetSystemPromptComponents reports the labeled decomposition of the system
+// prompt just set via SetSystemPrompt. Display-only observability: the host
+// feeds it to the /context breakdown and never rebuilds the prompt from it.
+// An empty list is ignored by the host, so a failed computation is harmless.
+func SetSystemPromptComponents(components []SystemPromptComponent) {
+	if len(components) == 0 {
+		return
+	}
+	_sdkCall("set_system_prompt_components", map[string]any{"components": components})
+}
+
 // SetModel switches the main agent active model.
 // value may be a model ID or a configured model-tier name (e.g. "high").
 // thinking, when non-empty, is a provider-agnostic reasoning level (e.g. "high")

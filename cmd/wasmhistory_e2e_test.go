@@ -22,30 +22,31 @@ type captureBridge struct {
 	onPicker func(sdk.ShowPickerParams)
 }
 
-func (b *captureBridge) Notify(string)                                      {}
-func (b *captureBridge) ShowModal(string)                                   {}
-func (b *captureBridge) ShowPicker(p sdk.ShowPickerParams)                  { b.onPicker(p) }
-func (b *captureBridge) ShowAgentTree(sdk.ShowAgentTreeParams)              {}
-func (b *captureBridge) SetFocusedAgent(string)                             {}
-func (b *captureBridge) ShowTextInput(string, string, string, string)       {}
-func (b *captureBridge) Abort()                                             {}
-func (b *captureBridge) SetStatus(string, string)                           {}
-func (b *captureBridge) GetStatusInfo() sdk.StatusInfo                      { return sdk.StatusInfo{} }
-func (b *captureBridge) SendMessage(sdk.Message)                            {}
-func (b *captureBridge) RegisterCommand(string, string, bool) error         { return nil }
-func (b *captureBridge) RegisterTool(sdk.Tool) error                        { return nil }
-func (b *captureBridge) SetSystemPrompt(string)                             {}
-func (b *captureBridge) AppendSystemPrompt(string)                          {}
-func (b *captureBridge) SetModel(string, string) error                      { return nil }
-func (b *captureBridge) ResetHistory([]sdk.Message) error                   { return nil }
-func (b *captureBridge) ToolResult(string, string, bool)                    {}
-func (b *captureBridge) AfterToolCall(string, string, string, string, bool) {}
-func (b *captureBridge) ConsoleOutput(string)                               {}
-func (b *captureBridge) ConsoleClear()                                      {}
-func (b *captureBridge) CreateArea(sdk.UIArea) error                        { return nil }
-func (b *captureBridge) PatchUI(sdk.UIPatchParams) error                    { return nil }
-func (b *captureBridge) RemoveArea(string)                                  {}
-func (b *captureBridge) UpdateArea(sdk.UIUpdateAreaParams) error            { return nil }
+func (b *captureBridge) Notify(string)                                         {}
+func (b *captureBridge) ShowModal(string)                                      {}
+func (b *captureBridge) ShowPicker(p sdk.ShowPickerParams)                     { b.onPicker(p) }
+func (b *captureBridge) ShowAgentTree(sdk.ShowAgentTreeParams)                 {}
+func (b *captureBridge) SetFocusedAgent(string)                                {}
+func (b *captureBridge) ShowTextInput(string, string, string, string)          {}
+func (b *captureBridge) Abort()                                                {}
+func (b *captureBridge) SetStatus(string, string)                              {}
+func (b *captureBridge) GetStatusInfo() sdk.StatusInfo                         { return sdk.StatusInfo{} }
+func (b *captureBridge) SendMessage(sdk.Message)                               {}
+func (b *captureBridge) RegisterCommand(string, string, bool) error            { return nil }
+func (b *captureBridge) RegisterTool(sdk.Tool) error                           { return nil }
+func (b *captureBridge) SetSystemPrompt(string)                                {}
+func (b *captureBridge) AppendSystemPromptFrom(string, string)                 {}
+func (b *captureBridge) SetSystemPromptComponents([]sdk.SystemPromptComponent) {}
+func (b *captureBridge) SetModel(string, string) error                         { return nil }
+func (b *captureBridge) ResetHistory([]sdk.Message) error                      { return nil }
+func (b *captureBridge) ToolResult(string, string, bool)                       {}
+func (b *captureBridge) AfterToolCall(string, string, string, string, bool)    {}
+func (b *captureBridge) ConsoleOutput(string)                                  {}
+func (b *captureBridge) ConsoleClear()                                         {}
+func (b *captureBridge) CreateArea(sdk.UIArea) error                           { return nil }
+func (b *captureBridge) PatchUI(sdk.UIPatchParams) error                       { return nil }
+func (b *captureBridge) RemoveArea(string)                                     {}
+func (b *captureBridge) UpdateArea(sdk.UIUpdateAreaParams) error               { return nil }
 
 var _ extension.UIBridge = (*captureBridge)(nil)
 

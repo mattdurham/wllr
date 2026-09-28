@@ -302,7 +302,7 @@ type Command struct {
 
 **Invariant:** Commands with `Instant=true` bypass the "queuing..." UI indicator in `updateActions`. When a `CommandMsg` for an Instant command arrives, `updateActions` invokes `cmd.Handler(msg.Args)` directly without setting `statusBar.statuses["stream"] = "queuing…"`.
 
-**Invariant:** All built-in commands (`/help`, `/clear`, `/reload`, `/model`, `/models`, `/thinking`, `/openrouter-speed`, `/login`, `/status`, `/tools`) have `Instant=true`. The zero value of `Command.Instant` is `false`. (The `/prompt` command is registered without `Instant=true` because it executes synchronously in the update loop via `ShowModalMsg`, not via WASM dispatch — it is intentionally excluded from the instant list.)
+**Invariant:** All built-in commands (`/help`, `/clear`, `/reload`, `/model`, `/models`, `/thinking`, `/openrouter-speed`, `/login`, `/status`, `/tools`, `/context`) have `Instant=true`. The zero value of `Command.Instant` is `false`. (The `/prompt` command is registered without `Instant=true` because it executes synchronously in the update loop via `ShowModalMsg`, not via WASM dispatch — it is intentionally excluded from the instant list.)
 
 **Invariant:** Extension-registered commands set `Instant` from the `instant bool` parameter passed to `UIBridge.RegisterCommand(name, desc, instant bool)`. When `instant=true`, the flag is stored on the `Command`, suppressing the "queuing…" status. The handler still routes through `dispatchOnCommandMsg` → `EventOnCommand`.
 
@@ -320,6 +320,7 @@ Built-in commands registered at startup:
 | `/login`        | true    | No args → `showLoginProviderPickerMsg{}` (opens the install-style provider wizard); `/login auth` → `loginMsg{}` (authenticates the active provider) |
 | `/status`       | true    | Emits `StatusUpdateMsg{Key: "_override", Value: text}`       |
 | `/tools`        | true    | Emits `showToolsMsg{}`                                       |
+| `/context`      | true    | Emits `showContextMsg{}`; `updateActions` renders `agentPool.ContextBreakdown()` into the modal — provider-reported usage, per-tool/per-type/per-message estimate attribution, and canonical-transcript attribution |
 | `/prompt`       | false   | Shows accumulated base system prompt in a modal              |
 
 ---

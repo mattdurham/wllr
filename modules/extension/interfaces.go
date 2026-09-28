@@ -163,7 +163,16 @@ type UIBridge interface {
 	RegisterCommand(name, desc string, instant bool) error
 	RegisterTool(tool sdk.Tool) error
 	SetSystemPrompt(prompt string)
-	AppendSystemPrompt(text string)
+	// AppendSystemPromptFrom appends text to the base system prompt and records
+	// source in the /context breakdown's component ledger. The host passes the
+	// calling extension's name as source, so the ledger labels every append
+	// without any extension cooperation.
+	AppendSystemPromptFrom(source, text string)
+	// SetSystemPromptComponents installs the prompt extension's decomposition
+	// of the base system prompt it just set (built-in rules, tools list,
+	// prompt files, AGENTS.md, cwd note). Display-only: consumed by the /context
+	// breakdown, never used to rebuild the prompt.
+	SetSystemPromptComponents(components []sdk.SystemPromptComponent)
 	// SetModel switches the main agent's active model. value may be a model ID
 	// or a configured model-tier name (e.g. "high"); tiers may switch provider.
 	// thinking, when non-empty, is a provider-agnostic reasoning level (e.g.

@@ -295,6 +295,18 @@ func (p *AgentPool) MainAgentContextUsage() sdk.ContextUsage {
 	return sdk.ContextUsageFromFantasy(a.LastUsage(), window)
 }
 
+// ContextBreakdown returns the context breakdown for the main agent. When the
+// main agent does not exist yet (no turn has run), all fields are zero.
+func (p *AgentPool) ContextBreakdown() ContextBreakdown {
+	p.mu.RLock()
+	a := p.agents[MainAgentID]
+	p.mu.RUnlock()
+	if a == nil {
+		return ContextBreakdown{}
+	}
+	return a.ContextBreakdown()
+}
+
 // SnapshotInbox returns a copy of an agent's inbox without draining. Snapshots
 // are safe while the agent is running and are intended for status/UI views.
 func (p *AgentPool) SnapshotInbox(id string) ([]sdk.Message, error) {
@@ -340,9 +352,16 @@ func (p *AgentPool) EditInboxMessage(id string, byIndex int, byMessageID string,
 
 // SetBaseSystemPrompt replaces the base system prompt and applies it to all
 // current and future agents. Used by the context extension (AGENTS.md).
+// The prompt-component ledger resets to a single fallback component; the
+// prompt extension's set_system_prompt_components call replaces it with the
+// real decomposition moments later. Components that existed before this call
+// described a prompt that no longer exists, so they must go.
 func (p *AgentPool) SetBaseSystemPrompt(prompt string) {
 	p.baseSystemPromptMu.Lock()
 	p.baseSystemPrompt = prompt
+	p.promptComponents = []sdk.SystemPromptComponent{
+		{Source: "system prompt", Chars: len(prompt)},
+	}
 	p.baseSystemPromptMu.Unlock()
 	p.mu.RLock()
 	for _, a := range p.agents {
@@ -351,21 +370,87 @@ func (p *AgentPool) SetBaseSystemPrompt(prompt string) {
 	p.mu.RUnlock()
 }
 
+// SetBaseSystemPromptComponents installs the prompt extension's decomposition
+// of the base system prompt it just set. It replaces whatever components the
+// ledger held — the report is authoritative, and it arrives immediately after
+// the Set it describes, so nothing else can have legitimately appended in
+// between. Empty or nil input leaves the ledger untouched, so a malformed
+// report degrades the /context modal, never erases attribution.
+func (p *AgentPool) SetBaseSystemPromptComponents(components []sdk.SystemPromptComponent) {
+	if len(components) == 0 {
+		return
+	}
+	p.baseSystemPromptMu.Lock()
+	p.promptComponents = append([]sdk.SystemPromptComponent(nil), components...)
+	p.baseSystemPromptMu.Unlock()
+}
+
 // AppendBaseSystemPrompt appends to the base system prompt and applies the
-// addition to all current and future agents. Used by the skills extension.
+// addition to all current and future agents. The component ledger records it
+// under the generic "extension" label; callers that know their identity use
+// AppendBaseSystemPromptFrom.
 func (p *AgentPool) AppendBaseSystemPrompt(text string) {
+	p.AppendBaseSystemPromptFrom("", text)
+}
+
+// AppendBaseSystemPromptFrom appends to the base system prompt and records a
+// labeled component (the extension host passes the calling extension's name).
+// An empty source falls back to "extension" so the ledger never carries a
+// blank row.
+func (p *AgentPool) AppendBaseSystemPromptFrom(source, text string) {
+	if source == "" {
+		source = "extension"
+	}
 	p.baseSystemPromptMu.Lock()
 	if p.baseSystemPrompt == "" {
 		p.baseSystemPrompt = text
 	} else {
 		p.baseSystemPrompt += "\n\n" + text
 	}
+	p.promptComponents = append(p.promptComponents, sdk.SystemPromptComponent{
+		Source: source,
+		Chars:  len(text),
+	})
 	p.baseSystemPromptMu.Unlock()
 	p.mu.RLock()
 	for _, a := range p.agents {
 		a.AppendSystemPrompt(text)
 	}
 	p.mu.RUnlock()
+}
+
+// PromptComponents returns a copy of the base system prompt's component
+// ledger. The components' chars sum may trail the prompt's real length by the
+// join separators between slices; the prompt total stays authoritative.
+func (p *AgentPool) PromptComponents() []sdk.SystemPromptComponent {
+	p.baseSystemPromptMu.RLock()
+	defer p.baseSystemPromptMu.RUnlock()
+	out := make([]sdk.SystemPromptComponent, len(p.promptComponents))
+	copy(out, p.promptComponents)
+	return out
+}
+
+// SetToolOwnersFn installs the resolver that maps a registered tool's name to
+// the extension that registered it. The harness wires it from the extension
+// host so the /context breakdown can attribute tool-definition tokens per
+// extension. Thread-safe; may be called before or after agents are spawned.
+func (p *AgentPool) SetToolOwnersFn(fn func() map[string]string) {
+	p.mu.Lock()
+	p.toolOwnersFn = fn
+	p.mu.Unlock()
+}
+
+// ToolOwners returns a snapshot of the tool→owner map, or nil when no resolver
+// is installed. Tools absent from the map were registered outside an extension
+// context (harness-native tools).
+func (p *AgentPool) ToolOwners() map[string]string {
+	p.mu.RLock()
+	fn := p.toolOwnersFn
+	p.mu.RUnlock()
+	if fn == nil {
+		return nil
+	}
+	return fn()
 }
 
 // BaseSystemPrompt returns the accumulated base system prompt.

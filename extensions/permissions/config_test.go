@@ -31,7 +31,11 @@ func TestConfigUnmarshalsBareStringRules(t *testing.T) {
 			t.Fatalf("DenyCommands[%d] = %+v, want command %q", i, got.Exec.DenyCommands[i], want)
 		}
 		if got.Exec.DenyCommands[i].Message != "" {
-			t.Fatalf("DenyCommands[%d].Message = %q, want empty for a bare-string rule", i, got.Exec.DenyCommands[i].Message)
+			t.Fatalf(
+				"DenyCommands[%d].Message = %q, want empty for a bare-string rule",
+				i,
+				got.Exec.DenyCommands[i].Message,
+			)
 		}
 	}
 	wantVars := []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"}
@@ -163,7 +167,11 @@ func TestDecodeRuleDegenerateForms(t *testing.T) {
 		// the rule never fires; any message payload is irrelevant but may parse.
 		{name: "object missing match key is inert", data: `{"message": "oops"}`, wantMsg: "oops"},
 		{name: "object with non-string match is inert", data: `{"command": 42}`},
-		{name: "object with non-string message is ignored", data: `{"command": "sed", "message": 42}`, wantMatch: "sed"},
+		{
+			name:      "object with non-string message is ignored",
+			data:      `{"command": "sed", "message": 42}`,
+			wantMatch: "sed",
+		},
 		// Truncated JSON cannot be repaired, so the rule stays inert rather than
 		// failing the whole config.
 		{name: "malformed object is inert", data: `{"command": "sed"`},

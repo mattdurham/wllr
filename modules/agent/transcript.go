@@ -135,6 +135,21 @@ func (t *Transcript) Len() int {
 	return len(t.entries)
 }
 
+// SizeChars returns the total verbatim character count across all entries and
+// the entry count. Used by the context breakdown to report how much detail is
+// recallable without being in context. Nil-safe.
+func (t *Transcript) SizeChars() (chars int64, entries int) {
+	if t == nil {
+		return 0, 0
+	}
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	for _, e := range t.entries {
+		chars += int64(len(e.Content))
+	}
+	return chars, len(t.entries)
+}
+
 // Snapshot returns a copy of every entry in chronological order.
 func (t *Transcript) Snapshot() []TranscriptEntry {
 	if t == nil {

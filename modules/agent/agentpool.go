@@ -57,6 +57,16 @@ type AgentPool struct {
 	providerName               string
 	defaultModelName           string
 	baseSystemPrompt           string
+	// promptComponents labels the base system prompt's sources for the /context
+	// breakdown. SetBaseSystemPrompt seeds a single fallback component; the
+	// prompt extension replaces it with its internal decomposition via
+	// set_system_prompt_components, and every labeled append adds an entry.
+	// Display-only: nothing rebuilds the prompt from this list.
+	promptComponents []sdk.SystemPromptComponent
+	// toolOwnersFn resolves tool name to the extension that registered it for
+	// the /context breakdown's per-extension tool attribution. Installed by the
+	// harness from the extension host's RegisteredTools snapshot.
+	toolOwnersFn func() map[string]string
 	// compactConfig controls the percentage-based compaction trigger.
 	// Initialized from WLLR_COMPACT_THRESHOLD in NewPool; override via SetCompactConfig.
 	compactConfig      CompactConfig

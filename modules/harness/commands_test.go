@@ -68,7 +68,7 @@ func TestBuiltinHelp(t *testing.T) {
 	for _, c := range cmds {
 		names[c.Name] = true
 	}
-	for _, expected := range []string{"help", "clear", "reload", "model", "models", "history"} {
+	for _, expected := range []string{"help", "clear", "reload", "model", "models", "history", "context"} {
 		if !names[expected] {
 			t.Errorf("expected builtin command %q to be registered", expected)
 		}

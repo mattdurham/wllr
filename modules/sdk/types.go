@@ -161,6 +161,11 @@ const (
 	MethodSetSystemPrompt = "set_system_prompt"
 	// MethodAppendSystemPrompt appends text to the existing system prompt.
 	MethodAppendSystemPrompt = "append_system_prompt"
+	// MethodSetSystemPromptComponents reports the base system prompt's internal
+	// decomposition (built-in rules, files, per-extension appends) as a labeled
+	// component list. Display-only observability: the host never rebuilds the
+	// prompt from it.
+	MethodSetSystemPromptComponents = "set_system_prompt_components"
 	// MethodSetModel switches the main agent's active model. The value may be a
 	// model ID or a configured model-tier name (e.g. "high"); tiers switch
 	// provider as needed. Used by the skills extension to apply a skill's

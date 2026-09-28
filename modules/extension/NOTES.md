@@ -410,3 +410,19 @@ comparison so symlinks and `..` cannot bypass the check.
 **Consequence:** `SetConfigIsolation` must be called at startup (`cmd/main.go`
 does, before loading extensions) or the checks are inert. Any future
 `config_write` host call must apply the same caller scoping.
+
+## 33. Append labeling is host-side; component reporting is one-way (2026-09-25)
+
+`append_system_prompt` now routes through `UIBridge.AppendSystemPromptFrom`
+with the calling extension's name as the source label. This was chosen over
+asking extensions to label themselves because the host already resolves the
+caller (`ext.name`) in every dispatch — labeling at the host means existing
+extension SDK copies (which send only `{text}`) are labeled automatically and
+no guest-side change is required.
+
+`set_system_prompt_components` is the one host call that carries a
+decomposition: it exists because only the prompt extension knows which files
+it read (AGENTS.md variants, prompt_files) and how big the built-in rules
+are. The payload is deliberately one-way display data — the pool ignores an
+empty report and nothing rebuilds the prompt from it — so the worst a
+misbehaving extension can do is skew the /context modal.

@@ -817,3 +817,59 @@ Covered by `inbox_clear_test.go` (by-ID delete and edit work while running;
 by-index stays gated; mailbox assigns/preserves IDs), `mailbox_test.go`
 (`TestMailbox_AppendAssignsIDs`), and the queue extension's native tests
 (envelope unwrap, ownership rule, input validation).
+
+## 43. Context breakdown buckets follow the request, not the transcript (2026-09-24)
+
+The /context command needed an honest answer to "what is consuming my context?"
+The tempting answer — walk everything including tool results — would have been
+wrong twice over. First, `a.history` does not contain tool traffic: tool calls
+and results go to the canonical transcript, and each Submit builds a fresh
+fantasy agent, so between turns tool bytes are simply not in context (recall
+is the recovery path, per §41). Second, system/steering messages sit in
+history but are filtered by `sdkToFantasyMessages` before every request, so
+counting them as context would overstate usage forever.
+
+The breakdown therefore reports what the NEXT request will contain (system +
+tools + user/assistant history, chars/4) alongside the provider-reported
+`LastRequest` input, and reports the canonical transcript as
+"recallable, not resident". The estimate/report gap is surfaced as a
+reconciliation note rather than scaled away: scaling would silently attribute
+within-turn tool traffic to buckets that do not contain it.
+
+Covered by `contextbreakdown_test.go` (bucket math, filter exclusion, SpawnOpts
+resolution parity with Submit, canonical-not-created, pool delegate,
+window passthrough) and the harness's `contextmodal_test.go` (modal sections,
+gap note thresholds, comma formatting).
+
+*Addendum (2026-09-24):* per-tool, per-type, and per-message attribution was
+added to the same snapshot. Tools get `ToolsByTool` (individually-rounded
+chars/4, heaviest first — the aggregate stays total-chars/4, so per-tool
+columns may trail it by up to ToolCount−1 tokens of rounding); history gets
+`LargestMessages` (top-N heaviest user/assistant messages, so one pasted
+document is visible above role totals — system/steering are excluded by `Type`
+because a steering message carries RoleUser); and the canonical side gets
+`CanonicalByKind` (messages vs tool calls vs results),
+`CanonicalMessagesByRole`, and `CanonicalByTool` (tool traffic attributed to
+the producing tool). The canonical attribution is chars, not tokens: the
+transcript is never sent to the provider, so estimating tokens for it would be
+a fiction. Nil maps mean a pre-attribution snapshot and render totals only.
+
+## 44. The prompt ledger is honest because every mutation path updates it (2026-09-25)
+
+Attributing the system prompt per source (built-in rules, prompt files,
+AGENTS.md, skills list) had two candidate designs: ask each extension to
+label its own appends, or label at the host. The host-side design won: the
+append_system_prompt handler already knows the calling extension, so the
+host passes its name to `AppendSystemPromptFrom` — no extension cooperation,
+no SDK copy churn, and old extensions get labeled automatically.
+
+The subtle part is session-start ordering. Extensions dispatch
+alphabetically (agents → context → skills), and `SetBaseSystemPrompt`
+REPLACES the base prompt, so the agents extension's early appends are
+clobbered by the prompt extension's Set. The ledger must tell the same
+story: Set resets it (plus a fallback component), the prompt extension's
+`set_system_prompt_components` report replaces it with the real
+decomposition, and later appends add entries. Whatever survived into the
+real prompt is exactly what the ledger describes. (The clobbering itself is
+pre-existing behavior — the /context modal now makes it VISIBLE: if the
+agents guidance is not in the prompt, it is not in the ledger.)

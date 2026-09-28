@@ -13,7 +13,11 @@ func TestCheckCommandPermission(t *testing.T) {
 		allow   bool
 	}{
 		{name: "empty config remains permissive", command: "sed -i file", allow: true},
-		{name: "denies executable", command: "sed -i file", rules: ExecRules{DenyCommands: []CommandRule{cmdRule("sed")}}},
+		{
+			name:    "denies executable",
+			command: "sed -i file",
+			rules:   ExecRules{DenyCommands: []CommandRule{cmdRule("sed")}},
+		},
 		{
 			name:    "denies executable path",
 			command: "/usr/bin/sed -i file",
