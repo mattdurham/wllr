@@ -65,12 +65,35 @@ func _sdkInit() int32 {
 	for evt := range _sdkHandlers {
 		_sdkCall("subscribe", map[string]string{"event": evt})
 	}
+	// The before_tool_call interceptor is not a _sdkHandlers entry (it must
+	// return a response), so subscribe for it explicitly — but only once even
+	// if a typed OnBeforeToolCall handler is also registered.
+	if _, ok := _sdkHandlers["before_tool_call"]; !ok && _sdkBeforeToolCallIntercept != nil {
+		_sdkCall("subscribe", map[string]string{"event": "before_tool_call"})
+	}
 	// Run deferred init hooks (RegisterTool, RegisterCommand calls).
 	for _, fn := range _sdkInitHooks {
 		fn()
 	}
 	return 0
 }
+
+// eventResponse mirrors the host's EventResponse for interceptor replies:
+// a non-nil response with Block (or Cancel) stops the event chain and
+// surfaces Error as the block reason the model sees. A response carrying
+// Payload (without Block) transforms the event input for later interceptors.
+type eventResponse struct {
+	Cancel  bool            `json:"cancel,omitempty"`
+	Block   bool            `json:"block,omitempty"`
+	Error   string          `json:"error,omitempty"`
+	Payload json.RawMessage `json:"payload,omitempty"`
+}
+
+// _sdkBeforeToolCallIntercept, when set, intercepts before_tool_call events
+// and may block them. Return nil to allow. This is the response-returning
+// path: typed _sdkOn handlers cannot block because _on_event historically
+// returned no response. Set by main.go for the tool-loop guard.
+var _sdkBeforeToolCallIntercept func(payload json.RawMessage) *eventResponse
 
 //go:wasmexport _on_event
 func _sdkOnEvent(ptr, length int32) int32 {
@@ -81,6 +104,30 @@ func _sdkOnEvent(ptr, length int32) int32 {
 	}
 	if err := json.Unmarshal(data, &evt); err != nil {
 		return 0
+	}
+	// Interceptor path: the returned response is serialized back to the host,
+	// which reads it from the _on_event result pointer (permissions-style).
+	// NOTE: registered handlers still run even when the interceptor returns
+	// nil — extension-implemented tools deliver their results via tool_result
+	// from inside their before_tool_call handler, so returning early on a
+	// nil interceptor response would strand every agents-extension tool
+	// (list_agents, create_agent, …) waiting on a result that never arrives.
+	if evt.Type == "before_tool_call" && _sdkBeforeToolCallIntercept != nil {
+		resp := _sdkBeforeToolCallIntercept(evt.Payload)
+		if resp != nil {
+			respJSON, err := json.Marshal(resp)
+			if err == nil {
+				respPtr := _sdkAlloc(int32(len(respJSON)))
+				if respPtr != 0 {
+					copy(_sdkPinned[uintptr(respPtr)], respJSON)
+					// Handlers are skipped only on an actual block/transform;
+					// a nil interceptor response falls through below.
+					if resp.Block || resp.Cancel || len(resp.Payload) > 0 {
+						return respPtr
+					}
+				}
+			}
+		}
 	}
 	for _, fn := range _sdkHandlers[evt.Type] {
 		fn(evt.Payload)
@@ -185,6 +232,17 @@ func OnCommand(name string, fn func(args []string)) {
 // OnSessionStart registers a handler called when a new session begins.
 func OnSessionStart(fn func()) {
 	_sdkOn("session_start", func(_ json.RawMessage) { fn() })
+}
+
+// ConfigRead reads this extension's own configuration file
+// (~/.wllr/extensions/<name>/config.yaml) through the host. Missing or empty
+// config returns nil with no error — the caller applies defaults.
+func ConfigRead() (json.RawMessage, error) {
+	result := _sdkCallResult("config_read", map[string]string{})
+	if len(result) == 0 {
+		return nil, nil
+	}
+	return result, nil
 }
 
 // OnShutdown registers a handler called when the host is shutting down.

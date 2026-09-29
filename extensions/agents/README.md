@@ -9,6 +9,52 @@ Successful results are JSON strings. Validation and host-operation failures mark
 the tool call as failed with plain-text messages such as
 `create_agent: name is required`.
 
+## Tool-loop guard
+
+This extension also owns the tool-loop guard: a `before_tool_call` interceptor
+that watches each agent's recent tool calls (main and sub-agents) and BLOCKS a
+call when the recent pattern repeats, so a stuck model cannot burn tokens
+making identical calls. The block reason reaches the model as the tool error:
+
+```
+[loop guard] the identical exec call has now been made 3 times in a row and
+was blocked. Identical calls produce identical results — repeating this
+pattern cannot make progress. Stop and reorient now: ...
+```
+
+Detection is input-sensitive: a call is identified by tool name plus its
+normalized JSON input, so the legitimate read→edit→read→verify workflow never
+fires (its edit inputs differ). Two triggers over the recent window:
+
+- **Consecutive** — the last `min_repeats` (default 3) calls are identical.
+  One identical retry after a transient failure is forgiven; the third means
+  the model is stuck. Blocked calls are rolled back out of the buffer, so
+  denial retries cannot consume window slots.
+- **Cycle** — the tail of the window repeats as 2+ identical blocks of a
+  period up to `max_period` (default 5). Longer cycles are treated as
+  legitimate per-file batches.
+
+Blocked calls never execute; the model must take a materially different
+approach or end its turn with a summary.
+
+### Configuration
+
+Optional — missing config uses the defaults (guard enabled, 10-call window,
+3-call consecutive threshold, all agents):
+
+```yaml
+# ~/.wllr/extensions/agents/config.yaml
+loop_guard:
+    enabled: true      # false disables the guard entirely
+    window: 10         # recent calls examined for a pattern
+    min_repeats: 3     # consecutive identical calls before blocking
+    max_period: 5      # longest cycle length considered a loop
+    scope: all         # "subagents" exempts the main agent
+```
+
+A malformed config file disables the guard and logs an error (a broken config
+must not silently run with guessed settings).
+
 ## Tools
 
 - `create_agent` creates a scoped child agent ID and starts its first turn. Its

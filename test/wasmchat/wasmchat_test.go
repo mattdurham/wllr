@@ -22,28 +22,28 @@ import (
 // real harness.SceneRenderer and treating everything else as a no-op.
 type sceneUIBridge struct{ scene *harness.SceneRenderer }
 
-func (b *sceneUIBridge) Notify(string)                                      {}
-func (b *sceneUIBridge) ShowModal(string)                                   {}
-func (b *sceneUIBridge) ShowAgentTree(sdk.ShowAgentTreeParams)              {}
-func (b *sceneUIBridge) SetFocusedAgent(string)                             {}
-func (b *sceneUIBridge) ShowPicker(sdk.ShowPickerParams)                    {}
-func (b *sceneUIBridge) ShowTextInput(string, string, string, string)       {}
-func (b *sceneUIBridge) Abort()                                             {}
-func (b *sceneUIBridge) SetStatus(string, string)                           {}
-func (b *sceneUIBridge) GetStatusInfo() sdk.StatusInfo                      { return sdk.StatusInfo{} }
-func (b *sceneUIBridge) SendMessage(sdk.Message)                            {}
-func (b *sceneUIBridge) RegisterCommand(string, string, bool) error         { return nil }
-func (b *sceneUIBridge) RegisterTool(sdk.Tool) error                        { return nil }
-func (b *sceneUIBridge) SetSystemPrompt(string)                             {}
-func (b *sceneUIBridge) AppendSystemPromptFrom(string, string)               {}
+func (b *sceneUIBridge) Notify(string)                                         {}
+func (b *sceneUIBridge) ShowModal(string)                                      {}
+func (b *sceneUIBridge) ShowAgentTree(sdk.ShowAgentTreeParams)                 {}
+func (b *sceneUIBridge) SetFocusedAgent(string)                                {}
+func (b *sceneUIBridge) ShowPicker(sdk.ShowPickerParams)                       {}
+func (b *sceneUIBridge) ShowTextInput(string, string, string, string)          {}
+func (b *sceneUIBridge) Abort()                                                {}
+func (b *sceneUIBridge) SetStatus(string, string)                              {}
+func (b *sceneUIBridge) GetStatusInfo() sdk.StatusInfo                         { return sdk.StatusInfo{} }
+func (b *sceneUIBridge) SendMessage(sdk.Message)                               {}
+func (b *sceneUIBridge) RegisterCommand(string, string, bool) error            { return nil }
+func (b *sceneUIBridge) RegisterTool(sdk.Tool) error                           { return nil }
+func (b *sceneUIBridge) SetSystemPrompt(string)                                {}
+func (b *sceneUIBridge) AppendSystemPromptFrom(string, string)                 {}
 func (b *sceneUIBridge) SetSystemPromptComponents([]sdk.SystemPromptComponent) {}
-func (b *sceneUIBridge) SetModel(string, string) error                      { return nil }
-func (b *sceneUIBridge) ResetHistory([]sdk.Message) error                   { return nil }
-func (b *sceneUIBridge) ToolResult(string, string, bool)                    {}
-func (b *sceneUIBridge) AfterToolCall(string, string, string, string, bool) {}
-func (b *sceneUIBridge) ConsoleOutput(string)                               {}
-func (b *sceneUIBridge) ConsoleClear()                                      {}
-func (b *sceneUIBridge) CreateArea(a sdk.UIArea) error                      { return b.scene.CreateArea(a) }
+func (b *sceneUIBridge) SetModel(string, string) error                         { return nil }
+func (b *sceneUIBridge) ResetHistory([]sdk.Message) error                      { return nil }
+func (b *sceneUIBridge) ToolResult(string, string, bool)                       {}
+func (b *sceneUIBridge) AfterToolCall(string, string, string, string, bool)    {}
+func (b *sceneUIBridge) ConsoleOutput(string)                                  {}
+func (b *sceneUIBridge) ConsoleClear()                                         {}
+func (b *sceneUIBridge) CreateArea(a sdk.UIArea) error                         { return b.scene.CreateArea(a) }
 
 func (b *sceneUIBridge) PatchUI(p sdk.UIPatchParams) error { return b.scene.ApplyPatch(p) }
 

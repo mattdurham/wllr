@@ -32,11 +32,11 @@ func (b *testUIBridge) RegisterTool(tool sdk.Tool) error {
 	}
 	return nil
 }
-func (b *testUIBridge) SetSystemPrompt(_ string)           {}
-func (b *testUIBridge) AppendSystemPromptFrom(_, _ string)  {}
+func (b *testUIBridge) SetSystemPrompt(_ string)                                {}
+func (b *testUIBridge) AppendSystemPromptFrom(_, _ string)                      {}
 func (b *testUIBridge) SetSystemPromptComponents(_ []sdk.SystemPromptComponent) {}
-func (b *testUIBridge) SetModel(_, _ string) error         { return nil }
-func (b *testUIBridge) ResetHistory(_ []sdk.Message) error { return nil }
+func (b *testUIBridge) SetModel(_, _ string) error                              { return nil }
+func (b *testUIBridge) ResetHistory(_ []sdk.Message) error                      { return nil }
 func (b *testUIBridge) ToolResult(id, result string, isError bool) {
 	if b.onToolResult != nil {
 		b.onToolResult(id, result, isError)

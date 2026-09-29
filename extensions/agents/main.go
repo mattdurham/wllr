@@ -150,7 +150,17 @@ func removeAgent(id string) {
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 
+// activeLoopGuard is the session's guard instance, built at session start
+// from the extension config. A nil guard (disabled) means the interceptor
+// allows every call.
+var activeLoopGuard *loopGuard
+
 func init() {
+	// Loop-guard plumbing: the host-backed config reader and the blocking
+	// interceptor. The guard itself is built at session start, when the
+	// config file is read.
+	configReadHost = ConfigRead
+	_sdkBeforeToolCallIntercept = onLoopGuardIntercept
 	RegisterToolWithOutput(
 		"create_agent",
 		`Create a new agent. The agent ID is {your_agent_id}/{name} (e.g. main creating "researcher" → id="main/researcher"). The returned agent_id is what you pass to send_message and shutdown_agent.`,
@@ -240,6 +250,7 @@ func init() {
 
 func onSessionStart() {
 	onChatSessionStart()
+	loadLoopGuard()
 
 	guidance := `
 ## Agent and Team Tools
@@ -637,7 +648,6 @@ func onBeforeToolCall(payload json.RawMessage) {
 	if err := json.Unmarshal(payload, &p); err != nil {
 		return
 	}
-
 	// Track the tool call against the agent that made it.
 	if p.AgentID != "" && p.AgentID != "main" {
 		upsertAgent(p.AgentID, "", "", "→ "+p.ToolName+" "+truncate(string(p.Input), 50))
@@ -661,6 +671,48 @@ func onBeforeToolCall(payload json.RawMessage) {
 	case "send_message":
 		handleSendMessage(p)
 	}
+}
+
+// ─── Tool-loop guard ────────────────────────────────────────────────────────
+
+// loadLoopGuard builds the session's guard from the extension config. A
+// config error is logged and the guard stays disabled — a broken config must
+// not silently run with guessed settings. Missing config is fine: defaults
+// apply (guard enabled, 10-call window, min 3 repeats, all agents).
+func loadLoopGuard() {
+	cfg, err := loadAgentsConfig()
+	if err != nil {
+		Logf(3, "agents: loop guard config error, disabled: %v", err)
+		activeLoopGuard = nil
+		return
+	}
+	if !cfg.EnabledOrDefault() {
+		activeLoopGuard = nil
+		Logf(1, "agents: loop guard disabled by config")
+		return
+	}
+	activeLoopGuard = newLoopGuard(cfg)
+	Logf(1, "agents: loop guard enabled (window %d, min_repeats %d, max_period %d, scope %s)",
+		cfg.Window, cfg.MinRepeats, cfg.MaxPeriod, cfg.Scope)
+}
+
+// onLoopGuardIntercept is the before_tool_call interceptor: it records the
+// call against the calling agent's buffer and blocks the call when the recent
+// pattern repeats. Blocked calls do not execute; the reason text is what the
+// model sees as the tool error.
+func onLoopGuardIntercept(payload json.RawMessage) *eventResponse {
+	var p beforeToolCallPayload
+	if err := json.Unmarshal(payload, &p); err != nil || p.AgentID == "" {
+		return nil
+	}
+	det := activeLoopGuard.observe(p.AgentID, p.ToolName, p.Input)
+	if det == nil {
+		return nil
+	}
+	reason := loopGuardMessage(*det)
+	Logf(2, "agents: loop guard blocked %s for %s (period %d, repeats %d)",
+		p.ToolName, p.AgentID, det.Period, det.Repeats)
+	return &eventResponse{Block: true, Error: reason}
 }
 
 // ─── Tool handlers ────────────────────────────────────────────────────────────

@@ -966,3 +966,14 @@ that no longer exists.
 resolver; `ToolOwners()` returns a snapshot (nil when no resolver is
 installed). Installed by the harness from the extension host; the snapshot
 is taken per breakdown call so extension reloads are reflected.
+
+## 18. Tool-Loop Guard (relocated)
+
+The tool-loop guard no longer lives in the agent module. It was moved to the
+agents WASM extension (`extensions/agents/loopguard.go`), where it runs as a
+`before_tool_call` interceptor: it watches every tool call per agent, detects
+repeating patterns, and BLOCKS the call with a stop-and-reorient reason the
+model sees as the tool error. See `extensions/agents/README.md` for the
+detection rules and `~/.wllr/extensions/agents/config.yaml` for configuration
+(`loop_guard:` — enabled/window/scope/min_repeats/max_period; missing config
+uses defaults). NOTES §45 records why the extension seam beat the pool seam.

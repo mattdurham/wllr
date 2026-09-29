@@ -873,3 +873,56 @@ decomposition, and later appends add entries. Whatever survived into the
 real prompt is exactly what the ledger describes. (The clobbering itself is
 pre-existing behavior — the /context modal now makes it VISIBLE: if the
 agents guidance is not in the prompt, it is not in the ledger.)
+
+## 45. The loop guard nudges; it does not force (2026-09-29)
+
+Looping behavior (the same tool call or a short call cycle repeating with no
+progress) burns real tokens and stalls sub-agents that an orchestrator must
+then babysit. The fix lives entirely at fantasy's PrepareStep seam — the same
+one the tool-loop compactor uses — because that is the only place wllr can
+both SEE the completed steps of the current turn and CHANGE what the model
+receives next.
+
+Three design points worth recording:
+
+1. **Injection does not persist, and that is the feature.** Fantasy applies
+   PrepareStepResult.Messages to that step's request only; the ongoing
+   conversation accumulates only assistant+tool-result content. So an
+   injected reorient message reappears on every step while the loop
+   continues and vanishes the moment the model breaks the pattern — no
+   stacking, no cleanup, no state.
+2. **Input-sensitive matching is the false-positive defense.** Keying on
+   (tool name, normalized JSON input) means the everyday
+   read→edit→read→verify rhythm never fires (its edit inputs differ), while
+   a stuck model re-sending the identical payload does. The consecutive
+   rule (two identical calls in a row) is aggressive by intent: with no
+   intervening call there is no state change to justify an identical retry.
+   The escalation ladder stays advisory: nudge first, never force. A
+   DisableAllTools force-stop was considered and rejected for now — with
+   tools suppressed, a model that still emits a tool call takes fantasy's
+   suppressed-call path, whose loop interaction is unverified.
+3. **Ordering with compaction matters.** The guard runs AFTER the tool-loop
+   compactor, so when compaction replaces the outgoing list with a summary
+   the guard message is appended on top instead of being discarded. Both
+   signals coexist: "your context was compacted" and "you are looping" —
+   which is exactly when a model most needs to reorient.
+
+Cross-turn loops (agent ends its turn, gets re-prompted, repeats the same
+tool sequence across turns) are out of scope here; they need a
+cross-turn memory the per-turn guard does not have.
+
+**Addendum (2026-09-29, same day): the guard moved to the agents extension.**
+The advisory injection worked (proven live) but the review of the extension
+architecture showed a better seam: the agents extension's `before_tool_call`
+interceptor can DENY the call outright — the proven permissions enforcement
+path — which upgrades nudge→force and puts the behavior where all agent-facing
+policy lives (and where per-extension config fits the config-isolation
+architecture). The pool-level injection code was removed; the detection logic
+(normalization, consecutive + cycle rules) was ported to
+`extensions/agents/loopguard.go` with two deliberate changes: the consecutive
+threshold defaults to 3 (not 2) because a denied call is stronger than a
+nudge — one identical retry after a transient failure should be forgiven —
+and denial is scoped/configurable (`scope: all|subagents`). The blocked call
+is rolled back out of the buffer so denial retries cannot consume window
+slots. The fantasy PrepareStep seam remains correct for future in-band
+message shaping; this guard no longer uses it.
