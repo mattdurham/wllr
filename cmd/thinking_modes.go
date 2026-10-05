@@ -7,6 +7,18 @@ import (
 	fantasyopenapiprovider "charm.land/fantasy/providers/openai"
 )
 
+// openAIUsesResponsesAPI reports whether a model on the openai provider is
+// served by the Responses API, which decides the provider-options wire type
+// (see providerOptionsForThinkingMode). Two constructions route differently:
+// a stored ChatGPT OAuth token builds newCodexProvider, which forces Responses
+// for every model ID; a plain API key uses fantasy's default gate.
+func openAIUsesResponsesAPI(modelID string) bool {
+	if cred, ok := loadAuthCredential(providerOpenAI); ok && cred.Type == authTypeOAuth {
+		return true
+	}
+	return fantasyopenapiprovider.IsResponsesModel(modelID)
+}
+
 // providerOptionsForThinkingMode builds the fantasy provider options for the
 // given provider and model-specific thinking mode ID. Returns nil when the
 // provider has no reasoning mechanism (or the mode clears reasoning on a
@@ -17,7 +29,7 @@ import (
 // emission policy differs: openai omits the field for "none"/unknown (native
 // default applies), local always emits it (the server would otherwise keep
 // its own default — LM Studio's is "on" for loaded thinking models).
-func providerOptionsForThinkingMode(provider, modeID string) fantasy.ProviderOptions {
+func providerOptionsForThinkingMode(provider, modeID, modelID string) fantasy.ProviderOptions {
 	switch provider {
 	case providerAnthropic:
 		budget := anthropicBudgetForThinkingMode(modeID)
@@ -36,11 +48,23 @@ func providerOptionsForThinkingMode(provider, modeID string) fantasy.ProviderOpt
 		// verbatim, including "none" (which maps to an explicit
 		// ReasoningEffort=none — a documented value that turns reasoning off).
 		// Only unknown/stale IDs (e.g. a saved mode from another model) hit the
-		// nil branch and omit the field, so they can never 400 a request. This
-		// is the pre-existing behavior; the codex/openai path is unchanged.
+		// nil branch and omit the field, so they can never 400 a request.
 		effort := openAIReasoningEffortForThinkingMode(modeID)
 		if effort == nil {
 			return nil
+		}
+		// The option type must match the model's wire format: fantasy's
+		// Responses-API model reads *ResponsesProviderOptions and silently
+		// ignores any other value under the openai key, while the
+		// chat-completions model reads *ProviderOptions. Sending the chat type
+		// for a responses model drops reasoning_effort without an error —
+		// exactly the silent no-op this branching prevents.
+		if openAIUsesResponsesAPI(modelID) {
+			return fantasy.ProviderOptions{
+				fantasyopenapiprovider.Name: &fantasyopenapiprovider.ResponsesProviderOptions{
+					ReasoningEffort: effort,
+				},
+			}
 		}
 		return fantasy.ProviderOptions{
 			fantasyopenapiprovider.Name: &fantasyopenapiprovider.ProviderOptions{
@@ -54,7 +78,8 @@ func providerOptionsForThinkingMode(provider, modeID string) fantasy.ProviderOpt
 		// explicit "none" is the only way to actually disable. Unlike openai,
 		// unknown/stale IDs (e.g. the boolean "on") are sent as "none" —
 		// disabling rather than 400-ing (the endpoint rejects anything outside
-		// the six OpenAI values).
+		// the six OpenAI values). Local endpoints speak chat completions, so
+		// the chat-completions option type is always correct here.
 		effort := openAIReasoningEffortForThinkingMode(modeID)
 		if effort == nil {
 			none := fantasyopenapiprovider.ReasoningEffortNone

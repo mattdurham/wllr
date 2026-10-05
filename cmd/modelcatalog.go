@@ -32,6 +32,7 @@ const (
 	thinkingModeMedium  = "medium"
 	thinkingModeHigh    = "high"
 	thinkingModeXHigh   = "xhigh"
+	thinkingModeMax     = "max"
 )
 
 // modelInfo describes one selectable model for the /model picker.
@@ -79,10 +80,30 @@ var (
 	openAIThinkingModes = []thinkingMode{
 		{ID: thinkingModeNone, Name: "None", Description: "No extended reasoning"},
 		{ID: thinkingModeMinimal, Name: "Minimal", Description: "Minimal extended reasoning"},
-		{ID: thinkingModeLow, Name: "Low", Description: "Extended reasoning (low effort)"},
-		{ID: thinkingModeMedium, Name: "Medium", Description: "Extended reasoning (medium effort)"},
-		{ID: thinkingModeHigh, Name: "High", Description: "Extended reasoning (high effort)"},
-		{ID: thinkingModeXHigh, Name: "X-High", Description: "Extended reasoning (maximum effort)"},
+		{ID: thinkingModeLow, Name: thinkingLabelLow, Description: "Extended reasoning (low effort)"},
+		{ID: thinkingModeMedium, Name: thinkingLabelMedium, Description: "Extended reasoning (medium effort)"},
+		{ID: thinkingModeHigh, Name: thinkingLabelHigh, Description: "Extended reasoning (high effort)"},
+		{ID: thinkingModeXHigh, Name: thinkingLabelXHigh, Description: "Extended reasoning (maximum effort)"},
+	}
+	// gpt56ThinkingModes is the effort set Catwalk declares for the gpt-5.6
+	// family and gpt-6-sol/luna: minimal is gone, and a new "max" level above
+	// xhigh is added.
+	gpt56ThinkingModes = []thinkingMode{
+		{ID: thinkingModeNone, Name: "None", Description: "No extended reasoning"},
+		{ID: thinkingModeLow, Name: thinkingLabelLow, Description: "Extended reasoning (low effort)"},
+		{ID: thinkingModeMedium, Name: thinkingLabelMedium, Description: "Extended reasoning (medium effort)"},
+		{ID: thinkingModeHigh, Name: thinkingLabelHigh, Description: "Extended reasoning (high effort)"},
+		{ID: thinkingModeXHigh, Name: thinkingLabelXHigh, Description: "Extended reasoning (x-high effort)"},
+		{ID: thinkingModeMax, Name: "Max", Description: "Extended reasoning (max effort)"},
+	}
+	// gpt6AstraThinkingModes: Catwalk declares GPT-6 Astra with reasoning
+	// always on — no "none" level.
+	gpt6AstraThinkingModes = []thinkingMode{
+		{ID: thinkingModeLow, Name: thinkingLabelLow, Description: "Extended reasoning (low effort)"},
+		{ID: thinkingModeMedium, Name: thinkingLabelMedium, Description: "Extended reasoning (medium effort)"},
+		{ID: thinkingModeHigh, Name: thinkingLabelHigh, Description: "Extended reasoning (high effort)"},
+		{ID: thinkingModeXHigh, Name: thinkingLabelXHigh, Description: "Extended reasoning (x-high effort)"},
+		{ID: thinkingModeMax, Name: "Max", Description: "Extended reasoning (max effort)"},
 	}
 	// geminiThinkingModes maps Gemini budget-token mode IDs to their rows.
 	geminiThinkingModes = []thinkingMode{
@@ -158,6 +179,16 @@ var modelCatalog = map[string][]modelInfo{
 		},
 	},
 	providerOpenAI: {
+		// gpt-6 family and gpt-5.6 family: Catwalk-declared entries (names,
+		// context windows, reasoning levels). Reasoning levels per model come
+		// from Catwalk: minimal is retired, "max" is added; Astra keeps
+		// reasoning always on (no "none").
+		{ID: "gpt-6-astra", Name: "GPT-6 Astra", ContextWindow: 1050000, ThinkingModes: gpt6AstraThinkingModes},
+		{ID: "gpt-6-sol", Name: "GPT-6 Sol", ContextWindow: 1050000, ThinkingModes: gpt56ThinkingModes},
+		{ID: "gpt-6-luna", Name: "GPT-6 Luna", ContextWindow: 1050000, ThinkingModes: gpt56ThinkingModes},
+		{ID: "gpt-5.6-sol", Name: "GPT-5.6 Sol", ContextWindow: 1050000, ThinkingModes: gpt56ThinkingModes},
+		{ID: "gpt-5.6-terra", Name: "GPT-5.6 Terra", ContextWindow: 1050000, ThinkingModes: gpt56ThinkingModes},
+		{ID: "gpt-5.6-luna", Name: "GPT-5.6 Luna", ContextWindow: 1050000, ThinkingModes: gpt56ThinkingModes},
 		{ID: defaultOpenAIModel, Name: "GPT-5.5", ContextWindow: 1050000, ThinkingModes: openAIThinkingModes},
 		{ID: "gpt-5.5-pro", Name: "GPT-5.5 Pro", ContextWindow: 1050000, ThinkingModes: openAIThinkingModes},
 		{ID: "gpt-5.4", Name: "GPT-5.4", ContextWindow: 1050000, ThinkingModes: openAIThinkingModes},
@@ -210,6 +241,14 @@ var modelCatalog = map[string][]modelInfo{
 }
 
 var chatGPTOAuthModels = []modelInfo{
+	// Synced with the openai catalog for the models the ChatGPT backend
+	// serves (gpt-6 and gpt-5.6 families added; default stays gpt-5.5).
+	{ID: "gpt-6-astra", Name: "GPT-6 Astra", ContextWindow: 1050000, ThinkingModes: gpt6AstraThinkingModes},
+	{ID: "gpt-6-sol", Name: "GPT-6 Sol", ContextWindow: 1050000, ThinkingModes: gpt56ThinkingModes},
+	{ID: "gpt-6-luna", Name: "GPT-6 Luna", ContextWindow: 1050000, ThinkingModes: gpt56ThinkingModes},
+	{ID: "gpt-5.6-sol", Name: "GPT-5.6 Sol", ContextWindow: 1050000, ThinkingModes: gpt56ThinkingModes},
+	{ID: "gpt-5.6-terra", Name: "GPT-5.6 Terra", ContextWindow: 1050000, ThinkingModes: gpt56ThinkingModes},
+	{ID: "gpt-5.6-luna", Name: "GPT-5.6 Luna", ContextWindow: 1050000, ThinkingModes: gpt56ThinkingModes},
 	{ID: defaultOpenAIModel, Name: "GPT-5.5", ContextWindow: 1050000, ThinkingModes: openAIThinkingModes},
 	{ID: "gpt-5.4", Name: "GPT-5.4", ContextWindow: 1050000, ThinkingModes: openAIThinkingModes},
 	{ID: "gpt-5.4-mini", Name: "GPT-5.4 Mini", ContextWindow: 400000, ThinkingModes: openAIThinkingModes},
@@ -392,7 +431,7 @@ func startupThinkingMode(ctx context.Context, cfg *Config, provider string) stri
 		if lvl == "" {
 			return ""
 		}
-		if providerOptionsForThinkingMode(provider, lvl) != nil {
+		if providerOptionsForThinkingMode(provider, lvl, cfg.Model) != nil {
 			return lvl
 		}
 		return ""

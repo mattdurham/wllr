@@ -520,7 +520,7 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 			return err
 		}
 		if main := pool.Get(agent.MainAgentID); main != nil {
-			main.SetProviderOptions(providerOptionsForRuntime(currentProvider, savedThinkingMode()))
+			main.SetProviderOptions(providerOptionsForRuntime(currentProvider, savedThinkingMode(), cfg.Model))
 		}
 		return nil
 	}
@@ -540,7 +540,7 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 			return fmt.Errorf("provider %s does not support thinking level %q", currentProvider, level)
 		}
 		if main := pool.Get(agent.MainAgentID); main != nil {
-			main.SetProviderOptions(providerOptionsForRuntime(currentProvider, modeID))
+			main.SetProviderOptions(providerOptionsForRuntime(currentProvider, modeID, cfg.Model))
 		}
 		if err := saveThinkingMode(modeID); err != nil {
 			slog.Warn("wllr: could not persist thinking mode", "mode", modeID, "error", err)
@@ -728,7 +728,7 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 		return "no reasoning modes could be detected for " + cfg.Model
 	}
 	m.SelectThinkingFn = func(levelID string) error {
-		po := providerOptionsForRuntime(currentProvider, levelID)
+		po := providerOptionsForRuntime(currentProvider, levelID, cfg.Model)
 		if main := pool.Get(agent.MainAgentID); main != nil {
 			main.SetProviderOptions(po)
 		}
@@ -750,7 +750,7 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 	// preference is valid without any reasoning level, so gating this on a
 	// thinking mode would silently drop a configured routing choice.
 	if main := pool.Get(agent.MainAgentID); main != nil {
-		main.SetProviderOptions(providerOptionsForRuntime(currentProvider, startupLevel))
+		main.SetProviderOptions(providerOptionsForRuntime(currentProvider, startupLevel, cfg.Model))
 	}
 	// Reflect the persisted routing preference in the status bar (OpenRouter
 	// only; other providers have no routing preference).

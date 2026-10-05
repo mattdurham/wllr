@@ -59,11 +59,11 @@ func TestIsValidThinkingLevel(t *testing.T) {
 
 func TestProviderOptionsForThinking_Anthropic(t *testing.T) {
 	// Off → nil (clears options).
-	if po := providerOptionsForThinking(providerAnthropic, thinkingOff); po != nil {
+	if po := providerOptionsForThinkingMode(providerAnthropic, "", "claude-x"); po != nil {
 		t.Errorf("anthropic off = %v, want nil", po)
 	}
 	// High → budget tokens set.
-	po := providerOptionsForThinking(providerAnthropic, thinkingHigh)
+	po := providerOptionsForThinkingMode(providerAnthropic, "32768", "claude-x")
 	data, ok := po[fantasyanthropicprovider.Name]
 	if !ok {
 		t.Fatalf("anthropic high: no anthropic options, got %v", po)
@@ -72,21 +72,36 @@ func TestProviderOptionsForThinking_Anthropic(t *testing.T) {
 	if !ok || opts.Thinking == nil {
 		t.Fatalf("anthropic high: unexpected options %T", data)
 	}
-	if opts.Thinking.BudgetTokens != anthropicThinkingBudget[thinkingHigh] {
-		t.Errorf("budget = %d, want %d", opts.Thinking.BudgetTokens, anthropicThinkingBudget[thinkingHigh])
+	if opts.Thinking.BudgetTokens != anthropicBudgetForThinkingMode("32768") {
+		t.Errorf("budget = %d, want %d", opts.Thinking.BudgetTokens, anthropicBudgetForThinkingMode("32768"))
 	}
 }
 
 func TestProviderOptionsForThinking_OpenAI(t *testing.T) {
-	if po := providerOptionsForThinking("openai", thinkingOff); po != nil {
-		t.Errorf("openai off = %v, want nil", po)
+	withAuthPath(t) // hermetic: no stored OAuth credential
+	// Unknown/off mode → nil (clears options).
+	if po := providerOptionsForThinkingMode(providerOpenAI, "", "gpt-4o"); po != nil {
+		t.Errorf("openai empty mode = %v, want nil", po)
 	}
-	po := providerOptionsForThinking("openai", thinkingMedium)
+	// The "none" mode is explicit for openai: ReasoningEffort=none, in the
+	// responses option type (gpt-4o is in fantasy's responses ID list).
+	po := providerOptionsForThinkingMode(providerOpenAI, thinkingModeNone, "gpt-4o")
 	data, ok := po[fantasyopenapiprovider.Name]
+	if !ok {
+		t.Fatalf("openai none: no openai options, got %v", po)
+	}
+	noneOpts, ok := data.(*fantasyopenapiprovider.ResponsesProviderOptions)
+	if !ok || noneOpts.ReasoningEffort == nil ||
+		*noneOpts.ReasoningEffort != fantasyopenapiprovider.ReasoningEffortNone {
+		t.Fatalf("openai none: unexpected options %T", data)
+	}
+	// A standard effort maps through, in the responses option type.
+	po = providerOptionsForThinkingMode(providerOpenAI, thinkingModeMedium, "gpt-4o")
+	data, ok = po[fantasyopenapiprovider.Name]
 	if !ok {
 		t.Fatalf("openai medium: no openai options, got %v", po)
 	}
-	opts, ok := data.(*fantasyopenapiprovider.ProviderOptions)
+	opts, ok := data.(*fantasyopenapiprovider.ResponsesProviderOptions)
 	if !ok || opts.ReasoningEffort == nil {
 		t.Fatalf("openai medium: unexpected options %T", data)
 	}
@@ -96,25 +111,25 @@ func TestProviderOptionsForThinking_OpenAI(t *testing.T) {
 }
 
 func TestProviderOptionsForThinking_Gemini(t *testing.T) {
-	if po := providerOptionsForThinking("gemini", thinkingOff); po != nil {
+	if po := providerOptionsForThinkingMode(providerGemini, "", "gemini-x"); po != nil {
 		t.Errorf("gemini off = %v, want nil", po)
 	}
-	po := providerOptionsForThinking("gemini", thinkingLow)
+	po := providerOptionsForThinkingMode(providerGemini, "16384", "gemini-x")
 	data, ok := po[fantasygoogleprovider.Name]
 	if !ok {
-		t.Fatalf("gemini low: no google options, got %v", po)
+		t.Fatalf("gemini medium: no google options, got %v", po)
 	}
 	opts, ok := data.(*fantasygoogleprovider.ProviderOptions)
 	if !ok || opts.ThinkingConfig == nil || opts.ThinkingConfig.ThinkingBudget == nil {
 		t.Fatalf("gemini low: unexpected options %T", data)
 	}
-	if *opts.ThinkingConfig.ThinkingBudget != geminiThinkingBudget[thinkingLow] {
-		t.Errorf("budget = %d, want %d", *opts.ThinkingConfig.ThinkingBudget, geminiThinkingBudget[thinkingLow])
+	if *opts.ThinkingConfig.ThinkingBudget != geminiThinkingBudget[thinkingMedium] {
+		t.Errorf("budget = %d, want %d", *opts.ThinkingConfig.ThinkingBudget, geminiThinkingBudget[thinkingMedium])
 	}
 }
 
 func TestProviderOptionsForThinking_UnknownProvider(t *testing.T) {
-	if po := providerOptionsForThinking("mystery", thinkingHigh); po != nil {
+	if po := providerOptionsForThinkingMode("mystery", "32768", ""); po != nil {
 		t.Errorf("unknown provider = %v, want nil", po)
 	}
 }

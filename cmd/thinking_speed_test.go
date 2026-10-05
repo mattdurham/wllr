@@ -51,7 +51,7 @@ func TestOpenRouterSpeedAppliesAndPersistsIndependently(t *testing.T) {
 	}
 	// A reasoning level set afterwards must not drop the routing preference:
 	// both are persisted in separate config fields.
-	po := providerOptionsForRuntime(providerOpenRouter, "high")
+	po := providerOptionsForRuntime(providerOpenRouter, "high", "")
 	if _, ok := po[fantasyopenrouterprovider.Name]; !ok {
 		t.Fatalf("routing lost: %#v", po)
 	}
@@ -72,7 +72,7 @@ func TestOpenRouterSpeedIgnoredForOtherProviders(t *testing.T) {
 		t.Errorf("local display = %q, want empty", got)
 	}
 	// Anthropic options carry no OpenRouter routing entry.
-	po := providerOptionsForRuntime(providerAnthropic, "high")
+	po := providerOptionsForRuntime(providerAnthropic, "high", "")
 	if _, ok := po[fantasyopenrouterprovider.Name]; ok {
 		t.Error("routing applied to anthropic; must be OpenRouter-only")
 	}

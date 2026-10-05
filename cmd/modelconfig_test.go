@@ -234,13 +234,22 @@ func TestModelsForOpenAIAuth_ChatGPTOAuthSubset(t *testing.T) {
 	if len(models) == 0 {
 		t.Fatal("modelsForOpenAIAuth returned no models")
 	}
-	if models[0].ID != "gpt-5.5" {
-		t.Fatalf("first ChatGPT OAuth model = %q, want gpt-5.5", models[0].ID)
+	// The default stays GPT-5.5; the newer families are listed above it but
+	// must not displace the default selection.
+	if models[0].ID != "gpt-6-astra" {
+		t.Fatalf("first ChatGPT OAuth model = %q, want gpt-6-astra", models[0].ID)
 	}
+	var sawDefault bool
 	for _, m := range models {
+		if m.ID == defaultOpenAIModel {
+			sawDefault = true
+		}
 		if m.ID == "gpt-5.3-codex" || m.ID == "gpt-5.2-codex" {
 			t.Fatalf("ChatGPT OAuth model list should not include unsupported Codex-suffixed model %q", m.ID)
 		}
+	}
+	if !sawDefault {
+		t.Fatalf("ChatGPT OAuth model list lost the default model %q", defaultOpenAIModel)
 	}
 }
 

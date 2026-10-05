@@ -15,8 +15,9 @@ import (
 // --- provider option mapping ---
 
 func TestProviderOptionsForThinkingMode_Local(t *testing.T) {
-	// Local is OpenAI-compatible: named efforts map through verbatim.
-	po := providerOptionsForThinkingMode(providerLocal, thinkingModeHigh)
+	// Local is OpenAI-compatible: named efforts map through verbatim. Local
+	// endpoints speak chat completions, so the chat option type is correct.
+	po := providerOptionsForThinkingMode(providerLocal, thinkingModeHigh, "local-model")
 	data, ok := po[fantasyopenapiprovider.Name]
 	if !ok {
 		t.Fatalf("local high: no openai options, got %v", po)
@@ -31,7 +32,7 @@ func TestProviderOptionsForThinkingMode_Local(t *testing.T) {
 
 	// "none" must be sent explicitly on local (the server would otherwise keep
 	// its own default, which for LM Studio loaded thinking models is "on").
-	po = providerOptionsForThinkingMode(providerLocal, thinkingModeNone)
+	po = providerOptionsForThinkingMode(providerLocal, thinkingModeNone, "local-model")
 	opts, ok = po[fantasyopenapiprovider.Name].(*fantasyopenapiprovider.ProviderOptions)
 	if !ok || opts.ReasoningEffort == nil || *opts.ReasoningEffort != fantasyopenapiprovider.ReasoningEffortNone {
 		t.Errorf("local none: expected explicit ReasoningEffort=none, got %v", opts)
@@ -39,7 +40,7 @@ func TestProviderOptionsForThinkingMode_Local(t *testing.T) {
 
 	// Non-standard vocabulary (LM Studio's boolean "on") → none, never an
 	// effort the endpoint would reject.
-	po = providerOptionsForThinkingMode(providerLocal, "on")
+	po = providerOptionsForThinkingMode(providerLocal, "on", "local-model")
 	opts, ok = po[fantasyopenapiprovider.Name].(*fantasyopenapiprovider.ProviderOptions)
 	if !ok || opts.ReasoningEffort == nil || *opts.ReasoningEffort != fantasyopenapiprovider.ReasoningEffortNone {
 		t.Errorf("local \"on\": expected ReasoningEffort=none, got %v", opts)
@@ -47,22 +48,42 @@ func TestProviderOptionsForThinkingMode_Local(t *testing.T) {
 }
 
 func TestProviderOptionsForThinkingMode_OpenAI(t *testing.T) {
+	withAuthPath(t) // hermetic: no stored OAuth credential — the model ID decides the type
 	// Native openai (incl. Codex): the "none" mode emits an explicit
-	// ReasoningEffort=none (a documented value; turns reasoning off).
-	po := providerOptionsForThinkingMode(providerOpenAI, thinkingModeNone)
-	opts, ok := po[fantasyopenapiprovider.Name].(*fantasyopenapiprovider.ProviderOptions)
+	// ReasoningEffort=none (a documented value; turns reasoning off). A
+	// responses-API model (codex backend, gpt-5.x) must get the
+	// ResponsesProviderOptions type — the chat type is silently dropped.
+	po := providerOptionsForThinkingMode(providerOpenAI, thinkingModeNone, "gpt-5.5-codex")
+	opts, ok := po[fantasyopenapiprovider.Name].(*fantasyopenapiprovider.ResponsesProviderOptions)
 	if !ok || opts.ReasoningEffort == nil || *opts.ReasoningEffort != fantasyopenapiprovider.ReasoningEffortNone {
-		t.Errorf("openai none: got %v, want explicit none", opts)
+		t.Errorf("openai none: got %v, want explicit none in ResponsesProviderOptions", opts)
 	}
-	// A standard effort maps through.
-	po = providerOptionsForThinkingMode(providerOpenAI, thinkingModeMedium)
-	opts, ok = po[fantasyopenapiprovider.Name].(*fantasyopenapiprovider.ProviderOptions)
+	// A standard effort maps through, in the responses option type.
+	po = providerOptionsForThinkingMode(providerOpenAI, thinkingModeMedium, "gpt-5.5-codex")
+	opts, ok = po[fantasyopenapiprovider.Name].(*fantasyopenapiprovider.ResponsesProviderOptions)
 	if !ok || opts.ReasoningEffort == nil || *opts.ReasoningEffort != fantasyopenapiprovider.ReasoningEffortMedium {
 		t.Errorf("openai medium: got %v", opts)
 	}
+	// fantasy's responses ID list explicitly includes the gpt-3.5 family
+	// (upstream quirk: the generation regex excludes them but the list
+	// doesn't), so practically every OpenAI model ID routes to Responses —
+	// pin that with a legacy ID too.
+	po = providerOptionsForThinkingMode(providerOpenAI, thinkingModeMedium, "gpt-3.5-turbo")
+	if _, ok := po[fantasyopenapiprovider.Name].(*fantasyopenapiprovider.ResponsesProviderOptions); !ok {
+		t.Errorf(
+			"gpt-3.5-turbo: expected ResponsesProviderOptions (fantasy lists it), got %T",
+			po[fantasyopenapiprovider.Name],
+		)
+	}
+	// A truly unknown ID falls back to fantasy's default gate, which for a
+	// non-matching ID means chat completions → the chat option type.
+	po = providerOptionsForThinkingMode(providerOpenAI, thinkingModeMedium, "future-model-xyz")
+	if _, ok := po[fantasyopenapiprovider.Name].(*fantasyopenapiprovider.ProviderOptions); !ok {
+		t.Errorf("unknown ID: expected chat-completions *ProviderOptions, got %T", po[fantasyopenapiprovider.Name])
+	}
 	// A non-standard/unknown ID is omitted (→ nil, no field) so it can never
 	// 400 a request on the OpenAI API — this is the pre-existing behavior.
-	if po := providerOptionsForThinkingMode(providerOpenAI, "on"); po != nil {
+	if po := providerOptionsForThinkingMode(providerOpenAI, "on", "gpt-5.5-codex"); po != nil {
 		t.Errorf("openai unknown id = %v, want nil (omit)", po)
 	}
 }

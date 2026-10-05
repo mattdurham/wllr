@@ -50,6 +50,13 @@ var (
 // ChatGPT account-id header. This is how a ChatGPT Plus/Pro subscription token
 // is used instead of a standard OpenAI API key — matching how Codex/pi route
 // these requests. The Responses API is used (Codex models are responses-based).
+//
+// WithResponsesAPIFunc overrides fantasy's default IsResponsesModel gate, whose
+// exact-ID list and gpt-N regex only cover models OpenAI shipped when fantasy
+// was released. Every model on the codex backend is served by the Responses
+// API regardless of its ID (new codex models don't follow the gpt-N pattern),
+// so routing is unconditional here: a future model ID needs no fantasy bump
+// and no wllr change to reach the right endpoint.
 func newCodexProvider(accessToken, accountID string) (fantasy.Provider, error) {
 	return fantasyopenapiprovider.New(
 		fantasyopenapiprovider.WithAPIKey(accessToken),
@@ -60,6 +67,7 @@ func newCodexProvider(accessToken, accountID string) (fantasy.Provider, error) {
 			"originator":         "codex_cli_go",
 		}),
 		fantasyopenapiprovider.WithUseResponsesAPI(),
+		fantasyopenapiprovider.WithResponsesAPIFunc(func(string) bool { return true }),
 	)
 }
 

@@ -2,8 +2,6 @@ package main
 
 import (
 	"charm.land/fantasy"
-	fantasyanthropicprovider "charm.land/fantasy/providers/anthropic"
-	fantasygoogleprovider "charm.land/fantasy/providers/google"
 	fantasyopenapiprovider "charm.land/fantasy/providers/openai"
 	fantasyopenrouterprovider "charm.land/fantasy/providers/openrouter"
 )
@@ -42,11 +40,20 @@ var thinkingLevels = []thinkingLevel{
 var thinkingLevelLabels = map[thinkingLevel]string{
 	thinkingOff:     "Off — no extended thinking",
 	thinkingMinimal: "Minimal — a little reasoning",
-	thinkingLow:     "Low",
-	thinkingMedium:  "Medium",
-	thinkingHigh:    "High",
+	thinkingLow:     thinkingLabelLow,
+	thinkingMedium:  thinkingLabelMedium,
+	thinkingHigh:    thinkingLabelHigh,
 	thinkingXHigh:   "X-High — maximum reasoning",
 }
+
+// thinkingLabel* are the picker label strings shared by the level labels and
+// the catalog thinking-mode rows.
+const (
+	thinkingLabelLow    = "Low"
+	thinkingLabelMedium = "Medium"
+	thinkingLabelHigh   = "High"
+	thinkingLabelXHigh  = "X-High"
+)
 
 // anthropicThinkingBudget maps a level to Anthropic extended-thinking token
 // budgets. 0 means thinking is disabled (no ThinkingProviderOption emitted).
@@ -112,50 +119,6 @@ func savedThinkingLevel() thinkingLevel {
 // saveThinkingLevel persists the thinking level to the "wllr" config group.
 func saveThinkingLevel(level thinkingLevel) error {
 	return saveWllrField("thinking", string(level))
-}
-
-// providerOptionsForThinking builds the fantasy provider options for the given
-// provider and level. Returns nil when the level is Off or the provider has no
-// reasoning mechanism, which clears any previously-set thinking options.
-func providerOptionsForThinking(provider string, level thinkingLevel) fantasy.ProviderOptions {
-	switch provider {
-	case providerAnthropic:
-		budget := anthropicThinkingBudget[level]
-		if budget <= 0 {
-			return nil
-		}
-		return fantasy.ProviderOptions{
-			fantasyanthropicprovider.Name: &fantasyanthropicprovider.ProviderOptions{
-				Thinking: &fantasyanthropicprovider.ThinkingProviderOption{
-					BudgetTokens: budget,
-				},
-			},
-		}
-	case providerOpenAI, providerLocal:
-		if level == thinkingOff {
-			return nil
-		}
-		effort := openAIReasoningEffort[level]
-		return fantasy.ProviderOptions{
-			fantasyopenapiprovider.Name: &fantasyopenapiprovider.ProviderOptions{
-				ReasoningEffort: &effort,
-			},
-		}
-	case providerGemini:
-		budget := geminiThinkingBudget[level]
-		if budget <= 0 {
-			return nil
-		}
-		return fantasy.ProviderOptions{
-			fantasygoogleprovider.Name: &fantasygoogleprovider.ProviderOptions{
-				ThinkingConfig: &fantasygoogleprovider.ThinkingConfig{
-					ThinkingBudget: &budget,
-				},
-			},
-		}
-	default:
-		return nil
-	}
 }
 
 // OpenRouter provider-routing options.
@@ -287,9 +250,9 @@ func openRouterProviderOptions() fantasy.ProviderOptions {
 // occupy distinct fantasy keys (the reasoning struct vs the OpenRouter routing
 // struct), so they merge instead of replacing one another — otherwise setting a
 // speed would silently clear the reasoning mode and vice versa.
-func providerOptionsForRuntime(provider, modeID string) fantasy.ProviderOptions {
+func providerOptionsForRuntime(provider, modeID, modelID string) fantasy.ProviderOptions {
 	out := fantasy.ProviderOptions{}
-	for k, v := range providerOptionsForThinkingMode(provider, modeID) {
+	for k, v := range providerOptionsForThinkingMode(provider, modeID, modelID) {
 		out[k] = v
 	}
 	if provider == providerOpenRouter {

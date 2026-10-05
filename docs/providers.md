@@ -266,8 +266,24 @@ The selection applies to the running main agent immediately and is **persisted**
 to `config.yaml` (`wllr.thinking`), so it survives restarts. Startup precedence:
 persisted level, else `off`.
 
+For OpenAI models, the effort is attached in the provider-options type the
+target model's wire format reads: Responses-API models (all current gpt-5.x,
+codex, and gpt-6 IDs, plus anything on the ChatGPT Codex backend) get
+`ResponsesProviderOptions`, chat-completions models get `ProviderOptions`.
+fantasy silently drops reasoning_effort carried in the wrong type — without
+this branching the picker is a no-op for every Responses model. One upstream
+limitation remains: fantasy's Responses reasoning gate keys on model-ID
+substrings that no gpt-6 ID matches, so effort for gpt-6 models is dropped by
+fantasy itself (the model still reasons at its server default). The behavior
+is pinned by `TestFantasyReasoningGateExcludesGPT6Sol` so a fantasy bump that
+fixes the gate flips the expectation visibly.
+
 The model list is a curated catalog (`cmd/modelcatalog.go`) covering Anthropic,
-OpenAI, and Gemini, sourced from charmbracelet's Catwalk model-metadata service.
+OpenAI, and Gemini, sourced from charmbracelet's Catwalk model-metadata service
+(https://catwalk.charm.sh/v2/providers). New OpenAI releases are picked up by
+fetching that endpoint and adding the new entries to both the `providerOpenAI`
+slice and the `chatGPTOAuthModels` slice (the latter is what `/model` shows
+after a ChatGPT/Codex login), with each model's declared reasoning levels.
 For `provider: "local"`, wllr uses the configured `local_models` entries. Each
 entry supplies the OpenAI-compatible endpoint for that specific model, so `/models`
 can switch between local instances.
