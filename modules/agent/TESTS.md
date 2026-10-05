@@ -82,6 +82,10 @@ mismatched endpoint overrides.
 | `TestDeliver_UnknownAgent` | Unknown ID | Deliver to ghost ID | `ErrAgentNotFound` |
 | `TestDeliver_WakeNotifierFires` | Wake notifier callback | SetWakeNotifier, Deliver wake=true | Notifier called once with the agent ID |
 | `TestDeliver_WhileRunning_DrainsAfterTurn` | Deliver lands mid-turn (gated LM) | Start gated turn, Deliver while running | Queued not started; drained after turn; both messages in history; single onDone |
+| `TestDeliver_ErrorTurn_StillDrainsQueued` | Deliver lands mid-turn, turn then fails (gated LM, failFirst) | Start gated turn, Deliver while running, release into error | Queued message drained into follow-up turn despite the error; history has both messages; inbox empty |
+| `TestDeliver_ErrorTurn_DrainFailureTerminatesChain` | Every turn fails (gated always-error LM) | Queue mid-turn, release failed turn, release failed drain turn | Exactly 2 stream calls (no loop); onDone(err) once; agent idle; inbox empty |
+| `TestSubmit_PanicInTurn_ReleasesRunningAndDrains` | Turn panics mid-stream (panicGateLM) while a message is queued | Start gated turn, Deliver mid-turn, release into panic | Recover routes through finishTurn: isRunning released; queued message drained into a follow-up turn (2 stream calls); single onDone; inbox empty |
+| `TestSubmit_NilModel_ReleasesRunning` | Nil language model (pool.Spawn does not validate) | Spawn with nil LM, Submit, then SetModel + Send | First turn errors with "no language model configured"; isRunning released; agent idle; reconfigured agent runs the follow-up turn to completion |
 | `TestDeliver_ShutdownRequestToIdleAgent` | Regression: shutdown to idle agent | Deliver shutdown_request to idle worker | Worker self-closes; creator gets AGENT_SHUTDOWN, no idle notice; clean (no error) |
 | `TestIdleNotification_WakesCreator` | Sub-agent idle notifies creator | Worker with creatorID=main, run a turn | Creator woken; creator history contains `is idle` + worker ID |
 | `TestIdleNotification_TopLevelAgentDoesNotSelfNotify` | main never self-notifies | Spawn main (no creator), run a turn | main inbox empty after turn (no loop) |

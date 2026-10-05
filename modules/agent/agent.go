@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -718,8 +719,23 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 		}
 		defer func() {
 			if r := recover(); r != nil {
+				slog.Error("agent: panic in turn goroutine", "agent", a.id, "panic", r, "stack", string(debug.Stack()))
+				panicErr := fmt.Errorf("agent %s: panic: %v", a.id, r)
+				// A panic before executeTurn reached finishTurn leaves isRunning set
+				// and any mid-turn inbox messages stranded — the agent wedges as
+				// permanently "running". Route through finishTurn to release the
+				// flag, drain queued messages (which reports the panic error to
+				// onDone if no drain turn supersedes it), and run shutdown handling.
+				// If finishTurn already ran (isRunning cleared), fall back to a bare
+				// onDone so the chain is never restarted from the recover path.
+				if a.isRunning.Load() {
+					// childCtx.Err() respects issue #48: if the turn was cancelled
+					// (not just panicked), the queue is preserved — no drain.
+					a.finishTurn(ctx, panicErr, childCtx.Err(), onDone, inboxMsgs)
+					return
+				}
 				if onDone != nil {
-					onDone(fmt.Errorf("agent %s: panic: %v", a.id, r))
+					onDone(panicErr)
 				}
 			}
 		}()
@@ -766,9 +782,19 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 	onDone func(error),
 ) {
 	if lm == nil {
-		if onDone != nil {
-			onDone(fmt.Errorf("agent %s: no language model configured", a.id))
-		}
+		// Route through finishTurn, not a bare onDone: Submit already claimed the
+		// turn via the isRunning CAS, so a bare return leaves isRunning set forever
+		// (the agent wedges as permanently "running" — every later Submit just
+		// re-queues) and strands inbox messages queued mid-turn. finishTurn
+		// releases isRunning, drains queued messages (loop-safe: each queued batch
+		// costs exactly one failed turn, never a spin), and reports the error once.
+		a.finishTurn(
+			ctx,
+			fmt.Errorf("agent %s: no language model configured", a.id),
+			nil,
+			onDone,
+			inboxMsgs,
+		)
 		return
 	}
 
@@ -1109,8 +1135,16 @@ func (a *Agent) finishTurn(ctx context.Context, err error, ctxErr error, onDone 
 	a.markTurnDone()
 	a.isRunning.Store(false)
 
-	// Only drain on successful turns — errors and cancellations terminate the chain.
-	if err == nil && ctxErr == nil {
+	// Drain after successful turns AND after failed turns: a message delivered
+	// while a turn was running must be processed even if that turn errored, so a
+	// provider failure never strands teammate sends in the inbox until the next
+	// user turn. Loop safety: Submit drains the inbox before any of its failure
+	// paths, so every turn — including an error-path drain turn — has consumed its
+	// batch before it can fail; the chain only continues while genuinely new
+	// messages arrive, so a persistent error costs one failed turn per arriving
+	// batch, never an infinite loop. Cancellations still terminate the chain: the
+	// queue is deliberately preserved (issue #48) for the next explicit Submit.
+	if ctxErr == nil {
 		pending := a.DrainInbox()
 
 		// Scan new pending messages for a system shutdown_request.
@@ -1187,7 +1221,10 @@ func (a *Agent) finishTurn(ctx context.Context, err error, ctxErr error, onDone 
 		// Skip when a shutdown is pending (handled below) or when the agent has no
 		// creator (top-level agents such as main never self-notify). The message is
 		// a normal (model-visible) message, unlike the system-only AGENT_SHUTDOWN.
-		if shutdownFrom == "" && a.creatorID != "" && a.pool != nil {
+		// Idle notifications fire only on successful settles: an errored turn
+		// already wakes the creator via the spawner's agent_failed notification
+		// (which carries the error), and an idle ping on top would double-wake.
+		if err == nil && shutdownFrom == "" && a.creatorID != "" && a.pool != nil {
 			idleMsg, encodeErr := a.lifecycleMessage(
 				lifecycleEventIdle,
 				"child is idle; review its results with get_agent_status or shut it down with shutdown_agent",

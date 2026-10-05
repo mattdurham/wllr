@@ -3,6 +3,7 @@ package agent_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -21,6 +22,9 @@ type gatedLM struct {
 	started chan struct{}
 	mu      sync.Mutex
 	calls   int
+	// failFirst makes the first Stream call yield a stream error after the gate
+	// releases, modelling a turn that fails mid-stream while later turns succeed.
+	failFirst bool
 }
 
 func newGatedLM() *gatedLM {
@@ -44,6 +48,13 @@ func (g *gatedLM) Stream(ctx context.Context, _ fantasy.Call) (fantasy.StreamRes
 			select {
 			case <-g.release:
 			case <-ctx.Done():
+				return
+			}
+			g.mu.Lock()
+			fail := g.failFirst
+			g.mu.Unlock()
+			if fail {
+				yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeError, Error: errors.New("stream error")})
 				return
 			}
 		}
@@ -140,6 +151,404 @@ func TestDeliver_WhileRunning_DrainsAfterTurn(t *testing.T) {
 	}
 	if n := a.InboxLen(); n != 0 {
 		t.Errorf("inbox length after drain = %d, want 0", n)
+	}
+}
+
+// gatedAlwaysErrLM gates every Stream call on release, then yields a stream
+// error — every turn fails, modelling a persistently broken provider. Used to
+// prove the error-path drain chain terminates instead of looping.
+type gatedAlwaysErrLM struct {
+	started chan struct{}
+	release chan struct{}
+	mu      sync.Mutex
+	calls   int
+}
+
+func (g *gatedAlwaysErrLM) Model() string    { return "gated-err" }
+func (g *gatedAlwaysErrLM) Provider() string { return "test" }
+
+func (g *gatedAlwaysErrLM) Stream(ctx context.Context, _ fantasy.Call) (fantasy.StreamResponse, error) {
+	g.mu.Lock()
+	g.calls++
+	g.mu.Unlock()
+	return func(yield func(fantasy.StreamPart) bool) {
+		select {
+		case g.started <- struct{}{}:
+		default:
+		}
+		select {
+		case <-g.release:
+		case <-ctx.Done():
+			return
+		}
+		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeError, Error: errors.New("provider down")})
+	}, nil
+}
+
+func (g *gatedAlwaysErrLM) Generate(_ context.Context, _ fantasy.Call) (*fantasy.Response, error) {
+	return &fantasy.Response{}, nil
+}
+
+func (g *gatedAlwaysErrLM) GenerateObject(_ context.Context, _ fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
+	return nil, nil
+}
+
+func (g *gatedAlwaysErrLM) StreamObject(_ context.Context, _ fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
+	return nil, nil
+}
+
+// TestDeliver_ErrorTurn_StillDrainsQueued verifies that a message delivered
+// while a turn is running is processed even when that turn FAILS. Before the
+// error-path drain fix, finishTurn only drained after successful turns, so a
+// provider error stranded the queued message in the inbox until the next
+// explicit Submit — for sub-agents, potentially forever.
+func TestDeliver_ErrorTurn_StillDrainsQueued(t *testing.T) {
+	pool := agent.NewPool()
+	lm := newGatedLM()
+	lm.failFirst = true
+	a, err := pool.Spawn("worker", lm, agent.SpawnOpts{})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	done := make(chan error, 4)
+	a.SetOnDone(func(e error) { done <- e })
+
+	// Turn 1 gates mid-stream, then fails.
+	a.Submit(context.Background(), "first task")
+	select {
+	case <-lm.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for turn 1 to start")
+	}
+
+	// Deliver while running: must queue.
+	if err := pool.Deliver("worker", sdk.Message{Role: sdk.RoleUser, Content: "delivered mid-turn"}, true); err != nil {
+		t.Fatalf("Deliver: %v", err)
+	}
+	if n := a.InboxLen(); n != 1 {
+		t.Fatalf("inbox length while running = %d, want 1", n)
+	}
+
+	// Release: turn 1 errors, but finishTurn must still drain the queued
+	// message into a drain turn — which succeeds (failFirst only fails call 1).
+	close(lm.release)
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for error-path drain turn to complete")
+	}
+
+	if calls := lm.calls; calls != 2 {
+		t.Errorf("stream calls = %d, want 2 (failed turn + drain turn)", calls)
+	}
+	var foundFirst, foundDelivered bool
+	for _, m := range a.History() {
+		if strings.Contains(m.Content, "first task") {
+			foundFirst = true
+		}
+		if strings.Contains(m.Content, "delivered mid-turn") {
+			foundDelivered = true
+		}
+	}
+	if !foundFirst {
+		t.Error("initial message missing from history")
+	}
+	if !foundDelivered {
+		t.Error("mid-turn delivered message stranded by the failed turn — not in history after drain")
+	}
+	if n := a.InboxLen(); n != 0 {
+		t.Errorf("inbox length after error-path drain = %d, want 0", n)
+	}
+	if a.IsRunning() {
+		t.Error("agent still running after error-path drain completed")
+	}
+}
+
+// TestDeliver_ErrorTurn_DrainFailureTerminatesChain verifies loop safety of the
+// error-path drain: when every turn fails (persistently broken provider), each
+// queued batch gets exactly one attempt and the chain stops — the drain turn's
+// own failure does NOT trigger another drain. This pins the non-looping
+// guarantee that justifies draining after errors at all.
+func TestDeliver_ErrorTurn_DrainFailureTerminatesChain(t *testing.T) {
+	pool := agent.NewPool()
+	lm := &gatedAlwaysErrLM{started: make(chan struct{}, 1), release: make(chan struct{})}
+	a, err := pool.Spawn("worker", lm, agent.SpawnOpts{})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	done := make(chan error, 4)
+	a.SetOnDone(func(e error) { done <- e })
+
+	// Turn 1 gates, then fails.
+	a.Submit(context.Background(), "first task")
+	select {
+	case <-lm.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for turn 1 to start")
+	}
+
+	// Queue a message mid-turn, then release turn 1 into its error.
+	if err := pool.Deliver("worker", sdk.Message{Role: sdk.RoleUser, Content: "delivered mid-turn"}, true); err != nil {
+		t.Fatalf("Deliver: %v", err)
+	}
+	lm.release <- struct{}{}
+
+	// The error-path drain turn must start (call 2 gates), consuming the queued
+	// message as its turn content.
+	select {
+	case <-lm.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("drain turn did not start after failed turn")
+	}
+
+	// Release the drain turn into its error. Its finishTurn must find an empty
+	// inbox (the batch was consumed) and terminate the chain with onDone(err).
+	lm.release <- struct{}{}
+
+	var turnErr error
+	select {
+	case turnErr = <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for chain to terminate after failed drain turn")
+	}
+	if turnErr == nil {
+		t.Error("onDone error = nil, want the drain turn's error")
+	}
+
+	// Exactly two turns must have run: the failed turn and the single failed
+	// drain turn. A third call would mean the drain retried itself into a loop.
+	deadline := time.After(500 * time.Millisecond)
+	for {
+		lm.mu.Lock()
+		calls := lm.calls
+		lm.mu.Unlock()
+		if calls > 2 {
+			t.Fatalf("stream calls = %d, want 2 — error-path drain is looping", calls)
+		}
+		select {
+		case <-deadline:
+			if calls != 2 {
+				t.Fatalf("stream calls = %d, want 2", calls)
+			}
+			if a.IsRunning() {
+				t.Error("agent still running after chain terminated")
+			}
+			if n := a.InboxLen(); n != 0 {
+				t.Errorf("inbox length after chain terminated = %d, want 0", n)
+			}
+			return
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+// panicGateLM panics inside the first Stream call after its release gate opens;
+// later calls stream successfully. Models a turn that panics mid-stream (e.g. a
+// provider bug) so the Submit goroutine's recover path runs while another
+// message is already queued in the inbox. fantasy only recovers panics from
+// tool implementations (runToolSafely) — provider Stream panics propagate to
+// the agent goroutine's recover.
+type panicGateLM struct {
+	started chan struct{}
+	release chan struct{}
+	mu      sync.Mutex
+	calls   int
+}
+
+func (p *panicGateLM) Model() string    { return "panic-gate" }
+func (p *panicGateLM) Provider() string { return "test" }
+
+func (p *panicGateLM) Stream(ctx context.Context, _ fantasy.Call) (fantasy.StreamResponse, error) {
+	p.mu.Lock()
+	p.calls++
+	first := p.calls == 1
+	p.mu.Unlock()
+	return func(yield func(fantasy.StreamPart) bool) {
+		if first {
+			select {
+			case p.started <- struct{}{}:
+			default:
+			}
+			select {
+			case <-p.release:
+			case <-ctx.Done():
+				return
+			}
+			panic("provider exploded mid-stream")
+		}
+		if !yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, Delta: "ok"}) {
+			return
+		}
+		yield(fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonStop})
+	}, nil
+}
+
+func (p *panicGateLM) Generate(_ context.Context, _ fantasy.Call) (*fantasy.Response, error) {
+	return &fantasy.Response{}, nil
+}
+
+func (p *panicGateLM) GenerateObject(_ context.Context, _ fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
+	return nil, nil
+}
+
+func (p *panicGateLM) StreamObject(_ context.Context, _ fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
+	return nil, nil
+}
+
+// TestSubmit_PanicInTurn_ReleasesRunningAndDrains is a regression test: a turn
+// that panics used to fire onDone directly from the goroutine's recover,
+// skipping finishTurn — isRunning stayed set forever (the agent wedged as
+// permanently "running") and mid-turn inbox messages were stranded. The
+// recover path must route through finishTurn: the flag is released, the queued
+// message is drained into a follow-up turn, and onDone fires exactly once.
+func TestSubmit_PanicInTurn_ReleasesRunningAndDrains(t *testing.T) {
+	pool := agent.NewPool()
+	lm := &panicGateLM{started: make(chan struct{}, 1), release: make(chan struct{})}
+	a, err := pool.Spawn("worker", lm, agent.SpawnOpts{})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	done := make(chan error, 4)
+	a.SetOnDone(func(e error) { done <- e })
+
+	// Turn 1 gates mid-stream, then panics on release.
+	a.Submit(context.Background(), "first task")
+	select {
+	case <-lm.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for turn 1 to start")
+	}
+	if !a.IsRunning() {
+		t.Fatal("agent should be running while turn 1 is gated")
+	}
+
+	// Queue a message mid-turn so the panicking turn's finishTurn has something
+	// to drain.
+	if err := pool.Deliver("worker", sdk.Message{Role: sdk.RoleUser, Content: "delivered mid-turn"}, true); err != nil {
+		t.Fatalf("Deliver: %v", err)
+	}
+	if n := a.InboxLen(); n != 1 {
+		t.Fatalf("inbox length while running = %d, want 1", n)
+	}
+
+	// Release the gate: Stream panics, the recover routes through finishTurn,
+	// the queued message drains into a follow-up turn (call 2, succeeds), and
+	// the chain settles with a single onDone(nil).
+	close(lm.release)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("chain ended with error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for chain to settle after panic")
+	}
+
+	if a.IsRunning() {
+		t.Error("agent still running after panic-recovered chain settled — isRunning was never released")
+	}
+	if calls := lm.calls; calls != 2 {
+		t.Errorf("stream calls = %d, want 2 (panicked turn + drain turn)", calls)
+	}
+	var foundDelivered bool
+	for _, m := range a.History() {
+		if strings.Contains(m.Content, "delivered mid-turn") {
+			foundDelivered = true
+		}
+	}
+	// Note: the panicking turn's own prompt ("first task") is deliberately NOT
+	// asserted here — the panic aborts executeTurn before its history-recording
+	// section, so an abnormally terminated turn leaves no record of its prompt
+	// (and no assistant reply). The stranding fix under test is that the QUEUED
+	// message survives via the drain.
+	if !foundDelivered {
+		t.Error("mid-turn delivered message stranded by the panic — not in history after drain")
+	}
+	if n := a.InboxLen(); n != 0 {
+		t.Errorf("inbox length after panic-recovered drain = %d, want 0", n)
+	}
+
+	// onDone must have fired exactly once for the whole chain.
+	time.Sleep(100 * time.Millisecond)
+	select {
+	case extra := <-done:
+		t.Errorf("onDone fired more than once: %v", extra)
+	default:
+	}
+}
+
+// TestSubmit_NilModel_ReleasesRunning is a regression test: an agent whose
+// language model is nil used to fire onDone directly from executeTurn's early
+// return, skipping finishTurn — isRunning stayed set forever, so every later
+// Submit silently re-queued instead of running and the agent was unrecoverable
+// without a restart. The nil-LM path must route through finishTurn so the flag
+// releases and the agent can be reconfigured (SetModel) and driven again.
+func TestSubmit_NilModel_ReleasesRunning(t *testing.T) {
+	pool := agent.NewPool()
+	// pool.Spawn does not validate the LM — exactly how a nil-model agent can
+	// come to exist.
+	a, err := pool.Spawn("worker", nil, agent.SpawnOpts{})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	done := make(chan error, 4)
+	a.SetOnDone(func(e error) { done <- e })
+
+	firstErr := make(chan error, 1)
+	go func() { firstErr <- <-done }()
+	a.Submit(context.Background(), "go")
+	select {
+	case err := <-firstErr:
+		if err == nil {
+			t.Fatal("nil-model turn completed without error")
+		}
+		if !strings.Contains(err.Error(), "no language model configured") {
+			t.Errorf("error = %v, want it to mention the missing model", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for nil-model turn to fail")
+	}
+
+	// The fix's whole point: the turn must have released isRunning, so the agent
+	// is idle with an empty inbox and a follow-up turn actually RUNS (before the
+	// fix it wedged as running and the second Submit just re-queued).
+	if a.IsRunning() {
+		t.Fatal("agent still running after nil-model turn — isRunning was never released")
+	}
+	if n := a.InboxLen(); n != 0 {
+		t.Errorf("inbox length after nil-model turn = %d, want 0", n)
+	}
+
+	// Reconfigure and drive again — proves the agent is recoverable. The
+	// explicit context window satisfies the window guard that every real model
+	// resolves at spawn time.
+	lm := &tokenStreamLM{tokens: []string{"ok"}}
+	a.SetModel(lm, "token-stream", 100_000)
+	if err := pool.Send("worker", "after fix"); err != nil {
+		t.Fatalf("Send after SetModel: %v", err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("post-fix turn errored: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for post-fix turn — agent likely wedged")
+	}
+	var found bool
+	for _, m := range a.History() {
+		if strings.Contains(m.Content, "after fix") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("post-fix message missing from history — the second turn never ran")
 	}
 }
 

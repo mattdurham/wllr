@@ -271,6 +271,34 @@ sequentially. The onDone callback fires after each sub-turn, so the TUI may see 
 StreamDoneMsg events from a single logical "agent wakeup." Each StreamDoneMsg finalizes
 one response chunk.
 
+*Addendum (2026-07-16):* The post-turn drain now also runs after **failed** turns
+(`ctxErr == nil` is the only gate; cancellation still terminates the chain and
+preserves the queue per issue #48). Previously a provider error stranded messages
+queued mid-turn in the inbox until the next explicit Submit — for sub-agents,
+potentially forever, since nobody else submits on their behalf. Loop safety comes from
+Submit's drain-first ordering: every turn consumes its inbox batch before it can fail,
+so the chain only continues while genuinely new messages arrive; a persistent error
+costs one failed turn per arriving batch. Idle notifications became success-only at
+the same time: an errored settle already wakes the creator via the spawner's
+`agent_failed` notification, and an idle ping would double-wake. Regression coverage:
+`TestDeliver_ErrorTurn_StillDrainsQueued` and
+`TestDeliver_ErrorTurn_DrainFailureTerminatesChain`.
+
+*Addendum (2026-10-05):* Two turn-goroutine exit paths bypassed `finishTurn` entirely
+and wedged the agent as permanently "running" — `isRunning` was never released, so
+every later `Submit` silently re-queued and the agent was unrecoverable without a
+restart: (1) `executeTurn`'s nil-language-model early return fired `onDone` directly
+(`pool.Spawn` does not validate the LM, so a nil-model agent is reachable — e.g. a
+model factory that returns `nil, nil`); (2) the `Submit` goroutine's panic recover
+fired `onDone` directly. Both now route through `finishTurn`. The recover path only
+takes over when `isRunning` is still set (the panic preceded `finishTurn`), logs the
+panic with a full stack, and passes `childCtx.Err()` so a panic during a cancelled
+turn still preserves the queue (issue #48). Because a panic aborts `executeTurn`
+before history recording, a panicking turn leaves no prompt or reply in history —
+queued inbox messages still drain into a follow-up turn. Regression coverage:
+`TestSubmit_NilModel_ReleasesRunning` and
+`TestSubmit_PanicInTurn_ReleasesRunningAndDrains`.
+
 ## 18. Real API Token Tracking — Why Replace chars/4 Heuristic
 
 *Added: 2026-05-30*
@@ -768,8 +796,9 @@ discard operation, and unavoidable without cross-operation transactions the
 UI does not need.
 
 **Cancel semantics (issue #48 option (a)):** Esc-cancel deliberately preserves
-the queue. `finishTurn` already skipped the drain on failed/canceled turns, so
-after a cancel the queued messages stay visible in the pane and the user — not
+the queue. `finishTurn` skips the drain on canceled turns (failed turns now drain
+like successful ones — see the §17 addendum), so after a cancel the queued messages
+stay visible in the pane and the user — not
 the harness — decides: drain them into the next submit (pre-existing
 `Submit` behavior), or discard them via ctrl+x / the `[ clear ]` button /
 `/queue clear`. Auto-draining after a cancel (option (b)) was rejected because

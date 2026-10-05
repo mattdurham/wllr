@@ -21,11 +21,28 @@ type blockingLM struct {
 	tokens        []string
 }
 
+// newBlockingLM is the constructor; the zero value also works for tests that
+// only need an indefinite block — lazyInit creates the channels on first use so
+// the zero value never blocks on nil channels inside Stream (that would panic
+// and hit the agent goroutine's recover path, which treats it as a turn error).
 func newBlockingLM(tokens ...string) *blockingLM {
-	return &blockingLM{
+	b := &blockingLM{
 		release:       make(chan struct{}),
 		streamStarted: make(chan struct{}),
 		tokens:        tokens,
+	}
+	return b
+}
+
+// lazyInit makes the zero-value blockingLM safe: inbox_clear_test.go and
+// TestAgent_Cancel_PreservesQueuedInbox deliberately use &blockingLM{} for an
+// indefinitely blocking stream.
+func (b *blockingLM) lazyInit() {
+	if b.release == nil {
+		b.release = make(chan struct{})
+	}
+	if b.streamStarted == nil {
+		b.streamStarted = make(chan struct{})
 	}
 }
 
@@ -33,6 +50,7 @@ func (b *blockingLM) Model() string    { return "blocking-model" }
 func (b *blockingLM) Provider() string { return "blocking" }
 
 func (b *blockingLM) Stream(ctx context.Context, _ fantasy.Call) (fantasy.StreamResponse, error) {
+	b.lazyInit()
 	toks := b.tokens
 	rel := b.release
 	// Signal that Stream has been entered — tests wait on this instead of sleeping.

@@ -493,7 +493,8 @@ In `executeTurn`, a local `buildStream` helper applies it:
   the original model (best-effort reroute, never fails the turn).
 - **Block:** the turn finishes immediately with a `*ProviderRequestBlockedError`
   carrying the reason; no provider call is made. It flows through `finishTurn`
-  like any turn error (no drain, `onDone(err)`).
+  like any turn error (messages that arrived mid-turn are still drained into a
+  follow-up turn; `onDone(err)` fires once the chain settles).
 
 **Invariant:** redaction is **send-time only**. History records the *original*
 user content (`a.history` append uses `content`, not the redacted messages), so
@@ -654,6 +655,28 @@ Orchestrator inbox receives:
    - Calls `pool.SendMessage(shutdownFrom, agentShutdownMsg)` to notify the creator.
    - Calls `pool.Close(a.id)` to remove self from pool (idempotent, safe from finishTurn goroutine).
    - Calls `onDone(nil)` exactly once and returns.
+
+The drain step runs after successful **and** failed turns (cancellations excepted):
+a message delivered while a turn was running is processed even if that turn errored,
+so a provider failure never strands queued sends until the next explicit `Submit`.
+This cannot loop: `Submit` drains the inbox before any of its failure paths, so every
+turn — including an error-path drain turn — consumes its batch before it can fail; the
+chain only continues while genuinely new messages arrive. Cancellation still terminates
+the chain and preserves the queue (issue #48). Idle notifications stay success-only:
+an errored settle already wakes the creator via the spawner's `agent_failed`
+notification (which carries the error), and an idle ping would double-wake.
+
+Every path that ends a turn goroutine must go through `finishTurn` — never fire
+`onDone` directly. Two paths previously bypassed it and wedged the agent as
+permanently "running" (`isRunning` never released, so every later `Submit` silently
+re-queued): (1) `executeTurn`'s nil-language-model early return, and (2) the
+`Submit` goroutine's panic recover. Both now route through `finishTurn`. The recover
+path only takes over when `isRunning` is still set (the panic preceded `finishTurn`);
+it passes `childCtx.Err()` as ctxErr so a panic during a cancelled turn still
+preserves the queue per issue #48. A panic aborts `executeTurn` before history
+recording, so a panicking turn leaves no prompt or reply in history — the panic is
+logged with a full stack (`agent: panic in turn goroutine`) and the queued inbox
+messages still drain into a follow-up turn.
 
 ### Invariants
 
