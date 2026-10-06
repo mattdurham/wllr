@@ -244,6 +244,32 @@ func OnAfterToolCall(fn func(callID, toolName, result string, isError bool)) {
 	})
 }
 
+// OnContextUsage registers a handler called after each main-agent context-usage
+// update: at the end of every completed turn, and immediately after each
+// successful compaction. compacted is true only on the post-compaction update;
+// trigger names the compaction kind ("proactive", "usage_threshold",
+// "reactive", "tool_loop") and messages is how many history messages the
+// summary folded away. inputTokens/contextWindow are the provider-reported
+// usage and the model's window; percent is inputTokens/contextWindow*100.
+func OnContextUsage(fn func(inputTokens, contextWindow int64, percent float64, compacted bool, trigger string, messages int)) {
+	_sdkOn("context_usage", func(payload json.RawMessage) {
+		var p struct {
+			Usage struct {
+				InputTokens   int64   `json:"input_tokens"`
+				ContextWindow int64   `json:"context_window"`
+				Percent       float64 `json:"percent"`
+			} `json:"usage"`
+			Compacted         bool   `json:"compacted"`
+			Trigger           string `json:"trigger"`
+			MessagesCompacted int    `json:"messages_compacted"`
+		}
+		if err := json.Unmarshal(payload, &p); err == nil {
+			fn(p.Usage.InputTokens, p.Usage.ContextWindow, p.Usage.Percent,
+				p.Compacted, p.Trigger, p.MessagesCompacted)
+		}
+	})
+}
+
 // ─── Host API ─────────────────────────────────────────────────────────────────
 
 // ToolResult sends the result of a tool call back to the host.

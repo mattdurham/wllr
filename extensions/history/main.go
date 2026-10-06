@@ -46,6 +46,15 @@ func init() {
 		}
 	})
 
+	// Compaction metadata: the session file must show when and why older turns
+	// were folded into a summary. The entry is metadata only — the resume path
+	// replays "message" entries exclusively, so this never re-enters context.
+	OnContextUsage(func(_, _ int64, _ float64, compacted bool, trigger string, messages int) {
+		if compacted && trigger != "" {
+			recordCompaction(trigger, messages)
+		}
+	})
+
 	OnBeforeToolCall(func(payload json.RawMessage) {
 		var p struct {
 			ToolCallID string          `json:"tool_call_id"`
@@ -182,6 +191,22 @@ func recordMessage(role, content string) {
 		Timestamp: ts,
 		Role:      role,
 		Content:   content,
+	})
+}
+
+// recordCompaction appends a compaction-metadata entry to the session file.
+// Skipped outside a live session (currentFile == ""), like every recorder.
+func recordCompaction(trigger string, messages int) {
+	if currentFile == "" {
+		return
+	}
+	entryCount++
+	appendJSONL(currentFile, compactionEntry{
+		Type:              "compaction",
+		ID:                fmt.Sprintf("c%d", entryCount),
+		Timestamp:         nowRFC(),
+		Trigger:           trigger,
+		MessagesCompacted: messages,
 	})
 }
 

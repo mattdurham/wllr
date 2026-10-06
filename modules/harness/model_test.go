@@ -860,15 +860,20 @@ func TestModel_View_WithStatusLineFitsHeight(t *testing.T) {
 }
 
 // TestStatusBarCtxPercent verifies that after a StreamDoneMsg, when the pool's main
-// agent has real usage and the context window is set, statuses["ctx"] shows window
-// usage and remaining headroom until compaction ("P%/R%": percent and
-// threshold% - current%).
+// agent has real usage and a resolved context window, statuses["ctx"] shows usage
+// against the agent's OWN window — the window its turns actually run with — not
+// the pool's default-model window, which can diverge (that divergence was the
+// bug: the statusline showed one denominator while compaction used another).
 func TestStatusBarCtxPercent(t *testing.T) {
 	pool := agent.NewPool()
-	pool.SetContextWindow(200_000)
+	// Decoy: the pool default-model window deliberately differs from the
+	// agent's explicit window. The display must follow the agent.
+	pool.SetContextWindow(1_000_000)
 	// 50k / 200k = 25%; default threshold 80% → rem = 55%
 	lm := newUsageMockLM(50_000, 500, "response")
-	a, err := pool.Spawn(agent.MainAgentID, lm, agent.SpawnOpts{})
+	a, err := pool.Spawn(agent.MainAgentID, lm, agent.SpawnOpts{
+		ModelName: "ctx-test-model", ContextWindow: 200_000,
+	})
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
@@ -908,9 +913,11 @@ func TestStatusBarCtxPercent(t *testing.T) {
 // TestStatusBarCtxPercentZero verifies that when ContextWindow is 0, ctx rem key is absent.
 func TestStatusBarCtxPercentZero(t *testing.T) {
 	pool := agent.NewPool()
-	// No SetContextWindow — window defaults to 0.
+	// An agent whose model has no resolvable window spawns with window 0
+	// (no fallback applies to named models). Its turns would refuse to run,
+	// and with LastUsage zeroed the status keys must stay absent.
 	lm := newUsageMockLM(50_000, 500, "response")
-	_, err := pool.Spawn(agent.MainAgentID, lm, agent.SpawnOpts{})
+	_, err := pool.Spawn(agent.MainAgentID, lm, agent.SpawnOpts{ModelName: "unknown-model-xyz"})
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}

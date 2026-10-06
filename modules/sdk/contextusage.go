@@ -19,22 +19,29 @@ type ContextUsage struct {
 }
 
 // ContextUsageFromFantasy constructs a ContextUsage from a fantasy.Usage and the
-// model's context window size. Percent is computed safely: a zero window yields
-// Percent == 0 rather than a divide-by-zero panic.
+// model's context window size. The numerator is the total prompt size the
+// provider actually processed: InputTokens plus cached tokens. Providers
+// disagree on where cache tokens live — Anthropic reports cache reads and
+// creations additively to input_tokens, while OpenAI-family providers subtract
+// cached tokens out of input_tokens (InputTokens = prompt − cached) — so summing
+// all three reconstructs the true prompt size on every provider and prevents a
+// fully cache-served turn from reporting zero context used.
+// Percent is computed safely: a zero window yields Percent == 0 rather than a
+// divide-by-zero panic.
 func ContextUsageFromFantasy(u fantasy.Usage, window int64) ContextUsage {
 	var pct float64
-	if window > 0 {
-		pct = float64(u.InputTokens) / float64(window) * 100.0
-	}
-
-	// Clamp InputTokens to prevent negative percentages due to int64 overflow
-	inputTokens := u.InputTokens
+	inputTokens := u.InputTokens + u.CacheReadTokens + u.CacheCreationTokens
 	if inputTokens < 0 {
 		slog.Warn("negative InputTokens detected, clamping to 0",
-			"input_tokens", inputTokens,
+			"input_tokens", u.InputTokens,
+			"cache_read", u.CacheReadTokens,
+			"cache_creation", u.CacheCreationTokens,
 			"output_tokens", u.OutputTokens,
 			"context_window", window)
 		inputTokens = 0
+	}
+	if window > 0 {
+		pct = float64(inputTokens) / float64(window) * 100.0
 	}
 
 	// Clamp Percent to reasonable range (0-200%) to catch calculation errors

@@ -111,7 +111,7 @@ mismatched endpoint overrides.
 | `TestCompactHistory_UsageSurfaced` | Summarization cost is observable | `compactTestLM` emitting fixed usage; 212×400-char history over budget | result carries the summarize call's input/output tokens, trigger, and messages_compacted; no-op run reports zero usage and empty summary |
 | `TestObserveCompaction_Summary_IncrementsCounter` | Per-session counter counts real compactions | agent + successful `compactHistory` | `CompactionCount()` increments once per observed summary |
 | `TestObserveCompaction_NoOp_DoesNotCount` | No-op compactions increment nothing | agent + no-op `compactHistory` (fits budget) | counter stays 0 |
-| `TestExecuteTurn_CompactionCounterIncrementsAndDispatches` | Full-turn observability wiring | main agent, 200k window, seeded over-budget history + usage above 0.80 threshold | turn completes, counter = 1, dispatcher sees `compacted=true` and `compactions=1` |
+| `TestExecuteTurn_CompactionCounterIncrementsAndDispatches` | Full-turn observability wiring | main agent, 200k window, seeded over-budget history + usage above 0.80 threshold | turn completes, counter = 1, post-compaction notice dispatched (trigger `usage_threshold`, messages > 0, estimate > 0) + end-of-turn dispatch with nil notice; no fake `[Compacting context…]` token; canonical transcript holds the compaction record |
 
 ### activity_test.go
 
@@ -120,6 +120,17 @@ mismatched endpoint overrides.
 | `TestAgentActivity_TracksRunningTurnAndToolCall` | Activity snapshot records intra-turn work | Fake LM emits text and a tool call | turn/activity/tool timestamps are set; last tool name recorded; active tool clears after turn |
 | `TestAgentActivity_ToolCompletionClearsActiveTool` | Tool completion updates liveness | Internal agent activity state with active tool | completion clears active tool/call and records last-tool-done timestamp |
 | `TestAgentActivity_ShutdownRequestedWhileRunning` | Graceful shutdown request is visible before stop | Gated running agent receives shutdown_request | `Activity().ShutdownRequested` is true while request is queued |
+
+### agent_usage_test.go
+
+| Test | Scenario | Setup | Assertions |
+|------|----------|-------|------------|
+| `TestStreamTurnReturnsUsage` | usage captured from stream | usageLM 1500/42 | `LastUsage` non-zero on both fields |
+| `TestStreamTurnUsageZeroOnError` | first-turn failure has nothing to retain | fresh agent + errStreamLM | `LastUsage` stays zero |
+| `TestAgentLastUsage` | provider-reported usage stored | usageLM 800/20 | `LastUsage` = {800, 20} |
+| `TestPoolMainAgentContextUsage` | pool exposes usage after a turn | window set, 50k-input turn | InputTokens/Window/Percent all > 0 |
+| `TestEventContextUsageDispatched` | dispatcher fires on a successful turn | usageLM 30k/100, dispatcher captured | dispatched usage non-zero, notice nil, compactions 0 |
+| `TestEventContextUsageDispatchedOnErrorRetainsLastKnown` | failed main turn re-dispatches retained usage | successThenErrLM through main | a dispatch with InputTokens 1200 arrives after the failed turn |
 
 ## Missing / Recommended Tests
 
@@ -193,8 +204,12 @@ mismatched endpoint overrides.
 
 | Test | Scenario | Setup | Assertions |
 |------|----------|-------|------------|
-| `TestExecuteTurn_CompactionPreservesCanonicalTranscript` | **acceptance:** compaction must not destroy the transcript | seeded transcript, 212-message history over budget, usage above threshold | compaction ran; detail gone from `History()`; transcript intact; recall still returns the exact detail |
+| `TestExecuteTurn_CompactionPreservesCanonicalTranscript` | **acceptance:** compaction must not destroy the transcript | seeded transcript, 212-message history over budget, usage above threshold | compaction ran; detail gone from `History()`; transcript intact plus one compaction record; recall still returns the exact detail |
 | `TestExecuteTurn_CanonicalTranscriptDoesNotEnterHistory` | transcript is not compaction input | transcript entry then a turn | marker never appears in `History()` |
+| `TestExecuteTurn_ReactiveCompaction_DispatchesNotice` | reactive path announces the fold instead of faking a token | first stream call rejects with a context-too-long error; seeded history over the keep-recent budget | retried turn succeeds after one summary call (3 stream calls total); notice dispatched with trigger `reactive`; no `[Context limit reached…]` marker in the stream |
+| `TestPoolMainAgentContextUsage_UsesAgentWindow` | display denominator follows the agent, not the pool default | pool default-model window 1M (decoy), agent explicit window 200k, 50k-input turn | `ContextUsage.ContextWindow` = 200000, `Percent` ≈ 25 |
+| `TestPoolMainAgentContextUsage_IncludesCacheTokens` | display numerator counts cached tokens (OpenAI subtracts them from raw input) | agent window 200k, turn reports InputTokens 0 + CacheRead 90k | `ContextUsage.InputTokens` = 90000, `Percent` ≈ 45 — a fully cache-served turn never displays 0 |
+| `TestAgentLastUsageRetainedOnError` | failed turns retain last-known usage (reverses the old zeroing contract) | successThenErrLM: turn 1 succeeds (1200/50), turn 2 fails | after the failure `LastUsage` is still {1200, 50} — context did not shrink |
 | `TestExecuteTurn_RecordsMessagesInCanonicalTranscript` | both sides of a turn are recorded | one turn | two entries: user then assistant, correct kinds/roles |
 | `TestExecuteTurn_RecordsToolCallAndResultInCanonicalTranscript` | **command output is retrievable** | scripted client-side tool call returning a failure | call and result entries recorded; result text exact; findable by tool |
 | `TestCanonicalTranscript_SurvivesAcrossTurns` | append-only across turns | two turns | two new entries; earlier turn still retrievable |

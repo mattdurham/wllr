@@ -369,11 +369,20 @@ wire one up. The harness is responsible for ensuring the dispatcher is set befor
 
 *Added: 2026-06-29*
 
-**Decision:** `streamTurn` now returns the peak provider-step usage from the `*fantasy.AgentResult` produced by `fa.Stream` (previously discarded with `_`). Fantasy's `TotalUsage` sums every tool-loop step, so it is cumulative billing telemetry rather than context occupancy. `executeTurn` stores the peak usage via `a.setLastUsage(usage)` on a successful, non-cancelled turn (zero-valued on error/cancel) and, for the main agent only, calls `pool.dispatchContextUsage(sdk.ContextUsageFromFantasy(usage, contextWindow), didCompact)`.
+**Decision:** `streamTurn` now returns the peak provider-step usage from the `*fantasy.AgentResult` produced by `fa.Stream` (previously discarded with `_`). Fantasy's `TotalUsage` sums every tool-loop step, so it is cumulative billing telemetry rather than context occupancy. `executeTurn` stores the peak usage via `a.setLastUsage(usage)` on a successful, non-cancelled turn and, for the main agent only, calls `pool.dispatchContextUsage(sdk.ContextUsageFromFantasy(usage, contextWindow), didCompact)`.
 
-**Rationale:** `setLastUsage` and `dispatchContextUsage` were defined and specified (see §19 and the sdk `EventContextUsage` contract) but never actually invoked — the streaming turn dropped the result's usage entirely, so `LastUsage()` always returned zero, `MainAgentContextUsage()` reported empty, and `EventContextUsage` never fired. This made the behavior diverge from the documented spec. The fix makes the runtime match the existing contract: usage is captured per turn, failed/cancelled turns report zero (never stale counts), and the dispatcher fires once per completed main-agent turn.
+**Rationale:** `setLastUsage` and `dispatchContextUsage` were defined and specified (see §19 and the sdk `EventContextUsage` contract) but never actually invoked — the streaming turn dropped the result's usage entirely, so `LastUsage()` always returned zero, `MainAgentContextUsage()` reported empty, and `EventContextUsage` never fired. This made the behavior diverge from the documented spec. The fix makes the runtime match the existing contract: usage is captured per turn, and the dispatcher fires once per completed main-agent turn.
 
 **Consequence:** `streamTurn` signature changed from `(string, error)` to `(string, fantasy.Usage, error)`. A `didCompact` bool tracks whether proactive compaction ran this turn and is forwarded as the dispatcher's `compacted` argument. Context-usage dispatch is restricted to `MainAgentID` so sub-agent turns do not overwrite the main context-window indicator. No public API of the agent package changed; the previously-zero `LastUsage()`/`MainAgentContextUsage()`/`EventContextUsage` values now carry real data.
+
+*Addendum (2026-10-05):* Failed and cancelled turns no longer zero `lastUsage` — the
+last-known value is retained (and re-dispatched for main), because the context does not
+shrink when a turn fails: zeroing made the statusline drop to `ctx:0` after any provider
+error and silently disabled the usage-threshold compaction trigger. A successful turn
+whose provider reported zero tokens across input/cache fields also retains the prior
+value. This reverses the "failed/cancelled turns report zero (never stale counts)"
+wording above; failed-turn accounting lives in `TurnUsage.Err`, which is the telemetry
+channel the original concern was actually about.
 
 ---
 
@@ -490,6 +499,8 @@ The user chose the simple "always notify" design over per-turn suppression or an
 **Rationale:** Compaction successes were previously invisible — only failures logged, and the summarization LLM call's token cost was discarded. Operators could not tell how often autocompaction fires, what it costs, or which trigger (heuristic estimate vs usage threshold vs reactive context-limit retry) fired.
 
 **Consequence:** `didCompact` is derived from `Summary != ""` rather than assumed true, so no-op compactions (history fit the budget, or no valid user boundary) never count, never log, and never set `Compacted` in the `EventContextUsage` payload. The counter is turn-goroutine-local (one turn at a time — no lock needed) and monotonic for the session lifetime. `EventContextUsage` gains an additive `compactions` field (omitempty) for extension charts. The `compaction_summary` stream is a separate `fantasy.NewAgent(lm)` call — its usage is reported from `res.TotalUsage` and is not folded into the turn's `lastUsage`, so compaction cost does not skew the percentage trigger.
+
+*Addendum (2026-10-05):* Compaction became user-visible and the fake markers are gone. Successful main-agent compactions now dispatch an immediate `EventContextUsage` with a non-nil `CompactionNotice` (trigger, messages folded, optional post-compaction chars/4 estimate) — the harness turns that into a chat notification (`EventNotify`: "🧹 Context compacted: N message(s) summarized (trigger: …)") and an up-to-date statusline number while the turn is still running. The end-of-turn dispatch now passes a nil notice, replacing the old turn-end `compacted` flag. The fake `onToken("[Compacting context…]")` / `"[Context limit reached — compacting and retrying…]"` markers were removed: they streamed as assistant tokens, so the session file recorded them as part of the model's reply. Each successful compaction is also recorded in the canonical transcript ("[Context compacted: N messages summarized …]") so recall can surface that older detail was folded away. The bundled history extension records a `compaction` JSONL entry (metadata only — resume replays `message` entries exclusively) when it sees the post-compaction event. Separately, `MainAgentContextUsage` now divides by the main agent's own resolved window instead of the pool's default-model window, so the displayed percentage always matches the window the agent's turns and compaction actually use.
 
 ---
 

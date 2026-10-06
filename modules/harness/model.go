@@ -542,22 +542,39 @@ func (m *Model) SetProgram(p *tea.Program) {
 		// to WASM extensions without a circular import between agent and extension.
 		if pool != nil {
 			pool.SetContextUsageDispatcher(
-				func(cu sdk.ContextUsage, compact bool, thresholdPct float64, compactions int) {
-					payload, _ := json.Marshal(
-						sdk.ContextUsagePayload{
-							Usage:        cu,
-							Compacted:    compact,
-							Compactions:  compactions,
-							ThresholdPct: thresholdPct,
-						},
-					)
-					evt := sdk.Event{Type: sdk.EventContextUsage, Payload: payload}
+				func(cu sdk.ContextUsage, notice *agent.CompactionNotice, compactions int) {
+					payload := sdk.ContextUsagePayload{
+						Usage:        cu,
+						Compactions:  compactions,
+						ThresholdPct: pool.CompactConfig().ThresholdPct,
+					}
+					if notice != nil {
+						payload.Compacted = true
+						payload.Trigger = notice.Trigger
+						payload.MessagesCompacted = notice.MessagesCompacted
+					}
+					buf, _ := json.Marshal(payload)
+					evt := sdk.Event{Type: sdk.EventContextUsage, Payload: buf}
 					// Off the turn goroutine: a turn can be running inside an
 					// extension's WASM call, so dispatching here would re-enter
 					// that extension and deadlock its call mutex.
 					go func() {
 						_, _ = extHostRef.DispatchEvent(context.Background(), evt)
 					}()
+					// A completed compaction becomes a visible chat message via
+					// EventNotify, so the transcript records why older context
+					// disappeared instead of the change being silent.
+					if notice != nil {
+						notifyPayload, _ := json.Marshal(sdk.NotifyPayload{
+							Text: fmt.Sprintf("🧹 Context compacted: %d message(s) summarized (trigger: %s)",
+								notice.MessagesCompacted, notice.Trigger),
+						})
+						go func() {
+							_, _ = extHostRef.DispatchEvent(context.Background(), sdk.Event{
+								Type: sdk.EventNotify, Payload: notifyPayload,
+							})
+						}()
+					}
 				},
 			)
 			// Drive the TUI streaming indicator when a Deliver (e.g. a sub-agent's

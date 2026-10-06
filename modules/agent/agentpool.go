@@ -34,7 +34,7 @@ type AgentPool struct {
 	// a circular import between the agent and extension packages.
 	// compactions is the agent's cumulative successful-compaction count.
 	// Set via SetContextUsageDispatcher; safe to call before any Submit.
-	contextUsageDispatcher func(cu sdk.ContextUsage, compacted bool, thresholdPct float64, compactions int)
+	contextUsageDispatcher func(cu sdk.ContextUsage, notice *CompactionNotice, compactions int)
 	// wakeNotifier, when set, is called with an agent ID whenever Deliver wakes
 	// that agent (wake=true). The harness uses it to drive the TUI streaming
 	// indicator for the main agent. Set via SetWakeNotifier.

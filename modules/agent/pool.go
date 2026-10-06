@@ -103,13 +103,18 @@ func (p *AgentPool) SetCompactConfig(cfg CompactConfig) {
 	p.mu.Unlock()
 }
 
-// SetContextUsageDispatcher installs a callback that is invoked after each completed
-// agent turn with the current context window usage. Use this to forward
-// EventContextUsage to WASM extensions from the harness layer without creating
-// a circular import between the agent and extension packages.
-// Thread-safe; may be called before or after agents are spawned.
+// SetContextUsageDispatcher installs a callback invoked after each completed
+// main-agent turn with the provider-reported context usage, and immediately
+// after each successful main-agent compaction with a non-nil CompactionNotice.
+// Use this to forward EventContextUsage to WASM extensions from the harness
+// layer without creating a circular import between the agent and extension
+// packages. Thread-safe; may be called before or after agents are spawned.
+//
+// notice is non-nil only on the post-compaction dispatch; the end-of-turn
+// dispatch passes nil. Consumers that want to surface a compaction message
+// should key off notice, not off the end-of-turn event.
 func (p *AgentPool) SetContextUsageDispatcher(
-	fn func(cu sdk.ContextUsage, compact bool, thresholdPct float64, compactions int),
+	fn func(cu sdk.ContextUsage, notice *CompactionNotice, compactions int),
 ) {
 	p.dispatchMu.Lock()
 	p.contextUsageDispatcher = fn
@@ -117,16 +122,17 @@ func (p *AgentPool) SetContextUsageDispatcher(
 }
 
 // dispatchContextUsage calls the registered contextUsageDispatcher, if any.
-// Called from agent goroutines after each completed turn.
-// compactions is the dispatching agent's cumulative successful-compaction
-// count (additive observability data for the EventContextUsage payload).
-func (p *AgentPool) dispatchContextUsage(cu sdk.ContextUsage, compacted bool, compactions int) {
+// Called from agent goroutines after each completed main-agent turn (notice
+// nil) and immediately after each successful main-agent compaction (notice
+// non-nil). compactions is the dispatching agent's cumulative successful-
+// compaction count (additive observability data for the EventContextUsage
+// payload).
+func (p *AgentPool) dispatchContextUsage(cu sdk.ContextUsage, notice *CompactionNotice, compactions int) {
 	p.dispatchMu.RLock()
 	fn := p.contextUsageDispatcher
 	p.dispatchMu.RUnlock()
 	if fn != nil {
-		cfg := p.CompactConfig()
-		fn(cu, compacted, cfg.ThresholdPct, compactions)
+		fn(cu, notice, compactions)
 	}
 }
 
@@ -282,15 +288,23 @@ func (p *AgentPool) ContextWindow() int64 {
 
 // MainAgentContextUsage returns the context window usage for the main agent.
 // If the main agent has not completed a turn yet, all fields are zero.
-// If no context window has been configured on the pool, ContextWindow and Percent
-// will be zero.
+// The denominator is the main agent's own resolved window (per its current
+// model), not the pool's default-model window, so the display can never
+// disagree with the model that actually ran the last turn.
 func (p *AgentPool) MainAgentContextUsage() sdk.ContextUsage {
 	p.mu.RLock()
 	a := p.agents[MainAgentID]
-	window := p.contextWindow
 	p.mu.RUnlock()
 	if a == nil {
 		return sdk.ContextUsage{}
+	}
+	// Fall back to the pool's per-model resolution when the agent's own window
+	// is unset (e.g. a zero-value or externally constructed agent), so the
+	// display degrades to the pool view instead of vanishing (window 0 hides
+	// the ctx segment entirely).
+	window := a.ContextWindow()
+	if window <= 0 {
+		window = p.ContextWindowForModel(a.ModelName())
 	}
 	return sdk.ContextUsageFromFantasy(a.LastUsage(), window)
 }

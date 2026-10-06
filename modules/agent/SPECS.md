@@ -368,8 +368,12 @@ definitions, since provider requests count those definitions against the context
 
 `shouldCompactByUsage(lastUsage fantasy.Usage, contextWindow int64, thresholdPct float64) bool`:
 
-- Returns `true` when `lastUsage.InputTokens / contextWindow >= thresholdPct`.
-- Returns `false` when `lastUsage.InputTokens == 0` (first turn — no prior usage data).
+- Returns `true` when the retained last-known prompt size (`InputTokens + CacheReadTokens +
+  CacheCreationTokens`) divided by `contextWindow` is `>= thresholdPct`. Cache tokens count:
+  OpenAI-family providers subtract cached tokens from `InputTokens`, so a heavily cache-served
+  context would otherwise never reach the trigger.
+- Returns `false` when that prompt size is 0 (first turn — no prior usage data, or nothing
+  retained).
 - Returns `false` when `contextWindow == 0` (window not configured).
 - Returns `false` when `thresholdPct <= 0`.
 
@@ -438,14 +442,19 @@ lastUsageMu sync.RWMutex
 ```
 
 `setLastUsage(u fantasy.Usage)` is called in the `Submit` goroutine after every `streamTurn`
-call — including the reactive retry. On error, `setLastUsage(fantasy.Usage{})` stores a zero
-value so a failed turn does not contaminate the next turn's compaction decision.
+call — including the reactive retry. On error or cancellation the **previous** value is
+retained, not zeroed: the context does not shrink because a turn failed, and `LastUsage`
+feeds both the statusline context indicator (which visibly dropped to `ctx:0` after any
+failed turn) and the usage-threshold compaction trigger (which silently stopped firing
+after one). A successful turn whose provider reported no tokens at all (input + cache
+reads + creations all zero) also retains the previous value. Failed-turn accounting is
+carried by `TurnUsage.Err` (§ Observability), never by wiping the context size.
 
 `LastUsage() fantasy.Usage` is a read-safe accessor used by `MainAgentContextUsage()` and
 the percentage-based compaction check.
 
-**Invariant:** `LastUsage()` returns a zero-valued `fantasy.Usage` before the first turn
-completes or when the last turn returned an error.
+**Invariant:** `LastUsage()` returns a zero-valued `fantasy.Usage` only before the first
+successful turn completes.
 
 **Invariant:** `lastUsage` is only written from inside the `Submit` goroutine, preventing
 concurrent writes.
@@ -455,19 +464,37 @@ concurrent writes.
 After each successful turn, the pool's `contextUsageDispatcher` callback is invoked:
 
 ```go
-pool.dispatchContextUsage(cu sdk.ContextUsage, compacted bool, thresholdPct float64, compactions int)
+pool.dispatchContextUsage(cu sdk.ContextUsage, notice *CompactionNotice, compactions int)
 ```
 
 The callback is set by the harness via `pool.SetContextUsageDispatcher` and forwards
 `EventContextUsage` to WASM extensions via the extension host, avoiding a circular import
 between the `agent` and `extension` packages.
 
-`compacted` is `true` when `compactHistory` ran successfully during the turn.
+There are two dispatch kinds:
+
+- **End-of-turn** (`notice == nil`): after a successful main-agent turn, carrying the
+  provider-reported usage for that turn. Sub-agent turns never dispatch.
+- **Post-compaction** (`notice != nil`): immediately after a successful main-agent
+  compaction (proactive, usage-threshold, reactive, or tool-loop trigger), while the
+  turn is still running. The notice carries the `CompactionTrigger*` kind, the number
+  of messages folded into the summary, and — when computable — a chars/4 estimate of
+  the post-compaction context (zero when unknown, e.g. tool-loop compactions whose
+  compacted steps live inside the fantasy loop; the dispatch then carries the last
+  real usage so the display does not collapse to zero).
+
 `compactions` is the dispatching agent's cumulative successful-compaction count
 (`a.compactionCount`) — additive observability data for the `EventContextUsage` payload.
 
-**Invariant:** `dispatchContextUsage` is only called on successful turns (`err == nil`).
-On error or cancellation it is not called, consistent with the pattern for other events.
+**Invariant:** `dispatchContextUsage` is called after successful compactions and at the
+end of every main-agent turn — successful **and** failed. A failed turn re-dispatches the
+retained last-known usage (skipped only while nothing is known yet), so the statusline
+refreshes to the true context size instead of sticking at zero. The display numerator is
+the full prompt size: `InputTokens + CacheReadTokens + CacheCreationTokens` (see the sdk
+payload contract), and the denominator is the agent's own per-model context window:
+`MainAgentContextUsage` never uses the pool's default-model window, so the statusline
+percentage always agrees with the window the agent's turns and compaction actually use.
+It falls back to the pool's per-model resolution only when the agent's window is unset.
 
 ### Provider-Request Interception
 

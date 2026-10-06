@@ -452,6 +452,13 @@ func (a *Agent) observeCompaction(result CompactionResult) {
 		return
 	}
 	a.compactionCount++
+	// Record the compaction in the canonical transcript so the event (and the
+	// fact that older detail was folded into a summary) is retrievable through
+	// recall, matching how every other turn event is recorded there.
+	a.CanonicalTranscript().RecordMessage("system", fmt.Sprintf(
+		"[Context compacted: %d messages summarized into the running summary (trigger: %s)]",
+		result.Messages, result.Trigger,
+	))
 	slog.Info(
 		"agent: context compaction completed",
 		"agent", a.id,
@@ -463,6 +470,44 @@ func (a *Agent) observeCompaction(result CompactionResult) {
 		"usage_output", result.Usage.OutputTokens,
 		"compaction_latency_ms", result.Latency.Milliseconds(),
 		"compactions", a.compactionCount,
+	)
+}
+
+// dispatchCompactionNotice forwards a just-completed compaction to the pool's
+// context-usage dispatcher (main agent only) so the UI can surface a compaction
+// message while the turn is still running. estimated is the chars/4 estimate of
+// the post-compaction context; zero means unknown (tool-loop compactions, whose
+// compacted steps live inside the fantasy loop), in which case the last real
+// usage is forwarded so the display keeps its previous value. When neither an
+// estimate nor a previous usage exists (tool-loop compaction during the very
+// first turn), nothing is dispatched — the end-of-turn event will carry the
+// first real numbers anyway.
+// Called only from the agent's turn goroutine.
+func (a *Agent) dispatchCompactionNotice(
+	pool *AgentPool,
+	result CompactionResult,
+	estimated int64,
+	contextWindow int64,
+	fallback fantasy.Usage,
+) {
+	if pool == nil || a.id != MainAgentID {
+		return
+	}
+	input := estimated
+	if input <= 0 {
+		input = fallback.InputTokens
+		if input <= 0 {
+			return
+		}
+	}
+	pool.dispatchContextUsage(
+		sdk.ContextUsageFromFantasy(fantasy.Usage{InputTokens: input}, contextWindow),
+		&CompactionNotice{
+			Trigger:              result.Trigger,
+			MessagesCompacted:    result.Messages,
+			EstimatedInputTokens: estimated,
+		},
+		a.compactionCount,
 	)
 }
 
@@ -868,7 +913,6 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 		}
 	}
 	history := priorHistory
-	didCompact := false
 	compactCfg := CompactConfig{Enabled: true, ThresholdPct: 0.80}
 	if pool != nil {
 		compactCfg = pool.CompactConfig()
@@ -886,9 +930,6 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 		shouldProactivelyCompact = true
 	}
 	if shouldProactivelyCompact {
-		if onToken != nil {
-			onToken("[Compacting context…]\n\n")
-		}
 		trigger := CompactionTriggerProactive
 		if usageTriggerFired {
 			trigger = CompactionTriggerUsage
@@ -897,14 +938,10 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 		if cerr != nil {
 			compactionErr := fmt.Errorf("context compaction failed: %w", cerr)
 			slog.Error("agent: context compaction failed", "agent", a.id, "model", modelName, "error", compactionErr)
-			if onToken != nil {
-				onToken("\n\n[Context compaction failed: " + compactionErr.Error() + "]\n\n")
-			}
 			a.finishTurn(ctx, compactionErr, nil, onDone, inboxMsgs)
 			return
 		}
 		a.observeCompaction(result)
-		didCompact = result.Summary != ""
 		history = result.History
 		a.historyMu.Lock()
 		a.history = history
@@ -913,6 +950,13 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 			a.lastSummaryMu.Lock()
 			a.lastSummary = result.Summary
 			a.lastSummaryMu.Unlock()
+			// Announce the compaction immediately (mid-turn) so the UI surfaces
+			// a compaction message and an estimated post-compaction usage while
+			// the turn is still running, instead of the stale pre-compaction
+			// number until stream end.
+			a.dispatchCompactionNotice(pool, result,
+				estimateTokens(history)+estimateStr(sysPrompt)+estimateStr(content)+estimateToolTokens(tools),
+				contextWindow, a.LastUsage())
 		}
 	}
 
@@ -961,7 +1005,10 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 
 	onToolLoopCompaction := func(result CompactionResult) {
 		a.observeCompaction(result)
-		didCompact = true
+		// The compacted steps live inside the fantasy loop (not sdk history), so
+		// there is no post-compaction estimate here; the notice still announces
+		// the compaction mid-turn and keeps the last real usage on the display.
+		a.dispatchCompactionNotice(pool, result, 0, contextWindow, a.LastUsage())
 	}
 	collectedText, usage, err := a.streamTurn(
 		childCtx,
@@ -981,9 +1028,6 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 	// retry the aborted turn once. This preserves a summary instead of silently
 	// discarding older messages.
 	if err != nil && isContextTooLong(err) {
-		if onToken != nil {
-			onToken("\n\n[Context limit reached — compacting and retrying…]\n\n")
-		}
 		result, cerr := compactHistory(childCtx, lm, history, priorSummary, keepRecent, CompactionTriggerReactive)
 		if cerr != nil {
 			compactionErr := fmt.Errorf("context compaction failed after context limit: %w", cerr)
@@ -996,14 +1040,10 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 				"error",
 				compactionErr,
 			)
-			if onToken != nil {
-				onToken("\n\n[Context compaction failed: " + compactionErr.Error() + "]\n\n")
-			}
 			a.finishTurn(ctx, compactionErr, nil, onDone, inboxMsgs)
 			return
 		}
 		a.observeCompaction(result)
-		didCompact = result.Summary != ""
 		history = result.History
 		a.historyMu.Lock()
 		a.history = history
@@ -1012,6 +1052,9 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 			a.lastSummaryMu.Lock()
 			a.lastSummary = result.Summary
 			a.lastSummaryMu.Unlock()
+			a.dispatchCompactionNotice(pool, result,
+				estimateTokens(history)+estimateStr(sysPrompt)+estimateStr(content)+estimateToolTokens(tools),
+				contextWindow, a.LastUsage())
 		}
 		streamMsgs, streamPrompt, blocked, blockReason = buildStream(history, content)
 		if blocked {
@@ -1033,17 +1076,30 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 		)
 	}
 
-	// Record token usage for the turn. On error or cancellation, store a
-	// zero-valued usage so a failed turn never reports stale counts.
-	if err == nil && childCtx.Err() == nil {
-		a.setLastUsage(usage)
+	// Record token usage for the turn. The display value (LastUsage) feeds the
+	// statusline context indicator and the usage-threshold compaction trigger,
+	// and both represent "how full is the context", which does not shrink
+	// because a turn failed or was cancelled. So the last-known usage is
+	// retained on error/cancel turns and on successful turns whose provider
+	// reported nothing; zeroing here made the statusline show ctx:0 after any
+	// failed turn and silently disabled usage-based compaction. Failed-turn
+	// accounting lives in TurnUsage.Err below, not in wiping the context size.
+	turnUsage := usage
+	if err != nil || childCtx.Err() != nil {
+		turnUsage = a.LastUsage()
+	} else if usage.InputTokens+usage.CacheReadTokens+usage.CacheCreationTokens == 0 {
+		turnUsage = a.LastUsage()
+	}
+	a.setLastUsage(turnUsage)
+	if pool != nil {
 		// Forward context window usage for the main agent so the harness/status
 		// bar and WASM extensions (EventContextUsage) see the latest usage.
-		// Sub-agent turns do not drive the main context indicator.
-		if pool != nil && a.id == MainAgentID {
-			pool.dispatchContextUsage(sdk.ContextUsageFromFantasy(usage, contextWindow), didCompact, a.compactionCount)
+		// Sub-agent turns do not drive the main context indicator. Skipped when
+		// nothing is known yet (pre-first-success), so a failure never paints 0.
+		if a.id == MainAgentID && turnUsage.InputTokens+turnUsage.CacheReadTokens+turnUsage.CacheCreationTokens > 0 {
+			pool.dispatchContextUsage(sdk.ContextUsageFromFantasy(turnUsage, contextWindow), nil, a.compactionCount)
 		}
-		if pool != nil {
+		if err == nil && childCtx.Err() == nil {
 			pool.observeTurn(TurnUsage{
 				AgentID:             a.id,
 				Model:               modelName,
@@ -1056,12 +1112,9 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 				CacheReadTokens:     usage.CacheReadTokens,
 				DurationMS:          a.turnDurationMS(),
 			})
-		}
-	} else {
-		a.setLastUsage(fantasy.Usage{})
-		// A failed turn is still a turn: report it so turn/latency counts reflect
-		// what actually ran, with no token usage attributed.
-		if pool != nil {
+		} else {
+			// A failed turn is still a turn: report it so turn/latency counts
+			// reflect what actually ran, with no token usage attributed.
 			pool.observeTurn(TurnUsage{
 				AgentID:    a.id,
 				Model:      modelName,

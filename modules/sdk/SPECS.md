@@ -197,9 +197,11 @@ No payload fields — the event carries no structured data beyond the event type
 | Field       | Type         | Description                                                                     |
 |-------------|--------------|---------------------------------------------------------------------------------|
 | `usage`     | ContextUsage | Context window usage for the turn (see ContextUsage type in Supporting Types)  |
-| `compacted` | bool         | `true` when `compactHistory` ran and succeeded during the turn                  |
+| `compacted` | bool         | `true` only on the dispatch sent immediately after a successful compaction; the end-of-turn dispatch is `false` |
 | `compactions` | int        | Cumulative successful compactions for the agent this session (`omitempty`)       |
 | `threshold_pct` | float64     | Compaction trigger threshold as a fraction of the context window (0.80 = 80%); 0 when disabled   |
+| `trigger`   | string       | Compaction kind (`proactive`, `usage_threshold`, `reactive`, `tool_loop`); set only on the post-compaction dispatch (`omitempty`) |
+| `messages_compacted` | int | History messages folded into the summary; set only on the post-compaction dispatch (`omitempty`) |
 
 **Note for extension authors:** `ContextUsage.Percent` is expressed as a percentage (0–100, e.g. 75.4 means 75.4% full). `threshold_pct` is the compaction trigger threshold expressed as a fraction (0.80 = 80%). To compute remaining-to-threshold, use `threshold_pct*100 - percent`, clamped at 0. Do not hard-code the threshold value.
 
@@ -261,12 +263,19 @@ No payload fields — the event carries no structured data beyond the event type
 
 | Field           | Type    | Description                                                                 |
 |-----------------|---------|-----------------------------------------------------------------------------|
-| `InputTokens`   | int64   | Input tokens for the peak provider request in the last turn                 |
+| `InputTokens`   | int64   | Total prompt size for the peak provider request in the last turn: raw input tokens plus cache reads and cache creations (see `ContextUsageFromFantasy`) |
 | `OutputTokens`  | int64   | Total output tokens for the last turn                                       |
 | `ContextWindow` | int64   | Model's maximum context window (from `WLLR_CONTEXT_WINDOW` or model default) |
 | `Percent`       | float64 | `InputTokens / ContextWindow × 100`; `0` if `ContextWindow == 0`           |
 
-Note: Percent is 0–100. CompactConfig.ThresholdPct is a fraction 0.0–1.0.
+Note: Percent is 0–100. CompactConfig.ThresholdPct is a fraction 0.0–1.0. `InputTokens`
+sums the raw input with cached tokens because providers report cache tokens in
+incompatible places: Anthropic adds cache reads/creations on top of `input_tokens`, while
+OpenAI-family providers subtract cached tokens out of `input_tokens` (raw input = prompt −
+cached). Summing reconstructs the true prompt size on every provider; using the raw field
+alone under-reports (to zero on a fully cache-served turn) and would both blank the
+statusline context indicator and prevent the usage-threshold compaction trigger from ever
+firing on cache-heavy sessions.
 
 ### Role Constants
 
@@ -592,9 +601,9 @@ Returned as `int32` from the `host_call` WASM import (not the JSON layer).
 8. Error codes are `int32` and exist only at the WASM boundary; they do not appear in the JSON layer.
 9. `BeforeToolCallPayload` and `AfterToolCallPayload` both include `agent_id` to allow extensions to correlate tool calls with the originating agent.
 10. `OnCommandPayload` is the payload for `EventOnCommand`, dispatched when a user invokes an extension-registered slash command.
-11. `ContextUsage.Percent` is always `InputTokens / ContextWindow * 100`; when `ContextWindow == 0` the value is exactly `0.0` (never NaN or Inf).
-12. `ContextUsagePayload.Compacted` is `true` only when `compactHistory` ran and succeeded during the turn that produced the event. `Compactions` is the cumulative successful-compaction count for the agent (additive; omitted from the JSON when zero).
-13. `EventContextUsage` (`"context_usage"`) is fired once per completed turn, after the turn's usage is stored, only on success (not on error or cancellation).
+11. `ContextUsage.Percent` is always `InputTokens / ContextWindow * 100` where `InputTokens` includes cached tokens (`raw input + cache reads + cache creations`); when `ContextWindow == 0` the value is exactly `0.0` (never NaN or Inf).
+12. `ContextUsagePayload.Compacted` is `true` only on the dispatch sent immediately after a successful compaction, which also carries `Trigger` (the `CompactionTrigger*` kind) and `MessagesCompacted`. The end-of-turn dispatch has `Compacted=false`. `Compactions` is the cumulative successful-compaction count for the agent (additive; omitted from the JSON when zero).
+13. `EventContextUsage` (`"context_usage"`) fires on two occasions: once per completed main-agent turn — successful **and** failed (a failed turn re-dispatches the retained last-known usage, skipped only while nothing is known yet, so the display never sticks at zero after an error) — and immediately after each successful main-agent compaction (with the `trigger`/`messages_compacted` fields set), so the UI learns about the shrink while the turn is still running.
 14. `MethodGetContextUsage` (`"get_context_usage"`) requires no permission; it returns a zero-valued `ContextUsage` when the agent bridge is unavailable.
 15. UI scene-graph types (`UINode`, `UIProps`, `UIPatchOp`, `UIPatchParams`, `UIArea`, `UICreateAreaParams`) are pure JSON data definitions; `UIPatchOp.Index` is a `*int` so a valid index of `0` survives the wire while a nil index (append) is omitted.
 16. All 67 `Method*` constants are documented above (59 in the method tables, 8 in the Task ledger wire contract); missing methods in SPECS.md indicate incomplete documentation rather than missing implementation.

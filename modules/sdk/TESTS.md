@@ -199,3 +199,22 @@ terminal reporting, and all three workspace-mode placeholders.
 ### TestNotifyPayloadRoundTrip (covered via test/wasmchat end-to-end)
 **Scenario:** `EventNotify`/`NotifyPayload{Text}` is dispatched to the bundled agents.wasm and rendered into the transcript scene.
 **Assertion:** The transcript contains the notification text (see test/wasmchat TestAgentsWASMDrivesChatTranscript).
+
+## Context usage tests (contextusage_test.go)
+
+### TestContextUsagePercent
+**Scenario:** 80k input over a 100k window.
+**Assertion:** `Percent` = 80.0.
+
+### TestContextUsagePercentZeroWindow
+**Scenario:** Zero window (unresolved metadata).
+**Assertion:** `Percent` is exactly 0 (no divide-by-zero).
+
+### TestContextUsageFromFantasyUsage
+**Scenario:** Plain 1000/200 usage over a 200k window.
+**Assertion:** Fields pass through; Percent = 0.5.
+
+### TestContextUsageIncludesCacheTokens
+**Scenario:** The three cache-reporting conventions: OpenAI (raw input excludes cached: 10k + 80k cache-read), Anthropic (cache read AND creation additive: 10k + 70k + 5k), and a fully cache-served turn (raw input 0 + 90k cache-read).
+**Assertion:** Display `InputTokens` is the sum (90000 / 85000 / 90000) and Percent matches the sum — a fully cached turn never displays zero used context.
+**Rationale:** Providers subtract or add cache tokens incompatibly; only the sum reconstructs the true prompt size, and the raw field alone blanked the statusline on cache-heavy sessions.

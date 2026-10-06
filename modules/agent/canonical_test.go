@@ -114,9 +114,11 @@ func TestExecuteTurn_CompactionPreservesCanonicalTranscript(t *testing.T) {
 		}
 	}
 
-	// The canonical transcript is untouched, plus this turn's own two records.
-	if got := tr.Len(); got != recordedBefore+2 {
-		t.Errorf("canonical transcript has %d entries, want %d (unchanged + this turn)", got, recordedBefore+2)
+	// The canonical transcript is untouched by compaction itself, plus this
+	// turn's own two records and one compaction record (the observeCompaction
+	// note that makes the fold-away retrievable through recall).
+	if got := tr.Len(); got != recordedBefore+3 {
+		t.Errorf("canonical transcript has %d entries, want %d (unchanged + this turn + compaction record)", got, recordedBefore+3)
 	}
 
 	// And the exact detail is still retrievable.

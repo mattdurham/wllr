@@ -24,6 +24,7 @@ Subscribes to four lifecycle events:
 | `before_agent_start` | `message` entry, role `user` |
 | `message_end` (assistant) | `message` entry, role `assistant` |
 | `before_tool_call` | `tool_call` entry (name + input) |
+| `context_usage` (post-compaction) | `compaction` entry (trigger + messages folded; metadata only — resume replays `message` entries exclusively, so this never re-enters context) |
 
 Files live under a per-cwd directory so sessions are scoped to the project you
 were working in. The session directory and header timestamp come from **host
