@@ -38,29 +38,11 @@ func TestEsc_AgentsViewOpen_ClosesWithoutCancelling(t *testing.T) {
 	}
 }
 
-// TestEsc_FocusedAgentWindow_ClosesWithoutCancelling verifies that esc while
-// a sub-agent transcript is focused closes that window (unfocuses back to the
-// root agent) instead of cancelling the main turn behind it.
-func TestEsc_FocusedAgentWindow_ClosesWithoutCancelling(t *testing.T) {
-	m := newTestModel()
-	m.width, m.height = 80, 24
-	m.streaming = true
-	m.focusedAgent = "main/worker"
-	m.live.setStatus("agent", "main/worker")
-
-	next, _ := m.Update(keyMsg(tea.KeyEscape, 0))
-	m = next.(Model)
-
-	if m.focusedAgent != "" {
-		t.Errorf("esc should close the focused agent window, focus = %q", m.focusedAgent)
-	}
-	if v := m.live.getStatus("agent"); v != "" {
-		t.Errorf("agent status should clear on unfocus, got %q", v)
-	}
-	if v := m.live.getStatus("stream"); v == "cancelling…" {
-		t.Error("esc in a focused agent window must not cancel the main turn")
-	}
-}
+// TestEsc_FocusedAgentWindow_DispatchesFocusCallback (killagents_test.go)
+// supersedes the old synchronous-unfocus test: esc routes the unfocus through
+// the extension dispatch (agents:focus with the root ID) so the extension
+// rebuilds the root transcript. The field clear itself is owned by the
+// FocusAgentMsg handler, covered by TestFocusPublishesAgentStatus.
 
 // TestEsc_RootFocus_StillCancelsTurn verifies the pre-existing behavior is
 // preserved once the window is closed: esc with no sub-agent focused cancels

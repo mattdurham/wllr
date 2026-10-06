@@ -7,12 +7,19 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
+
+	"github.com/mattdurham/wllr/modules/agent"
 )
 
 // AgentTreeCallback is fired when the user focuses an agent. The harness emits
 // EventOnCommand with this name and the agent ID, so the extension can switch
 // its transcript and input target.
 const AgentTreeCallback = "agents:focus"
+
+// AgentTreeKillCallback is fired when the user hard-kills an agent from the
+// tree. The extension routes it to the host's agent_close, which removes the
+// agent (and its subtree) from the pool and cancels in-flight work.
+const AgentTreeKillCallback = "agents:kill"
 
 // AgentTreeView is an interactive overlay listing agents as a tree with
 // expand/collapse. It replaces the static modal that previously rendered the
@@ -222,6 +229,13 @@ func (t *AgentTreeView) HandleKey(kp tea.KeyPressMsg) AgentTreeKeyResult {
 			return AgentTreeKeyResult{Focused: node.ID, Handled: true}
 		}
 		return AgentTreeKeyResult{Handled: true}
+	case keyKillAgent:
+		if node, ok := t.Highlighted(); ok && node.ID != agent.MainAgentID {
+			// The root cannot be killed: it owns the session. Swallowing the
+			// key keeps the invariant visible — only sub-agents are killable.
+			return AgentTreeKeyResult{Killed: node.ID, Handled: true}
+		}
+		return AgentTreeKeyResult{Handled: true}
 	case "up":
 		if t.cursor > 0 {
 			t.cursor--
@@ -268,7 +282,7 @@ func (t *AgentTreeView) View() string {
 	content := inner - 2
 
 	var sb strings.Builder
-	title := " Agents  (↑↓ move · →← fold · enter focus · esc/q close) "
+	title := " Agents  (↑↓ move · →← fold · enter focus · x kill · esc/q close) "
 	sb.WriteString(treeBorderStyle.Render("╭") +
 		treeTitleStyle.Render(truncateRunes(title, inner)) +
 		treeBorderStyle.Render(strings.Repeat("─", max(0, inner-lipgloss.Width(title)))+"╮") + "\n")

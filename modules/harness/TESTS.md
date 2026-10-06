@@ -282,8 +282,11 @@ a model, and typing/backspace filtering in the searchable picker.
 | Medium | `TestAgentTree_LeafDoesNotFold` | toggle a leaf | not reported as folded |
 | Medium | `TestAgentTree_EscCloses` | esc on the agent tree | tree closes and the key is consumed |
 | High | `TestEsc_AgentsViewOpen_ClosesWithoutCancelling` | esc while the agents tree overlay is open and a turn streams | overlay closes; turn is not cancelled (`cancelling…` status absent) |
-| High | `TestEsc_FocusedAgentWindow_ClosesWithoutCancelling` | esc while a sub-agent transcript is focused | focus resets to root, `agent` status clears, main turn is not cancelled |
+| High | `TestEsc_FocusedAgentWindow_DispatchesFocusCallback` | esc while a sub-agent transcript is focused | dispatches `agents:focus` with the root ID (the extension rebuilds the root transcript); main turn not cancelled |
 | High | `TestEsc_RootFocus_StillCancelsTurn` | esc with no sub-agent focused and a turn streaming | stream status is `cancelling…` (cancel behavior preserved) |
+| High | `TestAgentTree_KillKeyOnSubagent` | `x` on a sub-agent row | tree closes; dispatches `agents:kill` with the agent ID |
+| High | `TestAgentTree_KillKeyOnRootIgnored` | `x` on the root row | key swallowed; tree stays open; no kill callback |
+| Medium | `TestAgentTreeEscStillClosesKept` | esc on the tree after the kill key joined the switch | tree closes |
 | Medium | `TestAgentTree_QCloses` | q on the tree | closes the overlay |
 | Medium | `TestAgentTree_OrphanRendersAsRoot` | node with a missing parent | still rendered, as a root |
 | High | `TestSubmitRoutesToFocusedAgent` | focus a sub-agent | focus state is set and input targets it |

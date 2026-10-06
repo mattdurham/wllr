@@ -6,6 +6,9 @@ package harness
 type AgentTreeKeyResult struct {
 	// Focused is the agent to switch to, set when the user confirms with enter.
 	Focused string
+	// Killed is the agent the user chose to hard-kill with the kill key. The
+	// caller dispatches the kill callback; the tree just reports the choice.
+	Killed string
 	// Closed is set when the user dismissed the tree with q.
 	Closed bool
 	// Folded is set when a node was expanded or collapsed, so the caller can

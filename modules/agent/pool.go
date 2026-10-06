@@ -28,6 +28,11 @@ var (
 	ErrAgentExists = errors.New("agent: ID already exists")
 	// ErrAgentNotFound is returned when an operation targets an unknown agent ID.
 	ErrAgentNotFound = errors.New("agent: ID not found")
+
+	// ErrRootAgentClose is returned when a close targets the root agent. The
+	// root owns the session lifecycle; it exits with the harness, never
+	// through a close request.
+	ErrRootAgentClose = errors.New("agent: cannot close the root agent")
 	// ErrTeamExists is returned when a team with the same ID is created twice.
 	ErrTeamExists = errors.New("agent: team ID already exists")
 	// ErrTeamNotFound is returned when an operation targets an unknown team ID.
@@ -677,12 +682,22 @@ func (p *AgentPool) Get(id string) *Agent {
 // leaving them running after their parent is gone produces orphaned work whose
 // results have nowhere to go. This applies to the root agent too, so stopping
 // the root stops the whole fleet.
+// Close hard-kills an agent: the agent and its whole subtree are removed from
+// the pool immediately and every cancelled context interrupts in-flight turns
+// and tool executions (no graceful drain — a graceful request is the
+// shutdown_agent path). Closing the root agent is rejected with
+// ErrRootAgentClose: the root owns the session and exits with the harness.
+// Returns ErrAgentNotFound if id is unknown.
 func (p *AgentPool) Close(id string) error {
 	p.mu.Lock()
 	root, exists := p.agents[id]
 	if !exists {
 		p.mu.Unlock()
 		return ErrAgentNotFound
+	}
+	if root.id == MainAgentID {
+		p.mu.Unlock()
+		return ErrRootAgentClose
 	}
 	// Collect the subtree before mutating the map. Descendants are those whose
 	// ID sits under "<id>/", which is the same convention spawn uses to derive

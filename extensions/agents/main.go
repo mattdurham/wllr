@@ -234,6 +234,9 @@ func init() {
 	// A tree selection switches the transcript and input target. The host owns
 	// the routing; the extension owns what to render.
 	OnCommand("agents:focus", onAgentsFocus)
+	// A tree kill (x on a row) hard-kills the agent: the host removes it and
+	// its subtree from the pool and cancels in-flight work immediately.
+	OnCommand("agents:kill", onAgentsKill)
 	// History restore rewrites the main agent's history in place; the harness
 	// fires this so the transcript owner re-renders it (otherwise the replay
 	// happens in context only and the chat goes blank).
@@ -630,6 +633,46 @@ func onAgentsFocus(args []string) {
 	SetFocusedAgent(id)
 	RebuildTranscriptFor(id)
 	Notify("Focused " + id)
+}
+
+// onAgentsKill hard-kills the named agent from the tree: the host's agent_close
+// removes it and its descendants from the pool and cancels in-flight turns
+// immediately — no graceful drain. If the killed agent owned the focused
+// transcript, focus returns to the root so the view shows a live conversation.
+func onAgentsKill(args []string) {
+	if len(args) == 0 || args[0] == "" {
+		return
+	}
+	id := args[0]
+	result := agentCall("agent_close", map[string]string{"id": id})
+	var resp struct {
+		Error string `json:"error,omitempty"`
+	}
+	if result != "" {
+		_ = json.Unmarshal([]byte(result), &resp)
+	}
+	if resp.Error != "" {
+		Notify("⚠ kill failed: " + resp.Error)
+		return
+	}
+	removeAgent(id)
+	// Also drop descendants from the local tree metadata: the pool close
+	// cascaded, so keeping their records would show dead agents on next open.
+	prefix := id + "/"
+	for _, r := range append([]agentRecord(nil), agentRecords...) {
+		if strings.HasPrefix(r.id, prefix) {
+			removeAgent(r.id)
+		}
+	}
+	// focusedAgentID is extension-local view state: if the victim owned the
+	// view, return the transcript to the root conversation.
+	if focusedAgentID == id || strings.HasPrefix(focusedAgentID, prefix) {
+		SetFocusedAgent("")
+		RebuildTranscriptFor("")
+		Notify("Killed " + id + " — transcript returned to root")
+		return
+	}
+	Notify("Killed " + id)
 }
 
 // onTranscriptRebuild re-renders the transcript for the given agent id (empty

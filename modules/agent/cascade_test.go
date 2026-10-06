@@ -1,6 +1,7 @@
 package agent_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/mattdurham/wllr/modules/agent"
@@ -39,14 +40,15 @@ func TestCloseCascadesToDescendants(t *testing.T) {
 	}
 }
 
-// Closing the root stops the whole fleet, since the root is not special.
-func TestCloseRootClosesEverything(t *testing.T) {
-	pool := spawnTree(t, "main", "main/a", "main/a/b")
-	if err := pool.Close(agent.MainAgentID); err != nil {
-		t.Fatalf("Close root: %v", err)
+// The root agent cannot be closed: it owns the session lifecycle and exits
+// with the harness, so a close request on it is rejected outright.
+func TestCloseRootIsRejected(t *testing.T) {
+	pool := spawnTree(t, "main", "main/a")
+	if err := pool.Close(agent.MainAgentID); !errors.Is(err, agent.ErrRootAgentClose) {
+		t.Fatalf("Close root err = %v, want ErrRootAgentClose", err)
 	}
-	if left := pool.ListAgents(); len(left) != 0 {
-		t.Fatalf("agents left after closing root: %v", left)
+	if pool.Get(agent.MainAgentID) == nil || pool.Get("main/a") == nil {
+		t.Error("rejected close must not remove any agent")
 	}
 }
 

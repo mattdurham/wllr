@@ -617,7 +617,7 @@ installed policy, so the two paths must not diverge.
 ### Agent Tree and Focus
 
 `AgentTreeView` is the interactive `/agents` surface: ↑↓ move, →← fold/unfold,
-space toggles, enter focuses, esc or `q` closes (the header hint advertises
+space toggles, enter focuses, `x` hard-kills a sub-agent, esc or `q` closes (the header hint advertises
 esc first because closing a window must never require reaching for a quit
 key that elsewhere in the app means quit-the-process). It replaces the previous static modal,
 which could not express selection. Extensions supply a flat node list and the
@@ -626,6 +626,8 @@ agent list comes from a Go map and would otherwise reshuffle between openings.
 A node whose parent is absent renders as a root, so a partial list still shows
 every agent. Collapsing hides a node's children but keeps the node visible, and
 the cursor clamps to a visible row so a collapse cannot strand the highlight.
+The kill key refuses the root: `x` on the root row is swallowed — the root owns
+the session and cannot be removed from the tree that would die with it.
 
 **Invariant:** an open overlay owns `esc`. `updateKeyPress` consults text input,
 picker, modal, and agent tree **before** the esc-cancels-the-ask branch, so `esc`
@@ -648,7 +650,17 @@ closed falls back to the root rather than losing the message. Focusing a node
 dispatches `EventOnCommand` with `AgentTreeCallback` and the agent ID, which the
 extension turns into a transcript switch. Focus is also published as the `agent`
 status key so a statusline extension can display it; see the status contract in
-the `StatusUpdateMsg` routing section below.
+the `StatusUpdateMsg` routing section below. The tree's kill key dispatches
+`AgentTreeKillCallback` (`agents:kill`) the same way; the extension calls the
+host's `agent_close` (pool `Close` — the hard kill) and, if the victim owned
+the focused transcript, returns focus and the transcript to the root.
+
+**Invariant:** unfocusing must go through the extension dispatch, not a local
+field clear. Esc in a focused sub-agent window routes `agents:focus` with the
+root ID — the same path a tree selection uses — so the extension rebuilds the
+root transcript. Clearing `focusedAgent` locally would leave the sub-agent's
+scene on screen (the transcript is extension-owned) and esc would appear to do
+nothing, which is exactly the bug this rule prevents.
 
 **Invariant:** focus and the transcript are reconciled together. An agent
 self-closes after processing its shutdown request without telling the extension

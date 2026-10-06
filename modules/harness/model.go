@@ -1142,6 +1142,17 @@ func (m Model) updateKeyPress(msg tea.Msg) (Model, tea.Cmd, bool) {
 				}
 			}, true
 		}
+		if res.Killed != "" {
+			m.agentTree.Close()
+			id := res.Killed
+			m.pushNotification("⚠ killing " + id + " — running turn cancelled, subtree removed")
+			return m, func() tea.Msg {
+				return dispatchOnCommandMsg{
+					Name: AgentTreeKillCallback,
+					Args: []string{id},
+				}
+			}, true
+		}
 		if res.Handled {
 			return m, nil, true
 		}
@@ -1163,9 +1174,18 @@ func (m Model) updateKeyPress(msg tea.Msg) (Model, tea.Cmd, bool) {
 	// agent cancels an active main turn.
 	if kp.String() == keyEsc {
 		if m.focusedAgent != "" && m.focusedAgent != m.mainAgentID {
-			m.focusedAgent = ""
-			m.live.setStatus("agent", "")
-			return m, nil, true
+			// Unfocus through the same extension dispatch the tree selection
+			// uses, so the extension rebuilds the root transcript. Clearing
+			// the field locally is not enough: the transcript is owned by the
+			// extension, and without the rebuild the sub-agent's scene stays
+			// on screen — esc would appear to do nothing.
+			root := m.mainAgentID
+			if root == "" {
+				root = "main"
+			}
+			return m, func() tea.Msg {
+				return dispatchOnCommandMsg{Name: AgentTreeCallback, Args: []string{root}}
+			}, true
 		}
 		// With no sub-agent window open, esc during an active main-agent turn
 		// cancels it. Sub-agents are not cancelled: esc means "stop what I

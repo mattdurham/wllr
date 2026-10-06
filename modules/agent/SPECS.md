@@ -65,10 +65,13 @@ goroutine, which protects all turn-start callbacks rather than one caller.
 **Invariant:** `Close(id)` and `Cancel(id)` cascade to every descendant of `id`,
 where a descendant is any agent whose ID is prefixed by `"<id>/"`. An agent's
 descendants exist only to serve it, so leaving them running after their parent
-stops produces orphaned work whose result has nowhere to go. This applies to the
-root agent too: stopping the root stops the whole fleet, because the root is
-only the top of the tree rather than a special case. `Close` removes the subtree
-from the pool; `Cancel` stops the turns and keeps the agents. The separator in
+stops produces orphaned work whose result has nowhere to go. `Close` is the
+**hard kill**: it removes the subtree from the pool immediately and cancels every
+member's turn context, so in-flight tool calls observe cancellation and end now
+(no graceful drain — that is the shutdown_request path). Closing the root agent
+is rejected with `ErrRootAgentClose`: the root owns the session lifecycle and
+exits with the harness, not through a pool close. `Cancel` stops the turns and
+keeps the agents. The separator in
 the prefix test matters — a bare prefix match would treat `main/x2` as a child of
 `main/x`. `Descendants(id)` reports the subtree without acting on it.
 
@@ -148,7 +151,7 @@ A `Team` is a lightweight membership set — it does not own goroutines or resou
 
 - `Team.AddMember(agentID)` returns `ErrAgentNotFound` if the agent is not registered in the pool at call time.
 - `Team.RemoveMember(agentID)` is a no-op if the agent is not a member. It does NOT close or cancel the agent.
-- `Team.Close(ctx)` cancels all member agents via `pool.Close` and clears the member set. Agents not found in the pool (already closed) are silently skipped.
+- `Team.Close(ctx)` cancels all member agents via `pool.Close` and clears the member set. Agents not found in the pool (already closed) are silently skipped. The root agent is never a team close target: members close individually and `Close` on the root returns `ErrRootAgentClose`, which the team close path skips like a missing agent.
 - `AgentPool.CloseTeam(id)` removes the team from `p.teams` before calling `t.Close`, preventing double-close races.
 
 **Invariant:** Team membership is guarded by `Team.mu` (separate from the pool-level `p.mu`). Reads and writes to `members` always hold `Team.mu` in the appropriate mode.

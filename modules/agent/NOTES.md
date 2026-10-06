@@ -1118,3 +1118,20 @@ retain-on-error philosophy. The harness paints the segments from its 100ms strea
 (see harness NOTES), so ctx appears within ~1s of the first step instead of at turn end.
 Coverage: observestepusage_test.go (mid-turn liveness through a two-gate scripted turn,
 sub-agent no-dispatch guard, zero-usage/peak-retention rules).
+
+## 49. Hard kill is Close; the root is uncloseable (2026-10-06)
+
+`pool.Close(id)` is the hard kill the /agents tree's `x` key (and the
+`agents:kill` extension command) route to: it removes the agent **and its whole
+subtree** from the pool immediately and cancels every member's turn context, so
+in-flight tool calls that honor `ctx.Done()` (all real tools do) end at once.
+That is a different contract from `shutdown_request`, which queues a control
+message and lets the agent finish its turn and self-close gracefully. Two rules
+make the kill safe to expose in the UI: (1) the root agent is rejected with
+`ErrRootAgentClose` — it owns the session lifecycle and exits with the harness,
+so no tree selection or team close can remove it (the graceful path never hits
+this because the root has no creator to send it a shutdown); (2) descendants
+die with the parent because their work has nowhere to go. `Cancel(id)` remains
+the non-destructive variant: turns stop, agents stay in the pool. Tests in
+kill_test.go prove the turn-interrupt (a blocked ctx-aware tool returns on
+kill), the subtree cascade including mid-turn descendants, and the root guard.

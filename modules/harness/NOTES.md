@@ -1096,11 +1096,22 @@ branch, killing the orchestrator's work when the user only meant to close
 the view.
 
 The fix orders the esc branch by window depth: focused sub-agent → unfocus
-(clear `focusedAgent`, clear the `agent` status); then overlay/modal/tree →
+(dispatch `agents:focus` with the root ID — see the SPECS invariant); then
+overlay/modal/tree →
 their own close; then, only with no window open, cancel an active main turn.
 Sub-agents remain never-cancelled-by-esc (their lifecycle is
 `shutdown_agent`), consistent with the existing issue-#48 semantics —
 unfocus is a view operation, not a lifecycle operation.
+
+**Addendum (2026-10-06, unfocus dispatches):** the first cut of the fix cleared
+`focusedAgent` locally, and the user reported esc "does nothing" — correct:
+the transcript is owned by the WASM chat extension, which kept rendering the
+sub-agent's scene after the field cleared. Unfocus now dispatches
+`agents:focus` with the root ID (the same path a tree selection takes), so
+`RebuildTranscriptFor` swaps the scene back and a notify confirms the action.
+The lesson generalizes: any focus change that should be *visible* must go
+through the extension dispatch, because the field is input routing, not the
+render state.
 
 **Consequence:** `updateKeyPress`'s esc branch gains a focused-agent guard
 before the cancel branch. A second esc after unfocusing still cancels a
@@ -1119,3 +1130,19 @@ half is the agent's per-step `observeStepUsage` (agent NOTES addendum, same date
 which `MainAgentContextUsage()` stays frozen at the previous turn boundary mid-turn.
 Coverage: livectx_test.go (segments derived from a completed turn, unknown-window no-write,
 tick handler paints ctx).
+
+## The /agents tree gains a hard kill (2026-10-06)
+
+`x` on a tree row hard-kills that agent: the harness dispatches
+`agents:kill` to the agents extension, which calls the host's `agent_close`
+(pool `Close` — immediate removal of the agent **and its subtree**, in-flight
+turns cancelled via context). This is deliberately distinct from
+`shutdown_agent`, which requests a graceful stop the agent may take a whole
+turn to honor; a kill is for an agent that is stuck, misbehaving, or simply
+not wanted anymore. The root row refuses the kill at the tree level and the
+pool rejects it again at `Close` (ErrRootAgentClose) — defense in depth on the
+one agent whose death would orphan the session. If the killed agent owned the
+focused transcript, the extension returns focus and the transcript to the
+root, so the user is never left looking at a dead scene. Coverage:
+killagents_test.go (kill key dispatch, root refusal, esc still closes),
+kill_test.go in modules/agent (turn interrupt, subtree cascade, root guard).

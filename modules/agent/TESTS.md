@@ -270,3 +270,11 @@ through the agent/pool accessors.
 | `TestSteer_DeliveredAtStepBoundary` | end-to-end mid-turn delivery | scripted tool-call turn with a blocking gate tool; steer queued while the gate blocks | steer absent from request 1, last user message of request 2; history order prompt < steer < assistant; canonical entry present; onSteer fired exactly once |
 | `TestSteer_IdleAgentConsumedAsMessage` | idle path | steer queued on an idle agent, Submit("") | steer reached the LLM and was recorded in history |
 | `TestSteerInjector_ReinjectsOnEveryStep` | fantasy rebuilds each step's request | two prepare calls with the same base messages | steer appended at both steps; base slice not mutated |
+
+### kill_test.go
+
+| Test | Scenario | Setup | Assertions |
+|------|----------|-------|------------|
+| `TestKill_RunningAgentInterruptsTurnImmediately` | hard kill ends a mid-turn agent now | scripted tool-call turn blocked in a ctx-aware gate tool; `pool.Close` while blocked | turn ends with an error within 5s without releasing the gate; agent removed; second Close is ErrAgentNotFound |
+| `TestKill_CascadesSubtree` | kill removes descendants, keeps kin | tree main/a/b + sibling z; close main/a | a and a/b gone; main and z untouched |
+| `TestKill_SubtreeRunningAgentsCancelled` | killing a parent cancels descendants' turns | parent + child mid-turn in a gate; close parent | child's turn ends with an error; both removed from the pool |
