@@ -268,8 +268,13 @@ func handleHistoryCommand(args []string) {
 
 // handleSessionSelected shows the conversation's messages in a picker so the
 // user can choose the point to resume from. Selecting a message replays context
-// up to and including it (see handleMessageSelected). Selecting the last message
-// resumes the full conversation.
+// up to and including it (see handleMessageSelected). Selecting the last
+// message resumes the full conversation.
+//
+// The list is newest-first (most recent message at the top, cursor starts
+// there) — resuming is almost always to the latest point, so the default
+// choice should be the first thing on screen. IDs remain original message
+// indices, so handleMessageSelected is unchanged.
 func handleSessionSelected(path string) {
 	pendingSessionPath = path
 	msgs, err := loadMessages(path)
@@ -280,7 +285,8 @@ func handleSessionSelected(path string) {
 	}
 
 	items := make([]PickerItem, 0, len(msgs))
-	for i, m := range msgs {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		m := msgs[i]
 		label := "you"
 		if m.role == "assistant" {
 			label = "asst"

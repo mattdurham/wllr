@@ -51,7 +51,9 @@ landed in a single `""` subdirectory with 2022 timestamps. The filename id uses
    host_call with real host mtimes and previews, because the WASM sandbox
    cannot reliably enumerate or stat the host filesystem.
 2. **Select a resume point.** Lists every message in that session, numbered and
-   tagged `you`/`asst` with a one-line preview.
+   tagged `you`/`asst` with a one-line preview, **newest first** — the most
+   recent message sits at the top with the cursor already on it, since resuming
+   to the latest point is the common case. (`esc` cancels.)
 
 Selecting a message calls `AgentResetHistory` with the messages **up to and
 including** that index, so the agent's context becomes exactly that prefix and
