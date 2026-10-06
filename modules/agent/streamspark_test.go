@@ -36,16 +36,23 @@ func TestSpark_ConstantRateBarsEqual(t *testing.T) {
 	}
 }
 
-// TestSpark_BeforeFirstTokenHidden verifies nothing renders before a span has
-// produced its first token — the bars must not lead the number.
-func TestSpark_BeforeFirstTokenHidden(t *testing.T) {
+// TestSpark_TTFTRecordsZeros verifies wall-clock sampling: from the very
+// first poll — even before a span opens, and through the TTFT wait — zero
+// samples accrue each second, so the bars are live from turn start instead
+// of freezing. Whether the segment is visible at all is the harness's
+// decision (formatTpsLive hides the segment while the number is zero); the
+// tracker's job is only to stay current.
+func TestSpark_TTFTRecordsZeros(t *testing.T) {
 	s := newStreamStats()
-	if got := s.spark(at(500)); got != "" {
-		t.Errorf("spark before any step = %q, want \"\"", got)
+	// First poll samples immediately: one zero in history plus the transient
+	// leading edge = two bars in the constant frame.
+	if got, want := s.spark(at(500)), "······▁▁"; got != want {
+		t.Errorf("spark on fresh tracker = %q, want %q", got, want)
 	}
 	s.stepStart(at(1000))
-	if got := s.spark(at(1500)); got != "" {
-		t.Errorf("spark during TTFT = %q, want \"\"", got)
+	// One silent second later the second zero lands and everything shifts left.
+	if got, want := s.spark(at(1500)), "·····▁▁▁"; got != want {
+		t.Errorf("spark during TTFT = %q, want %q", got, want)
 	}
 }
 
@@ -84,19 +91,36 @@ func TestSpark_StallShowsDip(t *testing.T) {
 	}
 }
 
-// TestSpark_FreezeBetweenSpans verifies polling during tool execution (span
-// closed) neither samples nor changes the bars — gaps are not generation time.
-func TestSpark_FreezeBetweenSpans(t *testing.T) {
+// TestSpark_ScrollsDuringToolGap verifies wall-clock sampling across a tool
+// gap: with the span closed and no tokens arriving, each silent second
+// records a zero sample, so the generation bar scrolls left and stall bars
+// fill in — a live trailing window rather than a frozen frame.
+func TestSpark_ScrollsDuringToolGap(t *testing.T) {
 	s := newStreamStats()
 	s.stepStart(at(0))
-	s.token(at(0), strings.Repeat("x", 200))
-	s.spark(at(1000))
-	s.stepFinish(at(1500), 50)
-	before := s.spark(at(1600))
-	for ms := 2000; ms <= 5000; ms += 500 {
-		if got := s.spark(at(ms)); got != before {
-			t.Fatalf("spark at %dms changed during tool gap: %q → %q", ms, before, got)
+	s.token(at(0), strings.Repeat("x", 200))   // 50 tokens (window-start anchor)
+	s.token(at(500), strings.Repeat("x", 200)) // 50 more inside the first window
+	s.spark(at(1000))                          // sample 1: 50 tokens over 1s = 50 t/s
+	s.stepFinish(at(1500), 50)                 // span closes; tool execution begins
+	// Inside the same sampling second the leading edge already reads the
+	// gap's zero; no stored sample yet.
+	if got, want := s.spark(at(1600)), "······█▁"; got != want {
+		t.Fatalf("spark at gap start = %q, want %q", got, want)
+	}
+	// Each silent second appends a zero sample and the bar scrolls left.
+	want := []string{"·····█▁▁", "····█▁▁▁", "···█▁▁▁▁"}
+	for i, ms := range []int{2000, 3000, 4000} {
+		if got := s.spark(at(ms)); got != want[i] {
+			t.Fatalf("spark at %dms = %q, want %q", ms, got, want[i])
 		}
+	}
+	// After enough silent seconds every generation bar has scrolled off:
+	// the frame is entirely stall bars, still exactly sparkPoints wide.
+	for ms := 5000; ms <= 9000; ms += 1000 {
+		s.spark(at(ms))
+	}
+	if got, want := s.spark(at(10000)), "▁▁▁▁▁▁▁▁"; got != want {
+		t.Errorf("spark after 9 silent seconds = %q, want %q", got, want)
 	}
 }
 

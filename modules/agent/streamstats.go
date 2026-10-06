@@ -209,20 +209,18 @@ func (s *streamStats) exact() float64 {
 
 // spark appends at most one windowed-rate sample per sparkWindow of poll time
 // and renders the statusline sparkline bars. The UI tick calls it (~10Hz)
-// while a turn streams; sampling happens only while a span is open with at
-// least one token, so between spans (tool execution, sub-agent waits) the
-// bars freeze rather than recording inactivity — matching the number's
-// span-based accounting. After finish it returns the frozen bars.
+// while a turn streams. Sampling is wall-clock: it runs whenever the turn is
+// active, whether or not tokens are arriving, so a silent second — the TTFT
+// wait, a mid-span stall, or tool execution between spans — records a
+// zero-rate sample and the bars scroll left in real time. The number keeps
+// its span-based accounting (gaps are not generation time); the bars are
+// deliberately the live wall-clock view of recent activity. After finish it
+// returns the frozen bars.
 func (s *streamStats) spark(now time.Time) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.finished {
 		return s.lastSpark
-	}
-	if s.spanStart.IsZero() || !s.lastTokenAt.After(s.spanStart) {
-		// No open span, or a span whose first token has not arrived (TTFT):
-		// history renders as-is without new samples.
-		return sparkBars(s.hist)
 	}
 	rate := s.windowedRateLocked(now)
 	if s.lastSampleAt.IsZero() || now.Sub(s.lastSampleAt) >= sparkWindow {

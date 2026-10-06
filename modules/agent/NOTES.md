@@ -1020,14 +1020,15 @@ to the number (`lastSpark`, same `streamTpsMu`). Bars scale to the window
 max, so the shape is relative speed; a flat-zero stretch is the visual
 signature of a stall.
 
-**Addendum (2026-10-06, later): the sparkline is a constant 8-column frame.**
-The original 20-sample history made the bars grow one column per second,
-shifting everything to their right in the statusline every second — distracting
-enough to defeat the feature. `sparkPoints` is now 8 and `sparkBars` renders a
-fixed frame: warm-up slots show `·` (no data — distinct from `▁`, a real
-zero-rate stall bar), history slides left, and the width never changes from the
-first sample onward. The window is shorter (≈8s) but the leading edge still
-moves at tick cadence, which is what carries the "right now" signal.
+**Addendum (2026-10-06, later still): sampling is wall-clock.** The original
+rule sampled only while a span was open with a token, freezing the bars
+during TTFT and tool gaps — but "no tokens" is exactly when the user watches
+the sparkline, and a frozen frame reads as a broken render, not as idle.
+Sampling now runs whenever the turn is active: each silent second records a
+zero sample and the bars scroll off in real time. The number keeps its
+span-based denominator; the bars are the wall-clock view. Visibility during
+pre-token silence stays with the harness (`formatTpsLive` hides the segment
+while the number is zero).
 
 ---
 

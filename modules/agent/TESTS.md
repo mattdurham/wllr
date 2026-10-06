@@ -160,10 +160,10 @@ through the agent/pool accessors.
 | Test | Scenario | Assertions |
 |------|----------|------------|
 | `TestSpark_ConstantRateBarsEqual` | steady 25 t/s stream, sampled each second | every bar at full height (each sample scales to the window max); 6 bars left-padded with `·` to the constant 8-column frame; the first sample already renders 8 columns — width never grows |
-| `TestSpark_BeforeFirstTokenHidden` | polls before any step and during TTFT | bars "" — the sparkline never leads the number |
+| `TestSpark_TTFTRecordsZeros` | first poll on a fresh tracker, then a silent TTFT second | wall-clock sampling from turn start: first poll renders two zero bars, the next second scrolls them left — bars stay current without a token |
 | `TestSpark_CadenceAndCap` | 30 one-second samples | render holds the constant `sparkPoints` frame at any turn length (history capped and right-truncated); frozen bars have no transient edge, same fixed width |
 | `TestSpark_StallShowsDip` | tokens then a silent window | zero-rate sample renders the lowest block (`·····█▁▁`) — a stall is visible, distinct from `·` no-data pads |
-| `TestSpark_FreezeBetweenSpans` | polling across a tool-execution gap | bars byte-identical across the gap — gaps are not sampled |
+| `TestSpark_ScrollsDuringToolGap` | tokens, span closes, then silent seconds of tool execution | each silent second appends a zero sample: the generation bar scrolls left (`·····█▁▁` → `···█▁▁▁▁`) and after nine silent seconds the frame is all stall bars — a live window, not a frozen frame |
 | `TestSpark_FinishFreezesBars` | finish after two sampled seconds | bars survive turn end unchanged; polling long after finish is stable |
 | `TestSpark_NoPollNoBars` | turn ends before any poll follows its first token | no bars frozen — the number alone shows |
 | `TestAgent_StreamTpsSpark_Lifecycle` | agent-level sparkline lifecycle | "" fresh; live while the tracker is open; frozen by `endStreamStats` exactly as the tracker holds them; redundant end call is a no-op |

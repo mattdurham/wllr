@@ -1079,9 +1079,14 @@ copy of the bundled statusline wasm renders them with no extension changes.
 
 - The number is the cumulative turn average; the bars are the trailing
   per-second windowed rates — recent speed, showing bursts and stalls.
-- Sampling happens only while a span is open with at least one token: between
-  spans (tool execution, sub-agent waits) the bars freeze rather than
-  recording inactivity, matching the number's span-based accounting.
+- Sampling is wall-clock: it runs whenever the turn is active, whether or not
+  tokens are arriving. A silent second — the TTFT wait, a mid-span stall, or
+  tool execution between spans — records a zero-rate sample, so the bars
+  scroll left in real time instead of freezing. The number keeps its
+  span-based accounting (gaps are not generation time); the bars are
+  deliberately the live wall-clock view. Whether the segment is visible at
+  all during pre-first-token silence is the harness's call: `formatTpsLive`
+  hides the whole segment while the number is zero.
 - Each sample's window starts at the later of the window start and the span
   beginning, so a just-opened span is not deflated by an empty window; a
   token landing exactly on the window start belongs to the earlier window.
