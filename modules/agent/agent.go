@@ -83,9 +83,9 @@ type Agent struct {
 	// mutex; the agent does not lock it directly.
 	inbox mailbox
 
-	// lastUsage is the token usage from the most recently completed turn.
-	// Updated after each turn by setLastUsage. Read by LastUsage().
-	// Protected by lastUsageMu.
+	// lastUsage is the most recent known token usage. Written per provider
+	// step by observeStepUsage (peak-within-turn semantics) and again at turn
+	// end by setLastUsage; read by LastUsage(). Protected by lastUsageMu.
 	lastUsage     fantasy.Usage
 	contextWindow int64 // resolved input context window for this model
 
@@ -543,6 +543,45 @@ func (a *Agent) setLastUsage(u fantasy.Usage) {
 	a.lastUsageMu.Lock()
 	a.lastUsage = u
 	a.lastUsageMu.Unlock()
+}
+
+// observeStepUsage records one provider step's usage mid-turn, from
+// streamTurn's OnStepFinish callback (turn goroutine — the same thread that
+// already calls setLastUsage at turn end and pool.addTokens per delta).
+//
+// Two effects:
+//
+//  1. lastUsage advances as soon as a step finishes, keeping LastUsage() —
+//     and through it MainAgentContextUsage(), the /context breakdown, and
+//     the usage-threshold compaction trigger — live during the turn instead
+//     of frozen at the previous turn boundary. The stored value keeps the
+//     turn-end semantics (peak input side within the turn): it advances only
+//     when the step's input side (input + cache read + cache creation)
+//     exceeds what is stored, mirroring contextUsageFromResult's peak rule
+//     and the turn-end retain-on-error guard.
+//
+//  2. For the main agent, EventContextUsage is dispatched per step, so the
+//     statusline extension learns the context window and the live value even
+//     when the turn never ends (the orchestrator wait-loop pattern that left
+//     ctx hidden for an entire session). Sub-agent steps do not drive the
+//     main indicator, matching the turn-end dispatch.
+//
+// The dispatch is safe from the turn goroutine: the harness-side dispatcher
+// detaches onto its own goroutine before touching any extension.
+func (a *Agent) observeStepUsage(step fantasy.Usage, pool *AgentPool, contextWindow int64) {
+	input := step.InputTokens + step.CacheReadTokens + step.CacheCreationTokens
+	if input <= 0 {
+		return
+	}
+	a.lastUsageMu.Lock()
+	prev := a.lastUsage
+	if input > prev.InputTokens+prev.CacheReadTokens+prev.CacheCreationTokens {
+		a.lastUsage = step
+	}
+	a.lastUsageMu.Unlock()
+	if pool != nil && a.id == MainAgentID {
+		pool.dispatchContextUsage(sdk.ContextUsageFromFantasy(step, contextWindow), nil, a.compactionCount)
+	}
 }
 
 // beginStreamStats installs a fresh stream tracker for the turn about to
@@ -1545,6 +1584,11 @@ func (a *Agent) streamTurn(
 		},
 		OnStepFinish: func(step fantasy.StepResult) error {
 			stats.stepFinish(time.Now(), step.Usage.OutputTokens)
+			// Record the step's usage mid-turn so the context indicator stays
+			// live during long agentic turns (an orchestrator can stream for
+			// hours in a single turn; previously ctx was painted only at turn
+			// end, so it never appeared at all in such sessions).
+			a.observeStepUsage(step.Usage, pool, contextWindow)
 			return nil
 		},
 		OnTextStart: func(_ string) error {

@@ -1522,6 +1522,34 @@ func formatTpsLive(tps float64, spark string) string {
 	return base + " " + spark
 }
 
+// refreshContextStatus writes the live ctx status segments from the main
+// agent's latest known usage. Returns true when written, false when the
+// context window is unknown (caller decides whether to clear).
+//
+// Called from the 100ms stream tick so the ctx segment appears and updates
+// during a turn — not only at turn end. An orchestrator can stay inside one
+// turn for hours (sleep-tool wait loops), and previously the segment was
+// written only by StreamDoneMsg, so such sessions never showed ctx at all.
+// The per-step usage recording on the agent side (observeStepUsage) is what
+// makes MainAgentContextUsage meaningful mid-turn.
+func (m Model) refreshContextStatus() bool {
+	if m.agentPool == nil {
+		return false
+	}
+	cu := m.agentPool.MainAgentContextUsage()
+	if cu.ContextWindow <= 0 {
+		return false
+	}
+	in := cu.InputTokens
+	if in < 0 {
+		in = 0
+	}
+	m.live.setStatus("ctx", fmt.Sprintf("%d/%d", in, cu.ContextWindow))
+	// Keep the legacy key for older copies of the bundled statusline wasm.
+	m.live.setStatus("ctx rem", fmt.Sprintf("%d", cu.ContextWindow))
+	return true
+}
+
 // updateStream handles token streaming messages: TokenMsg, streamTickMsg, StreamDoneMsg, agentWakeupMsg.
 // Returns (model, cmd, true) when the message was handled.
 func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
@@ -1557,6 +1585,9 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 		// the number stays the cumulative turn average.
 		if m.agentPool != nil {
 			m.live.setStatus("tps", formatTpsLive(m.agentPool.MainAgentTps(), m.agentPool.MainAgentTpsSpark()))
+			// Live context usage, same reasoning: polled per tick so ctx is
+			// visible and advancing during long turns, not only after them.
+			m.refreshContextStatus()
 		}
 		return m, tea.Batch(cmds...), true
 
@@ -1568,16 +1599,9 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 		if m.agentPool != nil {
 			n := int(m.agentPool.TokenCount())
 			m.live.setTokens(n)
-			// Update context usage from real API token counts.
-			cu := m.agentPool.MainAgentContextUsage()
-			if cu.ContextWindow > 0 {
-				if cu.InputTokens < 0 {
-					cu.InputTokens = 0
-				}
-				m.live.setStatus("ctx", fmt.Sprintf("%d/%d", cu.InputTokens, cu.ContextWindow))
-				// Keep the legacy key for older copies of the bundled statusline wasm.
-				m.live.setStatus("ctx rem", fmt.Sprintf("%d", cu.ContextWindow))
-			} else {
+			// Update context usage from real API token counts; an unknown
+			// window clears the segment.
+			if !m.refreshContextStatus() {
 				m.live.setStatus("ctx", "")
 				m.live.setStatus("ctx rem", "")
 			}

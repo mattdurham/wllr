@@ -453,11 +453,21 @@ carried by `TurnUsage.Err` (§ Observability), never by wiping the context size.
 `LastUsage() fantasy.Usage` is a read-safe accessor used by `MainAgentContextUsage()` and
 the percentage-based compaction check.
 
-**Invariant:** `LastUsage()` returns a zero-valued `fantasy.Usage` only before the first
-successful turn completes.
+**Mid-turn recording:** `observeStepUsage(step fantasy.Usage, pool, contextWindow)` is
+called from `streamTurn`'s `OnStepFinish` after every provider step — including steps
+inside the tool loop. It advances `lastUsage` when the step's input side (input + cache
+reads + creations) exceeds the stored peak (grow-within-turn, mirroring
+`contextUsageFromResult`), and for the main agent only, dispatches `EventContextUsage`
+per step so the statusline shows a live, advancing ctx during long turns. `OnStepFinish`
+for step N fires after step N's tools complete and before step N+1's tools start — the
+moment between an orchestrator's sleep/poll loops. Sub-agent steps never dispatch (the
+main indicator is main-agent-only, matching the turn-end dispatch).
 
-**Invariant:** `lastUsage` is only written from inside the `Submit` goroutine, preventing
-concurrent writes.
+**Invariant:** `LastUsage()` returns a zero-valued `fantasy.Usage` only before the first
+provider step with reported input usage completes.
+
+**Invariant:** `lastUsage` is only written from inside the `Submit` goroutine (turn
+goroutine), preventing concurrent writes.
 
 ### EventContextUsage Dispatch
 
@@ -486,7 +496,8 @@ There are two dispatch kinds:
 `compactions` is the dispatching agent's cumulative successful-compaction count
 (`a.compactionCount`) — additive observability data for the `EventContextUsage` payload.
 
-**Invariant:** `dispatchContextUsage` is called after successful compactions and at the
+**Invariant:** `dispatchContextUsage` is called after successful compactions, after every
+completed provider step of a main-agent turn (per-step, via `observeStepUsage`), and at the
 end of every main-agent turn — successful **and** failed. A failed turn re-dispatches the
 retained last-known usage (skipped only while nothing is known yet), so the statusline
 refreshes to the true context size instead of sticking at zero. The display numerator is

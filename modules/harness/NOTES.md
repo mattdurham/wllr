@@ -1108,3 +1108,14 @@ running main turn, so the key's stop semantics are unchanged at the root.
 Coverage in escagentsview_test.go: overlay-open esc closes without
 cancelling, focused-window esc unfocuses without cancelling, and root-focus
 esc still cancels.
+
+**Addendum (2026-10-06, live ctx mid-turn):** the `ctx` status segments were written only
+by the `StreamDoneMsg` handler, so a session whose main turn ran for hours (orchestrator
+wait-loop) never showed ctx at all — the segment's single write point never executed. The
+write now lives in `refreshContextStatus()` (returns false when the window is unknown),
+called from both the 100ms `streamTickMsg` handler and `StreamDoneMsg` (which keeps the
+clear branch for the unknown-window case). This is the display half of the fix; the value
+half is the agent's per-step `observeStepUsage` (agent NOTES addendum, same date), without
+which `MainAgentContextUsage()` stays frozen at the previous turn boundary mid-turn.
+Coverage: livectx_test.go (segments derived from a completed turn, unknown-window no-write,
+tick handler paints ctx).

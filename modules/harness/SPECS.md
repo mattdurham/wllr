@@ -377,6 +377,14 @@ generation speed:
   `m.agentPool.MainAgentTps()` and stores `formatTps(v)` under the `"tps"`
   status key. The live rate comes from the agent's span-based tracker (agent
   SPECS §19), so it excludes tool execution and sub-agent wait time.
+- The same tick also calls `refreshContextStatus()`, which writes the `ctx` /
+  `ctx rem` segments from `MainAgentContextUsage()` whenever the window is
+  known. Combined with the agent's per-step usage recording
+  (`observeStepUsage`), ctx appears and advances during a turn instead of
+  only at turn end — a long orchestrator turn (hours in one turn) used to
+  keep ctx hidden for the whole session. The helper returns false when the
+  window is unknown; the tick leaves stale state alone in that case, and
+  `StreamDoneMsg`'s clear branch owns deletion.
 - On each `StreamDoneMsg` (inside the `agentPool != nil` block, next to the
   `ctx` update), the handler re-reads `MainAgentTps()` — by then the agent
   has frozen the exact end-of-turn rate — so the display settles at the

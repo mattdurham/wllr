@@ -131,6 +131,9 @@ mismatched endpoint overrides.
 | `TestPoolMainAgentContextUsage` | pool exposes usage after a turn | window set, 50k-input turn | InputTokens/Window/Percent all > 0 |
 | `TestEventContextUsageDispatched` | dispatcher fires on a successful turn | usageLM 30k/100, dispatcher captured | dispatched usage non-zero, notice nil, compactions 0 |
 | `TestEventContextUsageDispatchedOnErrorRetainsLastKnown` | failed main turn re-dispatches retained usage | successThenErrLM through main | a dispatch with InputTokens 1200 arrives after the failed turn |
+| `TestObserveStepUsage_LiveMidTurn` | per-step usage recording keeps ctx live mid-turn | two-gate scripted turn; step-1 usage checked while gate-b blocks | LastUsage > 0 mid-turn, ≥1 dispatch carries the agent's window, dispatch count grows by turn end |
+| `TestObserveStepUsage_SubAgentDoesNotDispatch` | sub-agent steps never drive the main indicator | sub-agent turn with dispatcher installed | sub-agent LastUsage recorded; dispatcher never fired |
+| `TestObserveStepUsage_Guard` | zero-usage steps ignored; stored peak never shrinks | unit: zero usage, big step, smaller step | zero ignored, big stored, small retained |
 
 ## Stream tokens-per-second (streamstats_test.go)
 

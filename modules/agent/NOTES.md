@@ -1101,3 +1101,20 @@ Coverage: steer_test.go (selective drain, type survives Submit's requeue,
 end-to-end delivery at a gated tool boundary with history/canonical/onSteer
 assertions, idle-agent consumption, per-step re-injection without input
 mutation).
+
+**Addendum (2026-10-06, live ctx mid-turn):** `lastUsage` used to be written only at turn
+end, and `EventContextUsage` only dispatched there — so a session whose main turn ran for
+hours (an orchestrator in a sleep/status-poll wait loop) never showed the statusline ctx
+segment at all, and even normal sessions froze the number at the previous turn boundary
+until the next one completed. `streamTurn`'s `OnStepFinish` now calls
+`observeStepUsage(step.Usage, pool, contextWindow)` after every provider step: the stored
+value keeps the peak-within-turn rule (grow-only on the input side, mirroring
+`contextUsageFromResult`), and the main agent dispatches `EventContextUsage` per step so
+the extension learns the window and the live value mid-turn. Ordering (probed): step N's
+`OnStepFinish` fires after step N's tools complete and before step N+1's tools start, so
+the refresh lands between an orchestrator's tool calls. Failed turns retain the failed
+attempt's peak — a step that actually ran did occupy that context, matching the existing
+retain-on-error philosophy. The harness paints the segments from its 100ms stream tick
+(see harness NOTES), so ctx appears within ~1s of the first step instead of at turn end.
+Coverage: observestepusage_test.go (mid-turn liveness through a two-gate scripted turn,
+sub-agent no-dispatch guard, zero-usage/peak-retention rules).
