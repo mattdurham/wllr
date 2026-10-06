@@ -1051,3 +1051,43 @@ the token observer), harness `TestTokenBatcher_HoldsTailUntilFlush`,
 `TestToolCallForwarder_FlushesTailBeforeToolCall`, and
 `TestWireMainAgentCallbacks_TurnFlushesTailAtToolCall` (real turn: full text
 delivered before the ToolCallStartMsg).
+
+## 48. /steer delivers mid-turn by re-injecting on every step (2026-10-06)
+
+**Decision:** Steering messages (`MessageTypeSteer`, `/steer <text>`) are
+delivered into the running turn through the fantasy `PrepareStep` hook rather
+than a new turn. `steerInjector` (steer.go) wraps the tool-loop compactor's
+prepare: it first drains only steer-typed inbox messages, then lets the
+compactor run (so compaction still works and steers survive it by being
+appended after the compacted payload), and appends every steer delivered this
+turn to the outgoing request — **on every subsequent prepare**, not once.
+
+**Rationale:** fantasy's agent loop rebuilds each step's input from the fixed
+initial prompt plus messages accumulated from step content
+(`stepInputMessages := append(initialPrompt, responseMessages...)`). An
+injected message exists only in the request it was prepared for; if prepare did
+not re-add it, the steer would be visible to step N but vanish from step N+1 —
+the model would "forget" mid-turn guidance one tool call later. Re-injecting
+from the injector's own accumulated list keeps the guidance present for the
+rest of the turn, and `executeTurn` records that same list into history and the
+canonical transcript afterward, so the persisted position (between the turn's
+prompt and its response) matches where it entered context.
+
+Two drain rules matter. Only steer-typed messages are taken at the step
+boundary: the inbox may simultaneously hold a `shutdown_request` whose handling
+lives in finishTurn — a full drain there would strand shutdowns forever. And
+the injector copies fantasy's message slice before appending: the slice is
+backed by fantasy's own array, which it reuses across steps, so in-place
+appends corrupt the next step's input.
+
+**Consequence:** `sdk` gains `MessageTypeSteer`; `mailbox` gains
+`drainSteer` (selective drain, order-preserving); `Agent` gains
+`SetOnSteer` + `onSteerFn` and `streamTurn` takes a `*steerInjector` (two
+existing test call sites updated); the spawner gains `SetSteerObserver` so
+focused sub-agent transcripts render deliveries. The idle path needs no new
+code: steer is model-visible, so Submit's normal drain delivers it as
+conversation, and `allControlMessages` correctly does not treat it as control.
+Coverage: steer_test.go (selective drain, type survives Submit's requeue,
+end-to-end delivery at a gated tool boundary with history/canonical/onSteer
+assertions, idle-agent consumption, per-step re-injection without input
+mutation).

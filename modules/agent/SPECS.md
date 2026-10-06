@@ -1112,3 +1112,43 @@ next turn replaces it, exactly like the ctx display; failed turns still
 freeze an estimate (the deferred guard runs `finish`), never a zero that
 would flash the segment off. The sparkline bars freeze the same way
 (`lastSpark`) and hide with the number.
+
+## 20. Mid-Turn Steering (`/steer`, MessageTypeSteer)
+
+`/steer <text>` injects user guidance into the focused agent **while its turn
+is running**, instead of waiting for the next turn boundary. A new sdk message
+type `MessageTypeSteer` (`"steer"`) marks the message; unlike
+`MessageTypeSteering` it is fully model-visible and recorded in history.
+
+**Delivery.** The harness routes the command through `AgentPool.Deliver(id,
+msg, wake=true)`, which is correct for both agent states atomically: a running
+turn leaves the message queued in the inbox (the queued pane shows it), and an
+idle agent starts a turn that consumes the steer as its ordinary message via
+Submit's drain path (steer is model-visible, so the control-only short-circuit
+does not apply).
+
+**Injection.** The agent wraps its `PrepareStep` hook (shared with the
+tool-loop compactor) in `steerInjector` (steer.go, one instance per turn,
+shared by the proactive and reactive stream attempts). At every step boundary
+it drains **only** steer-typed messages from the inbox (mailbox.drainSteer —
+a full drain would strand shutdown_request handling in finishTurn), appends
+them as fantasy user messages after the compacted payload, and fires the
+`SetOnSteer` callback per message. Because fantasy rebuilds each step's request
+from the fixed initial prompt plus accumulated step messages, the injector
+**re-appends everything it has delivered on every subsequent prepare** — a
+one-shot append would vanish from step N+1's request.
+
+**Recording.** Messages delivered mid-turn are recorded at turn end between the
+turn's prompt and its assistant response in both `a.history` and the canonical
+transcript — the position where they entered the model's context — so later
+turns and recall see them even after compaction.
+
+**Invariant:** the injector copies the prepare-step message slice before
+appending; the slice fantasy passes in reuses its backing array across steps.
+
+**Invariant:** `drainSteer` removes steer-typed messages only; system control
+messages always stay for finishTurn.
+
+**Invariant:** `SetOnSteer` fires on the turn goroutine; harness observers must
+dispatch on their own goroutine (the WASM re-entrance deadlock rule that
+applies to every agent callback).

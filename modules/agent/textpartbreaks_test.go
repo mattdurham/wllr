@@ -78,7 +78,7 @@ func TestStreamTurn_SeparatesTextPartsWithParagraphBreak(t *testing.T) {
 	a := &Agent{}
 	got, _, err := a.streamTurn(context.Background(), fa, lm, nil, "inspect", nil,
 		func(text string) { streamed.WriteString(text) }, nil,
-		262_144, CompactConfig{}, nil)
+		262_144, CompactConfig{}, nil, nil)
 	if err != nil {
 		t.Fatalf("streamTurn: %v", err)
 	}

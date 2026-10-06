@@ -181,6 +181,21 @@ func registerBuiltins(r *Registry) {
 	})
 
 	r.Register(Command{
+		Name:    "steer",
+		Desc:    "Inject guidance into the running turn at the next step boundary (/steer <text>)",
+		Instant: true,
+		Handler: func(args []string) tea.Cmd {
+			text := strings.Join(args, " ")
+			if strings.TrimSpace(text) == "" {
+				return func() tea.Msg {
+					return NotifyMsg{Text: "usage: /steer <message> — guidance delivered mid-turn"}
+				}
+			}
+			return func() tea.Msg { return steerSubmitMsg{Content: text} }
+		},
+	})
+
+	r.Register(Command{
 		Name:    "context",
 		Desc:    "Show the context-window breakdown for the main agent",
 		Instant: true,

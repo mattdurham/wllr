@@ -57,6 +57,29 @@ func (b *mailbox) drain() []sdk.Message {
 	return msgs
 }
 
+// drainSteer removes and returns only steer-typed messages, leaving every
+// other message (and their relative order) queued. The agent's step-boundary
+// injector calls this mid-turn: a full drain there would also consume system
+// control messages that finishTurn's shutdown handling expects to find at the
+// turn boundary, stranding shutdown requests forever. Thread-safe.
+func (b *mailbox) drainSteer() []sdk.Message {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var steered []sdk.Message
+	kept := b.msgs[:0:0]
+	for _, m := range b.msgs {
+		if m.Type == sdk.MessageTypeSteer {
+			steered = append(steered, m)
+			continue
+		}
+		kept = append(kept, m)
+	}
+	if len(steered) > 0 {
+		b.msgs = kept
+	}
+	return steered
+}
+
 // clear atomically removes all queued messages and returns how many were
 // removed. Unlike deleteByIndex/editByIndex it is safe to call while the
 // agent's turn is running: Submit drains the inbox at turn start and the

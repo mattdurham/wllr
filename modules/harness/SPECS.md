@@ -309,7 +309,7 @@ type Command struct {
 
 **Invariant:** Commands with `Instant=true` bypass the "queuing..." UI indicator in `updateActions`. When a `CommandMsg` for an Instant command arrives, `updateActions` invokes `cmd.Handler(msg.Args)` directly without setting `statusBar.statuses["stream"] = "queuing…"`.
 
-**Invariant:** All built-in commands (`/help`, `/clear`, `/reload`, `/model`, `/models`, `/thinking`, `/openrouter-speed`, `/login`, `/status`, `/tools`, `/context`) have `Instant=true`. The zero value of `Command.Instant` is `false`. (The `/prompt` command is registered without `Instant=true` because it executes synchronously in the update loop via `ShowModalMsg`, not via WASM dispatch — it is intentionally excluded from the instant list.)
+**Invariant:** All built-in commands (`/help`, `/clear`, `/reload`, `/model`, `/models`, `/thinking`, `/openrouter-speed`, `/login`, `/status`, `/tools`, `/context`, `/steer`) have `Instant=true`. The zero value of `Command.Instant` is `false`. (The `/prompt` command is registered without `Instant=true` because it executes synchronously in the update loop via `ShowModalMsg`, not via WASM dispatch — it is intentionally excluded from the instant list.)
 
 **Invariant:** Extension-registered commands set `Instant` from the `instant bool` parameter passed to `UIBridge.RegisterCommand(name, desc, instant bool)`. When `instant=true`, the flag is stored on the `Command`, suppressing the "queuing…" status. The handler still routes through `dispatchOnCommandMsg` → `EventOnCommand`.
 
@@ -945,3 +945,33 @@ The main chat transcript content is produced by a WASM extension (the bundled `a
 - `/clear` resets the transcript area to empty. History-restore resets it and then dispatches `agents:transcript_rebuild` (main agent id) so the restored history is re-rendered into the transcript; the replay must be visible, not only present in agent context.
 - The per-turn tool log is cleared at turn start (`submitToAgent`) and surfaced via `/tools`; it is independent of the transcript and also feeds the persistent tool activity pane.
 - **Invariant (#45):** No line of the composed view may exceed the terminal width. Panes that build bordered boxes by hand (tool activity, input box, console) clamp each content row to the content width before padding, and content-derived text is measured by display width rather than rune count. An over-wide row is hard-wrapped by the terminal, which lands the wrapped remainder beside the following row's border and desynchronises the repaint into doubled borders (`││`) and fused corners (`────╮│`). The transcript message box itself satisfies this by construction: lipgloss v2 `Width()` is border-box, so `styleFromProps` sizing a `fill` node to the available width yields a box exactly that wide.
+
+## 29. /steer — Mid-Turn Guidance
+
+`/steer <text>` is a built-in `Instant` command (commands.go) that injects
+guidance into the **focused agent's running turn** instead of waiting for the
+next turn boundary.
+
+**Flow.** The handler joins args into text (empty → usage `NotifyMsg`) and
+emits `steerSubmitMsg`; `updateActions` routes it to `submitSteer(content)`
+(model.go). `submitSteer` resolves the target (focused agent, falling back to
+the root when the focused agent closed, like `submitToAgent`) and calls
+`AgentPool.Deliver(target, steerMsg, wake=true)`. Delivery semantics by agent
+state:
+
+- **Running:** the steer-typed message queues in the inbox until the agent's
+  `steerInjector` pulls it in at the next step boundary (agent SPECS §20); the
+  queued pane shows it waiting, and ctrl+x / `[ clear ]` can still discard it.
+- **Idle:** `Deliver`'s wake starts a turn that consumes the steer as its
+  ordinary model-visible message.
+
+**Rendering.** `wireMainAgentCallbacks` installs `SetOnSteer` on the main
+agent and the spawner installs `SetSteerObserver` on each sub-agent
+(`dispatchAgentSteer`): each delivery dispatches `EventBeforeAgentStart` with
+`Queued: true`, so the transcript extension renders a prompt-style bubble at
+the moment the guidance enters the model's context. Dispatches are
+asynchronous (turn-goroutine / WASM re-entrance rule, §3).
+
+**Invariant:** `submitSteer` never blocks the bubbletea loop — `Deliver` is
+non-blocking — and never touches `m.streaming`; the wake notifier or the turn
+callbacks drive the indicator.

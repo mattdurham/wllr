@@ -1057,3 +1057,31 @@ Two renderer decisions on top of the earlier breakdown:
   resolver (host registration records); ownerless tools (harness-native,
   recall) group under "harness". Snapshots from before the owner field
   existed render the old flat list — pinned by test.
+
+## /steer delivers guidance at the next step boundary (2026-10-06)
+
+**Decision:** `/steer` routes through `pool.Deliver(id, msg, wake=true)` for
+both agent states instead of branching on `IsRunning` in the harness.
+
+**Rationale:** `Deliver`'s append-then-Submit sequence is race-free against
+turn ends: if the turn finishes between the append and the wake, the wake's
+`Submit("")` drains the just-queued steer and starts the turn; if a turn is
+running, the CAS-fail requeue preserves the message for the injector. A
+harness-side `IsRunning()` branch would re-create both races. The notification
+text ("queued — delivered at the next step boundary" vs "delivered — starting
+a turn") is best-effort UX read after delivery, not a guarantee.
+
+`MessageTypeSteer` is deliberately distinct from `MessageTypeSteering`
+(orchestrator guidance filtered from LLM context): steering semantics differ
+only in *visibility* + *delivery timing*, and reusing the filtered type would
+make `/steer` invisible to the model — worse than useless. The idle path
+needed no special casing because steer is model-visible: `Submit`'s normal
+drain delivers it as conversation, and the control-only short-circuit
+(`allControlMessages`) correctly does not treat it as control.
+
+**Consequence:** harness gains the `/steer` builtin, `steerSubmitMsg`,
+`submitSteer`, the main-agent `SetOnSteer` wiring, and `dispatchAgentSteer`
+for sub-agents (EventBeforeAgentStart with Queued:true, async dispatch).
+Coverage in steer_test.go: builtin registration + arg joining + usage hint;
+running agent → steer typed and queued, absent from the running request;
+idle agent → wake turn consumes it and it reaches the provider.

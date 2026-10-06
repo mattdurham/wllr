@@ -257,3 +257,13 @@ through the agent/pool accessors.
 | Test | Scenario | Setup | Assertions |
 |------|----------|-------|------------|
 | `TestSpawnerTokenFlushDeliversTailAtTurnEnd` | sub-agent's final text-segment tail reaches the focused transcript | word-delta FakeProvider response, token + flush observers, spawn with initial prompt | flush observer fires at turn end with the agent ID; concatenated streamed text equals the complete response |
+
+### steer_test.go
+
+| Test | Scenario | Setup | Assertions |
+|------|----------|-------|------------|
+| `TestDrainSteer_PreservesOtherMessages` | selective drain takes only steer messages | inbox mixing normal/steer/normal | steer extracted once; normals remain in order; second drain empty |
+| `TestSteer_QueuePreservedThroughSubmitRaces` | steer queued mid-turn survives Submit's CAS-fail requeue | isRunning forced, Submit while running | steer still in inbox with its steer type |
+| `TestSteer_DeliveredAtStepBoundary` | end-to-end mid-turn delivery | scripted tool-call turn with a blocking gate tool; steer queued while the gate blocks | steer absent from request 1, last user message of request 2; history order prompt < steer < assistant; canonical entry present; onSteer fired exactly once |
+| `TestSteer_IdleAgentConsumedAsMessage` | idle path | steer queued on an idle agent, Submit("") | steer reached the LLM and was recorded in history |
+| `TestSteerInjector_ReinjectsOnEveryStep` | fantasy rebuilds each step's request | two prepare calls with the same base messages | steer appended at both steps; base slice not mutated |

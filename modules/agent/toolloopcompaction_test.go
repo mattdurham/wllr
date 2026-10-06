@@ -62,7 +62,7 @@ func TestStreamTurnCompactsGrowingToolTranscript(t *testing.T) {
 	got, _, err := a.streamTurn(context.Background(), fa, lm, nil, "do the task", nil, nil, nil,
 		262_144, CompactConfig{Enabled: true, ThresholdPct: 0.80}, func(result CompactionResult) {
 			observed = append(observed, result)
-		})
+		}, nil)
 	if err != nil {
 		t.Fatalf("streamTurn: %v", err)
 	}

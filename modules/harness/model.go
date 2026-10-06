@@ -517,6 +517,9 @@ func (m *Model) SetProgram(p *tea.Program) {
 		dispatchTokens, flushAgentTokens := dispatchSegmentedTokens(extHostRef)
 		spawner.SetTokenObserver(dispatchTokens)
 		spawner.SetTokenFlushObserver(flushAgentTokens)
+		// Render mid-turn steer deliveries in the focused sub-agent transcript,
+		// attributed to that agent, at the moment they enter its context.
+		spawner.SetSteerObserver(dispatchAgentSteer(extHostRef))
 		// Attribute each sub-agent's turn start to that agent, so a focused
 		// transcript shows the prompt alongside the reply.
 		//
@@ -787,6 +790,22 @@ func (m *Model) wireMainAgentCallbacks(p msgSender) {
 		)
 	})
 	a.SetOnToolCall(toolCallForwarder(mainID, p, stopBatch))
+	// Steer deliveries render at the moment they are injected into the running
+	// turn — that is when the model will see them. The queued:true payload
+	// makes the transcript extension render it as a prompt-style bubble, and
+	// dispatchTurnStart detaches onto its own goroutine because this callback
+	// fires on the turn goroutine (mid-turn, possibly inside a WASM call).
+	a.SetOnSteer(func(content string) {
+		if extHostForToken == nil {
+			return
+		}
+		payload, _ := json.Marshal(sdk.BeforeAgentStartPayload{
+			AgentID: mainID,
+			Prompt:  content,
+			Queued:  true,
+		})
+		dispatchTurnStart(extHostForToken, payload)
+	})
 }
 
 // toolCallForwarder returns the main agent's SetOnToolCall callback. A
@@ -1674,6 +1693,10 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 		n, cmd := m.submitToAgent(msg.Content, msg.Display)
 		return n.(Model), cmd, true
 
+	case steerSubmitMsg:
+		m.closeSuggestions()
+		return m.submitSteer(msg.Content), nil, true
+
 	case CommandMsg:
 		if msg.Name == commandHelp {
 			return m, func() tea.Msg { return ShowModalMsg{Text: m.commands.HelpText()} }, true
@@ -2311,6 +2334,49 @@ func (m Model) submitToAgent(content, display string) (tea.Model, tea.Cmd) {
 	immediateTick := func() tea.Msg { return streamTickMsg{} }
 	tick := tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return streamTickMsg{} })
 	return m, tea.Batch(cmd, immediateTick, tick)
+}
+
+// submitSteer injects /steer guidance into the focused agent. Delivery
+// semantics differ by agent state, and pool.Deliver(wake=true) covers both
+// atomically: a running turn leaves the message queued until the injector
+// pulls it in at the next step boundary (the queued pane shows it waiting),
+// while an idle agent starts a turn that consumes it as its first message.
+// Steer type is model-visible, so the idle path needs no special casing —
+// Submit's normal drain delivers it as conversation.
+func (m Model) submitSteer(content string) Model {
+	if m.agentPool == nil {
+		m.pushNotification("⚠ no agent pool — cannot steer")
+		return m
+	}
+	target := m.focusedAgent
+	if target == "" {
+		target = m.mainAgentID
+	}
+	a := m.agentPool.Get(target)
+	if a == nil && target != m.mainAgentID {
+		// Focused agent closed mid-flow; fall back to the root like submitToAgent.
+		target = m.mainAgentID
+		a = m.agentPool.Get(target)
+	}
+	if a == nil {
+		m.pushNotification("⚠ no agent to steer")
+		return m
+	}
+	err := m.agentPool.Deliver(target, sdk.Message{
+		Role:    sdk.RoleUser,
+		Content: content,
+		Type:    sdk.MessageTypeSteer,
+	}, true)
+	if err != nil {
+		m.pushNotification(fmt.Sprintf("⚠ steer failed: %v", err))
+		return m
+	}
+	if a.IsRunning() {
+		m.pushNotification("↳ steer queued — delivered at the next step boundary")
+	} else {
+		m.pushNotification("↳ steer delivered — starting a turn")
+	}
+	return m
 }
 
 // cmdDispatchMessageEnd fires EventMessageEnd with the given role and content.
@@ -3112,6 +3178,37 @@ func dispatchSegmentedTokens(extHost *extension.Host) (func(agentID, text string
 		onToken(text)
 	}
 	return dispatch, flushAgent
+}
+
+// dispatchAgentSteer returns a steer observer that reports a sub-agent's
+// mid-turn steer delivery as EventBeforeAgentStart with Queued:true, so a
+// focused transcript shows the guidance at the point it entered the model's
+// context. Asynchronous for the same deadlock-avoidance reason as
+// dispatchAgentPrompt: the callback fires on the sub-agent's turn goroutine,
+// which may be inside the spawning extension's WASM call.
+func dispatchAgentSteer(extHost *extension.Host) func(agentID, content string) {
+	if extHost == nil {
+		return nil
+	}
+	return func(agentID, content string) {
+		if agentID == "" || strings.TrimSpace(content) == "" {
+			return
+		}
+		payload, err := json.Marshal(sdk.BeforeAgentStartPayload{
+			AgentID: agentID,
+			Prompt:  content,
+			Queued:  true,
+		})
+		if err != nil {
+			return
+		}
+		go func() {
+			_, _ = extHost.DispatchEvent(
+				context.Background(),
+				sdk.Event{Type: sdk.EventBeforeAgentStart, Payload: payload},
+			)
+		}()
+	}
 }
 
 // dispatchAgentPrompt returns a prompt observer that reports a sub-agent's turn

@@ -354,3 +354,11 @@ dispatched at all.
 | High | `TestToolCallForwarder_FlushesTailBeforeToolCall` | buffered tail, then the forwarder fires | tail `TokenMsg` precedes `ToolCallStartMsg` with correct agent/tool |
 | Medium | `TestToolCallForwarder_NilFlushSafe` | forwarder built without a flush | forwards the tool call; no panic |
 | High | `TestWireMainAgentCallbacks_TurnFlushesTailAtToolCall` | real scripted turn: word-delta text then a tool call, through the wired callbacks | complete response text reaches the UI before `ToolCallStartMsg` |
+
+### steer_test.go
+
+| Priority | Test | Scenario | Assertions |
+|---|---|---|---|
+| High | `TestSteerCommand_RegisteredAndParsesArgs` | `/steer` builtin lookup, arg joining, empty-args hint | `Instant` true; handler returns `steerSubmitMsg` with joined text; empty args → `NotifyMsg` |
+| High | `TestSubmitSteer_RunningAgentQueuesSteer` | steer submitted while a gated tool call runs | steer-typed message queued in the inbox; never present in the running request |
+| High | `TestSubmitSteer_IdleAgentWakesTurn` | steer submitted to an idle agent | Deliver wakes a turn; steer reaches the provider and the inbox drains to 0 |

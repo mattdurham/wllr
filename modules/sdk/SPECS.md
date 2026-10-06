@@ -297,6 +297,8 @@ firing on cache-heavy sessions.
 | `MessageTypeNormal`   | `"normal"`    | Regular user/assistant message; included in LLM context             |
 | `MessageTypeSteering` | `"steering"`  | Guidance message; in history but filtered from LLM context slice    |
 | `MessageTypeSystem`   | `"system"`    | Go-level control message (e.g. shutdown_request); never sent to LLM, not written to history |
+| `MessageTypeProtocol` | `"protocol"`  | Model-visible lifecycle notification (e.g. agent_idle); not rendered as a chat bubble |
+| `MessageTypeSteer`    | `"steer"`     | Mid-turn guidance from /steer; fully model-visible, delivered at the running turn's next step boundary (or as an idle agent's next message) |
 
 **Invariants:**
 

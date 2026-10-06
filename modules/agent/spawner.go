@@ -39,6 +39,10 @@ type Spawner struct {
 	// queued inbox messages) with the producing agent. A focused transcript
 	// needs this to show the user/broker prompt that began the turn.
 	promptFn func(agentID, content string, queued bool)
+	// steerFn, when set, receives each /steer message the spawner's agents
+	// deliver mid-turn, so a focused transcript shows the guidance at the
+	// point it entered the model's context.
+	steerFn func(agentID, content string)
 }
 
 // NewSpawner creates a Spawner bound to the given pool.
@@ -84,6 +88,14 @@ func (s *Spawner) SetTokenFlushObserver(fn func(agentID string)) {
 // matching prompt.
 func (s *Spawner) SetPromptObserver(fn func(agentID, content string, queued bool)) {
 	s.promptFn = fn
+}
+
+// SetSteerObserver installs an optional callback invoked when a spawned agent
+// delivers a /steer message into its running turn at a step boundary. The
+// callback runs on the agent's turn goroutine and must not block: dispatches
+// belong on their own goroutine (see dispatchAgentPrompt's deadlock notes).
+func (s *Spawner) SetSteerObserver(fn func(agentID, content string)) {
+	s.steerFn = fn
 }
 
 // Spawn creates and registers a sub-agent with the given parameters.
@@ -205,6 +217,15 @@ func (s *Spawner) Spawn(ctx context.Context, req extension.SpawnRequest) error {
 			if strings.TrimSpace(content) != "" {
 				promptFn(subID, content, false)
 			}
+		})
+	}
+	// Steer deliveries render like queued prompts at the moment they are
+	// injected into the running turn — that is when the model will see them.
+	if s.steerFn != nil {
+		steerFn := s.steerFn
+		subID := req.ID
+		a.SetOnSteer(func(content string) {
+			steerFn(subID, content)
 		})
 	}
 	toolsFn := s.toolsFn

@@ -22,6 +22,13 @@ const (
 	// finished — but it is not conversation: it must not be rendered as a chat
 	// bubble, and it is not recorded as a user prompt.
 	MessageTypeProtocol MessageType = "protocol"
+	// MessageTypeSteer is a mid-turn steering message submitted with /steer.
+	// It is fully model-visible and recorded in history — unlike
+	// MessageTypeSteering, which the Go runtime consumes — but it is delivered
+	// at a step boundary of the running turn (via the agent's PrepareStep
+	// hook) instead of waiting for the next turn. When the agent is idle it is
+	// consumed as the next turn's message like any other inbox message.
+	MessageTypeSteer MessageType = "steer"
 )
 
 // Message is a chat message.

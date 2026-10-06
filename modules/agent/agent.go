@@ -124,6 +124,11 @@ type Agent struct {
 	// onToolCall is called when a tool call is dispatched. Set via SetOnToolCall.
 	onToolCallMu sync.RWMutex
 
+	// onSteer is called on the turn goroutine when a /steer message is
+	// delivered into the running turn at a step boundary. Set via SetOnSteer.
+	onSteerMu sync.RWMutex
+	onSteerFn func(content string)
+
 	// onTurnStart is called after Submit successfully claims a turn and drains
 	// inbox messages into that turn. Set via SetOnTurnStart.
 	onTurnStartMu sync.RWMutex
@@ -1088,6 +1093,9 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 		// the compaction mid-turn and keeps the last real usage on the display.
 		a.dispatchCompactionNotice(pool, result, 0, contextWindow, a.LastUsage())
 	}
+	// One injector per turn (shared by the reactive retry below) delivers /steer
+	// messages at step boundaries; executeTurn records what it delivered.
+	steer := newSteerInjector(a)
 	collectedText, usage, err := a.streamTurn(
 		childCtx,
 		fa,
@@ -1100,6 +1108,7 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 		contextWindow,
 		compactCfg,
 		onToolLoopCompaction,
+		steer,
 	)
 
 	// Reactive fallback: if the provider still rejects the context, compact and
@@ -1151,6 +1160,7 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 			contextWindow,
 			compactCfg,
 			onToolLoopCompaction,
+			steer,
 		)
 	}
 
@@ -1224,6 +1234,10 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 			}
 		}
 	}
+	// Steer messages delivered mid-turn sit between this turn's prompt and its
+	// response: that is where they entered the model's context. Steer is
+	// model-visible (unlike system), so future turns must see them too.
+	a.history = append(a.history, steer.injected...)
 	a.history = append(a.history, sdk.Message{Role: sdk.RoleAssistant, Content: assistantText})
 	a.historyMu.Unlock()
 
@@ -1241,6 +1255,9 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 				canonical.RecordMessage(string(m.Role), m.Content)
 			}
 		}
+	}
+	for _, m := range steer.injected {
+		canonical.RecordMessage(string(m.Role), m.Content)
 	}
 	canonical.RecordMessage(string(sdk.RoleAssistant), assistantText)
 
@@ -1492,6 +1509,9 @@ func contextUsageFromResult(res *fantasy.AgentResult) fantasy.Usage {
 
 // streamTurn sends history+content to fa and collects the full text response.
 // Extracted from Submit to keep its cyclomatic complexity below threshold.
+// steer, when non-nil, delivers mid-turn /steer messages at step boundaries;
+// both stream attempts (initial + reactive retry) share one injector so a
+// message delivered during a failed attempt is not lost.
 func (a *Agent) streamTurn(
 	ctx context.Context,
 	fa fantasy.Agent,
@@ -1504,6 +1524,7 @@ func (a *Agent) streamTurn(
 	contextWindow int64,
 	compactCfg CompactConfig,
 	onCompaction func(CompactionResult),
+	steer *steerInjector,
 ) (string, fantasy.Usage, error) {
 	var collected string
 	compactor := newToolLoopCompactor(lm, contextWindow, compactCfg, onCompaction)
@@ -1517,7 +1538,7 @@ func (a *Agent) streamTurn(
 	res, err := fa.Stream(ctx, fantasy.AgentStreamCall{
 		Messages:    sdkToFantasyMessages(history),
 		Prompt:      content,
-		PrepareStep: compactor.prepare,
+		PrepareStep: steer.wrap(compactor.prepare),
 		OnStepStart: func(_ int) error {
 			stats.stepStart(time.Now())
 			return nil
