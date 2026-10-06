@@ -89,6 +89,19 @@ type Agent struct {
 	lastUsage     fantasy.Usage
 	contextWindow int64 // resolved input context window for this model
 
+	// liveStats tracks provider-stream timing for the in-flight turn so the
+	// statusline can show generation speed (tokens/second). Installed at
+	// streamTurn entry, finished and frozen into lastTps at its exit; nil
+	// whenever no turn is streaming. See streamstats.go for the span
+	// lifecycle (tool execution and sub-agent wait time are excluded from
+	// the denominator by construction). streamTpsMu guards liveStats and
+	// lastTps — deliberately separate from lastUsageMu because usage and
+	// speed are written at different points of the turn and read by
+	// different tick paths.
+	streamTpsMu sync.Mutex
+	liveStats   *streamStats
+	lastTps     float64 // frozen end-of-turn tokens/second, kept visible while idle
+
 	// compactionCount is the number of successful context compactions this agent
 	// has run for its session lifetime. Monotonically non-decreasing; no-op
 	// compactions (history fits) and failures do not increment it. Incremented
@@ -524,6 +537,53 @@ func (a *Agent) setLastUsage(u fantasy.Usage) {
 	a.lastUsageMu.Lock()
 	a.lastUsage = u
 	a.lastUsageMu.Unlock()
+}
+
+// beginStreamStats installs a fresh stream tracker for the turn about to
+// stream and returns it for direct use by the turn's stream callbacks (which
+// fantasy invokes on the turn goroutine). Called only from the turn goroutine
+// — one turn at a time — so replacing any stale tracker is safe.
+func (a *Agent) beginStreamStats() *streamStats {
+	stats := newStreamStats()
+	a.streamTpsMu.Lock()
+	a.liveStats = stats
+	a.streamTpsMu.Unlock()
+	return stats
+}
+
+// endStreamStats freezes the tracker at turn exit: the exact rate computed
+// from provider-reported output is kept in lastTps so the display stays
+// visible while the agent is idle (mirroring how LastUsage keeps the ctx
+// value), and the live tracker is cleared. Called from streamTurn's normal
+// exit path and from its deferred panic guard; the second call is a no-op
+// once liveStats is nil.
+func (a *Agent) endStreamStats(totalOutputTokens int64, reported bool) {
+	a.streamTpsMu.Lock()
+	stats := a.liveStats
+	a.liveStats = nil
+	a.streamTpsMu.Unlock()
+	if stats == nil {
+		return
+	}
+	stats.finish(time.Now(), totalOutputTokens, reported)
+	frozen := stats.exact()
+	a.streamTpsMu.Lock()
+	a.lastTps = frozen
+	a.streamTpsMu.Unlock()
+}
+
+// StreamTps returns the agent's generation speed in output tokens per
+// second: the live estimate while a turn streams and the frozen end-of-turn
+// rate afterwards. Zero before the first turn and whenever there is nothing
+// meaningful to report (see tpsRate's minStreamSpan guard).
+func (a *Agent) StreamTps() float64 {
+	a.streamTpsMu.Lock()
+	stats, frozen := a.liveStats, a.lastTps
+	a.streamTpsMu.Unlock()
+	if stats != nil {
+		return stats.live(time.Now())
+	}
+	return frozen
 }
 
 // ID returns the agent's unique identifier within its pool.
@@ -1429,10 +1489,25 @@ func (a *Agent) streamTurn(
 ) (string, fantasy.Usage, error) {
 	var collected string
 	compactor := newToolLoopCompactor(lm, contextWindow, compactCfg, onCompaction)
+	// Live tokens-per-second tracking: spans follow the step lifecycle so
+	// tool execution and sub-agent wait time are excluded from the streamed
+	// denominator (see streamstats.go). The deferred end covers panic exits;
+	// on the normal path below it is a no-op because endStreamStats has
+	// already cleared the tracker.
+	stats := a.beginStreamStats()
+	defer a.endStreamStats(0, false)
 	res, err := fa.Stream(ctx, fantasy.AgentStreamCall{
 		Messages:    sdkToFantasyMessages(history),
 		Prompt:      content,
 		PrepareStep: compactor.prepare,
+		OnStepStart: func(_ int) error {
+			stats.stepStart(time.Now())
+			return nil
+		},
+		OnStepFinish: func(step fantasy.StepResult) error {
+			stats.stepFinish(time.Now(), step.Usage.OutputTokens)
+			return nil
+		},
 		OnTextStart: func(_ string) error {
 			// Each text part is a separate assistant segment — typically the
 			// narration surrounding a tool call. Parts carry no separating
@@ -1460,6 +1535,7 @@ func (a *Agent) streamTurn(
 			default:
 			}
 			collected += text
+			stats.token(time.Now(), text)
 			a.markActivity()
 			if pool != nil {
 				pool.addTokens(1)
@@ -1493,9 +1569,16 @@ func (a *Agent) streamTurn(
 		},
 	})
 	var usage fantasy.Usage
+	totalOutput := int64(0)
+	reported := false
 	if res != nil {
 		usage = contextUsageFromResult(res)
+		// TotalUsage.OutputTokens is cumulative across all steps, matching the
+		// summed span durations; a single step's Usage would undercount.
+		totalOutput = res.TotalUsage.OutputTokens
+		reported = err == nil && totalOutput > 0
 	}
+	a.endStreamStats(totalOutput, reported)
 	return collected, usage, err
 }
 

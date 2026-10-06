@@ -1443,6 +1443,20 @@ func (m Model) updateKeyPressDropdown(kp tea.KeyPressMsg) (Model, tea.Cmd, bool)
 	return m, nil, false
 }
 
+// formatTps renders a tokens-per-second rate for the statusline. Zero or
+// negative (nothing measured yet, a failed turn, or a rate suppressed by the
+// agent's minStreamSpan guard) yields "" so the wasm renderer hides the
+// segment entirely.
+func formatTps(tps float64) string {
+	if tps <= 0 {
+		return ""
+	}
+	if tps < 1 {
+		return "<1 t/s"
+	}
+	return fmt.Sprintf("%.0f t/s", tps)
+}
+
 // updateStream handles token streaming messages: TokenMsg, streamTickMsg, StreamDoneMsg, agentWakeupMsg.
 // Returns (model, cmd, true) when the message was handled.
 func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
@@ -1470,6 +1484,13 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 		if m.streaming {
 			cmds = append(cmds, tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return streamTickMsg{} }))
 		}
+		// Live generation speed for the statusline. Polled from the agent's
+		// stream tracker so the value updates in place while tokens arrive;
+		// zero (nothing streamed yet, silent tail, or a sub-100ms span) clears
+		// the segment instead of painting a stale or absurd number.
+		if m.agentPool != nil {
+			m.live.setStatus("tps", formatTps(m.agentPool.MainAgentTps()))
+		}
 		return m, tea.Batch(cmds...), true
 
 	case StreamDoneMsg:
@@ -1493,6 +1514,10 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 				m.live.setStatus("ctx", "")
 				m.live.setStatus("ctx rem", "")
 			}
+			// Freeze the generation-speed display at the exact end-of-turn rate
+			// the agent computed from provider-reported output. Like ctx, the
+			// last value stays visible while the agent is idle; zero clears it.
+			m.live.setStatus("tps", formatTps(m.agentPool.MainAgentTps()))
 		}
 		if msg.Err != nil {
 			if errors.Is(msg.Err, context.Canceled) {

@@ -132,6 +132,26 @@ mismatched endpoint overrides.
 | `TestEventContextUsageDispatched` | dispatcher fires on a successful turn | usageLM 30k/100, dispatcher captured | dispatched usage non-zero, notice nil, compactions 0 |
 | `TestEventContextUsageDispatchedOnErrorRetainsLastKnown` | failed main turn re-dispatches retained usage | successThenErrLM through main | a dispatch with InputTokens 1200 arrives after the failed turn |
 
+## Stream tokens-per-second (streamstats_test.go)
+
+Internal (`package agent`) tests with injected timestamps — no sleeps, fully
+deterministic. Covers the tracker in isolation and through the agent's
+Submit→streamTurn path.
+
+| Test | Scenario | Assertions |
+|------|----------|------------|
+| `TestTPSRate_Guards` | rate conversion guards | zero/negative tokens → 0; below `minStreamSpan` → 0; exactly min span and 2s produce exact rates |
+| `TestStreamStats_LiveExcludesSilentTail` | last token at 100ms, stepFinish at 1000ms | live rate = 10 tokens / 100ms — the silent tail is not in the denominator |
+| `TestStreamStats_MultiStepExcludesToolGap` | two steps separated by a 2s tool-execution gap | live rate = 40 / 2000ms of streamed time — the gap never enters |
+| `TestStreamStats_FinishFreezesExactRate` | reported TotalUsage beats the per-step sum | `exact()` = 50/500ms; `live` returns the frozen value afterwards |
+| `TestStreamStats_FinishEstimatesWhenUsageMissing` | no provider usage | chars/4 over all streamed text stands in (max, never summed with doneOutput) |
+| `TestStreamStats_BelowMinSpanHidden` | 50ms span | live and exact are 0 (segment hidden) |
+| `TestStreamStats_TokenReopensSpan` | deltas with no step lifecycle; and a single token at span-open | reopen folds first→last token; a zero-duration span reports 0 |
+| `TestStreamStats_FinishIdempotent` | second finish (deferred panic guard) | rate unchanged — estimate never double-counted |
+| `TestAgent_StreamTps_Lifecycle` | agent-level tracker lifecycle | 0 fresh; live while open; frozen after `endStreamStats`; redundant end call is a no-op; tracker cleared |
+| `TestAgent_StreamTps_EndToEnd` | real Submit with a sleeping LM (10×60ms, output 100) | `pool.MainAgentTps()` > 0 and ≤ 200 (denominator must cover ≥540ms of sleeps); value stable while idle |
+| `TestAgent_StreamTps_InstantStreamHidden` | instant usage-less LM | `MainAgentTps()` = 0 (hidden) |
+
 ## Missing / Recommended Tests
 
 | Priority | Test | Scenario | Assertions |

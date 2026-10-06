@@ -361,6 +361,30 @@ updates the context-usage status keys via `setStatus`:
 **Invariant:** The `ctx` and `ctx rem` keys are only present when a context window is
 configured and at least one turn has completed. Updated once per `StreamDoneMsg`.
 
+### Generation speed (`tps`)
+
+The harness polls the main agent's stream tracker so the statusline can show
+generation speed:
+
+- On each `streamTickMsg` (the 100ms streaming tick), the handler calls
+  `m.agentPool.MainAgentTps()` and stores `formatTps(v)` under the `"tps"`
+  status key. The live rate comes from the agent's span-based tracker (agent
+  SPECS §19), so it excludes tool execution and sub-agent wait time.
+- On each `StreamDoneMsg` (inside the `agentPool != nil` block, next to the
+  `ctx` update), the handler re-reads `MainAgentTps()` — by then the agent
+  has frozen the exact end-of-turn rate — so the display settles at the
+  authoritative value and stays visible while idle, like `ctx`.
+- `formatTps` renders `"<n> t/s"` (rounded); a sub-1 rate renders "<1 t/s";
+  zero or negative renders `""`, which deletes the key and hides the
+  statusline segment (no measurement, sub-100ms span, or failed turn).
+
+**Invariant:** the harness only formats and copies the agent's value; all
+timing lives in the agent module (`Agent.StreamTps` / `pool.MainAgentTps`).
+A nil `agentPool` skips both updates.
+
+**Invariant:** consumers treat an empty `"tps"` key as "hide the segment"
+(the bundled statusline wasm omits `sl-tps` entirely when the key is absent).
+
 ---
 
 ## 19. Message Types
@@ -382,7 +406,7 @@ configured and at least one turn has completed. Updated once per `StreamDoneMsg`
 | `ShowPickerMsg{Title,Callback,Items,Split}` | extension → TUI | Open the picker overlay; `Split` requests the two-pane layout (type-to-filter list left, highlighted item's `Preview` right) |
 | `abortStreamMsg`            | OnAbort/Esc → TUI  | Cancel the active agent turn                                    |
 | `dispatchOnCommandMsg`      | command → TUI      | Dispatch EventOnCommand for an extension-registered command     |
-| `streamTickMsg`             | internal timer     | Drive the "working." animated indicator                         |
+| `streamTickMsg`             | internal timer     | Drive the "working." animated indicator and poll the live `tps` status key |
 
 ---
 

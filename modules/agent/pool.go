@@ -309,6 +309,21 @@ func (p *AgentPool) MainAgentContextUsage() sdk.ContextUsage {
 	return sdk.ContextUsageFromFantasy(a.LastUsage(), window)
 }
 
+// MainAgentTps returns the main agent's current generation speed in output
+// tokens per second: the live rate while a turn streams, the frozen
+// end-of-turn rate afterwards (kept visible while idle, matching the ctx
+// display), and 0 when nothing has been measured yet. Zero also hides the
+// statusline segment (see the harness tick and wasm renderer).
+func (p *AgentPool) MainAgentTps() float64 {
+	p.mu.RLock()
+	a := p.agents[MainAgentID]
+	p.mu.RUnlock()
+	if a == nil {
+		return 0
+	}
+	return a.StreamTps()
+}
+
 // ContextBreakdown returns the context breakdown for the main agent. When the
 // main agent does not exist yet (no turn has run), all fields are zero.
 func (p *AgentPool) ContextBreakdown() ContextBreakdown {

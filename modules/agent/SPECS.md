@@ -1027,3 +1027,60 @@ model sees as the tool error. See `extensions/agents/README.md` for the
 detection rules and `~/.wllr/extensions/agents/config.yaml` for configuration
 (`loop_guard:` — enabled/window/scope/min_repeats/max_period; missing config
 uses defaults). NOTES §45 records why the extension seam beat the pool seam.
+
+---
+
+## 19. Stream Tokens-per-Second (liveStats)
+
+`streamstats.go` implements per-turn provider-stream timing so the statusline
+can show generation speed (tokens/second). The tracker measures the provider
+stream, not the turn: spans follow fantasy's step lifecycle — `OnStepStart`
+opens a span just before each provider call (so time-to-first-token is
+included), `OnTextDelta` marks token arrivals and accumulates characters, and
+`OnStepFinish` closes the span right after the step stream ends, before
+fantasy executes the step's tools. Tool execution and sub-agent wait time
+therefore fall between spans and never enter the denominator — tokens/second
+measures generation speed, not turn duration.
+
+Lifecycle is owned by `streamTurn` (so both call sites — first attempt and
+reactive retry — are covered): `beginStreamStats()` installs a fresh tracker
+at entry and returns it for the callbacks; a deferred
+`endStreamStats(0, false)` guards panic exits; the normal exit calls
+`endStreamStats(totalOutput, reported)` with `res.TotalUsage.OutputTokens`
+(cumulative across steps, matching the summed span durations) and
+`reported = err == nil && totalOutput > 0`. `endStreamStats` freezes the exact
+rate into `a.lastTps` — kept visible while idle, mirroring how `LastUsage`
+keeps the ctx value — and clears the tracker, so the deferred call is a no-op
+on the normal path.
+
+Fields `streamTpsMu sync.Mutex`, `liveStats *streamStats`, and `lastTps` are
+guarded by `streamTpsMu`, deliberately separate from `lastUsageMu` (usage and
+speed are written at different points of the turn and read by different tick
+paths). `Agent.StreamTps()` returns the live rate while a tracker is installed
+and the frozen rate afterwards; `AgentPool.MainAgentTps()` delegates for the
+main agent (0 when it does not exist).
+
+Accounting rules (enforced by `streamstats_test.go`):
+
+- A closed span contributes only `lastTokenAt − spanStart`: a stalled
+  stream's silent tail is TTFT-of-nothing, not generation time.
+- `stepFinish` drops the span's chars/4 estimate — the step's reported output
+  tokens supersede it — so `live` never double-counts a closed span.
+- `finish` without reported usage estimates output as chars/4 over all
+  streamed text (`totalChars`), taken as a **max** with the per-step sum,
+  never added to it (adding would double-count partially reported turns).
+- Rates whose accumulated streaming time is below `minStreamSpan` (100ms)
+  report 0; every consumer treats 0 as "hide the segment".
+- A span is folded into `streamedNS` exactly once: `closeSpanLocked` zeroes
+  the span state after folding, so `live` and a later `finish`/`stepStart`
+  cannot fold the same span twice (double-folding halved the rate; caught by
+  `TestStreamStats_LiveExcludesSilentTail` before it shipped).
+
+**Invariant:** `liveStats` is installed/cleared only from the turn goroutine
+(one turn at a time); `StreamTps` may be called from any goroutine (the UI
+tick) and never mutates tracker state.
+
+**Invariant:** the tps value survives turn end (frozen `lastTps`) until the
+next turn replaces it, exactly like the ctx display; failed turns still
+freeze an estimate (the deferred guard runs `finish`), never a zero that
+would flash the segment off.

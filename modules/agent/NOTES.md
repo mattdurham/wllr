@@ -966,3 +966,41 @@ and denial is scoped/configurable (`scope: all|subagents`). The blocked call
 is rolled back out of the buffer so denial retries cannot consume window
 slots. The fantasy PrepareStep seam remains correct for future in-band
 message shaping; this guard no longer uses it.
+
+---
+
+## 46. Tokens-per-second measures the provider stream, not the turn (2026-09-29)
+
+The statusline shows generation speed as tokens/second. The naive denominator
+— turn wall-clock — is wrong in exactly the cases users care about: a turn
+that calls three tools and waits on two sub-agents would report a fraction of
+the real generation speed, and the number would swing with unrelated work.
+The fix is span-based timing pinned to fantasy's step lifecycle, which is the
+only seam that knows exactly when a provider stream starts and ends
+(`OnStepStart`/`OnStepFinish`, invoked around each provider call at fantasy
+agent.go's step loop).
+
+Decisions worth recording:
+
+1. **The silent tail is excluded.** A closed span contributes only up to its
+   last token. A stream that stalls mid-response is not generating during the
+   stall; counting it would understate speed exactly when something is wrong.
+2. **The step's chars estimate dies with its span.** The first implementation
+   kept `spanChars` after `OnStepFinish`, so the live rate double-counted
+   every completed step (est. chars/4 on top of the step's real output
+   tokens) — halving the displayed rate. Resetting on close, plus a separate
+   never-reset `totalChars` for the no-usage fallback, is the accounting that
+   survives both mid-turn reads and end-of-turn freezing.
+3. **`max`, never `+`, when usage is missing.** The chars/4 fallback covers
+   ALL spans; adding it to partially reported steps would double-count. The
+   estimate is only ever a stand-in for absent usage.
+4. **Frozen, not cleared, at turn end.** Like the ctx display, the last
+   measured rate stays visible while idle; zero only hides (no measurement,
+   sub-100ms span, instant fake stream). The 100ms floor keeps a microsecond
+   test double from reporting 100,000 t/s.
+5. **Own mutex (`streamTpsMu`).** Usage (`lastUsageMu`) and speed are written
+   at different points of the turn and read by different tick paths; sharing
+   a lock would couple them for no benefit.
+
+The harness poll (100ms tick → `pool.MainAgentTps()` → `"tps"` status key)
+and the wasm `sl-tps` segment are pure consumers; all timing lives here.

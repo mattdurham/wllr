@@ -17,6 +17,7 @@
 //	  sl-agent       (text, fg:muted)   — "agent:<id>"; "agent:main" for the root
 //	  sl-sep3        (text, "  ")
 //	  sl-working     (text, fg:accent)  — empty when idle
+//	  sl-tps         (text, fg:muted)   — "87 t/s"; omitted until the host reports a rate
 //	  sl-ctx         (text, fg:muted)   — "ctx:P%/R%" when a context window is configured
 //	  sl-compact     (text, fg:muted)   — "C<n>" after the first successful compaction
 //
@@ -44,6 +45,7 @@ const (
 	agentID    = "sl-agent"
 	sep3ID     = "sl-sep3"
 	workingID  = "sl-working"
+	tpsID      = "sl-tps"
 	ctxID      = "sl-ctx"
 	compactID  = "sl-compact"
 )
@@ -55,6 +57,7 @@ var (
 	lastModel       string
 	lastAgent       string // focused-agent segment text
 	lastWorking     string // rendered working indicator text or ""
+	lastTps         string // generation-speed segment text or "" when hidden
 	lastCtx         string // ctx text or "" when no window configured
 	lastCompactions int    // cumulative successful compactions this session
 )
@@ -143,6 +146,9 @@ func patchAll() {
 		UIText(sep3ID, "  "),
 		{ID: workingID, Type: "text", Text: lastWorking, Props: &accent},
 	}
+	if lastTps != "" {
+		nodes = append(nodes, UINode{ID: tpsID, Type: "text", Text: lastTps, Props: &muted})
+	}
 	if lastCtx != "" {
 		nodes = append(nodes, UINode{ID: ctxID, Type: "text", Text: lastCtx, Props: &muted})
 	}
@@ -197,12 +203,14 @@ func renderWorking(info StatusInfo) string {
 
 func syncDynamicStatus(info StatusInfo) bool {
 	working := renderWorking(info)
+	tps := renderTps(info)
 	ctx := renderContext(info)
 	agent := renderAgent(info)
-	if working == lastWorking && ctx == lastCtx && agent == lastAgent {
+	if working == lastWorking && tps == lastTps && ctx == lastCtx && agent == lastAgent {
 		return false
 	}
 	lastWorking = working
+	lastTps = tps
 	lastCtx = ctx
 	lastAgent = agent
 	return true
@@ -224,6 +232,24 @@ func renderContext(info StatusInfo) string {
 		return "  ctx:" + remaining
 	}
 	return "  ctx:" + value
+}
+
+// renderTps renders the generation-speed segment ("  87 t/s"). Hidden while
+// the host reports no measurable rate — before the first token of a turn,
+// during tool execution and sub-agent waits, after a failed turn, and for
+// streams too short to divide meaningfully (the agent suppresses rates whose
+// streamed span is under 100ms). The unit string comes from the host; this
+// side only adds the two-space separator, matching how the ctx segment is
+// composed.
+func renderTps(info StatusInfo) string {
+	if info.Statuses == nil {
+		return ""
+	}
+	value := strings.TrimSpace(info.Statuses["tps"])
+	if value == "" {
+		return ""
+	}
+	return "  " + value
 }
 
 // rootAgentLabel is the segment text shown when the root agent has focus. An

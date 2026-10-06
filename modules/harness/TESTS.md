@@ -317,6 +317,15 @@ a model, and typing/backspace filtering in the searchable picker.
 | High | `TestShowPickerMsg_SplitOpensSplitPicker` | ShowPickerMsg with Split | picker opens searchable + preview; view shows preview pane |
 | High | `TestShowPickerMsg_PlainOpensSinglePane` | ShowPickerMsg without Split | picker opens without the split layout |
 
+## Generation speed status (statustps_test.go)
+
+| Level | Test | Scenario | Assertion |
+|-------|------|----------|-----------|
+| High | `TestFormatTps` | formatting table | 0/negative → "" (hide); sub-1 → "<1 t/s"; rounding to "<n> t/s" |
+| High | `TestModel_Update_StreamTickMsg_PropagatesLiveTps` | real mid-turn stream (sleeping LM); poll the agent tracker until live, then tick | the `"tps"` status key carries a non-empty live value |
+| High | `TestModel_Update_StreamDoneMsg_FreezesTpsFromPool` | turn completes, then `StreamDoneMsg` | `"tps"` holds the frozen "<n> t/s" value |
+| High | `TestModel_Update_TpsHiddenWithoutMeasuredStream` | no turn; then the bundled mock's instant no-usage stream | `"tps"` stays empty after tick and done |
+
 ## Recall tool registration (recalltool_test.go)
 
 Issue #42. The harness, not the extension host, registers the agent-scoped
