@@ -102,9 +102,12 @@ func TestStreamTurnReturnsUsage(t *testing.T) {
 	}
 }
 
-// TestStreamTurnUsageZeroOnError verifies that when an agent's first turn fails,
-// LastUsage stays zero-valued: there is no prior successful turn whose context
-// size could be retained.
+// TestStreamTurnUsageZeroOnError verifies that when an agent's first turn
+// fails, LastUsage retains the turn-start baseline seed rather than real
+// provider usage: there is no prior successful turn to retain, but the seed
+// (chars/4 over the outgoing request) is still the best-known context size —
+// the next attempt sends roughly the same payload. With no system prompt,
+// tools, or history, the seed is exactly len(prompt)/4.
 func TestStreamTurnUsageZeroOnError(t *testing.T) {
 	pool := agent.NewPool()
 	errLM := &errStreamLM{}
@@ -127,8 +130,10 @@ func TestStreamTurnUsageZeroOnError(t *testing.T) {
 	}
 
 	u := a.LastUsage()
-	if u.InputTokens != 0 || u.OutputTokens != 0 {
-		t.Errorf("LastUsage after error = {InputTokens:%d, OutputTokens:%d}, want zero", u.InputTokens, u.OutputTokens)
+	want := int64(len("will fail") / 4)
+	if u.InputTokens != want || u.OutputTokens != 0 {
+		t.Errorf("LastUsage after error = {InputTokens:%d, OutputTokens:%d}, want seed {InputTokens:%d, OutputTokens:0}",
+			u.InputTokens, u.OutputTokens, want)
 	}
 }
 

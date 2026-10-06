@@ -84,10 +84,26 @@ type Agent struct {
 	inbox mailbox
 
 	// lastUsage is the most recent known token usage. Written per provider
-	// step by observeStepUsage (peak-within-turn semantics) and again at turn
-	// end by setLastUsage; read by LastUsage(). Protected by lastUsageMu.
-	lastUsage     fantasy.Usage
-	contextWindow int64 // resolved input context window for this model
+	// step by observeStepUsage (peak-within-turn semantics), seeded with a
+	// chars/4 baseline by seedUsageEstimate before a fresh session's first
+	// provider call, and again at turn end by setLastUsage; read by
+	// LastUsage(). Protected by lastUsageMu.
+	lastUsage fantasy.Usage
+	// usageReported records whether any provider-reported usage has ever been
+	// stored on this agent. Until it is true, executeTurn seeds lastUsage with
+	// a chars/4 baseline (contextEstimate) at turn start, so a fresh session
+	// shows the size of what is actually sent — system prompt, tool
+	// definitions, and the conversation — instead of 0. Once real usage is
+	// reported, seeding is permanently disabled: reported numbers are
+	// authoritative and already include everything on the wire.
+	usageReported bool
+	// usageIsEstimate marks the currently stored lastUsage as a seed rather
+	// than provider-reported. The first real step report replaces it outright:
+	// the seed deliberately overestimates (chars/4), so a peak rule would pin
+	// the display to the overestimate until real usage grew past it. Cleared
+	// by observeStepUsage's first replacement and by markUsageReported.
+	usageIsEstimate bool
+	contextWindow   int64 // resolved input context window for this model
 
 	// liveStats tracks provider-stream timing for the in-flight turn so the
 	// statusline can show generation speed (tokens/second). Installed at
@@ -531,7 +547,8 @@ func (a *Agent) dispatchCompactionNotice(
 }
 
 // LastUsage returns the token usage from the most recently completed turn.
-// Returns a zero-valued Usage before the first turn completes.
+// Before any provider-reported usage exists it returns the turn-start baseline
+// seed (see seedUsageEstimate), and before the very first turn a zero value.
 func (a *Agent) LastUsage() fantasy.Usage {
 	a.lastUsageMu.RLock()
 	defer a.lastUsageMu.RUnlock()
@@ -543,6 +560,47 @@ func (a *Agent) setLastUsage(u fantasy.Usage) {
 	a.lastUsageMu.Lock()
 	a.lastUsage = u
 	a.lastUsageMu.Unlock()
+}
+
+// markUsageReported records that real provider-reported usage has been
+// stored, permanently disabling baseline seeding and clearing the estimate
+// marker. Called by the turn goroutine right after setLastUsage stores a
+// real (non-retained) turn result.
+func (a *Agent) markUsageReported() {
+	a.lastUsageMu.Lock()
+	a.usageReported = true
+	a.usageIsEstimate = false
+	a.lastUsageMu.Unlock()
+}
+
+// seedUsageEstimate installs a chars/4 baseline estimate as lastUsage before
+// the turn's first provider call, so the context indicator shows the size of
+// what is actually about to go over the wire — system prompt, tool
+// definitions, and the conversation — instead of 0 on a fresh session. A
+// no-op once any real usage has been reported (usageReported): reported
+// numbers are authoritative and already include everything on the wire. For
+// the main agent the seed is dispatched like a real report, so the statusline
+// extension learns the context window and the baseline before the first step
+// completes. Called only from the agent's turn goroutine.
+func (a *Agent) seedUsageEstimate(estimate int64, pool *AgentPool, contextWindow int64) {
+	if estimate <= 0 {
+		return
+	}
+	a.lastUsageMu.Lock()
+	if a.usageReported {
+		a.lastUsageMu.Unlock()
+		return
+	}
+	a.lastUsage = fantasy.Usage{InputTokens: estimate}
+	a.usageIsEstimate = true
+	a.lastUsageMu.Unlock()
+	if pool != nil && a.id == MainAgentID {
+		pool.dispatchContextUsage(
+			sdk.ContextUsageFromFantasy(fantasy.Usage{InputTokens: estimate}, contextWindow),
+			nil,
+			a.compactionCount,
+		)
+	}
 }
 
 // observeStepUsage records one provider step's usage mid-turn, from
@@ -558,7 +616,9 @@ func (a *Agent) setLastUsage(u fantasy.Usage) {
 //     turn-end semantics (peak input side within the turn): it advances only
 //     when the step's input side (input + cache read + cache creation)
 //     exceeds what is stored, mirroring contextUsageFromResult's peak rule
-//     and the turn-end retain-on-error guard.
+//     and the turn-end retain-on-error guard. The one exception is a stored
+//     baseline seed (usageIsEstimate): the first real report replaces it
+//     outright rather than peaking against it.
 //
 //  2. For the main agent, EventContextUsage is dispatched per step, so the
 //     statusline extension learns the context window and the live value even
@@ -575,9 +635,16 @@ func (a *Agent) observeStepUsage(step fantasy.Usage, pool *AgentPool, contextWin
 	}
 	a.lastUsageMu.Lock()
 	prev := a.lastUsage
-	if input > prev.InputTokens+prev.CacheReadTokens+prev.CacheCreationTokens {
+	if a.usageIsEstimate {
+		// First real report replaces the seed outright. The seed intentionally
+		// overestimates (chars/4 heuristic), so a peak rule here would pin the
+		// display to the overestimate until real usage grew past it.
+		a.lastUsage = step
+		a.usageIsEstimate = false
+	} else if input > prev.InputTokens+prev.CacheReadTokens+prev.CacheCreationTokens {
 		a.lastUsage = step
 	}
+	a.usageReported = true
 	a.lastUsageMu.Unlock()
 	if pool != nil && a.id == MainAgentID {
 		pool.dispatchContextUsage(sdk.ContextUsageFromFantasy(step, contextWindow), nil, a.compactionCount)
@@ -1077,7 +1144,7 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 			// the turn is still running, instead of the stale pre-compaction
 			// number until stream end.
 			a.dispatchCompactionNotice(pool, result,
-				estimateTokens(history)+estimateStr(sysPrompt)+estimateStr(content)+estimateToolTokens(tools),
+				contextEstimate(history, sysPrompt, content, tools),
 				contextWindow, a.LastUsage())
 		}
 	}
@@ -1135,6 +1202,11 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 	// One injector per turn (shared by the reactive retry below) delivers /steer
 	// messages at step boundaries; executeTurn records what it delivered.
 	steer := newSteerInjector(a)
+	// Seed the display baseline for a fresh session: until the first provider
+	// step reports, ctx would read 0 even though the system prompt, tool
+	// definitions, and conversation are already on the wire. No-op once real
+	// usage exists (usageReported).
+	a.seedUsageEstimate(contextEstimate(history, sysPrompt, content, tools), pool, contextWindow)
 	collectedText, usage, err := a.streamTurn(
 		childCtx,
 		fa,
@@ -1179,7 +1251,7 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 			a.lastSummary = result.Summary
 			a.lastSummaryMu.Unlock()
 			a.dispatchCompactionNotice(pool, result,
-				estimateTokens(history)+estimateStr(sysPrompt)+estimateStr(content)+estimateToolTokens(tools),
+				contextEstimate(history, sysPrompt, content, tools),
 				contextWindow, a.LastUsage())
 		}
 		streamMsgs, streamPrompt, blocked, blockReason = buildStream(history, content)
@@ -1187,6 +1259,9 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 			a.finishTurn(ctx, &ProviderRequestBlockedError{Reason: blockReason}, nil, onDone, inboxMsgs)
 			return
 		}
+		// Re-seed for the retry's smaller post-compaction context; a no-op if
+		// the failed attempt already reported a step (usageReported set).
+		a.seedUsageEstimate(contextEstimate(history, sysPrompt, content, tools), pool, contextWindow)
 		collectedText, usage, err = a.streamTurn(
 			childCtx,
 			fa,
@@ -1212,12 +1287,22 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 	// failed turn and silently disabled usage-based compaction. Failed-turn
 	// accounting lives in TurnUsage.Err below, not in wiping the context size.
 	turnUsage := usage
+	reportedTurn := true
 	if err != nil || childCtx.Err() != nil {
 		turnUsage = a.LastUsage()
+		reportedTurn = false
 	} else if usage.InputTokens+usage.CacheReadTokens+usage.CacheCreationTokens == 0 {
 		turnUsage = a.LastUsage()
+		reportedTurn = false
 	}
 	a.setLastUsage(turnUsage)
+	if reportedTurn {
+		// Real provider-reported usage is now on record: baseline seeding is
+		// permanently disabled and the estimate marker cleared. A retained
+		// (error/cancel/zero-usage) turn keeps whatever was stored — possibly
+		// still the seed, which remains the best-known value.
+		a.markUsageReported()
+	}
 	if pool != nil {
 		// Forward context window usage for the main agent so the harness/status
 		// bar and WASM extensions (EventContextUsage) see the latest usage.

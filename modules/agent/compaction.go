@@ -165,6 +165,16 @@ func estimateToolTokens(tools []fantasy.AgentTool) int64 {
 	return chars / 4
 }
 
+// contextEstimate returns the chars/4 estimate of the next provider request's
+// size: conversation history plus system prompt plus the new content plus the
+// serialized tool definitions. It is the quantity shouldCompactWithTools
+// preflights against the window, dispatchCompactionNotice reports after a
+// compaction, and executeTurn seeds the display baseline with before the
+// first provider-reported usage exists.
+func contextEstimate(history []sdk.Message, sysPrompt, content string, tools []fantasy.AgentTool) int64 {
+	return estimateTokens(history) + estimateStr(sysPrompt) + estimateStr(content) + estimateToolTokens(tools)
+}
+
 // shouldCompact returns true when the estimated total context (history +
 // system prompt + next message) is close enough to the window limit that
 // compaction should run before the next API call.

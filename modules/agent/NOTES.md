@@ -1135,3 +1135,43 @@ die with the parent because their work has nowhere to go. `Cancel(id)` remains
 the non-destructive variant: turns stop, agents stay in the pool. Tests in
 kill_test.go prove the turn-interrupt (a blocked ctx-aware tool returns on
 kill), the subtree cascade including mid-turn descendants, and the root guard.
+
+## 50. Fresh-session ctx seeds a chars/4 baseline instead of 0 (2026-10-06)
+
+`lastUsage` was zero until the first provider step reported, so a fresh session's
+statusline showed ctx 0 (or nothing) even though the system prompt, tool definitions,
+and the user's prompt were already on the wire — the operator reasonably read 0 as a
+calculation bug. The fix reuses the estimator the compaction path already trusts:
+`executeTurn` calls `seedUsageEstimate(contextEstimate(...))` before each `streamTurn`
+attempt while `usageReported` is false, storing a chars/4 baseline as `lastUsage` and
+dispatching it (main agent) so the extension learns the window at turn start, not
+step 1.
+
+Two rules make the seed honest rather than sticky:
+
+1. **Replacement, not peak.** The seed intentionally overestimates (chars/4 — the same
+   bias that keeps compaction safe). A peak rule against it would pin the display high
+   until real usage grew past the overestimate. So the first real `observeStepUsage`
+   replaces the stored seed outright (`usageIsEstimate` flag), and only subsequent
+   steps peak.
+2. **Seeding is one-shot per session.** Once real usage exists, seeding is permanently
+   off. Re-seeding at every turn start would bounce the display up to the overestimate
+   each turn before step 1 corrected it; the previous turn's final reported input is
+   already a good stand-in (context persists across turns), and it is replaced within
+   one step anyway.
+
+Failed/cancelled first turns retain the seed (the retained-value rule stores the best
+known value and `markUsageReported` is not called), so the next attempt re-seeds —
+still correct, since nothing authoritative ever arrived.
+
+The `/context` modal would otherwise have labeled the seed "provider-reported";
+`ContextBreakdown.LastRequestIsEstimate` distinguishes the two and the modal says
+"chars/4 baseline — no provider report yet". The seed also feeds the usage-threshold
+compaction trigger via `LastUsage()` — correct by construction: if the baseline
+estimate really is over 80% of the window, the heuristic trigger
+(`shouldCompactWithTools`, same formula) would fire anyway.
+
+Deliberately out of scope: seeding at spawn time. Before the first `Submit` there is
+no resolved tool set (`toolsFn` may not be installed) and no prompt — the estimate
+would be fiction. A fresh idle session shows no ctx segment until the first turn
+begins, which is truthful: nothing has been sent yet.

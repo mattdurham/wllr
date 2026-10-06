@@ -466,8 +466,32 @@ for step N fires after step N's tools complete and before step N+1's tools start
 moment between an orchestrator's sleep/poll loops. Sub-agent steps never dispatch (the
 main indicator is main-agent-only, matching the turn-end dispatch).
 
-**Invariant:** `LastUsage()` returns a zero-valued `fantasy.Usage` only before the first
-provider step with reported input usage completes.
+**Baseline seed (fresh sessions):** until any provider-reported usage exists
+(`usageReported`), `executeTurn` calls `seedUsageEstimate(contextEstimate(history,
+sysPrompt, content, tools), pool, contextWindow)` before each `streamTurn` attempt,
+storing a chars/4 baseline as `lastUsage` (`usageIsEstimate = true`) and dispatching it
+for the main agent. The seed makes ctx show the size of what is actually sent — system
+prompt, tool definitions, and the conversation — from the first moment of the first
+turn, instead of 0 until the first step reports. `contextEstimate` is the same sum
+`shouldCompactWithTools` preflights and `dispatchCompactionNotice` reports. Seeding is
+permanently disabled once real usage is stored (`markUsageReported`, called on every
+successful turn end with reported tokens): reported numbers are authoritative and
+already include everything on the wire, so re-seeding each turn would bounce the
+display up to the overestimate at every turn start.
+
+**Invariant:** the first real step report **replaces** the seed outright rather than
+peaking against it — the seed deliberately overestimates (chars/4), so a peak rule
+would pin the display to the overestimate until real usage grew past it. Later steps
+peak as usual.
+
+**Invariant:** a failed or cancelled first turn retains the seed (the retained-value
+rule stores whatever was last known, possibly the estimate) and does not call
+`markUsageReported`, so the next attempt re-seeds — the correct behavior, since the
+failed turn produced no authoritative numbers.
+
+**Invariant:** `LastUsage()` returns a zero-valued `fantasy.Usage` only before the
+first turn of the session starts; from the first turn's provider call onward it is
+the baseline seed (until the first real report replaces it) or real reported usage.
 
 **Invariant:** `lastUsage` is only written from inside the `Submit` goroutine (turn
 goroutine), preventing concurrent writes.
@@ -500,8 +524,9 @@ There are two dispatch kinds:
 (`a.compactionCount`) — additive observability data for the `EventContextUsage` payload.
 
 **Invariant:** `dispatchContextUsage` is called after successful compactions, after every
-completed provider step of a main-agent turn (per-step, via `observeStepUsage`), and at the
-end of every main-agent turn — successful **and** failed. A failed turn re-dispatches the
+completed provider step of a main-agent turn (per-step, via `observeStepUsage`), at
+turn start of a fresh session (the baseline seed, main agent only — see lastUsage
+above), and at the end of every main-agent turn — successful **and** failed. A failed turn re-dispatches the
 retained last-known usage (skipped only while nothing is known yet), so the statusline
 refreshes to the true context size instead of sticking at zero. The display numerator is
 the full prompt size: `InputTokens + CacheReadTokens + CacheCreationTokens` (see the sdk
@@ -944,11 +969,13 @@ a twentieth of the window, capped at `DefaultRecallTokenBudget` and floored at
 
 ## 17. Context Breakdown (/context)
 
-`Agent.ContextBreakdown()` returns a `ContextBreakdown`: the provider-reported
-usage of the most recently completed turn (`LastRequest`, the largest per-step
-input from `contextUsageFromResult`) plus estimated buckets for the NEXT
-request — system prompt, tool definitions, and history, all via the chars/4
-estimators shared with compaction.
+`Agent.ContextBreakdown()` returns a `ContextBreakdown`: the usage of the most
+recently completed turn (`LastRequest`, the largest per-step input from
+`contextUsageFromResult`) plus estimated buckets for the NEXT request — system
+prompt, tool definitions, and history, all via the chars/4 estimators shared with
+compaction. Before the first provider report, `LastRequest` carries the turn-start
+baseline seed and `LastRequestIsEstimate` is true, so the renderer can label it
+"chars/4 baseline" instead of "provider-reported".
 
 **Invariant:** the breakdown's LLM-facing history counts only user/assistant
 messages. System and steering messages held in history are reported separately

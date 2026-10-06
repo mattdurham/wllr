@@ -126,7 +126,7 @@ mismatched endpoint overrides.
 | Test | Scenario | Setup | Assertions |
 |------|----------|-------|------------|
 | `TestStreamTurnReturnsUsage` | usage captured from stream | usageLM 1500/42 | `LastUsage` non-zero on both fields |
-| `TestStreamTurnUsageZeroOnError` | first-turn failure has nothing to retain | fresh agent + errStreamLM | `LastUsage` stays zero |
+| `TestStreamTurnUsageZeroOnError` | failed first turn retains the baseline seed | fresh agent + errStreamLM | `LastUsage` equals the seed (`len(prompt)/4`), output 0 |
 | `TestAgentLastUsage` | provider-reported usage stored | usageLM 800/20 | `LastUsage` = {800, 20} |
 | `TestPoolMainAgentContextUsage` | pool exposes usage after a turn | window set, 50k-input turn | InputTokens/Window/Percent all > 0 |
 | `TestEventContextUsageDispatched` | dispatcher fires on a successful turn | usageLM 30k/100, dispatcher captured | dispatched usage non-zero, notice nil, compactions 0 |
@@ -134,6 +134,8 @@ mismatched endpoint overrides.
 | `TestObserveStepUsage_LiveMidTurn` | per-step usage recording keeps ctx live mid-turn | two-gate scripted turn; step-1 usage checked while gate-b blocks | LastUsage > 0 mid-turn, ≥1 dispatch carries the agent's window, dispatch count grows by turn end |
 | `TestObserveStepUsage_SubAgentDoesNotDispatch` | sub-agent steps never drive the main indicator | sub-agent turn with dispatcher installed | sub-agent LastUsage recorded; dispatcher never fired |
 | `TestObserveStepUsage_Guard` | zero-usage steps ignored; stored peak never shrinks | unit: zero usage, big step, smaller step | zero ignored, big stored, small retained |
+| `TestSeedUsage_BaselineVisibleBeforeFirstStep` | fresh-session ctx shows the outgoing-request size, not 0 | blockingLM: seed checked inside Stream before any step reports; second turn checks no re-seed | seed = `(len(sys)+len(prompt))/4` mid-call with a window-carrying dispatch; turn 2 mid-call shows turn 1's real usage |
+| `TestSeedUsage_ReplacementNotPeak` | first real report replaces the seed outright; seeding disabled afterward | unit: seed 50k, step 30k, step 40k, re-seed | 30k replaces, 40k peaks, re-seed ignored |
 
 ## Stream tokens-per-second (streamstats_test.go)
 

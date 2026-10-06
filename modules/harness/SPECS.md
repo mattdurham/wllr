@@ -327,7 +327,7 @@ Built-in commands registered at startup:
 | `/login`        | true    | No args → `showLoginProviderPickerMsg{}` (opens the install-style provider wizard); `/login auth` → `loginMsg{}` (authenticates the active provider) |
 | `/status`       | true    | Emits `StatusUpdateMsg{Key: "_override", Value: text}`       |
 | `/tools`        | true    | Emits `showToolsMsg{}`                                       |
-| `/context`      | true    | Emits `showContextMsg{}`; `updateActions` renders `agentPool.ContextBreakdown()` into the modal — provider-reported usage, per-tool/per-type/per-message estimate attribution, and canonical-transcript attribution |
+| `/context`      | true    | Emits `showContextMsg{}`; `updateActions` renders `agentPool.ContextBreakdown()` into the modal — last-request usage (provider-reported, or labeled "chars/4 baseline" for a fresh session's seed), per-tool/per-type/per-message estimate attribution, and canonical-transcript attribution |
 | `/prompt`       | false   | Shows accumulated base system prompt in a modal              |
 
 ---

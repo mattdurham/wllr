@@ -173,6 +173,23 @@ func TestRenderContextBreakdown_ReconciliationNote(t *testing.T) {
 	}
 }
 
+func TestRenderContextBreakdown_SeedLabeledNotProviderReported(t *testing.T) {
+	// A fresh session's LastRequest is the chars/4 baseline seed: the modal
+	// must label it as an estimate, never "provider-reported".
+	b := agent.ContextBreakdown{ContextWindow: 200_000, LastRequestIsEstimate: true}
+	b.LastRequest.InputTokens = 1_234
+	out := renderContextBreakdown(b)
+	if !strings.Contains(out, "chars/4 baseline") {
+		t.Errorf("seeded LastRequest must be labeled as baseline:\n%s", out)
+	}
+	if strings.Contains(out, "provider-reported") {
+		t.Errorf("seeded LastRequest must not claim provider-reported:\n%s", out)
+	}
+	if !strings.Contains(out, "input 1,234") {
+		t.Errorf("seed value must still render:\n%s", out)
+	}
+}
+
 func TestComma(t *testing.T) {
 	cases := map[int64]string{
 		0:         "0",

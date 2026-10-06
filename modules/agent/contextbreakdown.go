@@ -36,7 +36,14 @@ type ContextBreakdown struct {
 	// LastRequest is the provider-reported usage from the most recently
 	// completed turn: the largest per-step input (see contextUsageFromResult),
 	// which includes that step's accumulated tool traffic and cache effects.
+	// Before the first provider report it carries the turn-start baseline
+	// seed instead (chars/4 over the outgoing request — see seedUsageEstimate);
+	// LastRequestIsEstimate distinguishes the two.
 	LastRequest fantasy.Usage
+
+	// LastRequestIsEstimate is true when LastRequest holds the pre-first-step
+	// baseline seed rather than provider-reported numbers.
+	LastRequestIsEstimate bool
 
 	// SystemTokens estimates the system prompt (chars/4).
 	SystemTokens int64
@@ -133,14 +140,16 @@ func (a *Agent) ContextBreakdown() ContextBreakdown {
 
 	a.lastUsageMu.RLock()
 	usage := a.lastUsage
+	estimate := a.usageIsEstimate
 	a.lastUsageMu.RUnlock()
 
 	b := ContextBreakdown{
-		ContextWindow: a.ContextWindow(),
-		LastRequest:   usage,
-		SystemTokens:  estimateStr(sys),
-		ToolTokens:    estimateToolTokens(tools),
-		ToolCount:     len(tools),
+		ContextWindow:         a.ContextWindow(),
+		LastRequest:           usage,
+		LastRequestIsEstimate: estimate,
+		SystemTokens:          estimateStr(sys),
+		ToolTokens:            estimateToolTokens(tools),
+		ToolCount:             len(tools),
 		// The component ledger describes the base prompt; the agent-level
 		// SpawnOpts override (subagent identity block) is not part of it.
 		SystemComponents: a.pool.PromptComponents(),

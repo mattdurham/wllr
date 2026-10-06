@@ -11,9 +11,10 @@ import (
 )
 
 // contextmodal.go renders the /context command's breakdown modal. The modal
-// shows two views of the same context window: the provider-reported usage from
-// the last completed request (authoritative) and an estimate of the next
-// request's composition (attribution). The two rarely match exactly — the
+// shows two views of the same context window: the last request's usage —
+// provider-reported (authoritative) or, on a fresh session before any provider
+// report, the chars/4 baseline seed, labeled as such — and an estimate of the
+// next request's composition (attribution). The two rarely match exactly — the
 // chars/4 heuristic overestimates, and within-turn tool traffic plus prompt
 // caching only exist in the provider's count — so the delta is called out
 // rather than hidden.
@@ -28,7 +29,12 @@ func renderContextBreakdown(b agent.ContextBreakdown) string {
 		sb.WriteString("unknown\n")
 	}
 
-	sb.WriteString("\nLast request (provider-reported)")
+	sb.WriteString("\nLast request")
+	if b.LastRequestIsEstimate {
+		sb.WriteString(" (chars/4 baseline — no provider report yet)")
+	} else {
+		sb.WriteString(" (provider-reported)")
+	}
 	if b.LastRequest.InputTokens == 0 {
 		sb.WriteString("\n  No completed turn yet.\n")
 	} else {
