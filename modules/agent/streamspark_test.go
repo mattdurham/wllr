@@ -20,9 +20,19 @@ func TestSpark_ConstantRateBarsEqual(t *testing.T) {
 		s.token(at(ms), strings.Repeat("abcd", 25))
 		got = s.spark(at(ms))
 	}
-	// 5 stored samples + the transient leading edge, all at the max rate.
-	if want := "██████"; got != want {
+	// 5 stored samples + the transient leading edge = 6 bars, left-padded
+	// with sparkPad to the constant 8-slot frame (width never grows).
+	if want := "··██████"; got != want {
 		t.Errorf("spark constant rate = %q, want %q", got, want)
+	}
+
+	// The frame is full-width from the very first sample: the first poll
+	// already renders sparkPoints columns, so the statusline never shifts.
+	s2 := newStreamStats()
+	s2.stepStart(at(0))
+	s2.token(at(500), strings.Repeat("abcd", 25)) // strictly after span start
+	if got := s2.spark(at(1000)); runeCount(got) != sparkPoints {
+		t.Errorf("spark width after first sample = %d, want %d (constant frame)", runeCount(got), sparkPoints)
 	}
 }
 
@@ -40,7 +50,8 @@ func TestSpark_BeforeFirstTokenHidden(t *testing.T) {
 }
 
 // TestSpark_CadenceAndCap verifies one stored sample per second of polling
-// (not one per 100ms tick) and the sparkPoints cap on history length.
+// (not one per 100ms tick) and that the render holds the constant sparkPoints
+// frame no matter how long the turn runs.
 func TestSpark_CadenceAndCap(t *testing.T) {
 	s := newStreamStats()
 	s.stepStart(at(0))
@@ -49,10 +60,10 @@ func TestSpark_CadenceAndCap(t *testing.T) {
 		s.token(at(ms), strings.Repeat("abcd", 25))
 		s.spark(at(ms))
 	}
-	// 30 seconds of samples, but the render is capped at sparkPoints stored
-	// samples plus the transient leading edge.
-	if got, want := s.spark(at(30000)), sparkPoints+1; runeCount(got) != want {
-		t.Errorf("spark length = %d, want %d (sparkPoints cap + leading edge)", runeCount(got), want)
+	// 30 seconds of samples, but the render is the fixed sparkPoints-wide
+	// frame: history has long stopped growing.
+	if got, want := s.spark(at(30000)), sparkPoints; runeCount(got) != want {
+		t.Errorf("spark length = %d, want %d (constant frame)", runeCount(got), want)
 	}
 	if text := s.sparkText(); runeCount(text) != sparkPoints {
 		t.Errorf("frozen bars length = %d, want %d (no transient edge)", runeCount(text), sparkPoints)
@@ -68,7 +79,7 @@ func TestSpark_StallShowsDip(t *testing.T) {
 	s.token(at(500), strings.Repeat("x", 200)) // 50 more inside the first window
 	s.spark(at(1000))                          // sample 1: 50 tokens over 1s = 50 t/s
 	s.spark(at(2000))                          // sample 2: empty window → 0
-	if got, want := s.spark(at(2500)), "█▁▁"; got != want {
+	if got, want := s.spark(at(2500)), "·····█▁▁"; got != want {
 		t.Errorf("spark after stall = %q, want %q", got, want)
 	}
 }

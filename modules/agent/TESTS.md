@@ -159,10 +159,10 @@ through the agent/pool accessors.
 
 | Test | Scenario | Assertions |
 |------|----------|------------|
-| `TestSpark_ConstantRateBarsEqual` | steady 25 t/s stream, sampled each second | every bar at full height (each sample scales to the window max) |
+| `TestSpark_ConstantRateBarsEqual` | steady 25 t/s stream, sampled each second | every bar at full height (each sample scales to the window max); 6 bars left-padded with `·` to the constant 8-column frame; the first sample already renders 8 columns — width never grows |
 | `TestSpark_BeforeFirstTokenHidden` | polls before any step and during TTFT | bars "" — the sparkline never leads the number |
-| `TestSpark_CadenceAndCap` | 30 one-second samples | stored history capped at `sparkPoints`; render = cap + 1 transient edge; frozen bars have no edge |
-| `TestSpark_StallShowsDip` | tokens then a silent window | zero-rate sample renders the lowest block (`█▁▁`) — a stall is visible |
+| `TestSpark_CadenceAndCap` | 30 one-second samples | render holds the constant `sparkPoints` frame at any turn length (history capped and right-truncated); frozen bars have no transient edge, same fixed width |
+| `TestSpark_StallShowsDip` | tokens then a silent window | zero-rate sample renders the lowest block (`·····█▁▁`) — a stall is visible, distinct from `·` no-data pads |
 | `TestSpark_FreezeBetweenSpans` | polling across a tool-execution gap | bars byte-identical across the gap — gaps are not sampled |
 | `TestSpark_FinishFreezesBars` | finish after two sampled seconds | bars survive turn end unchanged; polling long after finish is stable |
 | `TestSpark_NoPollNoBars` | turn ends before any poll follows its first token | no bars frozen — the number alone shows |

@@ -26,9 +26,18 @@ const liveCharsPerToken = 4
 // ~75ms token-batching pulses into a readable shape.
 const sparkWindow = time.Second
 
-// sparkPoints is how many one-second samples the sparkline keeps — the
-// trailing ~20 seconds of generation activity.
-const sparkPoints = 20
+// sparkPoints is how many one-second samples the sparkline renders — a
+// constant 8-slot trailing window (~8 seconds of generation activity). The
+// rendered width never changes: history slides left through a fixed frame
+// instead of the bars growing one column per second, which kept shifting
+// everything to the sparkline's right in the statusline.
+const sparkPoints = 8
+
+// sparkPad is the glyph for a sparkline slot with no sample yet (the first
+// seconds of a turn, before one sample per second has accumulated). A dotted
+// slot reads as "no data", distinct from ▁ — a real zero-rate sample, which
+// is what a stall paints.
+const sparkPad = '·'
 
 // tokSample records the cumulative streamed character count at a token
 // arrival, the raw material for the trailing-window rate.
@@ -79,7 +88,8 @@ type streamStats struct {
 
 	// Sparkline state (all guarded by mu). samples records cumulative
 	// totalChars at token arrivals for the trailing-window rate; hist holds
-	// at most sparkPoints one-second windowed rates, oldest first;
+	// at most sparkPoints one-second windowed rates, oldest first, rendered
+	// as a constant-width frame (see sparkPoints);
 	// lastSampleAt is when hist last grew (sample cadence); lastSpark is the
 	// bars frozen at finish and shown while idle.
 	samples      []tokSample
@@ -269,11 +279,17 @@ func (s *streamStats) windowedRateLocked(now time.Time) float64 {
 	return tpsRate(tokens, now.Sub(measuredFrom))
 }
 
-// sparkBars renders rates as unicode block bars, scaled to the window's max
-// so the shape stays readable regardless of absolute speed.
+// sparkBars renders rates as a constant-width unicode sparkline: always
+// exactly sparkPoints columns, oldest data on the left, newest on the right.
+// Slots with no sample yet (warm-up) render as sparkPad; bars scale to the
+// window's max so the shape stays readable regardless of absolute speed.
+// More rates than sparkPoints keeps the newest sparkPoints.
 func sparkBars(rates []float64) string {
 	if len(rates) == 0 {
 		return ""
+	}
+	if len(rates) > sparkPoints {
+		rates = rates[len(rates)-sparkPoints:]
 	}
 	blocks := []rune("▁▂▃▄▅▆▇█")
 	max := rates[0]
@@ -283,6 +299,9 @@ func sparkBars(rates []float64) string {
 		}
 	}
 	var b strings.Builder
+	for i := len(rates); i < sparkPoints; i++ {
+		b.WriteRune(sparkPad)
+	}
 	for _, r := range rates {
 		idx := 0
 		if max > 0 {

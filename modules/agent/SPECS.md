@@ -1066,11 +1066,16 @@ sparkline counterparts (bars string, "" when nothing is sampled).
 
 `streamStats.spark(now)` — driven by the harness's 100ms UI tick via
 `StreamTpsSpark` — maintains a history of the trailing `sparkWindow` (1s)
-windowed rate, sampled at most once per second (`sparkPoints` = 20 samples,
-≈ the trailing 20 seconds of generation activity), and renders it as unicode
-block bars scaled to the window max. The harness appends the bars to the
-`"tps"` status value next to the number (`formatTpsLive`), so every copy of
-the bundled statusline wasm renders them with no extension changes.
+windowed rate, sampled at most once per second (`sparkPoints` = 8 samples,
+≈ the trailing 8 seconds of generation activity), and renders it as a
+**constant-width** unicode sparkline: always exactly `sparkPoints` columns,
+newest on the right, bars scaled to the window max. History slides left
+through the fixed frame — the rendered width never changes, so the statusline
+does not shift while history accumulates. Slots with no sample yet (the first
+seconds of a turn) render `sparkPad` (`·`) — distinct from `▁`, a real
+zero-rate sample, which is what a stall paints. The harness appends the bars
+to the `"tps"` status value next to the number (`formatTpsLive`), so every
+copy of the bundled statusline wasm renders them with no extension changes.
 
 - The number is the cumulative turn average; the bars are the trailing
   per-second windowed rates — recent speed, showing bursts and stalls.
@@ -1080,9 +1085,11 @@ the bundled statusline wasm renders them with no extension changes.
 - Each sample's window starts at the later of the window start and the span
   beginning, so a just-opened span is not deflated by an empty window; a
   token landing exactly on the window start belongs to the earlier window.
-- The rendered string is history plus the current rate (leading edge moves at
-  the tick cadence); `finish` freezes the stored history into `a.lastSpark`,
-  shown while idle exactly like the frozen number. A turn that ends before
+- The rendered string is the newest `sparkPoints` rates of history plus the
+  current rate (leading edge moves at the tick cadence; more history than
+  the frame keeps the newest); `finish` freezes the stored history into
+  `a.lastSpark` at the same fixed width, shown while idle exactly like the
+  frozen number. A turn that ends before
   any poll follows its first token freezes no bars.
 - Rates below `minStreamSpan` yield 0 samples (the shared `tpsRate` guard);
   bars are hidden whenever the number is hidden (`formatTpsLive`).
