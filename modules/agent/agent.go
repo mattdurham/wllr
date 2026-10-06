@@ -94,13 +94,14 @@ type Agent struct {
 	// streamTurn entry, finished and frozen into lastTps at its exit; nil
 	// whenever no turn is streaming. See streamstats.go for the span
 	// lifecycle (tool execution and sub-agent wait time are excluded from
-	// the denominator by construction). streamTpsMu guards liveStats and
-	// lastTps — deliberately separate from lastUsageMu because usage and
-	// speed are written at different points of the turn and read by
-	// different tick paths.
+	// the denominator by construction). streamTpsMu guards liveStats,
+	// lastTps, and lastSpark — deliberately separate from lastUsageMu
+	// because usage and speed are written at different points of the turn
+	// and read by different tick paths.
 	streamTpsMu sync.Mutex
 	liveStats   *streamStats
 	lastTps     float64 // frozen end-of-turn tokens/second, kept visible while idle
+	lastSpark   string  // frozen end-of-turn sparkline bars, kept visible while idle
 
 	// compactionCount is the number of successful context compactions this agent
 	// has run for its session lifetime. Monotonically non-decreasing; no-op
@@ -567,8 +568,10 @@ func (a *Agent) endStreamStats(totalOutputTokens int64, reported bool) {
 	}
 	stats.finish(time.Now(), totalOutputTokens, reported)
 	frozen := stats.exact()
+	bars := stats.sparkText()
 	a.streamTpsMu.Lock()
 	a.lastTps = frozen
+	a.lastSpark = bars
 	a.streamTpsMu.Unlock()
 }
 
@@ -582,6 +585,21 @@ func (a *Agent) StreamTps() float64 {
 	a.streamTpsMu.Unlock()
 	if stats != nil {
 		return stats.live(time.Now())
+	}
+	return frozen
+}
+
+// StreamTpsSpark returns the sparkline of trailing per-second generation
+// rates as unicode block bars (newest on the right). Live while a turn
+// streams (the bars record one sample per second of polling) and frozen
+// after the turn ends, mirroring StreamTps. Empty before any streaming and
+// for turns shorter than one sampling interval.
+func (a *Agent) StreamTpsSpark() string {
+	a.streamTpsMu.Lock()
+	stats, frozen := a.liveStats, a.lastSpark
+	a.streamTpsMu.Unlock()
+	if stats != nil {
+		return stats.spark(time.Now())
 	}
 	return frozen
 }

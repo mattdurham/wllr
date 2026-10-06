@@ -324,6 +324,21 @@ func (p *AgentPool) MainAgentTps() float64 {
 	return a.StreamTps()
 }
 
+// MainAgentTpsSpark returns the main agent's sparkline of trailing per-second
+// generation rates (unicode block bars, newest right): live while a turn
+// streams, frozen end-of-turn bars afterwards, and "" when the main agent
+// does not exist or nothing has been sampled yet. The harness appends the
+// bars to the "tps" status value next to the number.
+func (p *AgentPool) MainAgentTpsSpark() string {
+	p.mu.RLock()
+	a := p.agents[MainAgentID]
+	p.mu.RUnlock()
+	if a == nil {
+		return ""
+	}
+	return a.StreamTpsSpark()
+}
+
 // ContextBreakdown returns the context breakdown for the main agent. When the
 // main agent does not exist yet (no turn has run), all fields are zero.
 func (p *AgentPool) ContextBreakdown() ContextBreakdown {

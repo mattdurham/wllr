@@ -3,6 +3,7 @@ package agent
 // NOTE: Any changes to this file must be reflected in the corresponding SPECS.md or NOTES.md.
 
 import (
+	"strings"
 	"sync"
 	"time"
 )
@@ -19,6 +20,22 @@ const minStreamSpan = 100 * time.Millisecond
 // display uses it; the frozen end-of-turn rate uses provider-reported
 // OutputTokens.
 const liveCharsPerToken = 4
+
+// sparkWindow is the trailing window over which each sparkline sample's rate
+// is measured. One second matches the display's "t/s" unit and smooths the
+// ~75ms token-batching pulses into a readable shape.
+const sparkWindow = time.Second
+
+// sparkPoints is how many one-second samples the sparkline keeps — the
+// trailing ~20 seconds of generation activity.
+const sparkPoints = 20
+
+// tokSample records the cumulative streamed character count at a token
+// arrival, the raw material for the trailing-window rate.
+type tokSample struct {
+	at    time.Time
+	chars int64
+}
 
 // streamStats accumulates provider-stream timing for one agent turn so the
 // statusline can show generation speed (tokens/second). Spans follow fantasy's
@@ -59,6 +76,16 @@ type streamStats struct {
 	finished bool
 	// lastTps is the frozen end-of-turn rate.
 	lastTps float64
+
+	// Sparkline state (all guarded by mu). samples records cumulative
+	// totalChars at token arrivals for the trailing-window rate; hist holds
+	// at most sparkPoints one-second windowed rates, oldest first;
+	// lastSampleAt is when hist last grew (sample cadence); lastSpark is the
+	// bars frozen at finish and shown while idle.
+	samples      []tokSample
+	hist         []float64
+	lastSampleAt time.Time
+	lastSpark    string
 }
 
 func newStreamStats() *streamStats { return &streamStats{} }
@@ -97,6 +124,18 @@ func (s *streamStats) token(now time.Time, text string) {
 	s.lastTokenAt = now
 	s.spanChars += int64(len(text))
 	s.totalChars += int64(len(text))
+	s.samples = append(s.samples, tokSample{at: now, chars: s.totalChars})
+	// Keep enough history to anchor the window (one sample at or before its
+	// start so the delta can span the boundary); anything older can never
+	// contribute again.
+	cutoff := now.Add(-2 * sparkWindow)
+	drop := 0
+	for drop < len(s.samples) && s.samples[drop].at.Before(cutoff) {
+		drop++
+	}
+	if drop > 0 {
+		s.samples = append(s.samples[:0], s.samples[drop:]...)
+	}
 }
 
 // finish closes any open span and freezes the exact end-of-turn rate from the
@@ -127,6 +166,7 @@ func (s *streamStats) finish(now time.Time, totalOutputTokens int64, reported bo
 	// the deferred panic guard) and a second finish must not re-add the
 	// estimate.
 	s.spanChars = 0
+	s.lastSpark = sparkBars(s.hist)
 	s.finished = true
 	s.lastTps = tpsRate(output, s.streamedNS)
 }
@@ -155,6 +195,105 @@ func (s *streamStats) exact() float64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.lastTps
+}
+
+// spark appends at most one windowed-rate sample per sparkWindow of poll time
+// and renders the statusline sparkline bars. The UI tick calls it (~10Hz)
+// while a turn streams; sampling happens only while a span is open with at
+// least one token, so between spans (tool execution, sub-agent waits) the
+// bars freeze rather than recording inactivity — matching the number's
+// span-based accounting. After finish it returns the frozen bars.
+func (s *streamStats) spark(now time.Time) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.finished {
+		return s.lastSpark
+	}
+	if s.spanStart.IsZero() || !s.lastTokenAt.After(s.spanStart) {
+		// No open span, or a span whose first token has not arrived (TTFT):
+		// history renders as-is without new samples.
+		return sparkBars(s.hist)
+	}
+	rate := s.windowedRateLocked(now)
+	if s.lastSampleAt.IsZero() || now.Sub(s.lastSampleAt) >= sparkWindow {
+		s.hist = append(s.hist, rate)
+		if len(s.hist) > sparkPoints {
+			s.hist = s.hist[len(s.hist)-sparkPoints:]
+		}
+		s.lastSampleAt = now
+	}
+	// Render history plus the current rate so the leading edge moves at the
+	// tick cadence rather than once per second.
+	return sparkBars(append(s.hist, rate))
+}
+
+// sparkText returns the bars as they stand (the frozen bars after finish).
+// endStreamStats uses it to freeze the display onto the agent.
+func (s *streamStats) sparkText() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.finished {
+		return s.lastSpark
+	}
+	return sparkBars(s.hist)
+}
+
+// windowedRateLocked computes tokens/second over the trailing sparkWindow of
+// token arrivals, via the chars/4 live estimate. The measured span starts at
+// the later of the window start and the span's beginning, so a span that
+// just opened is not deflated by an otherwise-empty window.
+func (s *streamStats) windowedRateLocked(now time.Time) float64 {
+	if len(s.samples) == 0 {
+		return 0
+	}
+	start := now.Add(-sparkWindow)
+	if s.spanStart.After(start) {
+		start = s.spanStart
+	}
+	base := int64(0)
+	measuredFrom := start
+	for _, smp := range s.samples {
+		if smp.at.After(start) {
+			break
+		}
+		base = smp.chars
+		measuredFrom = smp.at
+	}
+	if measuredFrom.Before(start) {
+		// The newest at-or-before-start sample is stale (window slid past it):
+		// coverage is the full window; its chars arrived before start and are
+		// excluded from the delta anyway.
+		measuredFrom = start
+	}
+	tokens := (s.totalChars - base) / liveCharsPerToken
+	return tpsRate(tokens, now.Sub(measuredFrom))
+}
+
+// sparkBars renders rates as unicode block bars, scaled to the window's max
+// so the shape stays readable regardless of absolute speed.
+func sparkBars(rates []float64) string {
+	if len(rates) == 0 {
+		return ""
+	}
+	blocks := []rune("▁▂▃▄▅▆▇█")
+	max := rates[0]
+	for _, r := range rates[1:] {
+		if r > max {
+			max = r
+		}
+	}
+	var b strings.Builder
+	for _, r := range rates {
+		idx := 0
+		if max > 0 {
+			idx = int(r/max*float64(len(blocks)-1) + 0.5)
+			if idx > len(blocks)-1 {
+				idx = len(blocks) - 1
+			}
+		}
+		b.WriteRune(blocks[idx])
+	}
+	return b.String()
 }
 
 // closeSpanLocked folds the open span into streamedNS exactly once and
