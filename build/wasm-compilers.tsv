@@ -21,3 +21,4 @@ extensions/permissions	tinygo	verified with Docker TinyGo builder
 extensions/mcp-bridge	tinygo	verified with Docker TinyGo builder
 extensions/otel-traces	tinygo	verified with Docker TinyGo builder
 extensions/websearch	tinygo	verified with Docker TinyGo builder
+extensions/search	tinygo	verified with Docker TinyGo builder

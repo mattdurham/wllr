@@ -426,3 +426,25 @@ it read (AGENTS.md variants, prompt_files) and how big the built-in rules
 are. The payload is deliberately one-way display data — the pool ignores an
 empty report and nothing rebuilds the prompt from it — so the worst a
 misbehaving extension can do is skew the /context modal.
+
+## 34. Every export call into a TinyGo module is serialized, including _init and _alloc (2026-10-06)
+
+The `callMu` lock used to be described as protecting WASM linear memory during
+`_on_event`/host_call dispatch. The real hazard is bigger: TinyGo compiles
+blocking operations (channel receives, host_call round-trips) with **asyncify**,
+a state-machine transform that suspends and resumes goroutines inside the
+module. That state machine is not re-entrant — two goroutines inside one module
+instance corrupt it, and the next export call traps `unreachable`. The observed
+failure was the bundled logging extension dying ~1s after startup with
+`host_call: _alloc failed`: the log-drain goroutine flushed buffered records
+the moment `EventLog` got a subscriber, invoking `_alloc`/`_on_event`
+concurrently with the extension's still-running `_init` (whose own subscribe
+host_call re-enters the module through `_alloc` to return the response).
+
+Three changes close the hole: `_init` now runs under `callMu` (loadExtension
+holds it across `callInit`); the lock comment in both extension.go and host.go
+documents the asyncify hazard rather than just memory races; and
+initdispatchrace_test.go reproduces the race with a hand-encoded WASM module
+whose `_init` performs a host_call, proving a dispatcher that sees a mid-init
+subscription can no longer enter the module until init completes. Coverage:
+TestLoad_InitSerializedWithDispatch.

@@ -376,3 +376,8 @@ unrelated path and the caller's own `config.yaml` pass through unchanged.
 **Scenario:** Embedders and tests that never call `SetConfigIsolation` keep the
 old behaviour.
 **Assertion:** A foreign group read and an arbitrary write both succeed.
+
+### Init/Dispatch Serialization (initdispatchrace_test.go)
+
+**Scenario:** `TestLoad_InitSerializedWithDispatch` — a hand-encoded WASM module whose `_init` performs a host_call while a dispatcher races to enter the module.
+**Assertion:** A dispatcher that observes a subscription registered mid-init cannot invoke `_alloc`/`_on_event` until `_init` completes — every export call is serialized under `callMu`, so TinyGo's non-re-entrant asyncify state machine is never entered twice (the "host_call: _alloc failed / unreachable" trap).

@@ -385,6 +385,14 @@ fields are read-only liveness/status signals and must not enqueue work.
 
 **Invariant:** No goroutine may read or write `subscriptions` without holding the appropriate lock.
 
+**Invariant:** Every export invocation on a WASM module runs under that module's
+`callMu` — `_init` (loadExtension holds the lock across `callInit`), `_on_event`,
+host_call handlers, and the re-entrant `_alloc` used to return responses. TinyGo
+compiles blocking operations with asyncify, whose scheduler state machine is not
+re-entrant: two goroutines inside one module corrupt it and the next export traps
+`unreachable` (observed as `host_call: _alloc failed` when a dispatcher entered a
+module whose `_init` host_call was still in flight). See NOTES §34.
+
 ---
 
 ## 11. Host.mu Guards

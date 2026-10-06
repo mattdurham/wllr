@@ -28,9 +28,11 @@ import (
 // permissions holds the declared permissions for untrusted extensions.
 // Map entries are set to true for each granted permission.
 
-// callMu serializes calls into the WASM module. WASM linear memory is
-// shared within a module instance, so concurrent _on_event or host_call
-// invocations race on the module's globals (pinned map, handler maps).
+// callMu serializes every export invocation on a WASM module (_init,
+// _on_event, _alloc, _free), including the re-entrant _alloc used to return
+// host_call responses. Beyond memory races on the module's globals (pinned
+// map, handler maps), concurrent entry breaks TinyGo's asyncify scheduler
+// state machine: the next export call traps "unreachable". See extension.go.
 
 // trusted is true for built-in extensions loaded via LoadBytes with trusted=true.
 // Trusted built-ins are still held to their declared permissions (least privilege);
@@ -1987,13 +1989,27 @@ func (h *Host) loadExtension(
 	h.extensions = append(h.extensions, ext)
 	h.mu.Unlock()
 
-	if err := callInit(ctx, mod); err != nil {
+	// Serialize _init with event dispatch. _init runs host_calls (subscribe,
+	// register_tool) whose responses re-enter the module via _alloc, and
+	// dispatchToExtension invokes exports under callMu — but only if the
+	// extension is fully initialized. Without this lock, a dispatcher that
+	// observes a subscription registered mid-init (e.g. the log drain
+	// goroutine's 30ms tick flushing buffered records the moment EventLog gets
+	// a subscriber) can invoke _alloc/_on_event concurrently with _init's
+	// in-flight host_call. Two goroutines inside one TinyGo asyncify module
+	// corrupt the asyncify state machine — the next export call then traps
+	// with "unreachable" (observed as "host_call: _alloc failed" in the
+	// bundled logging extension ~1s after startup).
+	ext.callMu.Lock()
+	initErr := callInit(ctx, mod)
+	ext.callMu.Unlock()
+	if initErr != nil {
 		// Remove on _init failure.
 		h.mu.Lock()
 		h.removeExtension(ext)
 		h.mu.Unlock()
 		_ = mod.Close(ctx)
-		return fmt.Errorf("init extension %s: %w", name, err)
+		return fmt.Errorf("init extension %s: %w", name, initErr)
 	}
 
 	return nil
