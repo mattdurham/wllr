@@ -63,6 +63,15 @@ export GOLANGCI_LINT_CACHE
 
 WASM_BUILD = WASM_COMPILER=$(WASM_COMPILER) TINYGO_MODE=$(TINYGO_MODE) TINYGO=$(TINYGO) TINYGO_IMAGE=$(TINYGO_IMAGE) TINYGO_FLAGS="$(TINYGO_FLAGS)" scripts/build-wasm-extension.sh
 
+# Build metadata (cmd/version.go), injected into the binary via -ldflags -X so
+# `wllr version` reports the exact commit it was built from. --dirty appends
+# "-dirty" when the tree had uncommitted changes at build time, making a stale
+# or locally-modified install visible from `wllr version` alone. Falls back to
+# "unknown" outside a git checkout (tarball builds).
+VERSION_COMMIT := $(shell git describe --always --dirty --abbrev=12 2>/dev/null || echo unknown)
+VERSION_DATE := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
+GO_LDFLAGS := -X main.versionCommit=$(VERSION_COMMIT) -X main.versionDate=$(VERSION_DATE)
+
 # Package list - lazy evaluation
 PACKAGES = $(shell go list -e -f '{{if .GoFiles}}{{.ImportPath}}{{end}}' ./...)
 
@@ -74,8 +83,8 @@ all: extensions build
 
 # build depends on builtins so the embedded WASM files are present.
 build: builtins $(DIST_DIR)
-	go build -o $(BINARY) ./cmd/
-	@echo "Built $(BINARY)"
+	go build -ldflags "$(GO_LDFLAGS)" -o $(BINARY) ./cmd/
+	@echo "Built $(BINARY) ($(VERSION_COMMIT), $(VERSION_DATE))"
 
 install: extensions build
 	mkdir -p "$(INSTALL_BIN)"

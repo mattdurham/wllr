@@ -35,8 +35,13 @@ import (
 var builtinFS embed.FS
 
 func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI callbacks in one startup path.
-	if len(os.Args) > 1 && os.Args[1] == "login" {
-		os.Exit(runLoginCommand(context.Background(), os.Args[2:], os.Stdout, os.Stderr))
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "version", "--version", "-version":
+			os.Exit(runVersionCommand(os.Args[2:], os.Stdout, os.Stderr))
+		case "login":
+			os.Exit(runLoginCommand(context.Background(), os.Args[2:], os.Stdout, os.Stderr))
+		}
 	}
 
 	execPrompt := flag.String("exec", "", "run a single prompt non-interactively and print the response to stdout")
