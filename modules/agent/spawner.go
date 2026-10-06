@@ -28,6 +28,13 @@ type Spawner struct {
 	// this is what lets a focused view render a sub-agent's turn as it streams
 	// rather than only after the turn completes.
 	tokenFn func(agentID, text string)
+	// tokenFlushFn, when set, delivers the tail a sub-agent's token batcher is
+	// still holding. The batcher only sends when a token arrives ≥75ms after
+	// the previous send, so a text segment's final tokens wait for the next
+	// segment — or, for the last segment, forever. The harness flushes at
+	// segment boundaries (tool-call dispatch) and turn end so focused
+	// transcripts are never left one fragment short.
+	tokenFlushFn func(agentID string)
 	// promptFn, when set, receives each sub-agent's turn start (prompt plus any
 	// queued inbox messages) with the producing agent. A focused transcript
 	// needs this to show the user/broker prompt that began the turn.
@@ -61,6 +68,13 @@ func (s *Spawner) SetToolCallObserver(fn func(agentID, id, toolName, input strin
 // block; the harness batches per agent before dispatching.
 func (s *Spawner) SetTokenObserver(fn func(agentID, text string)) {
 	s.tokenFn = fn
+}
+
+// SetTokenFlushObserver installs an optional callback that delivers the tail
+// a sub-agent's token batcher is still holding (see tokenFlushFn). The spawner
+// invokes it when a sub-agent dispatches a tool call and when its turn ends.
+func (s *Spawner) SetTokenFlushObserver(fn func(agentID string)) {
+	s.tokenFlushFn = fn
 }
 
 // SetPromptObserver installs an optional callback invoked when a sub-agent
@@ -140,7 +154,14 @@ func (s *Spawner) Spawn(ctx context.Context, req extension.SpawnRequest) error {
 	subID := req.ID
 	notifyFn := s.notifyFn
 	pool := s.pool
+	tokenFlushFn := s.tokenFlushFn
 	a.SetOnDone(func(e error) {
+		// Turn end: the last text segment has no successor to flush its tail,
+		// so flush explicitly or the final <75ms of sub-agent output never
+		// reaches the focused transcript at all.
+		if tokenFlushFn != nil {
+			tokenFlushFn(subID)
+		}
 		if e == nil {
 			return
 		}
@@ -195,6 +216,12 @@ func (s *Spawner) Spawn(ctx context.Context, req extension.SpawnRequest) error {
 	})
 	toolCallFn := s.toolCallFn
 	a.SetOnToolCall(func(id, toolName, input string) {
+		// A dispatched tool call ends the preceding text segment; flush any
+		// batched tail so the focused transcript shows the segment complete
+		// before the tool activity appears.
+		if tokenFlushFn != nil {
+			tokenFlushFn(agentID)
+		}
 		if toolCallFn != nil {
 			toolCallFn(agentID, id, toolName, input)
 		}

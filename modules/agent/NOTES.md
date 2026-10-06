@@ -616,6 +616,7 @@ live output while leaving the main transcript untouched.
 windows are independent and a slow agent cannot delay a fast one. The batcher's
 program field is optional: a nil program marks dispatch-only operation, which is
 how sub-agent text reaches extensions without emitting a main-chat `TokenMsg`.
+The per-agent flusher added later (§47) covers the tail those batchers held.
 
 ## 37. Close and Cancel cascade to descendants
 
@@ -1004,3 +1005,49 @@ Decisions worth recording:
 
 The harness poll (100ms tick → `pool.MainAgentTps()` → `"tps"` status key)
 and the wasm `sl-tps` segment are pure consumers; all timing lives here.
+
+**Addendum (2026-10-06): the sparkline answers "what is it doing right now",
+the number answers "how fast overall".** The cumulative average converges and
+cannot show a burst or a stall, so the tracker also keeps a per-second
+history of the trailing 1s windowed rate (chars/4 over recorded token-arrival
+samples) and renders it as block bars appended to the same `"tps"` status
+value — one status key, so old wasm copies render the bars with zero
+extension changes. Sampling is driven by the existing UI tick (at most one
+sample per second of poll time, 20 kept), happens only while a span is open
+with a token (between spans the bars freeze — gaps are not generation time,
+same rule as the number's denominator), and the bars freeze at turn end next
+to the number (`lastSpark`, same `streamTpsMu`). Bars scale to the window
+max, so the shape is relative speed; a flat-zero stretch is the visual
+signature of a stall.
+
+---
+
+## 47. Sub-agent token flush at segment boundaries and turn end (2026-10-06)
+
+**Decision:** Add `Spawner.SetTokenFlushObserver(func(agentID string))`. The
+spawner invokes it when a sub-agent dispatches a tool call and unconditionally
+when the sub-agent's turn ends. The harness implements it by flushing that
+agent's token batcher, so a segment's final <75ms of tokens reach the focused
+transcript immediately instead of waiting for the next segment — or, for the
+last segment, never arriving at all.
+
+**Rationale:** The dispatch-only batchers (`dispatchSegmentedTokens`) only
+send when a token arrives ≥75ms after the previous send. A sub-agent response
+streamed word-by-word holds its last words in the buffer at turn end, and the
+batcher's flush was previously **discarded** (`onToken, _ :=`), so nothing
+ever delivered them: the focused transcript rendered the response permanently
+one fragment short (the same cut-off-mid-sentence symptom seen on the main
+agent, but permanent rather than delayed). Flushing at tool-call dispatch also
+fixes the mid-turn lag: narration before a long tool call stays incomplete
+until the tool finishes otherwise.
+
+**Consequence:** `Spawner` gains the `tokenFlushFn` field, setter, and two
+invocation sites (OnToolCall wrapper, OnDone wrapper before the error check).
+`dispatchSegmentedTokens` returns `(dispatch, flushAgent)` and records each
+agent's flush. The main agent needs no new API — `wireMainAgentCallbacks`
+already owned its batcher and flushes it via `toolCallForwarder`. Regression
+coverage: `TestSpawnerTokenFlushDeliversTailAtTurnEnd` (complete text reaches
+the token observer), harness `TestTokenBatcher_HoldsTailUntilFlush`,
+`TestToolCallForwarder_FlushesTailBeforeToolCall`, and
+`TestWireMainAgentCallbacks_TurnFlushesTailAtToolCall` (real turn: full text
+delivered before the ToolCallStartMsg).

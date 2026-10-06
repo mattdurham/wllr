@@ -126,6 +126,8 @@ Append-only design decision log. Never delete entries; add an `*Addendum (date):
 
 **Consequence:** Tokens are dispatched from within the fantasy streaming goroutine (via `prog.Send`), so the batcher does not need to be goroutine-safe with itself — only with potential concurrent `flush()` calls, which are protected by the mutex.
 
+*Addendum (2026-10-06):* The batcher's flush contract expanded from "onDone only" to "segment boundaries + onDone". A multi-segment agentic turn (narration → tool call → narration → …) is ONE turn, so `onDone` fires only at the very end — any text segment's final <75ms of tokens sat in the buffer until the NEXT segment's first token flushed them, and the final segment's tail sat there through the entire remaining turn. The visible symptom: narration frozen mid-sentence ("Waiting for the") for minutes while the orchestrator slept between polls. `toolCallForwarder` now flushes when a tool call is dispatched (the exact text-segment→silence boundary), and the sub-agent path (`dispatchSegmentedTokens`) gained the flush it never had — its dispatch-only batcher's flush was previously discarded with `_`, so a sub-agent's last-segment tail was NEVER dispatched, permanently shortening focused transcripts. Flushing is idempotent, so the extra call sites stay no-ops when the buffer is empty.
+
 ---
 
 ## 11. renderToolGroup is a No-Op — Tool Calls Hidden from UI

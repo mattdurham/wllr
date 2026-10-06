@@ -10,9 +10,16 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
+// msgSender is the subset of tea.Program the token batcher and the agent
+// callback wiring need. An interface rather than *tea.Program lets tests
+// capture sends headlessly without a running TUI.
+type msgSender interface {
+	Send(tea.Msg)
+}
+
 type tokenBatcher struct {
 	lastSend time.Time
-	p        *tea.Program
+	p        msgSender
 	// dispatch, when non-nil, is called with each flushed batch of text so the
 	// batch can be forwarded to WASM extensions (EventToken). Called on the
 	// agent goroutine, not the bubbletea loop.

@@ -337,3 +337,20 @@ Issue #42. The harness, not the extension host, registers the agent-scoped
 | High | `TestWithRecallTool_PreservesExistingTools` | an unrelated tool is already registered | the existing tool keeps its place and recall is appended |
 | High | `TestWithRecallTool_UnknownAgentLeavesBaseUnchanged` | unknown agent ID, and nil pool | base returned unchanged, no panic |
 | High | `TestWithRecallTool_DoesNotShadowExtensionTool` | an extension already registered `recall` | the extension's tool is kept and no duplicate is added |
+
+## Segment-boundary token flush (tailflush_test.go)
+
+Text visibly cut off mid-sentence (e.g. narration frozen at "Waiting for the"
+while the turn continued): the 75ms token batcher holds a burst's tail until
+the next token arrives, and `onDone` fires only at turn end — so in a
+multi-segment orchestrator turn the final narration before a long tool call
+rendered incomplete for minutes, and a sub-agent's last-segment tail was never
+dispatched at all.
+
+| Level | Test | Scenario | Assertion |
+|-------|------|----------|-----------|
+| High | `TestTokenBatcher_HoldsTailUntilFlush` | first token sends (interval elapsed), second arrives within the window, then flush | only the first batch is sent pre-flush; flush delivers the tail |
+| High | `TestTokenBatcher_FlushIdempotent` | flush called repeatedly after one batch | exactly one delivery, no duplicates |
+| High | `TestToolCallForwarder_FlushesTailBeforeToolCall` | buffered tail, then the forwarder fires | tail `TokenMsg` precedes `ToolCallStartMsg` with correct agent/tool |
+| Medium | `TestToolCallForwarder_NilFlushSafe` | forwarder built without a flush | forwards the tool call; no panic |
+| High | `TestWireMainAgentCallbacks_TurnFlushesTailAtToolCall` | real scripted turn: word-delta text then a tool call, through the wired callbacks | complete response text reaches the UI before `ToolCallStartMsg` |

@@ -509,8 +509,14 @@ func (m *Model) SetProgram(p *tea.Program) {
 		})
 		// Forward each sub-agent's streamed text as EventToken keyed by agent,
 		// so a focused view can render it live. Each agent gets its own batcher;
-		// nothing is sent to the main chat.
-		spawner.SetTokenObserver(dispatchSegmentedTokens(extHostRef))
+		// nothing is sent to the main chat. The flusher delivers a batcher's
+		// held tail at segment boundaries and turn end — without it the final
+		// <75ms of a sub-agent's last text segment would never be dispatched
+		// at all (the dispatch-only batcher's flush was previously discarded),
+		// leaving focused transcripts permanently one fragment short.
+		dispatchTokens, flushAgentTokens := dispatchSegmentedTokens(extHostRef)
+		spawner.SetTokenObserver(dispatchTokens)
+		spawner.SetTokenFlushObserver(flushAgentTokens)
 		// Attribute each sub-agent's turn start to that agent, so a focused
 		// transcript shows the prompt alongside the reply.
 		//
@@ -681,10 +687,13 @@ func (b *tokenBatcher) flush() {
 // makeBatchedOnToken returns an onToken callback and a flush function.
 // Tokens are coalesced into batches sent at most every 75ms, capping
 // render cycles to ~13/sec regardless of LLM speed (prevents O(n²) work).
-// flush() must be called from onDone to deliver any buffered tail tokens.
-// dispatch, when non-nil, receives each flushed batch for forwarding to WASM
-// (EventToken).
-func makeBatchedOnToken(p *tea.Program, dispatch func(string)) (onToken func(string), flush func()) {
+// flush() must be called at segment boundaries — when a tool call is
+// dispatched (a text segment just ended and the provider is silent during
+// tool execution) and from onDone — to deliver any buffered tail tokens.
+// Without the mid-turn flush the tail of every text segment sits in the
+// buffer until the NEXT segment's first token arrives (or turn end), so the
+// final narration before a long tool call renders incomplete for minutes.
+func makeBatchedOnToken(p msgSender, dispatch func(string)) (onToken func(string), flush func()) {
 	b := &tokenBatcher{p: p, dispatch: dispatch}
 	return b.onToken, b.flush
 }
@@ -699,7 +708,7 @@ func makeDispatchOnlyBatcher(dispatch func(string)) (onToken func(string), flush
 }
 
 // wireMainAgentCallbacks sets the onToken, onDone, and toolsFn callbacks on the main agent.
-func (m *Model) wireMainAgentCallbacks(p *tea.Program) {
+func (m *Model) wireMainAgentCallbacks(p msgSender) {
 	if m.agentPool == nil {
 		return
 	}
@@ -777,9 +786,24 @@ func (m *Model) wireMainAgentCallbacks(p *tea.Program) {
 			agent.MainAgentID,
 		)
 	})
-	a.SetOnToolCall(func(id, toolName, input string) {
-		p.Send(ToolCallStartMsg{AgentID: mainID, ID: id, ToolName: toolName, Input: input})
-	})
+	a.SetOnToolCall(toolCallForwarder(mainID, p, stopBatch))
+}
+
+// toolCallForwarder returns the main agent's SetOnToolCall callback. A
+// dispatched tool call marks the end of the preceding text segment: the
+// provider is silent during tool execution, so any tokens still held by the
+// 75ms batcher would otherwise wait for the NEXT segment or turn end before
+// becoming visible — the narration rendered incomplete for minutes in long
+// orchestrator turns. Flush the tail first so the text is complete before the
+// tool activity appears, then forward the tool call to the UI. Flushing is
+// idempotent; onDone flushes again at turn end.
+func toolCallForwarder(agentID string, p msgSender, flushTail func()) func(id, toolName, input string) {
+	return func(id, toolName, input string) {
+		if flushTail != nil {
+			flushTail()
+		}
+		p.Send(ToolCallStartMsg{AgentID: agentID, ID: id, ToolName: toolName, Input: input})
+	}
 }
 
 // withRecallTool appends the canonical-transcript recall tool to base for the
@@ -1457,6 +1481,19 @@ func formatTps(tps float64) string {
 	return fmt.Sprintf("%.0f t/s", tps)
 }
 
+// formatTpsLive composes the tps statusline segment: the rate plus the
+// trailing-window sparkline bars from the agent's stream tracker. The bars
+// ride the same status value so every copy of the bundled statusline wasm
+// renders them with no extension changes. Hidden whenever either half is
+// absent — a short turn shows just the number, no number hides both.
+func formatTpsLive(tps float64, spark string) string {
+	base := formatTps(tps)
+	if base == "" || spark == "" {
+		return base
+	}
+	return base + " " + spark
+}
+
 // updateStream handles token streaming messages: TokenMsg, streamTickMsg, StreamDoneMsg, agentWakeupMsg.
 // Returns (model, cmd, true) when the message was handled.
 func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
@@ -1487,9 +1524,11 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 		// Live generation speed for the statusline. Polled from the agent's
 		// stream tracker so the value updates in place while tokens arrive;
 		// zero (nothing streamed yet, silent tail, or a sub-100ms span) clears
-		// the segment instead of painting a stale or absurd number.
+		// the segment instead of painting a stale or absurd number. The bars
+		// show the trailing per-second windowed rates (recent speed), while
+		// the number stays the cumulative turn average.
 		if m.agentPool != nil {
-			m.live.setStatus("tps", formatTps(m.agentPool.MainAgentTps()))
+			m.live.setStatus("tps", formatTpsLive(m.agentPool.MainAgentTps(), m.agentPool.MainAgentTpsSpark()))
 		}
 		return m, tea.Batch(cmds...), true
 
@@ -1515,9 +1554,10 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 				m.live.setStatus("ctx rem", "")
 			}
 			// Freeze the generation-speed display at the exact end-of-turn rate
-			// the agent computed from provider-reported output. Like ctx, the
-			// last value stays visible while the agent is idle; zero clears it.
-			m.live.setStatus("tps", formatTps(m.agentPool.MainAgentTps()))
+			// the agent computed from provider-reported output, with the
+			// sparkline frozen at its final bars. Like ctx, the last value
+			// stays visible while the agent is idle; zero clears it.
+			m.live.setStatus("tps", formatTpsLive(m.agentPool.MainAgentTps(), m.agentPool.MainAgentTpsSpark()))
 		}
 		if msg.Err != nil {
 			if errors.Is(msg.Err, context.Canceled) {
@@ -3017,23 +3057,37 @@ func (m Model) renderConsole() string {
 
 // dispatchSegmentedTokens returns a token observer for sub-agents that batches
 // each agent's text separately and dispatches it as EventToken with that
-// agent's ID. One batcher per agent keeps the coalescing window independent, so
-// a slow agent cannot delay a fast one, and nothing is written to the main
-// transcript. The returned observer runs on agent turn goroutines.
-func dispatchSegmentedTokens(extHost *extension.Host) func(agentID, text string) {
+// agent's ID, plus a flush observer the spawner invokes at segment boundaries
+// (tool-call dispatch) and turn end to deliver a batcher's held tail. One
+// batcher per agent keeps the coalescing window independent, so a slow agent
+// cannot delay a fast one, and nothing is written to the main transcript. The
+// returned observers run on agent turn goroutines.
+func dispatchSegmentedTokens(extHost *extension.Host) (func(agentID, text string), func(agentID string)) {
 	if extHost == nil {
-		return nil
+		return nil, nil
 	}
 	var mu sync.Mutex
 	batchers := make(map[string]func(string))
-	return func(agentID, text string) {
+	flushes := make(map[string]func())
+	flushAgent := func(agentID string) {
+		if agentID == "" {
+			return
+		}
+		mu.Lock()
+		flush := flushes[agentID]
+		mu.Unlock()
+		if flush != nil {
+			flush()
+		}
+	}
+	dispatch := func(agentID, text string) {
 		if agentID == "" || text == "" {
 			return
 		}
 		mu.Lock()
-		dispatch := batchers[agentID]
-		if dispatch == nil {
-			onToken, _ := makeDispatchOnlyBatcher(func(batch string) {
+		onToken := batchers[agentID]
+		if onToken == nil {
+			onTokenBatch, flushBatch := makeDispatchOnlyBatcher(func(batch string) {
 				payload, err := json.Marshal(sdk.TokenPayload{AgentID: agentID, Text: batch})
 				if err != nil {
 					return
@@ -3050,12 +3104,14 @@ func dispatchSegmentedTokens(extHost *extension.Host) func(agentID, text string)
 					)
 				}()
 			})
-			dispatch = onToken
+			onToken = onTokenBatch
 			batchers[agentID] = onToken
+			flushes[agentID] = flushBatch
 		}
 		mu.Unlock()
-		dispatch(text)
+		onToken(text)
 	}
+	return dispatch, flushAgent
 }
 
 // dispatchAgentPrompt returns a prompt observer that reports a sub-agent's turn

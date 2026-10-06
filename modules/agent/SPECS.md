@@ -1053,12 +1053,39 @@ rate into `a.lastTps` — kept visible while idle, mirroring how `LastUsage`
 keeps the ctx value — and clears the tracker, so the deferred call is a no-op
 on the normal path.
 
-Fields `streamTpsMu sync.Mutex`, `liveStats *streamStats`, and `lastTps` are
-guarded by `streamTpsMu`, deliberately separate from `lastUsageMu` (usage and
-speed are written at different points of the turn and read by different tick
-paths). `Agent.StreamTps()` returns the live rate while a tracker is installed
-and the frozen rate afterwards; `AgentPool.MainAgentTps()` delegates for the
-main agent (0 when it does not exist).
+Fields `streamTpsMu sync.Mutex`, `liveStats *streamStats`, `lastTps`, and
+`lastSpark` are guarded by `streamTpsMu`, deliberately separate from
+`lastUsageMu` (usage and speed are written at different points of the turn
+and read by different tick paths). `Agent.StreamTps()` returns the live rate
+while a tracker is installed and the frozen rate afterwards;
+`AgentPool.MainAgentTps()` delegates for the main agent (0 when it does not
+exist). `Agent.StreamTpsSpark()` / `AgentPool.MainAgentTpsSpark()` are the
+sparkline counterparts (bars string, "" when nothing is sampled).
+
+### Sparkline (trailing-window bars)
+
+`streamStats.spark(now)` — driven by the harness's 100ms UI tick via
+`StreamTpsSpark` — maintains a history of the trailing `sparkWindow` (1s)
+windowed rate, sampled at most once per second (`sparkPoints` = 20 samples,
+≈ the trailing 20 seconds of generation activity), and renders it as unicode
+block bars scaled to the window max. The harness appends the bars to the
+`"tps"` status value next to the number (`formatTpsLive`), so every copy of
+the bundled statusline wasm renders them with no extension changes.
+
+- The number is the cumulative turn average; the bars are the trailing
+  per-second windowed rates — recent speed, showing bursts and stalls.
+- Sampling happens only while a span is open with at least one token: between
+  spans (tool execution, sub-agent waits) the bars freeze rather than
+  recording inactivity, matching the number's span-based accounting.
+- Each sample's window starts at the later of the window start and the span
+  beginning, so a just-opened span is not deflated by an empty window; a
+  token landing exactly on the window start belongs to the earlier window.
+- The rendered string is history plus the current rate (leading edge moves at
+  the tick cadence); `finish` freezes the stored history into `a.lastSpark`,
+  shown while idle exactly like the frozen number. A turn that ends before
+  any poll follows its first token freezes no bars.
+- Rates below `minStreamSpan` yield 0 samples (the shared `tpsRate` guard);
+  bars are hidden whenever the number is hidden (`formatTpsLive`).
 
 Accounting rules (enforced by `streamstats_test.go`):
 
@@ -1083,4 +1110,5 @@ tick) and never mutates tracker state.
 **Invariant:** the tps value survives turn end (frozen `lastTps`) until the
 next turn replaces it, exactly like the ctx display; failed turns still
 freeze an estimate (the deferred guard runs `finish`), never a zero that
-would flash the segment off.
+would flash the segment off. The sparkline bars freeze the same way
+(`lastSpark`) and hide with the number.

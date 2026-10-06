@@ -79,7 +79,12 @@ or unavailable.
 - `SetOnToken`: a batched token callback (see §5).
 - `SetOnDone`: calls flush on the batcher, then `p.Send(StreamDoneMsg{Err})`.
 - `SetToolsFn`: returns `withRecallTool(tools.BuildFantasyTools(extHost, "main", logFn), pool, "main")` — the extension/native tool set plus the agent-scoped `recall` tool.
-- `SetOnToolCall`: `p.Send(ToolCallStartMsg{AgentID: mainID, ID, ToolName, Input})`.
+- `SetOnToolCall`: `toolCallForwarder(mainID, p, stopBatch)` — flushes any
+  batched token tail (the dispatched tool call ends the preceding text
+  segment; without the flush the segment's last <75ms of tokens would wait
+  for the next segment or turn end, rendering narration frozen mid-sentence
+  through long tool executions), then `p.Send(ToolCallStartMsg{AgentID:
+  mainID, ID, ToolName, Input})`.
 - If the main agent is recovered after an `ErrAgentNotFound`, these callbacks
   and the dynamic tool function are wired onto the replacement before the user
   turn is retried.
@@ -110,17 +115,19 @@ After all sub-handlers return false, remaining messages are forwarded to `m.inpu
 ## 5. Token Batching (tokenBatcher)
 
 ```go
+type msgSender interface { Send(tea.Msg) }
+
 type tokenBatcher struct {
     mu       sync.Mutex
     buf      strings.Builder
     lastSend time.Time
-    p        *tea.Program
+    p        msgSender
     dispatch func(string) // optional: forward each batch to WASM (EventToken)
 }
 const tokenBatchInterval = 75 * time.Millisecond
 ```
 
-`makeBatchedOnToken(p, dispatch)` returns `(onToken func(string), flush func())`. Tokens are coalesced and sent as a single `TokenMsg` at most every 75ms. `flush()` drains any buffered tail tokens immediately and must be called from `onDone`. When `dispatch` is non-nil, each flushed batch is also passed to it; `wireMainAgentCallbacks` supplies a closure that marshals a `sdk.TokenPayload` and calls `Host.DispatchEvent(EventToken)` so streamed text reaches WASM extensions. The dispatch runs on the agent goroutine, not the bubbletea loop.
+`makeBatchedOnToken(p, dispatch)` returns `(onToken func(string), flush func())`. Tokens are coalesced and sent as a single `TokenMsg` at most every 75ms. `flush()` drains any buffered tail tokens immediately and must be called at segment boundaries — when a tool call is dispatched (`toolCallForwarder`) and from `onDone` — otherwise a text segment's final <75ms of tokens wait for the NEXT segment's first token (or turn end) before becoming visible. When `dispatch` is non-nil, each flushed batch is also passed to it; `wireMainAgentCallbacks` supplies a closure that marshals a `sdk.TokenPayload` and calls `Host.DispatchEvent(EventToken)` so streamed text reaches WASM extensions. The dispatch runs on the agent goroutine, not the bubbletea loop. `msgSender` is the `Send(tea.Msg)` subset of `*tea.Program`, so tests can capture sends headlessly.
 
 **Invariant:** The batcher uses time-based coalescing with no goroutines or channels — it is safe to call `flush()` multiple times across turns without panics. Locking is purely `sync.Mutex` on the buffer.
 
@@ -650,6 +657,11 @@ producing agent's ID (`dispatchSegmentedTokens`), while remaining absent from th
 main transcript. Each agent gets its own batcher so coalescing windows are
 independent; `tokenBatcher` treats a nil program as dispatch-only, which is what
 lets sub-agent text reach extensions without emitting a main-chat `TokenMsg`.
+`dispatchSegmentedTokens` also returns a per-agent flusher, installed via
+`Spawner.SetTokenFlushObserver` and invoked at segment boundaries (tool-call
+dispatch) and turn end; without it a sub-agent's final text-segment tail was
+never dispatched at all (the dispatch-only batcher's flush was discarded),
+leaving focused transcripts permanently one fragment short.
 
 **Invariant:** picker callbacks prefixed `"__wllr:"` are core-owned and route to harness handlers, never to `EventOnCommand`. Extension command names cannot collide (the prefix is reserved). Reserved callbacks: `"__wllr:model"`, `"__wllr:thinking"`.
 

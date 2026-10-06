@@ -152,6 +152,23 @@ Submit→streamTurn path.
 | `TestAgent_StreamTps_EndToEnd` | real Submit with a sleeping LM (10×60ms, output 100) | `pool.MainAgentTps()` > 0 and ≤ 200 (denominator must cover ≥540ms of sleeps); value stable while idle |
 | `TestAgent_StreamTps_InstantStreamHidden` | instant usage-less LM | `MainAgentTps()` = 0 (hidden) |
 
+### streamspark_test.go (trailing-window sparkline)
+
+Same deterministic injected-timestamp style; covers the bars in isolation and
+through the agent/pool accessors.
+
+| Test | Scenario | Assertions |
+|------|----------|------------|
+| `TestSpark_ConstantRateBarsEqual` | steady 25 t/s stream, sampled each second | every bar at full height (each sample scales to the window max) |
+| `TestSpark_BeforeFirstTokenHidden` | polls before any step and during TTFT | bars "" — the sparkline never leads the number |
+| `TestSpark_CadenceAndCap` | 30 one-second samples | stored history capped at `sparkPoints`; render = cap + 1 transient edge; frozen bars have no edge |
+| `TestSpark_StallShowsDip` | tokens then a silent window | zero-rate sample renders the lowest block (`█▁▁`) — a stall is visible |
+| `TestSpark_FreezeBetweenSpans` | polling across a tool-execution gap | bars byte-identical across the gap — gaps are not sampled |
+| `TestSpark_FinishFreezesBars` | finish after two sampled seconds | bars survive turn end unchanged; polling long after finish is stable |
+| `TestSpark_NoPollNoBars` | turn ends before any poll follows its first token | no bars frozen — the number alone shows |
+| `TestAgent_StreamTpsSpark_Lifecycle` | agent-level sparkline lifecycle | "" fresh; live while the tracker is open; frozen by `endStreamStats` exactly as the tracker holds them; redundant end call is a no-op |
+| `TestPool_MainAgentTpsSpark_NoMain` | pool without a main agent | "" (mirrors `MainAgentTps`'s zero) |
+
 ## Missing / Recommended Tests
 
 | Priority | Test | Scenario | Assertions |
@@ -234,3 +251,9 @@ Submit→streamTurn path.
 | `TestExecuteTurn_RecordsToolCallAndResultInCanonicalTranscript` | **command output is retrievable** | scripted client-side tool call returning a failure | call and result entries recorded; result text exact; findable by tool |
 | `TestCanonicalTranscript_SurvivesAcrossTurns` | append-only across turns | two turns | two new entries; earlier turn still retrievable |
 | `TestCanonicalTranscript_ExcludesSystemMessages` | control traffic is not conversation | inbox mixing a system and a protocol message, empty-prompt drain turn | system content absent; something else recorded (test is not vacuous) |
+
+### spawner_flush_test.go
+
+| Test | Scenario | Setup | Assertions |
+|------|----------|-------|------------|
+| `TestSpawnerTokenFlushDeliversTailAtTurnEnd` | sub-agent's final text-segment tail reaches the focused transcript | word-delta FakeProvider response, token + flush observers, spawn with initial prompt | flush observer fires at turn end with the agent ID; concatenated streamed text equals the complete response |
