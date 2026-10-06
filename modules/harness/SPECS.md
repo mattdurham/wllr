@@ -621,10 +621,15 @@ the cursor clamps to a visible row so a collapse cannot strand the highlight.
 picker, modal, and agent tree **before** the esc-cancels-the-ask branch, so `esc`
 dismisses the dialog and leaves any running turn untouched. If esc-cancelled
 turns took precedence, the same key would both close a dialog and stop the work
-with no way to express only the first. With no overlay open, `esc` during an
-active main-agent turn cancels that turn. Covered by
-`TestEscInOverlaysDoesNotCancelTurn` and
-`TestModel_Esc_ClosesModalWithoutCancellingTurn`.
+with no way to express only the first. A focused sub-agent transcript is also a
+window: `esc` with `focusedAgent` set to a non-root agent unfocuses back to the
+root agent (clearing the `agent` status) and never cancels — only with no
+sub-agent window open does `esc` during an active main-agent turn cancel that
+turn. Covered by `TestEscInOverlaysDoesNotCancelTurn`,
+`TestModel_Esc_ClosesModalWithoutCancellingTurn`,
+`TestEsc_AgentsViewOpen_ClosesWithoutCancelling`,
+`TestEsc_FocusedAgentWindow_ClosesWithoutCancelling`, and
+`TestEsc_RootFocus_StillCancelsTurn`.
 
 **Invariant:** input follows focus. `submitToAgent` targets `focusedAgent`, and
 an empty focus means the root agent — the root is the default, not a special

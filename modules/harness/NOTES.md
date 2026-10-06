@@ -1085,3 +1085,26 @@ for sub-agents (EventBeforeAgentStart with Queued:true, async dispatch).
 Coverage in steer_test.go: builtin registration + arg joining + usage hint;
 running agent → steer typed and queued, absent from the running request;
 idle agent → wake turn consumes it and it reaches the provider.
+
+## Esc is layered window dismissal, not just turn-cancel (2026-10-06)
+
+Esc while a sub-agent transcript is focused cancelled the **main** agent's
+turn: the agent tree overlay owns esc only while *it* is open, but selecting
+a node closes the overlay and leaves the sub-agent focused — the "window"
+the user is looking at. From there, esc fell through to the main-turn cancel
+branch, killing the orchestrator's work when the user only meant to close
+the view.
+
+The fix orders the esc branch by window depth: focused sub-agent → unfocus
+(clear `focusedAgent`, clear the `agent` status); then overlay/modal/tree →
+their own close; then, only with no window open, cancel an active main turn.
+Sub-agents remain never-cancelled-by-esc (their lifecycle is
+`shutdown_agent`), consistent with the existing issue-#48 semantics —
+unfocus is a view operation, not a lifecycle operation.
+
+**Consequence:** `updateKeyPress`'s esc branch gains a focused-agent guard
+before the cancel branch. A second esc after unfocusing still cancels a
+running main turn, so the key's stop semantics are unchanged at the root.
+Coverage in escagentsview_test.go: overlay-open esc closes without
+cancelling, focused-window esc unfocuses without cancelling, and root-focus
+esc still cancels.

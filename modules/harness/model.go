@@ -1156,11 +1156,20 @@ func (m Model) updateKeyPress(msg tea.Msg) (Model, tea.Cmd, bool) {
 		return m.updateKeyPressModal(kp)
 	}
 
-	// With no overlay open, esc during an active main-agent turn cancels it.
-	// Sub-agents are not cancelled: esc means "stop what I asked you for", not
-	// "abandon everything I delegated". Their lifecycle is shutdown_agent /
-	// shutdown_team.
+	// A focused sub-agent transcript is a window: esc closes it — unfocusing
+	// back to the root agent — instead of reaching through to cancel work
+	// behind it. Sub-agents are never cancelled by esc (their lifecycle is
+	// shutdown_agent / shutdown_team); a second esc once back on the root
+	// agent cancels an active main turn.
 	if kp.String() == keyEsc {
+		if m.focusedAgent != "" && m.focusedAgent != m.mainAgentID {
+			m.focusedAgent = ""
+			m.live.setStatus("agent", "")
+			return m, nil, true
+		}
+		// With no sub-agent window open, esc during an active main-agent turn
+		// cancels it. Sub-agents are not cancelled: esc means "stop what I
+		// asked you for", not "abandon everything I delegated".
 		if m.mainTurnActive() {
 			m.cancelMainTurn()
 			m.live.setStatus("stream", "cancelling…")
