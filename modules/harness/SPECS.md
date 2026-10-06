@@ -609,7 +609,9 @@ installed policy, so the two paths must not diverge.
 ### Agent Tree and Focus
 
 `AgentTreeView` is the interactive `/agents` surface: ↑↓ move, →← fold/unfold,
-space toggles, enter focuses, `q` closes. It replaces the previous static modal,
+space toggles, enter focuses, esc or `q` closes (the header hint advertises
+esc first because closing a window must never require reaching for a quit
+key that elsewhere in the app means quit-the-process). It replaces the previous static modal,
 which could not express selection. Extensions supply a flat node list and the
 view derives the hierarchy from `ParentID`; siblings sort by ID because the
 agent list comes from a Go map and would otherwise reshuffle between openings.

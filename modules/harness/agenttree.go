@@ -268,7 +268,7 @@ func (t *AgentTreeView) View() string {
 	content := inner - 2
 
 	var sb strings.Builder
-	title := " Agents  (↑↓ move · →← fold · enter focus · q=quit) "
+	title := " Agents  (↑↓ move · →← fold · enter focus · esc/q close) "
 	sb.WriteString(treeBorderStyle.Render("╭") +
 		treeTitleStyle.Render(truncateRunes(title, inner)) +
 		treeBorderStyle.Render(strings.Repeat("─", max(0, inner-lipgloss.Width(title)))+"╮") + "\n")
