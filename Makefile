@@ -34,7 +34,7 @@
 #
 # Installed extensions (loaded from ~/.wllr/extensions/ at runtime):
 #   context, skills, tasks, task-runner, lsp, memory, permissions, mcp-bridge,
-#   otel-traces, websearch, search
+#   otel-traces, websearch, search, list_files
 
 DIST_DIR    := dist
 BINARY      := $(DIST_DIR)/wllr
@@ -108,7 +108,7 @@ extensions: builtins optional-extensions
 
 optional-extensions:
 	mkdir -p $(EXT_DIR)/websearch
-	mkdir -p $(EXT_DIR)/context $(EXT_DIR)/skills $(EXT_DIR)/tasks $(EXT_DIR)/task-runner $(EXT_DIR)/lsp $(EXT_DIR)/permissions $(EXT_DIR)/mcp-bridge $(EXT_DIR)/otel-traces $(EXT_DIR)/websearch $(EXT_DIR)/search
+	mkdir -p $(EXT_DIR)/context $(EXT_DIR)/skills $(EXT_DIR)/tasks $(EXT_DIR)/task-runner $(EXT_DIR)/lsp $(EXT_DIR)/permissions $(EXT_DIR)/mcp-bridge $(EXT_DIR)/otel-traces $(EXT_DIR)/websearch $(EXT_DIR)/search $(EXT_DIR)/list_files
 	$(WASM_BUILD) $(EXT_DIR)/skills/skills.wasm extensions/skills
 	cp extensions/skills/extension.yaml $(EXT_DIR)/skills/
 	$(WASM_BUILD) $(EXT_DIR)/tasks/tasks.wasm extensions/tasks
@@ -126,6 +126,8 @@ optional-extensions:
 	cp extensions/websearch/extension.yaml $(EXT_DIR)/websearch/
 	$(WASM_BUILD) $(EXT_DIR)/search/search.wasm extensions/search
 	cp extensions/search/extension.yaml $(EXT_DIR)/search/
+	$(WASM_BUILD) $(EXT_DIR)/list_files/list_files.wasm extensions/list_files
+	cp extensions/list_files/extension.yaml $(EXT_DIR)/list_files/
 	@echo "Installed optional extensions to $(EXT_DIR)"
 
 $(DIST_DIR):
