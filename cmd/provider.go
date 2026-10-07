@@ -204,24 +204,31 @@ type editFileResult struct {
 // exec, get_env, edit_file) on h, bypassing WASM entirely.
 func registerNativeTools(h *extension.Host) {
 	h.RegisterNativeTool(sdk.Tool{
-		Name:        "read_file",
-		Description: "Read the contents of a file from the filesystem",
+		Name: "read_file",
+		Description: "Read the contents of a file from the filesystem. Optionally return only a " +
+			"1-based inclusive line range (start_line/end_line). Output is byte-capped with an " +
+			"explicit truncation notice; when a path does not exist, nearby candidate paths are suggested.",
 		InputSchema: json.RawMessage(
-			`{"type":"object","properties":{"path":{"type":"string","description":"Absolute or relative path of the file to read"}},"required":["path"]}`,
+			`{"type":"object","properties":{"path":{"type":"string","description":"Absolute or relative path of the file to read"},"start_line":{"type":"integer","description":"Optional 1-based first line to return (inclusive)"},"end_line":{"type":"integer","description":"Optional 1-based last line to return (inclusive)"},"max_bytes":{"type":"integer","description":"Optional maximum bytes to return before truncation (default 524288)"}},"required":["path"]}`,
 		),
-		OutputSchema: json.RawMessage(`{"type":"string","description":"File contents as text"}`),
+		OutputSchema: json.RawMessage(
+			`{"type":"string","description":"File contents as text, with line-range selection and an explicit truncation notice when capped"}`,
+		),
 	}, func(_ context.Context, input json.RawMessage) (string, bool) {
 		var in struct {
-			Path string `json:"path"`
+			Path      string `json:"path"`
+			StartLine int    `json:"start_line"`
+			EndLine   int    `json:"end_line"`
+			MaxBytes  int    `json:"max_bytes"`
 		}
 		if err := json.Unmarshal(input, &in); err != nil || in.Path == "" {
 			return "path is required", true
 		}
 		content, err := os.ReadFile(in.Path)
 		if err != nil {
-			return "read_file: " + err.Error(), true
+			return readFileError(in.Path, err), true
 		}
-		return string(content), false
+		return formatReadFile(content, in.StartLine, in.EndLine, in.MaxBytes), false
 	})
 
 	h.RegisterNativeTool(sdk.Tool{
@@ -444,6 +451,280 @@ func registerNativeTools(h *extension.Host) {
 		data, _ := json.Marshal(vars)
 		return string(data), false
 	})
+}
+
+// defaultReadMaxBytes bounds a single read_file result so a very large file
+// cannot blow the model's context window. A caller can raise it per call via
+// max_bytes, and use start_line/end_line to page through a larger file.
+const defaultReadMaxBytes = 512 * 1024
+
+// readFileError formats a read_file failure. When the file is missing it
+// appends nearby candidate paths so a caller can correct a wrong, misspelled,
+// or relocated path without another blind guess.
+func readFileError(path string, err error) string {
+	msg := "read_file: " + err.Error()
+	if !errors.Is(err, os.ErrNotExist) {
+		return msg
+	}
+	candidates := suggestPaths(path)
+	if len(candidates) == 0 {
+		return msg
+	}
+	var b strings.Builder
+	b.WriteString(msg)
+	b.WriteString("\ndid you mean:")
+	for _, c := range candidates {
+		b.WriteString("\n  ")
+		b.WriteString(c)
+	}
+	return b.String()
+}
+
+// formatReadFile renders a file's contents with an optional 1-based inclusive
+// line range and a byte cap. Truncation is always surfaced explicitly so the
+// caller knows the result is incomplete and how to page further.
+func formatReadFile(content []byte, startLine, endLine, maxBytes int) string {
+	text := string(content)
+
+	if startLine > 0 || endLine > 0 {
+		lines := strings.Split(text, "\n")
+		n := len(lines)
+		s := startLine
+		if s < 1 {
+			s = 1
+		}
+		if s > n {
+			return fmt.Sprintf("[read_file: start_line %d is beyond end of file (%d lines)]", startLine, n)
+		}
+		e := endLine
+		if e < 1 || e > n {
+			e = n
+		}
+		if e < s {
+			return fmt.Sprintf("[read_file: end_line %d is before start_line %d]", endLine, startLine)
+		}
+		text = strings.Join(lines[s-1:e], "\n")
+	}
+
+	if maxBytes <= 0 {
+		maxBytes = defaultReadMaxBytes
+	}
+	total := len(text)
+	if total > maxBytes {
+		cut := maxBytes
+		// Prefer a line boundary at or before the cap so a line is not cut mid-way.
+		if idx := strings.LastIndexByte(text[:cut], '\n'); idx > 0 {
+			cut = idx + 1
+		}
+		text = text[:cut] + fmt.Sprintf(
+			"\n[read_file: truncated at %d bytes of %d total; use start_line/end_line to read more]",
+			cut, total,
+		)
+	}
+	return text
+}
+
+// maxPathSuggestions caps how many candidate paths a missing read reports.
+const maxPathSuggestions = 5
+
+// suggestPaths returns up to a few existing paths that may be the intended
+// target of a missing read. It covers two failure modes seen in practice: a
+// slightly misspelled basename in the same directory, and a file that lives at
+// the same relative path under a sibling directory (for example a git worktree
+// checkout beside the main repository). Work is bounded so a missing path in a
+// large tree cannot turn one read into an expensive scan.
+func suggestPaths(path string) []string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(p string) {
+		if p == "" || seen[p] || len(out) >= maxPathSuggestions {
+			return
+		}
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	for _, c := range suggestSameDir(filepath.Dir(path), filepath.Base(path)) {
+		add(c)
+	}
+	if len(out) < maxPathSuggestions {
+		abs, err := filepath.Abs(path)
+		if err != nil {
+			abs = path
+		}
+		for _, c := range suggestRelocated(abs) {
+			add(c)
+		}
+	}
+	return out
+}
+
+// suggestSameDir returns up to three file paths in parent whose names are
+// similar to base (a typo or a near rename), closest first.
+func suggestSameDir(parent, base string) []string {
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		return nil
+	}
+	type scored struct {
+		path string
+		dist int
+	}
+	lb := strings.ToLower(base)
+	var near []scored
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := strings.ToLower(e.Name())
+		d := boundedEditDistance(name, lb, 2)
+		if d <= 2 || strings.Contains(name, lb) || strings.Contains(lb, name) {
+			near = append(near, scored{path: filepath.Join(parent, e.Name()), dist: d})
+		}
+	}
+	sort.Slice(near, func(i, j int) bool { return near[i].dist < near[j].dist })
+	var out []string
+	for i, n := range near {
+		if i >= 3 {
+			break
+		}
+		out = append(out, n.path)
+	}
+	return out
+}
+
+// suggestRelocated returns candidate paths holding the same relative path as
+// abs under a sibling directory of one of abs's existing ancestors. It walks up
+// the ancestor chain so a missing path whose own parents do not exist (the
+// common case) is still matched against an existing ancestor higher up.
+func suggestRelocated(abs string) []string {
+	var out []string
+	dir := filepath.Dir(abs)
+	for depth := 0; depth < 8 && len(out) < maxPathSuggestions; depth++ {
+		parent := filepath.Dir(dir)
+		if parent == dir || parent == "" {
+			break
+		}
+		if st, err := os.Stat(dir); err == nil && st.IsDir() {
+			out = append(out, relocatedUnder(dir, abs)...)
+		}
+		dir = parent
+	}
+	return out
+}
+
+// relocatedUnder varies the first path component of abs below each existing
+// sibling of that component under dir, testing both the direct replacement and
+// one wildcard level for roots that hold per-checkout subdirectories (for
+// example replacing "repo" with "repo-worktrees/<name>").
+func relocatedUnder(dir, abs string) []string {
+	relFromDir, err := filepath.Rel(dir, abs)
+	if err != nil || relFromDir == "." || strings.HasPrefix(relFromDir, "..") {
+		return nil
+	}
+	comps := strings.Split(relFromDir, string(filepath.Separator))
+	if len(comps) < 2 {
+		return nil
+	}
+	first := comps[0]
+	rest := filepath.Join(comps[1:]...)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") || e.Name() == first {
+			continue
+		}
+		if len(out) >= maxPathSuggestions {
+			break
+		}
+		sib := filepath.Join(dir, e.Name())
+		out = append(out, filepath.Join(sib, rest))
+		for _, sub := range childDirNames(sib) {
+			if len(out) >= maxPathSuggestions {
+				break
+			}
+			out = append(out, filepath.Join(sib, sub, rest))
+		}
+	}
+	return out
+}
+
+// childDirNames returns the names of subdirectories of dir, excluding hidden
+// entries. A read error yields no names.
+func childDirNames(dir string) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, e := range entries {
+		if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
+			names = append(names, e.Name())
+		}
+	}
+	return names
+}
+
+// boundedEditDistance returns the Levenshtein distance between a and b, capped
+// at max. It returns max as soon as every path in a row already exceeds it, so
+// clearly dissimilar strings cost little.
+func boundedEditDistance(a, b string, max int) int {
+	if a == b {
+		return 0
+	}
+	la, lb := len(a), len(b)
+	if la == 0 {
+		return lb
+	}
+	if lb == 0 {
+		return la
+	}
+	if la-lb > max || lb-la > max {
+		return max
+	}
+	prev := make([]int, lb+1)
+	cur := make([]int, lb+1)
+	for j := 0; j <= lb; j++ {
+		prev[j] = j
+	}
+	for i := 1; i <= la; i++ {
+		cur[0] = i
+		rowMin := cur[0]
+		for j := 1; j <= lb; j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			cur[j] = editMin3(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+			if cur[j] < rowMin {
+				rowMin = cur[j]
+			}
+		}
+		if rowMin > max {
+			return max
+		}
+		prev, cur = cur, prev
+	}
+	if prev[lb] > max {
+		return max
+	}
+	return prev[lb]
+}
+
+// editMin3 returns the smallest of three ints.
+func editMin3(a, b, c int) int {
+	m := a
+	if b < m {
+		m = b
+	}
+	if c < m {
+		m = c
+	}
+	return m
 }
 
 // findOccurrences returns all start indices of substr in s.

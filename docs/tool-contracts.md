@@ -28,11 +28,27 @@ items into a text tool result.
 Input:
 
 - `path` string, required. Absolute or relative file path.
+- `start_line` integer, optional. 1-based first line to return, inclusive.
+- `end_line` integer, optional. 1-based last line to return, inclusive. Omitted
+  or past the end of the file reads to the end. `start_line`/`end_line` are
+  clamped; a `start_line` past the end (or an `end_line` before `start_line`)
+  returns a non-fatal notice instead of the contents.
+- `max_bytes` integer, optional. Byte cap for the returned text; defaults to
+  `524288` (512 KiB).
 
 Output:
 
-- Plain text containing the file contents.
+- Plain text containing the file contents (or the requested line range).
+- When the result exceeds `max_bytes`, the text is cut at the last line
+  boundary at or before the cap and a trailing notice is appended:
+  `[read_file: truncated at <n> bytes of <total> total; use start_line/end_line
+  to read more]`. Truncation is not an error.
 - Fatal errors: missing `path`, read failure. Error text is plain text.
+- When `path` does not exist, the error text appends a `did you mean:` list of
+  nearby candidate paths: a similar basename in the same directory (typos), or
+  the same relative path under a sibling directory (a relocated checkout or a
+  git worktree beside the main repository). No candidates yields the plain
+  error.
 
 ### `write_file`
 
