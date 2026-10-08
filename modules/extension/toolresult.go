@@ -7,3 +7,8 @@ type toolResult struct {
 	Result  string
 	IsError bool
 }
+
+// ToolResult is the exported alias of toolResult for external dispatchers
+// (modules/tools watchdog interface) that call ExecuteTool without importing
+// wllr-internal names.
+type ToolResult = toolResult

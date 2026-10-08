@@ -456,7 +456,7 @@ Each `Extension` carries:
 
 ## 15. ExecuteTool: Synchronous Tool Dispatch
 
-`Host.ExecuteTool(ctx, agentID, toolCallID, toolName, input)` provides synchronous tool execution.
+`Host.ExecuteTool(ctx, agentID, toolCallID, toolName, input)` provides synchronous tool execution. Its result type is aliased exported as `extension.ToolResult` so external dispatchers (the tools-package watchdog) can name it; the two-method dispatcher surface (`ExecuteTool` + `RegisteredTools`) is satisfied by `*Host`.
 
 **Both paths run the `before_tool_call` interceptor chain** via
 `runBeforeToolCall` (a wrapper over `DispatchEventChain`): interceptors may

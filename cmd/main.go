@@ -60,6 +60,7 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 
 	ctx := context.Background()
 	localModelReplaced := resolveLocalProviderConfig(ctx, cfg)
+	applyToolCallTimeoutConfig()
 
 	missingAuthEnv, missingAuth := missingProviderAuth(cfg)
 	_, knownOpenRouterModel := cfg.openRouterModel(cfg.Model)
