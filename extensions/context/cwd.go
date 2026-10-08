@@ -45,9 +45,16 @@ func globalPaths() []string {
 
 func readFirst(paths []string) (string, string) {
 	for _, path := range paths {
-		if data, err := os.ReadFile(path); err == nil && len(data) > 0 {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		// Trim before the emptiness check so a whitespace-only file falls
+		// through to the next candidate instead of shadowing it with empty
+		// content (which the addPart guard would silently drop).
+		if content := strings.TrimSpace(string(data)); content != "" {
 			Log(1, "prompt: loaded "+path)
-			return strings.TrimSpace(string(data)), path
+			return content, path
 		}
 	}
 	return "", ""

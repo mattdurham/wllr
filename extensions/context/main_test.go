@@ -2,6 +2,8 @@ package main
 
 import (
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -47,6 +49,142 @@ func TestBuildPromptWithConfig_OverrideAndDynamicMetadata(t *testing.T) {
 	if strings.Contains(prompt, "## Action Rules") {
 		t.Fatalf("built-in prompt should be replaced by override: %q", prompt)
 	}
+}
+
+// setTestHome points os.UserHomeDir at a fresh temp dir for the duration of
+// the test. os.UserHomeDir reads $HOME on unix; skipped on windows, where it
+// reads USERPROFILE instead.
+func setTestHome(t *testing.T) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("os.UserHomeDir reads USERPROFILE on windows; $HOME override does not apply")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	return home
+}
+
+func TestGlobalPaths_UnderHome(t *testing.T) {
+	home := setTestHome(t)
+	paths := globalPaths()
+	if len(paths) != 2 {
+		t.Fatalf("globalPaths() = %v, want 2 entries", paths)
+	}
+	wantAgents := filepath.Join(home, ".wllr", "AGENTS.md")
+	wantClaude := filepath.Join(home, ".wllr", "CLAUDE.md")
+	if paths[0] != wantAgents || paths[1] != wantClaude {
+		t.Errorf("globalPaths() = %v, want [%s %s]", paths, wantAgents, wantClaude)
+	}
+}
+
+func TestReadFirst_GlobalTier(t *testing.T) {
+	agentsContent := "global rule: be concise"
+	claudeContent := "claude fallback rule"
+	writeGlobal := func(t *testing.T, agents, claude string) string {
+		t.Helper()
+		home := setTestHome(t)
+		dir := filepath.Join(home, ".wllr")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		write := func(name, content string) {
+			if content == "" {
+				return
+			}
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		write("AGENTS.md", agents)
+		write("CLAUDE.md", claude)
+		return home
+	}
+
+	t.Run("agents wins when both exist", func(t *testing.T) {
+		home := writeGlobal(t, agentsContent, claudeContent)
+		content, path := readFirst(globalPaths())
+		if content != agentsContent || path != filepath.Join(home, ".wllr", "AGENTS.md") {
+			t.Errorf("readFirst() = %q, %q; want agents content from AGENTS.md", content, path)
+		}
+	})
+
+	t.Run("falls back to CLAUDE.md", func(t *testing.T) {
+		home := writeGlobal(t, "", claudeContent)
+		content, path := readFirst(globalPaths())
+		if content != claudeContent || path != filepath.Join(home, ".wllr", "CLAUDE.md") {
+			t.Errorf("readFirst() = %q, %q; want claude content from CLAUDE.md", content, path)
+		}
+	})
+
+	t.Run("whitespace-only AGENTS.md does not shadow CLAUDE.md", func(t *testing.T) {
+		home := writeGlobal(t, "   \n\t ", claudeContent)
+		content, path := readFirst(globalPaths())
+		if content != claudeContent || path != filepath.Join(home, ".wllr", "CLAUDE.md") {
+			t.Errorf("readFirst() = %q, %q; want fall-through past whitespace-only AGENTS.md", content, path)
+		}
+	})
+
+	t.Run("neither file present", func(t *testing.T) {
+		writeGlobal(t, "", "")
+		content, path := readFirst(globalPaths())
+		if content != "" || path != "" {
+			t.Errorf("readFirst() = %q, %q; want empty results", content, path)
+		}
+	})
+}
+
+func TestBuildPrompt_GlobalTier(t *testing.T) {
+	t.Run("labeled component placed before project tier", func(t *testing.T) {
+		home := setTestHome(t)
+		agentsPath := filepath.Join(home, ".wllr", "AGENTS.md")
+		if err := os.MkdirAll(filepath.Dir(agentsPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		marker := "global rule: never commit to slack without asking"
+		if err := os.WriteFile(agentsPath, []byte(marker), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		prompt, components := buildPromptWithConfigParts([]promptTool{{Name: "read_file"}}, nil, promptConfig{})
+
+		var globalIdx = -1
+		for i := range components {
+			if components[i].Source == "file:"+agentsPath {
+				globalIdx = i
+			}
+		}
+		if globalIdx == -1 {
+			t.Fatalf("no component labeled file:%s in %v", agentsPath, components)
+		}
+		if got := components[globalIdx].Chars; got != len(marker) {
+			t.Errorf("global component chars = %d, want %d", got, len(marker))
+		}
+		if !strings.Contains(prompt, marker) {
+			t.Errorf("prompt missing global tier content %q", marker)
+		}
+		// The global tier sits after the base/tools glue and before any
+		// project-tier file found by the cwd walk-up (the repo's own
+		// AGENTS.md when tests run inside the wllr checkout).
+		for i := range components {
+			if i == globalIdx || !strings.HasPrefix(components[i].Source, "file:") {
+				continue
+			}
+			if i < globalIdx {
+				t.Errorf("project-tier component %q (index %d) precedes global tier (index %d)",
+					components[i].Source, i, globalIdx)
+			}
+		}
+	})
+
+	t.Run("absent files contribute no component", func(t *testing.T) {
+		setTestHome(t)
+		_, components := buildPromptWithConfigParts(nil, nil, promptConfig{})
+		for i := range components {
+			if strings.Contains(components[i].Source, ".wllr") {
+				t.Errorf("unexpected global-tier component %q with no ~/.wllr files", components[i].Source)
+			}
+		}
+	})
 }
 
 func TestBuildPromptWithConfig_ContainsAuthoritativeEditingPolicy(t *testing.T) {
