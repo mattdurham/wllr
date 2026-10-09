@@ -120,10 +120,10 @@ func (s *SceneRenderer) ConstrainWidth(id string, termWidth int) int {
 		return termWidth
 	}
 	w := termWidth
-	if min, ok := resolveConstraint(area.minWidth, termWidth); ok && w < min {
+	if min, ok := sdk.ResolveConstraint(area.minWidth, termWidth); ok && w < min {
 		w = min
 	}
-	if max, ok := resolveConstraint(area.maxWidth, termWidth); ok && w > max {
+	if max, ok := sdk.ResolveConstraint(area.maxWidth, termWidth); ok && w > max {
 		w = max
 	}
 	if w < 0 {
@@ -142,10 +142,10 @@ func (s *SceneRenderer) ConstrainHeight(id string, lines int, termHeight int) in
 	if !ok {
 		return lines
 	}
-	if min, ok := resolveConstraint(area.minHeight, termHeight); ok && lines < min {
+	if min, ok := sdk.ResolveConstraint(area.minHeight, termHeight); ok && lines < min {
 		lines = min
 	}
-	if max, ok := resolveConstraint(area.maxHeight, termHeight); ok && lines > max {
+	if max, ok := sdk.ResolveConstraint(area.maxHeight, termHeight); ok && lines > max {
 		lines = max
 	}
 	if lines < 0 {
@@ -154,41 +154,10 @@ func (s *SceneRenderer) ConstrainHeight(id string, lines int, termHeight int) in
 	return lines
 }
 
-// resolveConstraint parses a constraint string ("N" absolute or "N%" percent
-// of total) and returns the resolved int value. Returns (0, false) for empty
-// or unparseable strings.
+// resolveConstraint delegates to sdk.ResolveConstraint. It is kept as a thin
+// package-local shim so existing call sites and tests read unchanged.
 func resolveConstraint(v string, total int) (int, bool) {
-	if v == "" {
-		return 0, false
-	}
-	if strings.HasSuffix(v, "%") {
-		n, ok := parseDecimal(v[:len(v)-1])
-		if !ok || n < 0 {
-			return 0, false
-		}
-		return total * n / 100, true
-	}
-	n, ok := parseDecimal(v)
-	if !ok {
-		return 0, false
-	}
-	return n, true
-}
-
-// parseDecimal parses a non-negative decimal integer string. Returns (0, false)
-// for empty strings, negative values, or non-digit characters.
-func parseDecimal(s string) (int, bool) {
-	if s == "" {
-		return 0, false
-	}
-	n := 0
-	for _, ch := range s {
-		if ch < '0' || ch > '9' {
-			return 0, false
-		}
-		n = n*10 + int(ch-'0')
-	}
-	return n, true
+	return sdk.ResolveConstraint(v, total)
 }
 
 // HasArea reports whether an area exists.
@@ -217,6 +186,9 @@ func (s *SceneRenderer) AreasByPlacement(p sdk.UIAreaPlacement) []string {
 // validated against a working copy first; if any op references a missing node
 // or targets a missing area, the whole batch is rejected and the live tree is
 // unchanged.
+//
+// The per-op semantics live in sdk.ApplyOp so the HTML renderer
+// (modules/server) manipulates the graph identically.
 func (s *SceneRenderer) ApplyPatch(p sdk.UIPatchParams) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -225,9 +197,9 @@ func (s *SceneRenderer) ApplyPatch(p sdk.UIPatchParams) error {
 		return fmt.Errorf("ui_patch: unknown area: %s", p.Area)
 	}
 	// Work on a clone so a mid-batch failure leaves the live tree intact.
-	working := cloneNode(area.root)
+	working := sdk.CloneNode(area.root)
 	for i, op := range p.Ops {
-		next, err := applyOp(working, op)
+		next, err := sdk.ApplyOp(working, op)
 		if err != nil {
 			return fmt.Errorf("ui_patch op %d (%s): %w", i, op.Op, err)
 		}
@@ -237,153 +209,6 @@ func (s *SceneRenderer) ApplyPatch(p sdk.UIPatchParams) error {
 	return nil
 }
 
-// applyOp applies a single op to root, returning the new root.
-func applyOp(root *sdk.UINode, op sdk.UIPatchOp) (*sdk.UINode, error) {
-	switch op.Op {
-	case sdk.UIOpSetRoot:
-		if op.Node == nil {
-			return nil, fmt.Errorf("set_root requires node")
-		}
-		n := cloneNode(op.Node)
-		return n, nil
-	case sdk.UIOpInsert:
-		if op.Node == nil {
-			return nil, fmt.Errorf("insert requires node")
-		}
-		if op.Parent == "" {
-			// Insert at the root container level requires an existing root container.
-			if root == nil {
-				return nil, fmt.Errorf("insert: no root; use set_root first")
-			}
-			if err := insertChild(root, op.Index, *cloneNode(op.Node)); err != nil {
-				return nil, err
-			}
-			return root, nil
-		}
-		parent := findNode(root, op.Parent)
-		if parent == nil {
-			return nil, fmt.Errorf("insert: parent not found: %s", op.Parent)
-		}
-		if err := insertChild(parent, op.Index, *cloneNode(op.Node)); err != nil {
-			return nil, err
-		}
-		return root, nil
-	case sdk.UIOpUpdate:
-		n := findNode(root, op.ID)
-		if n == nil {
-			return nil, fmt.Errorf("update: node not found: %s", op.ID)
-		}
-		n.Props = cloneProps(op.Props)
-		return root, nil
-	case sdk.UIOpRemove:
-		if root != nil && root.ID == op.ID {
-			return nil, nil
-		}
-		if !removeNode(root, op.ID) {
-			return nil, fmt.Errorf("remove: node not found: %s", op.ID)
-		}
-		return root, nil
-	case sdk.UIOpAppendText:
-		n := findNode(root, op.ID)
-		if n == nil {
-			return nil, fmt.Errorf("append_text: node not found: %s", op.ID)
-		}
-		if n.Type != sdk.UINodeText {
-			return nil, fmt.Errorf("append_text: node %s is not a text node", op.ID)
-		}
-		n.Text += op.Text
-		return root, nil
-	case sdk.UIOpReplaceText:
-		n := findNode(root, op.ID)
-		if n == nil {
-			return nil, fmt.Errorf("replace_text: node not found: %s", op.ID)
-		}
-		if n.Type != sdk.UINodeText {
-			return nil, fmt.Errorf("replace_text: node %s is not a text node", op.ID)
-		}
-		n.Text = op.Text
-		return root, nil
-	default:
-		return nil, fmt.Errorf("unknown op: %s", op.Op)
-	}
-}
-
-func insertChild(parent *sdk.UINode, index *int, child sdk.UINode) error {
-	at := len(parent.Children)
-	if index != nil {
-		at = *index
-		if at < 0 || at > len(parent.Children) {
-			return fmt.Errorf("insert index out of range: %d", at)
-		}
-	}
-	parent.Children = append(parent.Children, sdk.UINode{})
-	copy(parent.Children[at+1:], parent.Children[at:])
-	parent.Children[at] = child
-	return nil
-}
-
-// findNode returns a pointer to the node with the given ID, or nil.
-func findNode(n *sdk.UINode, id string) *sdk.UINode {
-	if n == nil {
-		return nil
-	}
-	if n.ID == id {
-		return n
-	}
-	for i := range n.Children {
-		if found := findNode(&n.Children[i], id); found != nil {
-			return found
-		}
-	}
-	return nil
-}
-
-// removeNode removes the child with the given ID from n's subtree. Returns true
-// if removed. Cannot remove the root itself (handled by caller).
-func removeNode(n *sdk.UINode, id string) bool {
-	if n == nil {
-		return false
-	}
-	for i := range n.Children {
-		if n.Children[i].ID == id {
-			n.Children = append(n.Children[:i], n.Children[i+1:]...)
-			return true
-		}
-		if removeNode(&n.Children[i], id) {
-			return true
-		}
-	}
-	return false
-}
-
-func cloneNode(n *sdk.UINode) *sdk.UINode {
-	if n == nil {
-		return nil
-	}
-	out := sdk.UINode{ID: n.ID, Type: n.Type, Text: n.Text, Props: cloneProps(n.Props)}
-	if len(n.Children) > 0 {
-		out.Children = make([]sdk.UINode, len(n.Children))
-		for i := range n.Children {
-			out.Children[i] = *cloneNode(&n.Children[i])
-		}
-	}
-	return &out
-}
-
-func cloneProps(p *sdk.UIProps) *sdk.UIProps {
-	if p == nil {
-		return nil
-	}
-	out := *p
-	if p.Padding != nil {
-		out.Padding = append([]int(nil), p.Padding...)
-	}
-	if p.Margin != nil {
-		out.Margin = append([]int(nil), p.Margin...)
-	}
-	return &out
-}
-
 // Render renders the area's scene graph to a string sized to width. Returns ""
 // for an unknown or empty area.
 func (s *SceneRenderer) Render(areaID string, width int) string {
@@ -391,7 +216,7 @@ func (s *SceneRenderer) Render(areaID string, width int) string {
 	area, ok := s.areas[areaID]
 	var root *sdk.UINode
 	if ok {
-		root = cloneNode(area.root)
+		root = sdk.CloneNode(area.root)
 	}
 	s.mu.RUnlock()
 	if !ok || root == nil {
@@ -408,7 +233,7 @@ func (s *SceneRenderer) RenderNode(areaID, nodeID string, width int, textOverrid
 	area, ok := s.areas[areaID]
 	var node *sdk.UINode
 	if ok {
-		node = cloneNode(findNode(area.root, nodeID))
+		node = sdk.CloneNode(sdk.FindNode(area.root, nodeID))
 	}
 	s.mu.RUnlock()
 	if !ok || node == nil {
@@ -435,7 +260,7 @@ func (s *SceneRenderer) RenderAppendTextNode(
 	area, areaOK := s.areas[areaID]
 	var node *sdk.UINode
 	if areaOK {
-		node = cloneNode(findNode(area.root, nodeID))
+		node = sdk.CloneNode(sdk.FindNode(area.root, nodeID))
 	}
 	s.mu.RUnlock()
 	if !areaOK || node == nil || node.Type != sdk.UINodeText {
@@ -457,12 +282,7 @@ func (s *SceneRenderer) RenderAppendTextNode(
 // trailing newlines, this is safe to apply mid-stream: a node's text may
 // still be growing via append_text, and a run this large is already
 // excessive regardless of whether more text follows.
-func collapseBlankLineRuns(s string) string {
-	for strings.Contains(s, "\n\n\n") {
-		s = strings.ReplaceAll(s, "\n\n\n", "\n\n")
-	}
-	return s
-}
+func collapseBlankLineRuns(s string) string { return sdk.CollapseBlankLineRuns(s) }
 
 // renderNode renders a single node and its subtree to a string given the
 // available content width. Text nodes only have excessive (3+) consecutive
@@ -579,11 +399,11 @@ func styleFromProps(p *sdk.UIProps, width int) (lipgloss.Style, int) {
 		style = style.Border(lipgloss.DoubleBorder())
 		inner -= 2
 	}
-	if t, r, b, l, ok := sides(p.Padding); ok {
+	if t, r, b, l, ok := sdk.PropSides(p.Padding); ok {
 		style = style.Padding(t, r, b, l)
 		inner -= l + r
 	}
-	if t, r, b, l, ok := sides(p.Margin); ok {
+	if t, r, b, l, ok := sdk.PropSides(p.Margin); ok {
 		style = style.Margin(t, r, b, l)
 		inner -= l + r
 	}
@@ -595,11 +415,11 @@ func styleFromProps(p *sdk.UIProps, width int) (lipgloss.Style, int) {
 	case "left":
 		style = style.Align(lipgloss.Left)
 	}
-	if w, ok := parseDimension(p.Width, width); ok {
+	if w, ok := sdk.ParseDimension(p.Width, width); ok {
 		style = style.Width(w)
 		inner = w
 		// account for border/padding already subtracted from a fresh width
-		if t, r, b, l, has := sides(p.Padding); has {
+		if t, r, b, l, has := sdk.PropSides(p.Padding); has {
 			inner -= l + r
 			_ = t
 			_ = b
@@ -608,46 +428,11 @@ func styleFromProps(p *sdk.UIProps, width int) (lipgloss.Style, int) {
 			inner -= 2
 		}
 	}
-	if h, ok := parseDimension(p.Height, 0); ok {
+	if h, ok := sdk.ParseDimension(p.Height, 0); ok {
 		style = style.Height(h)
 	}
 	if inner < 0 {
 		inner = 0
 	}
 	return style, inner
-}
-
-// sides expands a 1/2/4-length cell spec into top,right,bottom,left.
-func sides(v []int) (t, r, b, l int, ok bool) {
-	switch len(v) {
-	case 1:
-		return v[0], v[0], v[0], v[0], true
-	case 2:
-		return v[0], v[1], v[0], v[1], true
-	case 4:
-		return v[0], v[1], v[2], v[3], true
-	}
-	return 0, 0, 0, 0, false
-}
-
-// parseDimension resolves "fill", "auto", or a decimal cell count. "fill"
-// resolves to fillWidth; "auto"/"" returns ok=false (size to content).
-func parseDimension(v string, fillWidth int) (int, bool) {
-	switch v {
-	case "", "auto":
-		return 0, false
-	case "fill":
-		if fillWidth <= 0 {
-			return 0, false
-		}
-		return fillWidth, true
-	}
-	n := 0
-	for _, ch := range v {
-		if ch < '0' || ch > '9' {
-			return 0, false
-		}
-		n = n*10 + int(ch-'0')
-	}
-	return n, true
 }

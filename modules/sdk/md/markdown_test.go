@@ -31,6 +31,35 @@ func TestDetect_Emphasis(t *testing.T) {
 	}
 }
 
+// TestDetect_InlineCode proves a lone code span is treated as markdown. Without
+// this signal the whole line was passed through verbatim, so a reply like
+// "It printed: `x`" rendered its backticks literally instead of styling the
+// span — in the terminal and in the browser alike.
+func TestDetect_InlineCode(t *testing.T) {
+	if !Detect("It printed: `hello`") {
+		t.Fatal("an inline code span should be detected")
+	}
+	// A lone backtick is still not a markdown signal, and must stay verbatim.
+	if Detect("the ` character alone") {
+		t.Fatal("a single backtick should not trigger markdown rendering")
+	}
+}
+
+// TestRender_InlineCode proves a code span is styled and its backticks are
+// consumed, rather than left in the rendered output.
+func TestRender_InlineCode(t *testing.T) {
+	out := Render("It printed: `hello`")
+	if strings.Contains(out, "`") {
+		t.Fatalf("backticks must not appear in rendered output, got %q", out)
+	}
+	if !strings.Contains(ansi.Strip(out), "hello") {
+		t.Fatalf("code span text must survive, got %q", out)
+	}
+	if out == ansi.Strip(out) {
+		t.Fatal("code span should carry ANSI styling")
+	}
+}
+
 func TestRender_PlainProsePassthrough(t *testing.T) {
 	in := "Just some plain prose."
 	if got := Render(in); got != in {

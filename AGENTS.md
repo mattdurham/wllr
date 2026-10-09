@@ -41,11 +41,17 @@ boundaries.
 ## Repository Layout
 
 - `cmd/` — binary entry point, provider/config wiring, OAuth/login, native tools,
-  embedded built-in WASM loading, and startup orchestration.
+  embedded built-in WASM loading, and startup orchestration. Includes the
+  interactive TUI, `--exec`, and `wllr serve` modes.
+- `cmd/wllr-multiplex/` — the multi-instance client binary: connects to N
+  running `wllr serve` instances and merges their streams (see `modules/client`).
 - `cmd/builtins/` — generated/embedded built-in WASM extension artifacts. Build
   with `make builtins` or `make build`.
 - `modules/sdk/` — shared wire types, event/method constants, and ABI-facing
   structs. Leaf package; must not depend on wllr internals.
+- `modules/wire/` — the shared event/stream protocol (`Event`, `EventKind`,
+  `ProtocolVersion`), a leaf over `sdk` so `modules/server` and `modules/client`
+  agree on one frame definition without either importing the engine.
 - `modules/agent/` — LLM turn execution, compaction, context usage, agent pool,
   sub-agent spawning, teams, liveness, inbox/queue handling.
 - `modules/extension/` — wazero host, extension lifecycle, host calls, event
@@ -55,6 +61,10 @@ boundaries.
   main agent, and renderer.
 - `modules/harness/` — Bubble Tea TUI, rendering, input handling, scene graph,
   status/tool/queue UI, and `Renderer` interface.
+- `modules/server/` — the `wllr serve` HTTP/SSE surface and the self-contained
+  HTML browser front end (see [docs/serve-mode.md](docs/serve-mode.md)).
+- `modules/client/` — out-of-process HTTP/SSE client and the multi-instance
+  multiplexer used by `cmd/wllr-multiplex`.
 - `modules/mcp/` — MCP server subprocess bridge and dynamic MCP tool discovery.
 - `modules/testutil/` — fake LM/provider helpers for tests.
 - `extensions/` — Go WASM extension source plus shared `wllrsdk.go` boilerplate.

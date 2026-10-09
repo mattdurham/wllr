@@ -56,6 +56,13 @@ func Detect(s string) bool {
 	if strings.Contains(s, "](") {
 		return true
 	}
+	// Inline code spans. Two backticks on a line is an unambiguous markdown
+	// signal, unlike a bare '*' (which is common in prose). A lone backtick
+	// still passes through: codeSpans emits an unpaired backtick verbatim, so
+	// over-detecting here cannot mangle text.
+	if strings.Count(s, "`") >= 2 {
+		return true
+	}
 	return strings.Contains(s, "\n> ")
 }
 

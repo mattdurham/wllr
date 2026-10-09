@@ -305,3 +305,181 @@ therefore looked like the user had issued commands they never sent.
 a lifecycle notification) rather than a directly-sent prompt; `agent_id` names
 the agent the turn belongs to. Consumers that record or display prompts filter
 on both. The payload fields existed already — the SDK was dropping them.
+
+---
+
+## UISink: a renderer-neutral front-end seam
+
+*Added: 2026-10-08*
+
+**Decision:** Introduce `sdk.UISink`, a renderer-neutral interface for every
+user-visible engine effect, with three implementations: `harness.teaSink` (TUI),
+`server.HubSink` (HTTP/SSE), and `sdk.FuncSink` (programmatic). The harness's
+extension bridges, pool observers, and main-agent callbacks now emit through
+`UISink` instead of holding a `*tea.Program`.
+
+**Rationale:** The full bridges were constructed only inside `Model.SetProgram`,
+so they were gated on the TUI's lifecycle: a front end without a terminal kept
+the no-op `earlyUIBridge`/`earlyAgentBridge` stubs forever. Serve mode could not
+spawn sub-agents and silently dropped all extension UI. The coupling was never
+functional — the bridges only ever used the program as a message bus — it was a
+construction-order shortcut. Extracting the effects into an interface makes the
+front end swappable without porting widget code.
+
+**Consequence:** The interface lives in `sdk` because its signatures are entirely
+`sdk` types, keeping it dependency-free; concrete front ends implement it. Adding
+a method is a breaking change across all implementations. `FuncSink`'s nil-tolerant
+fields make it usable both as an embedder's sink and as a test double.
+
+## Why the scene-graph operations live in sdk (uigraph.go, uilayout.go)
+
+Adding a second renderer (the HTML front end in `modules/server`) surfaced a
+choice: reimplement the patch semantics and layout resolution for it, or share
+them. Reimplementing would be the same duplication the sink was built to remove,
+and it would let the two front ends drift — a batch that the TUI rejects and the
+browser accepts, or an insert-index rule that matches on one side only.
+
+**Decision:** `sdk` already owned the scene-graph *types* (`UINode`, `UIPatchOp`,
+`UIArea`, `UIProps`), so it now also owns their reference *semantics*:
+`ApplyOp`/`FindNode`/`InsertChild`/`RemoveNode`/`CloneNode`/`CloneProps`
+(uigraph.go) and `PropSides`/`ParseDimension`/`ResolveConstraint`/`ParseDecimal`/
+`ExpandSideCSS` (uilayout.go). Both `harness.SceneRenderer` (terminal/lipgloss)
+and `modules/server.SceneModel` (HTML/CSS) call these; only the final
+node-to-pixels step is front-end specific.
+
+**Rationale:** These functions are pure — no shared state, no locking, no I/O —
+so they fit `sdk`'s dependency-free contract. The new files (`uigraph.go`,
+`uilayout.go`) add only standard-library imports.
+
+**Consequence:** Patch-op error strings now originate here (e.g. "insert: parent
+not found"), so both front ends report identical failures. A renderer that wants
+different behaviour must change this shared code rather than fork it. The harness
+keeps one-line shims (`resolveConstraint`, `collapseBlankLineRuns`) so existing
+call sites and tests are unaffected.
+
+## Why the callback router lives in sdk (uicallback.go, funcrouter.go)
+
+`UISink` carries effects *out* to a front end. A picker or text-input selection
+travels the other way, and for that direction the TUI had an advantage no other
+front end does: an event loop. `Model.updateKeyPressPicker` resolves a callback
+by inspecting `m.picker.Callback` and either running a harness handler (for
+`__wllr:` ids) or dispatching `EventOnCommand` (for everything else). A browser
+has no such loop — it POSTs a callback id and needs something to route it.
+
+**Decision:** the routing *contract* (`UICallbackRouter`) and the core/extension
+split (`IsCoreCallback`) live in `sdk` beside `UISink`, because they are part of
+the same renderer-neutral boundary and their signatures are entirely `sdk`
+types. The *dispatcher* lives in `harness` (`ExtensionRouter`), where the
+extension host and the core-handler seam already are.
+
+**Rationale:** the `__wllr:` prefix rule is a contract, not an implementation
+detail — if the browser and the TUI disagreed about which callbacks are core,
+they would behave differently on the same picker. Keeping the predicate here
+means both sides read one definition. The two sentinel errors exist so a front
+end can distinguish "this callback class is not handled here" (answer 501, let
+the client fall back) from a genuine dispatch failure (answer 500).
+
+**Consequence:** serve mode installs an `ExtensionRouter` whose core handler is
+`Model.CoreCallbackFunc` (harness `coredispatch.go`), so both extension-owned
+callbacks (agent focus/kill, transcript rebuild, WASM extension buttons) and the
+stateless core selections (model, provider-model, thinking, OpenRouter routing)
+work headlessly. The multi-step core setup flows (auth, local-model,
+context-window, catalog) are not classified by that handler and answer 501 until
+their live `Model` state can be constructed headlessly — see harness NOTES. The
+router carries no engine logic: `ExtensionRouter` only marshals a payload and
+calls `DispatchEvent`, so it cannot reach state the host does not expose.
+
+## Why the model-selection contract lives in sdk (modelchoice.go)
+
+Selecting a model is the one front-end interaction that needs *two* shared
+definitions, not one. A front end must first enumerate the selectable models,
+then send a choice back. The TUI had both halves wired to `harness` internals:
+`ModelListFn` produced `[]harness.ModelChoice`, and the picker encoded each row
+as `provider + "\x1f" + modelID` and opened under the `"__wllr:model"` callback.
+The HTTP front end needs all three facts, and getting any of them subtly wrong
+fails *silently* — a mismatched separator or callback id just selects nothing.
+
+**Decision:** `ModelChoice`, `ModelLister`, the key encoding
+(`ModelPickerKeySep`/`ModelPickerKey`/`SplitModelPickerKey`), and the picker
+callback id (`ModelPickerCallback`) live in `sdk`. `harness.ModelChoice` becomes
+a type alias, and the harness's `modelPickerKey`/`modelPickerCallback` are
+redefined in terms of the shared values.
+
+**Rationale:** these are wire-contract values shared across a process boundary
+(browser↔server↔engine), exactly like `UISink` and `IsCoreCallback`. Duplicating
+the unit-separator constant in the server would work until someone changed one
+copy. `harness.ModelChoice` is an alias rather than a moved-and-referenced type
+so every existing `ModelChoice{...}` literal in `cmd` and the harness tests keeps
+compiling unchanged.
+
+**Consequence:** `GET /api/models` returns the harness list with pre-built keys,
+so the browser never learns the encoding — it echoes the key the server gave it.
+The round trip is pinned by `TestModelSelectionRoundTrip`, which serves a key and
+feeds it back through `/api/ui/callback`, and by
+`TestModelPickerKeyRoundTrip` in sdk. `ContextWindow`/`ContextWindowKnown` were
+carried onto the sdk struct so the harness's sublabel rendering is unaffected.
+
+---
+
+## Why the slash-command contract lives in sdk (uicommand.go)
+
+**Problem:** the terminal offers autocomplete over its registered slash commands
+and a `/help` listing. A second front end needs the same discovery, and the two
+must not disagree — a browser showing a command the terminal does not (or
+failing to trigger its dropdown where the terminal does) is a visible
+inconsistency.
+
+**Decision:** the two facts a front end needs are shared in `sdk`:
+`CommandInfo`/`CommandLister` (the command shape and its source) and
+`SlashWordAt`/`CommandQuery` (the trigger rule). The harness's `slashWordAt`
+delegates to `sdk.SlashWordAt`, and the browser client reimplements the identical
+rule, so both trigger under the same conditions.
+
+**Why the *rule* and not just the data:** the trigger is a small string predicate,
+but it is a contract. "When is the user typing a command?" has an exact answer
+(index of a word-start slash with no space before the caret); if the browser
+guessed a different one — say, any leading slash — the dropdown would appear in
+cases the terminal would not show it. Pinning it here makes the divergence a test
+failure rather than a subtle UI difference.
+
+**One command source:** the command set is the harness registry, which already
+holds the built-ins. Extension commands registered before serve-mode wiring reach
+it through the harness's early bridge; those registered after wiring reach it
+through `HubSink.RegisterCommand`, which forwards to `Model.RegisterCommand`
+(installed via `SetCommandRegistrar`). All three paths land in one registry, so
+`GET /api/commands` cannot drift from the terminal's list.
+
+**Execution is per front end:** discovery is shared, but running a command is
+not one operation — the terminal turns `/<name> args` into the registry's
+handler, whereas the browser has no event loop. The client therefore performs
+the commands that open its own UI locally (the same pickers/modals the terminal
+opens) and routes the rest through the existing callback endpoint: `/model <x>`
+and `/thinking <x>` become the same `__wllr:` core callbacks a picker sends, and
+an extension command becomes the same `EventOnCommand` dispatch an extension
+button uses. This reuses one engine path rather than adding a second command
+dispatcher.
+
+---
+
+## Inline code spans are a markdown detection signal
+
+**Decision:** `md.Detect` treats two or more backticks on a line as markdown,
+so a lone code span is rendered rather than passed through.
+
+**Rationale:** `Detect` gates the cheap path — prose with no markers skips the
+renderer entirely. Its signal list covered fences, headers, lists, tables, bold,
+links, and blockquotes, but not inline code, so a reply like
+"It printed: `x`" was returned verbatim with its backticks intact. Both front
+ends call this one renderer (the terminal through `format_markdown`, the browser
+through `MessageHTML`), so the gap appeared in both — the browser was faithfully
+matching the terminal, which was itself wrong.
+
+**Why backticks and not `*`:** a lone `*` is ordinary prose and adding it would
+render text that was never markdown. Two backticks on a line is an unambiguous
+span. A single backtick remains undetected, and if a line with an odd backtick
+count is ever rendered, `codeSpans` emits the unpaired backtick verbatim, so
+over-detection cannot corrupt text.
+
+**Consequence:** the terminal's rendering of inline code changes too (it is the
+same function). Both the old and new behaviour are pinned by tests
+(`TestDetect_InlineCode`, `TestRender_InlineCode`).

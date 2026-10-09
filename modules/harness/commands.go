@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/mattdurham/wllr/modules/sdk"
 )
 
 // Registry holds registered slash commands and dispatches them.
@@ -46,6 +47,19 @@ func (r *Registry) List() []Command {
 		out = append(out, c)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// ListInfo returns the registered commands as the renderer-neutral
+// sdk.CommandInfo list (sorted by name). A non-terminal front end serves it so
+// a browser can offer the same autocomplete dropdown and help the terminal
+// does; the command set is the same because it is read from this one registry.
+func (r *Registry) ListInfo() []sdk.CommandInfo {
+	cmds := r.List()
+	out := make([]sdk.CommandInfo, 0, len(cmds))
+	for _, c := range cmds {
+		out = append(out, sdk.CommandInfo{Name: c.Name, Desc: c.Desc, Instant: c.Instant})
+	}
 	return out
 }
 
@@ -212,6 +226,39 @@ func registerBuiltins(r *Registry) {
 		Instant: true,
 		Handler: func(_ []string) tea.Cmd {
 			return func() tea.Msg { return dispatchOnCommandMsg{Name: "history"} }
+		},
+	})
+}
+
+// CommandLister exposes the command registry through the renderer-neutral
+// sdk.CommandLister contract, so the HTTP front end can serve the list without
+// reaching into the harness registry type.
+func (m *Model) CommandLister() sdk.CommandLister {
+	return sdk.CommandListerFunc(func() []sdk.CommandInfo {
+		if m.commands == nil {
+			return nil
+		}
+		return m.commands.ListInfo()
+	})
+}
+
+// RegisterCommand records an extension-registered slash command in the same
+// registry the built-ins live in, so a command registered after serve-mode
+// wiring still appears in the browser's autocomplete and help. The handler
+// routes through dispatchOnCommandMsg, exactly as the terminal sink does, so an
+// extension command behaves identically whichever front end registered it.
+func (m *Model) RegisterCommand(name, desc string, instant bool) {
+	if m.commands == nil {
+		return
+	}
+	m.commands.Register(Command{
+		Name:    name,
+		Desc:    desc,
+		Instant: instant,
+		Handler: func(args []string) tea.Cmd {
+			return func() tea.Msg {
+				return dispatchOnCommandMsg{Name: name, Args: args}
+			}
 		},
 	})
 }

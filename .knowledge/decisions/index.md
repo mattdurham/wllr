@@ -13,3 +13,4 @@
 * [Agents verify repository state before editing](agent-editing-discipline.md) — targeted changes, preservation of user work, and verified completion.
 * [Model tiers route work by cost, not model name](model-tiers.md) — tag high/low tier targets in `/models`; reference them from skills and sub-agent defaults.
 * [Prometheus metrics via plain-value observer seams](prometheus-metrics.md) — per-model/per-agent token and turn visibility without coupling the agent package to a metrics library.
+* [The wire protocol is a leaf package](wire-protocol-extraction.md) — the HTTP/SSE envelope in `modules/wire`, aliased by `server`, so clients decode frames without linking the engine.

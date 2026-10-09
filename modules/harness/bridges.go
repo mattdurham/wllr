@@ -2,16 +2,24 @@ package harness
 
 // NOTE: Any changes to this file must be reflected in the corresponding SPECS.md or NOTES.md.
 
-// This file contains the four bridge adapter types installed on the extension host:
-//   - earlyUIBridge: stub UIBridge installed in New() before the tea.Program exists;
+// This file contains the bridge adapter types installed on the extension host:
+//   - earlyUIBridge: stub UIBridge installed in New() before a front end exists;
 //     supports command registration during extension _init.
-//   - earlyAgentBridge: stub AgentBridge installed in New() before the tea.Program exists;
-//     returns descriptive errors for any agent operation during _init.
-//   - harnessAgentBridge: full AgentBridge installed in SetProgram; delegates to
-//     agent.Spawner and the agent pool.
-//   - harnessTeamBridge: full TeamBridge installed in SetProgram; delegates to the pool.
-//   - harnessUIBridge: full UIBridge installed in SetProgram; sends bubbletea messages
-//     to the running tea.Program for all UI operations.
+//   - earlyAgentBridge: stub AgentBridge installed in New() before a front end
+//     exists; returns descriptive errors for any agent operation during _init.
+//   - harnessAgentBridge: full AgentBridge; delegates to agent.Spawner and the
+//     agent pool, and reports wakeups to the front-end sink.
+//   - harnessTeamBridge: full TeamBridge; delegates to the pool.
+//   - harnessUIBridge: full UIBridge; performs the engine-local mutations
+//     (system prompt, history, tool-call bookkeeping) directly and forwards
+//     every user-visible effect to the renderer-neutral sdk.UISink.
+//
+// None of the full bridges depends on a terminal. The interactive TUI installs a
+// teaSink (turning effects into bubbletea messages); the HTTP server installs a
+// HubSink (publishing frames to clients); an embedder installs an sdk.FuncSink.
+// This is what lets a non-terminal front end drive the same engine — in
+// particular it lets serve mode install the real AgentBridge, so create_agent
+// works headlessly.
 
 import (
 	"context"
@@ -25,9 +33,9 @@ import (
 	"github.com/mattdurham/wllr/modules/sdk"
 )
 
-// earlyUIBridge is installed before SetProgram is called so that extensions
+// earlyUIBridge is installed before a front end is set so that extensions
 // can register commands during _init. All other methods are no-ops or return
-// defaults, since the bubbletea program is not yet available.
+// defaults, since no front end is available yet.
 type earlyUIBridge struct {
 	cmds *Registry
 }
@@ -75,7 +83,7 @@ func (e *earlyUIBridge) UpdateArea(_ sdk.UIUpdateAreaParams) error              
 // Verify earlyUIBridge satisfies the interface at compile time.
 var _ extension.UIBridge = (*earlyUIBridge)(nil)
 
-// earlyAgentBridge is installed before SetProgram is called so that extensions
+// earlyAgentBridge is installed before a front end is set so that extensions
 // that call agent_spawn during _init receive a clear error rather than a nil
 // pointer dereference. All methods return descriptive errors.
 type earlyAgentBridge struct{}
@@ -124,11 +132,12 @@ func (e *earlyAgentBridge) EditInboxMessage(_ string, _ int, _ string, _ string)
 var _ extension.AgentBridge = (*earlyAgentBridge)(nil)
 
 // harnessAgentBridge implements extension.AgentBridge by delegating to the
-// agent.AgentPool and agent.Spawner.
+// agent.AgentPool and agent.Spawner. Wakeups are reported to the front-end sink
+// so it can show a "working" indicator; a nil sink disables only that hint.
 type harnessAgentBridge struct {
 	pool    *agent.AgentPool
 	spawner *agent.Spawner
-	prog    *tea.Program
+	sink    sdk.UISink
 	mainID  string
 }
 
@@ -170,10 +179,10 @@ func (b *harnessAgentBridge) Run(id string) error {
 	if b.pool == nil {
 		return fmt.Errorf("no agent pool")
 	}
-	// Send agentWakeupMsg to set streaming=true for the TUI indicator.
-	// Only fire for the main agent — sub-agents don't have TUI streaming state.
-	if id == b.mainID && b.prog != nil {
-		b.prog.Send(agentWakeupMsg{})
+	// Tell the front end the root agent is waking. Only the root has stream
+	// state to indicate; sub-agents do not.
+	if id == b.mainID && b.sink != nil {
+		b.sink.AgentWakeup(id)
 	}
 	// Empty content: the agent drains its inbox (queued by a prior SendMessage)
 	// as the turn content. No synthetic placeholder message leaks into history.
@@ -372,166 +381,74 @@ func (b *harnessTeamBridge) List() ([]string, error) {
 	return b.pool.ListTeams(), nil
 }
 
-// harnessUIBridge implements extension.UIBridge by sending bubbletea messages.
+// harnessUIBridge implements extension.UIBridge. It performs the engine-local
+// mutations (base system prompt, history reset, tool-call bookkeeping) itself
+// and forwards every user-visible effect to the renderer-neutral sink. The same
+// bridge therefore serves the TUI, the HTTP server, and an embedder — only the
+// sink differs.
 type harnessUIBridge struct {
 	pool   *agent.AgentPool
-	prog   *tea.Program
-	live   *liveState
-	cmds   *Registry
-	scene  *SceneRenderer
+	sink   sdk.UISink
 	mainID string
 }
 
 func (b *harnessUIBridge) Notify(text string) {
-	if b.prog == nil {
-		return
-	}
-	b.prog.Send(NotifyMsg{Text: text})
+	sinkOrNil(b.sink).Notify(text)
 }
 
 func (b *harnessUIBridge) ShowModal(text string) {
-	if b.prog == nil {
-		return
-	}
-	b.prog.Send(ShowModalMsg{Text: text})
+	sinkOrNil(b.sink).ShowModal(text)
 }
 
 func (b *harnessUIBridge) ShowPicker(params sdk.ShowPickerParams) {
-	if b.prog == nil {
-		return
-	}
-	b.prog.Send(ShowPickerMsg{Title: params.Title, Items: params.Items, Callback: params.Callback, Split: params.Split})
+	sinkOrNil(b.sink).ShowPicker(params)
 }
 
 // ShowAgentTree opens the interactive agent tree; a node selection is routed
 // back to the extension as EventOnCommand with the given callback.
 func (b *harnessUIBridge) ShowAgentTree(params sdk.ShowAgentTreeParams) {
-	if b.prog == nil {
-		return
-	}
-	b.prog.Send(ShowAgentTreeMsg{
-		Title:    params.Title,
-		Callback: params.Callback,
-		Nodes:    params.Nodes,
-	})
+	sinkOrNil(b.sink).ShowAgentTree(params)
 }
 
-// SetFocusedAgent tells the harness which agent user input and the transcript
-// target. Routed through the program so focus changes on the UI goroutine.
+// SetFocusedAgent tells the front end which agent user input and the transcript
+// target.
 func (b *harnessUIBridge) SetFocusedAgent(id string) {
-	if b.prog == nil {
-		return
-	}
-	b.prog.Send(FocusAgentMsg{AgentID: id})
+	sinkOrNil(b.sink).FocusAgent(id)
 }
 
 func (b *harnessUIBridge) ShowTextInput(title, placeholder, initialValue, callback string) {
-	if b.prog == nil {
-		return
-	}
-	b.prog.Send(
-		ShowTextInputMsg{Title: title, Placeholder: placeholder, InitialValue: initialValue, Callback: callback},
-	)
+	sinkOrNil(b.sink).ShowTextInput(title, placeholder, initialValue, callback)
 }
 
 func (b *harnessUIBridge) Abort() {
-	if b.prog == nil {
-		return
-	}
-	b.prog.Send(abortStreamMsg{})
+	sinkOrNil(b.sink).Abort()
 }
 
 func (b *harnessUIBridge) SetStatus(key, value string) {
-	if b.prog == nil {
-		return
-	}
-	b.prog.Send(StatusUpdateMsg{Key: key, Value: value})
+	sinkOrNil(b.sink).SetStatus(key, value)
 }
 
 func (b *harnessUIBridge) GetStatusInfo() sdk.StatusInfo {
-	live := b.live
-	live.mu.RLock()
-	streaming := live.streaming
-	streamStart := live.streamStart
-	width := live.width
-	hasError := live.hasError
-	tokens := live.tokens
-	provider := live.provider
-	modelName := live.model
-	statuses := make(map[string]string, len(live.statuses))
-	for k, v := range live.statuses {
-		statuses[k] = v
-	}
-	live.mu.RUnlock()
-
-	// A focused sub-agent can vanish without the focusing extension being told:
-	// an agent self-closes once it has processed its shutdown request. Reporting
-	// a dead ID would leave the statusline naming an agent that no longer
-	// exists, so drop the key — focus has fallen back to the root.
-	if id := statuses["agent"]; id != "" && b.pool != nil && b.pool.Get(id) == nil {
-		delete(statuses, "agent")
-	}
-
-	info := sdk.StatusInfo{
-		Provider: provider,
-		Model:    modelName,
-		Tokens:   tokens,
-		Working:  streaming,
-		Statuses: statuses,
-		Width:    width,
-		HasError: hasError,
-	}
-	if streaming {
-		info.ElapsedMs = time.Since(streamStart).Milliseconds()
-	}
-	if b.pool != nil {
-		n := len(b.pool.ListAgents()) - 1
-		if n < 0 {
-			n = 0
-		}
-		info.ActiveAgents = n
-	}
-	return info
+	return sinkOrNil(b.sink).StatusInfo()
 }
 
 func (b *harnessUIBridge) SendMessage(msg sdk.Message) {
-	if b.prog == nil {
-		return
-	}
-	sm := SubmitMsg{Content: msg.Content}
+	display := ""
 	if strings.HasPrefix(strings.TrimSpace(msg.Content), "<skill ") {
-		sm.Display = skillDisplayName(msg.Content)
+		display = skillDisplayName(msg.Content)
 	}
-	b.prog.Send(sm)
+	sinkOrNil(b.sink).Submit(msg.Content, display)
 }
 
-// SetModel queues a model switch on the bubbletea goroutine. value may be a
-// model ID or a configured model-tier name; the core setModelMsg handler
-// resolves tiers and applies the switch. Errors surface as notifications, so
-// the returned error is always nil (the switch is asynchronous by design).
+// SetModel queues a model switch on the front end. value may be a model ID or a
+// configured model-tier name. Errors surface as notifications, so the returned
+// error is always nil (the switch is asynchronous by design).
 func (b *harnessUIBridge) SetModel(value, thinking string) error {
-	if b.prog == nil {
-		return nil
-	}
-	// A thinking-only request still goes through setModelMsg with an empty
-	// model; applyModelSelection treats an empty model as a no-op, so only the
-	// thinking level changes.
-	b.prog.Send(setModelMsg{Model: value, Thinking: thinking})
-	return nil
+	return sinkOrNil(b.sink).SetModel(value, thinking)
 }
 
 func (b *harnessUIBridge) RegisterCommand(name, desc string, instant bool) error {
-	b.cmds.Register(Command{
-		Name:    name,
-		Desc:    desc,
-		Instant: instant,
-		Handler: func(args []string) tea.Cmd {
-			return func() tea.Msg {
-				return dispatchOnCommandMsg{Name: name, Args: args}
-			}
-		},
-	})
-	return nil
+	return sinkOrNil(b.sink).RegisterCommand(name, desc, instant)
 }
 
 func (b *harnessUIBridge) RegisterTool(_ sdk.Tool) error {
@@ -565,9 +482,7 @@ func (b *harnessUIBridge) ResetHistory(messages []sdk.Message) error {
 	if err := b.pool.SetAgentHistory(b.mainID, messages); err != nil {
 		return err
 	}
-	if b.prog != nil {
-		b.prog.Send(ResetHistoryMsg{Messages: messages})
-	}
+	sinkOrNil(b.sink).ResetHistory(messages)
 	return nil
 }
 
@@ -584,92 +499,72 @@ func (b *harnessUIBridge) AfterToolCall(agentID, id, toolName, result string, is
 			a.MarkToolCallDone(id, toolName)
 		}
 	}
-	if b.prog == nil {
-		return
-	}
-	b.prog.Send(ToolCallDoneMsg{AgentID: agentID, ID: id, ToolName: toolName, IsError: isError, Output: result})
+	sinkOrNil(b.sink).ToolCallDone(agentID, id, toolName, result, isError)
 }
 
 func (b *harnessUIBridge) ConsoleOutput(line string) {
-	if b.prog == nil {
-		return
-	}
-	b.prog.Send(ConsoleMsg{Line: line})
+	sinkOrNil(b.sink).Console(line, false)
 }
 
 func (b *harnessUIBridge) ConsoleClear() {
-	if b.prog == nil {
-		return
-	}
-	b.prog.Send(ConsoleMsg{Clear: true})
+	sinkOrNil(b.sink).Console("", true)
 }
 
-// CreateArea registers a new scene-graph area. The SceneRenderer is
-// goroutine-safe, so the mutation happens synchronously here; a sceneDirtyMsg
-// triggers a re-render on the bubbletea loop.
+// CreateArea registers a new scene-graph area through the sink, which owns the
+// scene graph and triggers a re-render on the front end.
 func (b *harnessUIBridge) CreateArea(area sdk.UIArea) error {
-	if b.scene == nil {
-		return fmt.Errorf("ui: scene renderer not available")
-	}
-	if err := b.scene.CreateArea(area); err != nil {
-		return err
-	}
-	if b.prog != nil {
-		b.prog.Send(sceneDirtyMsg{Area: area.ID})
-	}
-	return nil
+	return sinkOrNil(b.sink).SceneCreate(area)
 }
 
 func (b *harnessUIBridge) PatchUI(params sdk.UIPatchParams) error {
-	if b.scene == nil {
-		return fmt.Errorf("ui: scene renderer not available")
-	}
-	if err := b.scene.ApplyPatch(params); err != nil {
-		return err
-	}
-	if b.prog != nil {
-		appendID, appendText, appendOnly := appendPatchDetails(params)
-		b.prog.Send(
-			sceneDirtyMsg{Area: params.Area, AppendOnly: appendOnly, AppendID: appendID, AppendText: appendText},
-		)
-	}
-	return nil
-}
-
-func appendPatchDetails(params sdk.UIPatchParams) (string, string, bool) {
-	if len(params.Ops) == 0 {
-		return "", "", false
-	}
-	id := params.Ops[0].ID
-	var text strings.Builder
-	for _, op := range params.Ops {
-		if op.Op != sdk.UIOpAppendText || op.ID == "" || op.ID != id {
-			return "", "", false
-		}
-		text.WriteString(op.Text)
-	}
-	return id, text.String(), true
+	return sinkOrNil(b.sink).ScenePatch(params)
 }
 
 func (b *harnessUIBridge) RemoveArea(id string) {
-	if b.scene == nil {
-		return
-	}
-	b.scene.RemoveArea(id)
-	if b.prog != nil {
-		b.prog.Send(sceneDirtyMsg{Area: id})
-	}
+	sinkOrNil(b.sink).SceneRemove(id)
 }
 
 func (b *harnessUIBridge) UpdateArea(params sdk.UIUpdateAreaParams) error {
-	if b.scene == nil {
-		return fmt.Errorf("ui: scene renderer not available")
-	}
-	if err := b.scene.UpdateArea(params); err != nil {
-		return err
-	}
-	if b.prog != nil {
-		b.prog.Send(sceneDirtyMsg{Area: params.ID})
-	}
-	return nil
+	return sinkOrNil(b.sink).SceneUpdate(params)
 }
+
+// Verify harnessUIBridge satisfies the interface at compile time.
+var _ extension.UIBridge = (*harnessUIBridge)(nil)
+
+// sinkOrNil returns s, or a no-op sink when s is nil, so a bridge built without
+// a front end degrades to silent no-ops instead of panicking.
+func sinkOrNil(s sdk.UISink) sdk.UISink {
+	if s == nil {
+		return noopSink{}
+	}
+	return s
+}
+
+// noopSink is the do-nothing UISink used when a bridge has no front end.
+type noopSink struct{}
+
+var _ sdk.UISink = noopSink{}
+
+func (noopSink) Notify(string)                             {}
+func (noopSink) ShowModal(string)                          {}
+func (noopSink) ShowPicker(sdk.ShowPickerParams)           {}
+func (noopSink) ShowAgentTree(sdk.ShowAgentTreeParams)     {}
+func (noopSink) FocusAgent(string)                         {}
+func (noopSink) ShowTextInput(_, _, _, _ string)           {}
+func (noopSink) Abort()                                    {}
+func (noopSink) SetStatus(_, _ string)                     {}
+func (noopSink) StatusInfo() sdk.StatusInfo                { return sdk.StatusInfo{Statuses: map[string]string{}} }
+func (noopSink) Submit(_, _ string)                        {}
+func (noopSink) SetModel(_, _ string) error                { return nil }
+func (noopSink) RegisterCommand(_, _ string, _ bool) error { return nil }
+func (noopSink) Console(_ string, _ bool)                  {}
+func (noopSink) ResetHistory([]sdk.Message)                {}
+func (noopSink) Token(string)                              {}
+func (noopSink) ToolCallStart(_, _, _, _ string)           {}
+func (noopSink) ToolCallDone(_, _, _, _ string, _ bool)    {}
+func (noopSink) StreamDone(error)                          {}
+func (noopSink) AgentWakeup(string)                        {}
+func (noopSink) SceneCreate(sdk.UIArea) error              { return nil }
+func (noopSink) ScenePatch(sdk.UIPatchParams) error        { return nil }
+func (noopSink) SceneUpdate(sdk.UIUpdateAreaParams) error  { return nil }
+func (noopSink) SceneRemove(string)                        {}

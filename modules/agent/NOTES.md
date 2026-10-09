@@ -1175,3 +1175,63 @@ Deliberately out of scope: seeding at spawn time. Before the first `Submit` ther
 no resolved tool set (`toolsFn` may not be installed) and no prompt — the estimate
 would be fiction. A fresh idle session shows no ctx segment until the first turn
 begins, which is truthful: nothing has been sent yet.
+
+---
+
+## Additive per-agent turn callbacks (the headless-transcript bug)
+
+**Decision:** the per-agent callbacks (`OnToken`, `OnDone`, `OnToolCall`,
+`OnTurnStart`, `OnSteer`) are lists, not slots: `Set*` replaces, `Add*` appends,
+and the list is copied under its mutex at turn start.
+
+**What this fixes:** in serve mode the root agent had *no tools* and its
+extension events were never dispatched, so a browser could chat but the bundled
+`agents` extension never built the chat transcript — no user-prompt bubbles, no
+streamed text, only a bare assistant bubble at message end.
+
+The cause was not a missing call but a structural one. The server's per-agent
+`Bridge` attaches observers with `Set*` and publishes the stream frames. The
+harness's root-agent wiring (`WireMainAgentCallbacks`) also attaches observers,
+and *also* sets the tool list and dispatches `before_agent_start`/`token`/
+`steer`. With single slots, wiring the root agent replaced the Bridge's
+observers (or vice versa, depending on order) — so serve mode could not wire the
+root agent at all without losing its stream, and did not. The agent was
+consequently tool-less and its extension events went nowhere.
+
+**Why not just reorder the wiring:** ordering is exactly what made this
+fragile. Making the callbacks additive removes the ordering dependency: who
+wires first stops mattering. `Set*` remains for callers that want exclusive
+ownership and for re-wiring a freshly created agent (the automatic-recovery
+path calls the wiring again on a new agent object).
+
+**How the frames avoid doubling:** `WireMainAgentCallbacks` takes a sink. Serve
+mode passes a no-op `sdk.FuncSink` because the Bridge's observers already
+publish `Token`/`StreamDone`/`ToolCallStart` for the root agent; the wiring needs
+only its extension-dispatch side effects. Passing the `HubSink` there would
+publish every root-agent frame twice.
+
+**Invariant:** `SetOnToken(nil)` (and the other `Set*` twins) clears the list
+rather than installing a nil callback, so "turn streaming off" cannot become a
+nil dereference when the next token arrives.
+
+---
+
+## Additive turn-usage and lifecycle observers
+
+**Decision:** `SetUsageObserver`/`SetLifecycleObserver` replace the observer
+list; `AddUsageObserver`/`AddLifecycleObserver` append to it. Observers are
+snapshotted under `dispatchMu` and invoked outside the lock.
+
+**Rationale:** the hooks started as single-slot, which was correct while the only
+consumer was the TUI/metrics host. The API server (`modules/server`) is a second,
+independent consumer of the same two streams, and a single slot makes the two
+consumers mutually exclusive: whichever installs second silently replaces the
+first, so metrics would stop recording the moment a server attached (or the
+server would go silent if metrics attached second). The additive forms make the
+fan-out explicit at the pool, which is where the events actually originate.
+
+**Consequence:** a nil argument to `Set` clears the list (matching the old
+"disable reporting" behavior); `Add` ignores nil. The context-usage dispatcher
+and wake notifier are deliberately left single-slot — they are front-end
+specific (TUI *or* serve mode, never both), so the active front end claims each
+one explicitly rather than both seeing it.

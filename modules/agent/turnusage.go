@@ -36,25 +36,48 @@ func TurnStarted(agentID string, main bool) TurnUsage {
 	return TurnUsage{AgentID: agentID, Main: main, Started: true}
 }
 
-// SetUsageObserver installs a callback invoked once per completed agent turn
-// with that turn's usage. The observer runs on the agent's turn goroutine, so
-// it must be safe for concurrent use and must not block. A nil observer
-// disables reporting.
+// SetUsageObserver replaces all turn-usage observers with fn, invoked once per
+// completed agent turn with that turn's usage. Observers run on the agent's
+// turn goroutine, so they must be safe for concurrent use and must not block.
+// A nil observer clears the list.
+//
+// Prefer AddUsageObserver when another subsystem already owns the slot (for
+// example the metrics recorder in cmd): Set replaces, Add appends.
 func (p *AgentPool) SetUsageObserver(fn func(TurnUsage)) {
 	p.dispatchMu.Lock()
-	p.usageObserver = fn
+	if fn == nil {
+		p.usageObservers = nil
+	} else {
+		p.usageObservers = []func(TurnUsage){fn}
+	}
 	p.dispatchMu.Unlock()
 }
 
-// observeTurn reports a completed turn to the installed observer, if any.
+// AddUsageObserver appends a turn-usage observer without disturbing any
+// already-installed observer. This is the multi-subscriber form: the API
+// server and the metrics recorder both observe turns independently. A nil
+// observer is ignored.
+func (p *AgentPool) AddUsageObserver(fn func(TurnUsage)) {
+	if fn == nil {
+		return
+	}
+	p.dispatchMu.Lock()
+	p.usageObservers = append(p.usageObservers, fn)
+	p.dispatchMu.Unlock()
+}
+
+// observeTurn reports a completed turn to every installed observer. The
+// observer slice is snapshotted under the lock and invoked outside it, so an
+// observer that itself calls back into the pool cannot deadlock.
 func (p *AgentPool) observeTurn(u TurnUsage) {
 	if p == nil {
 		return
 	}
 	p.dispatchMu.RLock()
-	fn := p.usageObserver
+	observers := make([]func(TurnUsage), len(p.usageObservers))
+	copy(observers, p.usageObservers)
 	p.dispatchMu.RUnlock()
-	if fn != nil {
+	for _, fn := range observers {
 		fn(u)
 	}
 }

@@ -35,6 +35,11 @@ import (
 var builtinFS embed.FS
 
 func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI callbacks in one startup path.
+	// `wllr serve [addr] …` is rewritten into the --serve flag form so it reuses
+	// the flag parsing and full startup wiring below instead of duplicating it.
+	if len(os.Args) > 1 && os.Args[1] == "serve" {
+		os.Args = serveArgs(os.Args)
+	}
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "version", "--version", "-version":
@@ -45,6 +50,11 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 	}
 
 	execPrompt := flag.String("exec", "", "run a single prompt non-interactively and print the response to stdout")
+	serveAddr := flag.String(
+		"serve",
+		"",
+		"run the HTTP/SSE API server on this address (e.g. 127.0.0.1:8765) instead of the TUI",
+	)
 	pprofAddr := flag.String(
 		"pprof",
 		defaultPprofAddr(),
@@ -167,7 +177,10 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 	// Configure logging now that the host exists. stderr (exec/headless only) stays
 	// in core; the rolling log FILE is written by the bundled `logging` WASM
 	// extension, fed by the dispatchLogHandler via EventLog. See cmd/loghandler.go.
-	cleanupLog := setupLogging(h, *execPrompt == "")
+	// Serve mode is headless too: it must log to stderr, not the TUI sink, so the
+	// listener address and request diagnostics are visible.
+	tuiMode := *execPrompt == "" && *serveAddr == ""
+	cleanupLog := setupLogging(h, tuiMode)
 	// Usage metrics are served alongside pprof on the debug listener (at
 	// /metrics), so a local Prometheus scrape needs no second address.
 	metrics := newWllrMetrics()
@@ -820,6 +833,17 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 	// `history` WASM extension, which writes JSONL under ~/.wllr/sessions/ and
 	// provides browse/rollback UI. The former core session.Journal was redundant
 	// with it and has been removed.
+
+	// --serve mode runs the same program as the TUI with the renderer off and an
+	// HTTP/SSE API server in place of the interactive program. It shares the full
+	// wiring above (so nothing is bypassed) and blocks until a signal arrives.
+	if *serveAddr != "" {
+		if err := runServe(ctx, pool, h, &m, *serveAddr); err != nil {
+			fmt.Fprintln(os.Stderr, "wllr: "+err.Error())
+			os.Exit(1)
+		}
+		return
+	}
 
 	// --exec mode runs the same program as the TUI, with the renderer off and a
 	// single prompt submitted. Routing through the same path is the point: exec

@@ -22,7 +22,7 @@ fully scene-driven via the `statusline` WASM extension (see §28).
 - `suggestions []Command` — autocomplete candidates (non-empty when dropdown is visible).
 - `streaming bool` — true while an agent turn is in progress.
 
-**Invariant:** `Model` is a value type (passed by value through bubbletea). All mutable shared state reaches the TUI via `prog.Send`; no goroutine mutates `Model` fields directly.
+**Invariant:** `Model` is a value type (passed by value through bubbletea). All mutable shared state reaches the front end through the renderer-neutral `sdk.UISink` (the TUI's implementation, `teaSink`, forwards each effect to `prog.Send`); no goroutine mutates `Model` fields directly.
 
 ---
 
@@ -53,7 +53,7 @@ Must be called after creating the bubbletea program and before calling `prog.Run
 
 ### Bridge construction in SetProgram
 
-`SetProgram` creates an `agent.Spawner` and constructs three bridge structs that implement the extension host's bridge interfaces:
+`SetProgram` builds a `*teaSink` (the TUI implementation of `sdk.UISink`; see §3a) and installs the extension bridges via the shared helper `installExtensionWiring`:
 
 | Bridge struct           | Installed via            | Replaces          |
 |------------------------|--------------------------|-------------------|
@@ -61,11 +61,49 @@ Must be called after creating the bubbletea program and before calling `prog.Run
 | `harnessTeamBridge`    | `h.SetTeamBridge`        | (none; first install)   |
 | `harnessUIBridge`      | `h.SetUIBridge`          | `earlyUIBridge` stub    |
 
-`harnessAgentBridge` wraps an `agent.Spawner` (which owns sub-agent lifecycle) and the pool (for close/send/list). Its list operation returns each agent's ID, display name, running state, `working`/`liveness` state, pending inbox message count, and intra-turn liveness fields (recent activity age, turn duration, active/last tool, last tool completion, shutdown-request state). `harnessTeamBridge` delegates directly to the pool. `harnessUIBridge` sends bubbletea messages to `p` for all UI operations.
+`installExtensionWiring` creates an `agent.Spawner`, wires its token/tool/steer/prompt observers to the sink and the extension host, and installs the three bridges — all backed by the sink, none by a terminal. `harnessAgentBridge` wraps the `agent.Spawner` (which owns sub-agent lifecycle) and the pool (for close/send/list); its list operation returns each agent's ID, display name, running state, `working`/`liveness` state, pending inbox message count, and intra-turn liveness fields (recent activity age, turn duration, active/last tool, last tool completion, shutdown-request state). `harnessTeamBridge` delegates directly to the pool. `harnessUIBridge` performs the engine-local mutations (base system prompt, history reset, tool-call bookkeeping) and forwards every user-visible effect to the sink.
+
+The same helper backs `InstallHeadlessBridges(host, pool, mainID, logFn, sink)`, which installs the identical bridges for a non-terminal front end (serve mode supplies a `server.HubSink`). Because the agent bridge carries the spawner, `create_agent` works headlessly — previously serve mode kept the no-op `earlyAgentBridge` stub and every spawn failed with "session not yet started".
+
+### 3a. Renderer-neutral sink (sdk.UISink)
+
+The bridges depend on `sdk.UISink`, not on `*tea.Program`. `sdk.UISink` is the front-end seam for every user-visible effect (notify, modal, picker, agent tree, focus, text input, abort, status, submit, model switch, command registration, console, reset history, streaming tokens/tool calls/turn-done, agent wakeup, and the scene-graph ops). Three implementations exist:
+
+- `teaSink` (harness) — the interactive TUI; turns each effect into the same bubbletea message the TUI already handled, and owns the shared `liveState` and `SceneRenderer`.
+- `sdk.FuncSink` — a programmatic sink backed by optional function fields; nil fields are no-ops. Used by embedders and tests.
+- `server.HubSink` — the HTTP/SSE front end; publishes a stream frame per effect.
+
+`harnessUIBridge` and `harnessAgentBridge` hold an `sdk.UISink`; a nil sink (or `noopSink`) degrades to silent no-ops rather than panicking. Narrow sub-interfaces (`sdk.TokenSink`, `sdk.ToolCallSink`, `sdk.AgentUISink`) let the streaming path be driven by a small double.
+
+### 3b. Renderer-neutral callback router (sdk.UICallbackRouter)
+
+The sink carries effects out to a front end; `sdk.UICallbackRouter` carries a front end's selection back in. The interactive `Model` resolves picker/text-input callbacks inside its own key handler (`updateKeyPressPicker` / `updateKeyPressTextInput`): a `__wllr:`-prefixed callback runs a harness handler, anything else is dispatched as `EventOnCommand`. A front end without an event loop (the browser, an embedder) cannot do that, so it installs a router and posts the callback.
+
+`harness.ExtensionRouter` is the concrete dispatcher:
+
+- extension-owned callback → `host.DispatchEvent(EventOnCommand{Name: callback, Args: args})`, the same event the TUI dispatches for `agents:focus`, `agents:kill`, transcript rebuild, and any WASM extension button;
+- core-owned callback → the injected `sdk.CoreCallbackHandler` (nil yields `sdk.ErrNoCoreHandler`).
+
+`NewExtensionRouter(host, core)` builds it; `SetCoreCallbackHandler` attaches or replaces the core handler later. A nil host yields `sdk.ErrNoExtensionHost` for extension callbacks, so a partial wiring never panics. The router holds no engine state — it marshals a payload and calls the host — so it cannot reach anything the host does not already expose. Serve mode installs one with the `Model`'s core handler (see below), so model/thinking/routing selections take effect headlessly.
+
+**Invariant:** the core/extension split is decided solely by `sdk.IsCoreCallback` (the `__wllr:` prefix), never re-derived per front end, so the TUI and the browser route the same callback id the same way.
+
+#### 3b.i Shared core-selection dispatch (`coredispatch.go`)
+
+The interactive `Model` resolves a core picker selection inside `updateKeyPressPicker` by emitting an internal `tea.Msg` (`setModelMsg`, `setThinkingMsg`, `setOpenRouterSpeedMsg`, `setProviderModelMsg`) that the update loop turns into an apply call. A headless front end has no event loop, so it needs to reach the same apply call directly. `classifyCoreSelection(callback, value)` is the single source of the callback-id → apply-action mapping; both front ends consume it:
+
+- the TUI's picker branch turns a `coreSelectModel`/`coreSelectProviderModel`/`coreSelectThinking`/`coreSelectSpeed` result into the matching internal message (byte-identical to the pre-refactor branch table);
+- `Model.ResolveCoreCallback(ctx, callback, args)` runs `applyCoreSelection`, which calls the *same* `applyModelSelection` / `applyProviderModelSelection` / `applyThinkingSelection` / `applySpeedSelection` methods the terminal uses.
+
+So a picker behaves identically whether the selection came from a terminal or the browser. `Model.CoreCallbackFunc()` adapts `ResolveCoreCallback` to `sdk.CoreCallbackHandler`, returning `sdk.ErrNoCoreHandler` for an unhandled callback (so the router answers 501).
+
+**Scope:** only the *stateless* selections are classified — model, provider-qualified model, thinking level, OpenRouter routing — because they carry all their state in the callback id and value. The multi-step setup flows (auth, local-model base-URL/manual entry, context-window entry, OpenRouter catalog, add-model) carry live `Model` state (`pendingAuthProvider`, `localSetupModels`, …) built up across earlier interactions and stay TUI-only; a headless caller cannot start one from a cold callback.
+
+**Invariant:** a core selection is applied through the same `apply*` method from every front end; the classifier may not select a different action for the same `(callback, value)` than the terminal does.
 
 `CapabilityProvider` and `MCPBridge` are NOT installed by SetProgram — `CapabilityProvider` is installed by `cmd/main.go` via `h.SetCapabilities`, and `MCPBridge` is not currently used.
 
-`SetProgram` also wires three pool callbacks (when `pool != nil`): `SetContextUsageDispatcher` (forwards `EventContextUsage`; when the dispatch carries a non-nil `CompactionNotice` it additionally dispatches `EventNotify` with a "🧹 Context compacted: N message(s) summarized (trigger: …)" line so the visible transcript records the compaction), `SetWakeNotifier` (sends `agentWakeupMsg` when a `Deliver` wakes the main agent), and `SetProviderRequestInterceptor` (routes the `before_provider_request` transform chain to `extHost.DispatchEventChain` via the package helper `interceptProviderRequest`). The interceptor lets extensions redact messages, reroute the model, or block the request just before each turn streams; a malformed transformed payload is tolerated (original messages/model kept). `submitToAgent` no longer dispatches `before_provider_request` — interception happens inside the agent turn where the real messages + model exist (see agent SPECS §9 Provider-Request Interception).
+`SetProgram` also wires three pool callbacks (when `pool != nil`): `SetContextUsageDispatcher` (forwards `EventContextUsage`; when the dispatch carries a non-nil `CompactionNotice` it additionally dispatches `EventNotify` with a "🧹 Context compacted: N message(s) summarized (trigger: …)" line so the visible transcript records the compaction), `SetWakeNotifier` (reports the wake of the main agent through the sink), and `SetProviderRequestInterceptor` (routes the `before_provider_request` transform chain to `extHost.DispatchEventChain` via the package helper `interceptProviderRequest`). The interceptor lets extensions redact messages, reroute the model, or block the request just before each turn streams; a malformed transformed payload is tolerated (original messages/model kept). `submitToAgent` no longer dispatches `before_provider_request` — interception happens inside the agent turn where the real messages + model exist (see agent SPECS §9 Provider-Request Interception).
 
 **Invariant:** `harnessUIBridge.SetSystemPrompt` and `harnessUIBridge.AppendSystemPrompt` both route through the `AgentPool`, which propagates the prompt to all current and future agents. They do NOT set the prompt on the extension host or the harness model itself.
 
@@ -74,22 +112,52 @@ The host reserves `/history` and dispatches `EventOnCommand` with
 This keeps the command invocable when a generated extension artifact is stale
 or unavailable.
 
-### Main agent callbacks wired in SetProgram
+### Main agent callbacks wired by `WireMainAgentCallbacks(sink sdk.AgentUISink)`
 
-- `SetOnToken`: a batched token callback (see §5).
-- `SetOnDone`: calls flush on the batcher, then `p.Send(StreamDoneMsg{Err})`.
+The callbacks are registered **additively** (`AddOnToken`, `AddOnDone`,
+`AddOnToolCall`, `AddOnTurnStart`, `AddOnSteer`) so a second consumer of the same
+agent's stream is not displaced. `SetToolsFn` is a genuine slot and is set here.
+
+- `AddOnToken`: a batched token callback (see §5).
+- `AddOnDone`: calls flush on the batcher, then `sink.StreamDone(err)`.
 - `SetToolsFn`: returns `withRecallTool(tools.BuildFantasyTools(extHost, "main", logFn), pool, "main")` — the extension/native tool set plus the agent-scoped `recall` tool.
-- `SetOnToolCall`: `toolCallForwarder(mainID, p, stopBatch)` — flushes any
+- `AddOnToolCall`: `toolCallForwarder(mainID, sink, stopBatch)` — flushes any
   batched token tail (the dispatched tool call ends the preceding text
   segment; without the flush the segment's last <75ms of tokens would wait
   for the next segment or turn end, rendering narration frozen mid-sentence
-  through long tool executions), then `p.Send(ToolCallStartMsg{AgentID:
-  mainID, ID, ToolName, Input})`.
+  through long tool executions), then `sink.ToolCallStart(mainID, ID,
+  ToolName, Input)`.
 - If the main agent is recovered after an `ErrAgentNotFound`, these callbacks
   and the dynamic tool function are wired onto the replacement before the user
   turn is retried.
 
+**Invariant:** wiring the root agent never removes another consumer's observer.
+A front end whose per-agent publisher already owns the stream frames (serve
+mode's `server.Bridge`) passes a no-op sink — `&sdk.FuncSink{}` — so it gets only
+the extension-dispatch side effects (`EventToken`, `EventBeforeAgentStart`,
+steer) and the tool list, without publishing each frame twice.
+
 Sub-agents spawned via `harnessAgentBridge.Spawn` (delegated to `agent.Spawner`) receive similar wiring with the spawned agent's ID. Their token output is not routed to the main chat, but their tool-call starts are routed to the tool activity pane/log with `AgentID` populated. Their tool list is built the same way, through `withRecallTool`, so a sub-agent can retrieve its own pre-compaction detail.
+
+### Session boot and message end for a front end with no event loop
+
+The interactive `Model.Init` dispatches `EventSessionStart` and
+`EventModelChanged` as `tea.Cmd`s, and `updateStream` dispatches
+`EventMessageEnd` when a stream completes. A front end with no bubbletea loop
+runs none of them, so three exported synchronous counterparts exist, each a
+no-op with a nil host:
+
+- `DispatchSessionStart(ctx) error` — extensions create their UI in response to
+  session start; the bundled `agents` extension creates the `chat` transcript
+  area here. Without it a headless front end has no extension-driven
+  transcript.
+- `DispatchModelChanged(ctx) error` — reports the provider/model (the bundled
+  `statusline` extension renders them).
+- `DispatchMessageEnd(ctx, role, content) error` — extensions act on a finalized
+  message; `agents` renders the finalized assistant bubble (markdown → ANSI)
+  only on this event, and `history` records the response. Called by serve mode
+  from the server's message-end notifier, which fires with the turn's
+  accumulated assistant text.
 
 ---
 
@@ -115,19 +183,17 @@ After all sub-handlers return false, remaining messages are forwarded to `m.inpu
 ## 5. Token Batching (tokenBatcher)
 
 ```go
-type msgSender interface { Send(tea.Msg) }
-
 type tokenBatcher struct {
     mu       sync.Mutex
     buf      strings.Builder
     lastSend time.Time
-    p        msgSender
+    sink     sdk.TokenSink
     dispatch func(string) // optional: forward each batch to WASM (EventToken)
 }
 const tokenBatchInterval = 75 * time.Millisecond
 ```
 
-`makeBatchedOnToken(p, dispatch)` returns `(onToken func(string), flush func())`. Tokens are coalesced and sent as a single `TokenMsg` at most every 75ms. `flush()` drains any buffered tail tokens immediately and must be called at segment boundaries — when a tool call is dispatched (`toolCallForwarder`) and from `onDone` — otherwise a text segment's final <75ms of tokens wait for the NEXT segment's first token (or turn end) before becoming visible. When `dispatch` is non-nil, each flushed batch is also passed to it; `wireMainAgentCallbacks` supplies a closure that marshals a `sdk.TokenPayload` and calls `Host.DispatchEvent(EventToken)` so streamed text reaches WASM extensions. The dispatch runs on the agent goroutine, not the bubbletea loop. `msgSender` is the `Send(tea.Msg)` subset of `*tea.Program`, so tests can capture sends headlessly.
+`makeBatchedOnToken(sink, dispatch)` returns `(onToken func(string), flush func())`. Tokens are coalesced and delivered to the sink at most every 75ms. `flush()` drains any buffered tail immediately and must be called at segment boundaries — when a tool call is dispatched (`toolCallForwarder`) and from `onDone` — otherwise a text segment's final <75ms of tokens wait for the NEXT segment's first token (or turn end) before becoming visible. When `dispatch` is non-nil, each flushed batch is also passed to it; `WireMainAgentCallbacks` supplies a closure that marshals a `sdk.TokenPayload` and calls `Host.DispatchEvent(EventToken)` so streamed text reaches WASM extensions. The dispatch runs on the agent goroutine, not the bubbletea loop. The sink is the `Token(text)` subset (`sdk.TokenSink`), so tests capture sends headlessly and non-TUI front ends receive the same stream.
 
 **Invariant:** The batcher uses time-based coalescing with no goroutines or channels — it is safe to call `flush()` multiple times across turns without panics. Locking is purely `sync.Mutex` on the buffer.
 
@@ -224,6 +290,8 @@ The caller (`View`) adds top and bottom blank-line margins to vertically center 
 
 `slashWordAt(val string) int` finds the index of the last `/` that starts an incomplete command word — it must be at position 0 or preceded by a space, and there must be no space between it and the end of the string. Returns -1 if no such position exists.
 
+**Invariant:** `slashWordAt` is a thin delegate to `sdk.SlashWordAt`. The rule is shared because the browser client reimplements it in JavaScript; the two must trigger under identical conditions, so the single definition lives in `sdk` (see sdk/NOTES.md). A change here must change `sdk.SlashWordAt`.
+
 ### updateSuggestions
 
 Called after every key event. Computes `slashWordAt(input.Value())`. If a slash word is found, filters `commands.List()` to entries whose names have the typed prefix. Updates `m.suggestions`.
@@ -312,6 +380,28 @@ type Command struct {
 **Invariant:** All built-in commands (`/help`, `/clear`, `/reload`, `/model`, `/models`, `/thinking`, `/openrouter-speed`, `/login`, `/status`, `/tools`, `/context`, `/steer`) have `Instant=true`. The zero value of `Command.Instant` is `false`. (The `/prompt` command is registered without `Instant=true` because it executes synchronously in the update loop via `ShowModalMsg`, not via WASM dispatch — it is intentionally excluded from the instant list.)
 
 **Invariant:** Extension-registered commands set `Instant` from the `instant bool` parameter passed to `UIBridge.RegisterCommand(name, desc, instant bool)`. When `instant=true`, the flag is stored on the `Command`, suppressing the "queuing…" status. The handler still routes through `dispatchOnCommandMsg` → `EventOnCommand`.
+
+### Command discovery for other front ends
+
+`func (r *Registry) ListInfo() []sdk.CommandInfo` returns the registry as the
+renderer-neutral `sdk.CommandInfo` list (sorted by name), so a non-terminal front
+end can serve it without reaching into the harness registry type.
+
+`func (m *Model) CommandLister() sdk.CommandLister` exposes it through the shared
+contract; serve mode installs it so `GET /api/commands` returns exactly the
+terminal's command set.
+
+`func (m *Model) RegisterCommand(name, desc string, instant bool)` records an
+extension-registered command in the same registry the built-ins live in, with a
+handler that routes through `dispatchOnCommandMsg` — identical to what the
+terminal sink (`teaSink.RegisterCommand`) does. Serve mode points
+`HubSink.SetCommandRegistrar` at this method, so a command an extension registers
+after serve-mode wiring still appears in the browser's autocomplete and help.
+
+**Invariant:** there is one command registry. Built-ins, extension commands
+registered before serve-mode wiring (via the early bridge), and those registered
+after it (forwarded from `HubSink`) all land in `m.commands`, so the browser's
+command list cannot diverge from the terminal's.
 
 Built-in commands registered at startup:
 
@@ -575,7 +665,7 @@ Appends the canonical-transcript `recall` tool (`agent.RecallTool()`) to `base` 
 
 | Field | Type | Purpose |
 |-------|------|---------|
-| `ModelListFn` | `func() []ModelChoice` | Returns the active provider's selectable models for the picker. Nil ⇒ selection unavailable. |
+| `ModelListFn` | `func() []ModelChoice` | Returns every configured/pinned selectable model for the picker. Nil ⇒ selection unavailable. `ModelChoice` is a type alias of `sdk.ModelChoice` (see sdk SPECS "Model-selection contract"); the picker key encoding (`modelPickerKey`) and callback id (`modelPickerCallback`) are likewise the shared `sdk` values, so the HTTP front end's `GET /api/models` and this picker describe a model identically. |
 | `SelectModelFn` | `func(modelID string) error` | Switches the active model: rebuilds the main agent's LM (`Agent.SetModel`), updates the context window, and persists the choice. Nil ⇒ display-only. |
 | `SetContextWindowFn` | `func(provider, modelID string, tokens int64) error` | Persists and applies a user-entered context window after unknown-model selection. |
 | `TierNamesFn` | `func() []string` | Returns configured model-tier names. Used to resolve a tier name in `setModelMsg` and to render tier tags. Nil ⇒ tiers unavailable. |
@@ -797,7 +887,7 @@ Local model replacement flow: when the configured local model is not advertised 
 
 **Invariant:** the setup wizard is only selected by `cmd/main.go` for blank first-run config and missing credentials. Cloud choices use the same OAuth completion path as `/login`; local choices do not record an OAuth auth choice and do not call `BeginOAuthFn`.
 
-**Invariant:** `"__wllr:auth"` and `"__wllr:login_provider"` join `"__wllr:model"`/`"__wllr:thinking"` as reserved core-owned picker callbacks; they never dispatch `EventOnCommand`.
+**Invariant:** `"__wllr:auth"` and `"__wllr:login_provider"` join `"__wllr:model"`/`"__wllr:thinking"` as reserved core-owned picker callbacks; they never dispatch `EventOnCommand`. The `__wllr:auth` prompt is terminal-only and is not classified by the headless core dispatch.
 
 ### show_text_input Overlay
 
@@ -889,6 +979,8 @@ Flow: selecting OAuth (or `/login auth` → `loginMsg` → `openAuthPrompt(activ
 **Invariants:**
 
 - `ApplyPatch` validates against a working clone; a mid-batch failure leaves the live tree untouched (atomicity).
+- The per-op graph operations are **not** implemented here. `ApplyPatch` calls `sdk.ApplyOp`, and `Render`/`RenderNode`/`RenderAppendTextNode` use `sdk.CloneNode`/`sdk.FindNode`; constraint resolution uses `sdk.ResolveConstraint` and prop sizing uses `sdk.ParseDimension`/`sdk.PropSides` (see `modules/sdk/SPECS.md` §Scene-graph operations). The terminal renderer and the HTML renderer (`modules/server`) therefore share one implementation of patch semantics and cannot drift. Only the node-to-pixels step (`renderNode`, lipgloss) is harness-specific.
+- `resolveConstraint` and `collapseBlankLineRuns` remain as thin package-local shims over the `sdk` helpers, so call sites and tests read unchanged.
 - `UIOpAppendText` targets only `UINodeText` nodes; appending to a non-text node errors.
 - An unknown `UINodeType` renders as an empty box (forward-compatibility).
 - Colour props resolve through `themeColor` (named tokens → hex); unknown non-hex tokens yield no colour, so the host keeps theming control.

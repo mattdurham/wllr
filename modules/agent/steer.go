@@ -32,13 +32,14 @@ type steerInjector struct {
 	injected []sdk.Message
 }
 
-// newSteerInjector captures the agent's steer callback once (the callback may
+// newSteerInjector captures the agent's steer callbacks once (the callbacks may
 // be re-registered between turns; one turn must use one callback).
 func newSteerInjector(a *Agent) *steerInjector {
 	a.onSteerMu.RLock()
-	fn := a.onSteerFn
+	fns := make([]func(string), len(a.onSteerFns))
+	copy(fns, a.onSteerFns)
 	a.onSteerMu.RUnlock()
-	return &steerInjector{a: a, onSteer: fn}
+	return &steerInjector{a: a, onSteer: chainSteerCallbacks(fns)}
 }
 
 // wrap composes the injector with the tool-loop compactor's PrepareStep: the
@@ -103,9 +104,26 @@ func (si *steerInjector) drain() {
 // SetOnSteer sets the callback invoked on the turn goroutine when a steer
 // message is delivered into the running turn (injected into the next provider
 // request). Used by the harness to render the steered text in the transcript
-// at delivery time. Thread-safe; may be called before each Submit.
+// at delivery time. It replaces any previously registered steer callbacks;
+// AddOnSteer appends instead of replacing. Thread-safe; may be called before
+// each Submit.
 func (a *Agent) SetOnSteer(fn func(content string)) {
 	a.onSteerMu.Lock()
-	a.onSteerFn = fn
+	if fn == nil {
+		a.onSteerFns = nil
+	} else {
+		a.onSteerFns = []func(string){fn}
+	}
+	a.onSteerMu.Unlock()
+}
+
+// AddOnSteer registers an additional steer-delivery callback alongside any
+// already set. A nil fn is ignored. Thread-safe.
+func (a *Agent) AddOnSteer(fn func(content string)) {
+	if fn == nil {
+		return
+	}
+	a.onSteerMu.Lock()
+	a.onSteerFns = append(a.onSteerFns, fn)
 	a.onSteerMu.Unlock()
 }

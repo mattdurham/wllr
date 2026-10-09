@@ -214,6 +214,59 @@ fallback when no creator is recorded. Shutdown acknowledgements are wake-enabled
 
 `SetWakeNotifier(fn func(id string))` installs a callback invoked with the agent ID whenever `Deliver` wakes that agent (`wake=true`). The harness uses it to drive the TUI streaming indicator for the main agent (sends `agentWakeupMsg`). The callback runs on the delivering goroutine (which may be a sub-agent's `finishTurn` goroutine), not the bubbletea loop — implementations must be goroutine-safe. Guarded by `dispatchMu` alongside `contextUsageDispatcher`.
 
+### Turn-Usage and Lifecycle Observers
+
+`AgentPool` reports two observability streams as plain value types, so the agent
+package keeps no metrics or HTTP dependency: `TurnUsage` (one per turn, plus a
+`Started` marker when a turn begins) and `AgentLifecycle` (add/remove with the
+resulting pool size).
+
+Each stream supports **multiple observers**:
+
+- `SetUsageObserver(fn)` / `SetLifecycleObserver(fn)` **replace** the observer
+  list (and a nil clears it). These preserve the original single-consumer
+  behavior.
+- `AddUsageObserver(fn)` / `AddLifecycleObserver(fn)` **append** an observer,
+  leaving any already-installed observer in place.
+
+**Invariant:** Adding an observer never displaces another. The observers are
+snapshotted under `dispatchMu` and each is invoked outside the lock, so an
+observer that calls back into the pool cannot deadlock and cannot be skipped by a
+concurrent change to the list.
+
+**Rationale:** more than one subsystem observes turns and membership (the
+metrics recorder in `cmd` and the API server in `modules/server`). The additive
+forms let a second consumer attach without clobbering the first; without them,
+whichever installed second would silently win.
+
+`SetContextUsageDispatcher` and `SetWakeNotifier` remain single-slot: context
+usage is meaningful to whichever front end is active (the TUI *or* serve mode,
+never both), so the active front end claims it explicitly.
+
+### Per-agent turn callbacks are additive too
+
+The per-agent callbacks an `*Agent` exposes — `SetOnToken`/`SetOnDone`,
+`SetOnToolCall`, `SetOnTurnStart`, `SetOnSteer` — follow the same rule as the
+pool observables above: `Set*` **replaces** the callback list (a nil clears it),
+and an `Add*` twin **appends**.
+
+**Invariant:** Adding a callback never displaces another. The list is copied
+under its mutex at the start of a turn, so the set a turn runs with is fixed
+when it starts and a concurrent registration cannot half-apply to it. A single
+callback is invoked unwrapped (no extra allocation); several are invoked in
+registration order.
+
+**Invariant:** `SetOnToken(nil)` clears the list rather than registering a nil
+callback, so clearing can never turn into a nil-dereference at token time.
+
+**Rationale:** two independent subsystems observe the same agent's turn. The
+server's per-agent `Bridge` publishes stream frames; the harness
+`WireMainAgentCallbacks` gives the root agent its tool list and dispatches its
+extension events (`before_agent_start`, `token`, `message_end`, steer). With
+single slots whichever wired second silently replaced the other — which is how a
+headless front end ended up with an agent that had no tools and a chat
+transcript that never received its user prompts or streamed text.
+
 ---
 
 ## 7. Cancel Semantics
@@ -225,7 +278,6 @@ fallback when no creator is recorded. Shutdown acknowledgements are wake-enabled
 **Invariant:** `Cancel` is idempotent. Calling `Cancel` on an agent with no active turn (including an agent that has already been closed via `pool.Close`) is a no-op. The stored cancel function is checked for nil before invocation.
 
 **Invariant:** `Cancel` does not remove the agent from the pool. The agent remains registered and may be re-submitted.
-
 ---
 
 ## 8. System Prompt Hierarchy
