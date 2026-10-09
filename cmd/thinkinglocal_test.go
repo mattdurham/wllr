@@ -431,7 +431,8 @@ func TestStartupThinkingMode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Non-local provider: a valid persisted mode is returned as-is.
+	// Non-local provider: a valid persisted mode is returned as-is. "high" is
+	// in gpt-5.5's own declared set, so the model-vocabulary check passes.
 	if got := startupThinkingMode(context.Background(), &Config{Provider: providerOpenAI, Model: "gpt-5.5"}, providerOpenAI); got != "high" {
 		t.Errorf("persisted valid mode: got %q, want high", got)
 	}

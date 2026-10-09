@@ -91,7 +91,11 @@ var openAIReasoningEffort = map[thinkingLevel]fantasyopenapiprovider.ReasoningEf
 // (shared by the openai and local providers) to their wire values. The map is
 // the single source of truth for the standard vocabulary; mode IDs outside it
 // (e.g. LM Studio's boolean "on") map to nil, which omits the field and lets
-// the server apply its own default.
+// the server apply its own default. "max" maps for the native OpenAI provider
+// (fantasy's Responses path accepts it — Catwalk declares it for the gpt-5.6
+// family); the local provider treats it as unmapped because OpenAI-compatible
+// endpoints accept only the six documented values (see the local branch in
+// providerOptionsForThinkingMode).
 var openAIReasoningEffortByMode = map[string]fantasyopenapiprovider.ReasoningEffort{
 	thinkingModeNone:    fantasyopenapiprovider.ReasoningEffortNone,
 	thinkingModeMinimal: fantasyopenapiprovider.ReasoningEffortMinimal,
@@ -99,6 +103,7 @@ var openAIReasoningEffortByMode = map[string]fantasyopenapiprovider.ReasoningEff
 	thinkingModeMedium:  fantasyopenapiprovider.ReasoningEffortMedium,
 	thinkingModeHigh:    fantasyopenapiprovider.ReasoningEffortHigh,
 	thinkingModeXHigh:   fantasyopenapiprovider.ReasoningEffortXHigh,
+	thinkingModeMax:     fantasyopenapiprovider.ReasoningEffortMax,
 }
 
 // openRouterReasoningEffort maps a thinking level to OpenRouter reasoning

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 )
 
 // NOTE: model catalog. Source: charmbracelet Catwalk (https://catwalk.charm.sh/v2/providers),
@@ -362,37 +361,93 @@ func contextWindowForSelection(provider, id string, cfg *Config) int64 {
 	return contextWindowFromCatalog(provider, id)
 }
 
-// supportedThinkingModesForModel returns the thinking modes supported by a
-// given model. Precedence: the model catalog (openai and friends), explicit
-// local_models configuration, and the standard OpenAI effort set for local
-// models without an endpoint-declared set (OpenAI-compatible endpoints speak
-// reasoning_effort).
-func supportedThinkingModesForModel(provider, model string) []thinkingMode {
+// modelThinkingModeVocabulary returns the thinking-mode set one model's own
+// metadata declares — its catalog entry (per-model sets differ: Anthropic
+// budget IDs, per-family OpenAI effort sets, Gemini budget IDs), OpenRouter
+// pin capability, or local_models configuration — plus whether the model is
+// known at all. Known models with a declared-empty set (OpenRouter's listing
+// or local config says the model cannot reason) return (nil, true); unknown
+// models return (nil, false). Local endpoint-declared sets need discovery
+// (context), so callers holding one validate through localThinkingInfo
+// instead.
+func modelThinkingModeVocabulary(provider, model string) ([]thinkingMode, bool) {
+	if provider == providerOpenRouter {
+		if supports, declared := openRouterReasoningCapability(loadWllrSettings().OpenRouterModels, model); declared {
+			if !supports {
+				return nil, true
+			}
+			return openRouterStandardThinkingModes(), true
+		}
+		return nil, false
+	}
 	if models := modelsForProvider(provider); models != nil {
 		for _, m := range models {
 			if m.ID == model {
-				return m.ThinkingModes
+				return m.ThinkingModes, true
 			}
 		}
+	}
+	if provider == providerLocal && model != "" {
+		if lm, ok := loadWllrSettings().localModelEntry(model); ok {
+			if filtered := thinkingModesFromIDs(lm.ThinkingModes); len(filtered) > 0 {
+				return filtered, true
+			}
+		}
+	}
+	return nil, false
+}
+
+// providerDefaultThinkingModes is the fallback vocabulary for a model found
+// in no source: the provider's standard set. Custom model IDs keep working
+// against the standard vocabulary rather than being treated as unable to
+// reason.
+func providerDefaultThinkingModes(provider string) []thinkingMode {
+	switch provider {
+	case providerAnthropic:
+		return anthropicThinkingModes
+	case providerOpenAI:
+		return openAIThinkingModes
+	case providerGemini:
+		return geminiThinkingModes
+	case providerOpenRouter:
+		return openRouterStandardThinkingModes()
+	case providerLocal:
+		return openAIStandardThinkingModes()
+	}
+	return nil
+}
+
+// modelSupportsThinkingMode reports whether a persisted mode ID is in the
+// model's own declared vocabulary, falling back to the provider's standard
+// set for unknown models. This is what keeps a mode saved for one model from
+// applying to another with a differently named set: "max" saved on a gpt-5.6
+// model must not reach gpt-5.5 (no max in its set), a budget ID must not
+// cross the Anthropic/Gemini boundary, and "none" must not disable a model
+// whose vocabulary has no none level.
+func modelSupportsThinkingMode(provider, model, modeID string) bool {
+	modes, known := modelThinkingModeVocabulary(provider, model)
+	if !known {
+		modes = providerDefaultThinkingModes(provider)
+	}
+	return thinkingModeInSet(modes, modeID)
+}
+
+// supportedThinkingModesForModel returns the thinking modes a model offers
+// the /thinking picker: the model's own declared vocabulary, with the
+// standard provider sets for models that carry no per-model data.
+func supportedThinkingModesForModel(provider, model string) []thinkingMode {
+	if modes, known := modelThinkingModeVocabulary(provider, model); known {
+		return modes
 	}
 	if provider == providerOpenRouter {
 		// OpenRouter speaks one normalized reasoning vocabulary for every
-		// upstream (reasoning.effort + enabled), so every pinned model gets
-		// the standard set — except models its listing declares unable to
-		// reason (mirrors the local provider's declared handling). Models
-		// pinned before the capability was captured carry no data and keep
-		// the set.
-		if supports, declared := openRouterReasoningCapability(loadWllrSettings().OpenRouterModels, model); declared && !supports {
-			return nil
-		}
+		// upstream (reasoning.effort + enabled); models pinned before the
+		// capability was captured carry no data and keep the standard set.
 		return openRouterStandardThinkingModes()
 	}
 	if provider == providerLocal && model != "" {
-		if lm, ok := loadWllrSettings().localModelEntry(model); ok && len(lm.ThinkingModes) > 0 {
-			if filtered := thinkingModesFromIDs(lm.ThinkingModes); len(filtered) > 0 {
-				return filtered
-			}
-		}
+		// OpenAI-compatible endpoints speak reasoning_effort even when the
+		// server does not declare per-model capabilities.
 		return openAIStandardThinkingModes()
 	}
 	return nil
@@ -451,86 +506,76 @@ func thinkingModeInSet(modes []thinkingMode, id string) bool {
 }
 
 // startupThinkingMode determines the thinking mode to apply for the current
-// provider/model: the mode persisted for that provider/model when it is valid
-// for that provider. For
-// local models with an endpoint-declared capability set, a missing or stale
-// persisted mode falls back to the model's endpoint-declared default (so the
-// user sees and can adjust the server's own choice, and an invalid effort can
-// never 400 the request). For non-local providers a stale/invalid mode yields
-// "" (nothing applied — the legacy behavior).
+// provider/model: the mode persisted for that provider/model, but only when
+// it is valid for THAT MODEL. Models have differently named mode sets, so a
+// mode saved for one model is dropped rather than applied to another — this
+// is also what makes the legacy global fallback and cross-model inheritance
+// safe (inheritance materializes only when the target model's vocabulary
+// offers the same name). For local models with an endpoint-declared
+// capability set, a missing or stale persisted mode falls back to the
+// model's endpoint-declared default (so the user sees and can adjust the
+// server's own choice, and an invalid effort can never 400 the request).
+// Anything stale or invalid yields "" (nothing applied).
 func startupThinkingMode(ctx context.Context, cfg *Config, provider string) string {
 	lvl := savedThinkingMode(provider, cfg.Model)
-	if provider != providerLocal {
-		if lvl == "" {
-			return ""
+	if provider == providerLocal {
+		// Local: a missing or stale persisted mode falls back to the
+		// endpoint-declared default (or a standard-vocabulary value on an
+		// undeclared endpoint), so lvl == "" must NOT short-circuit here —
+		// nothing persisted is exactly the adopt-the-server-default case.
+		modes, declared, def := localThinkingInfo(ctx, cfg)
+		if thinkingModeInSet(modes, lvl) {
+			return lvl
 		}
-		if provider == providerOpenRouter {
-			// A pinned model that OpenRouter's listing declares unable to
-			// reason never gets a reasoning option, even if one is
-			// persisted — the request would carry a parameter the model
-			// cannot use. Models pinned before the capability was captured
-			// (no data) keep the persisted mode.
-			if supports, declared := openRouterReasoningCapability(cfg.OpenRouterModels, cfg.Model); declared && !supports {
+		if declared {
+			if len(modes) == 0 {
+				// The endpoint says this model has no reasoning capability:
+				// send nothing (it cannot think) rather than an effort it
+				// may reject.
 				return ""
 			}
+			return adoptedLocalThinkingMode(modes, def)
 		}
-		if providerOptionsForThinkingMode(provider, lvl, cfg.Model) != nil {
-			return lvl
+		// Endpoint did not declare capabilities (unknown OpenAI-compatible
+		// server): trust only standard-vocabulary persisted modes; otherwise
+		// send nothing (server default) rather than guessing.
+		if lvl != "" {
+			if _, ok := openAIReasoningEffortByMode[lvl]; ok {
+				return lvl
+			}
 		}
 		return ""
 	}
-	modes, declared, def := localThinkingInfo(ctx, cfg)
-	if lvl != "" && thinkingModeInSet(modes, lvl) {
-		return lvl
+	if lvl == "" {
+		return ""
 	}
-	if declared {
-		if len(modes) == 0 {
-			// The endpoint says this model has no reasoning capability: send
-			// nothing (it cannot think) rather than an effort it may reject.
-			return ""
-		}
-		return adoptedLocalThinkingMode(modes, def)
+	// The persisted mode applies only when the model's own vocabulary offers
+	// it; a declared-empty vocabulary (OpenRouter's listing says the model
+	// cannot reason) rejects everything. The wire mapping stays a second
+	// gate: a mode in the model's set but outside the provider's wire
+	// vocabulary (e.g. the gpt-5.6 "max" row, which fantasy's openai provider
+	// does not map) still omits the option instead of failing the request.
+	if !modelSupportsThinkingMode(provider, cfg.Model, lvl) {
+		return ""
 	}
-	// Endpoint did not declare capabilities (unknown OpenAI-compatible server):
-	// trust only standard-vocabulary persisted modes; otherwise send nothing
-	// (server default) rather than guessing.
-	if lvl != "" {
-		if _, ok := openAIReasoningEffortByMode[lvl]; ok {
-			return lvl
-		}
+	if providerOptionsForThinkingMode(provider, lvl, cfg.Model) == nil {
+		return ""
 	}
-	return ""
+	return lvl
 }
 
-// currentThinkingModeForModel returns the currently active thinking mode ID for a model.
+// currentThinkingModeForModel returns the currently active thinking mode ID
+// for a model: the saved level resolved onto THAT model's own vocabulary
+// (through thinkingModeIDForLevel), or "none" as the safe default when the
+// level is off or unresolvable.
 func currentThinkingModeForModel(provider, model string) string {
 	// Get the saved thinking level from config
 	savedLevel := savedThinkingLevel()
 	if savedLevel == thinkingOff {
 		return thinkingModeNone
 	}
-
-	switch provider {
-	case providerAnthropic:
-		if budget, ok := anthropicThinkingBudget[savedLevel]; ok {
-			return fmt.Sprint(budget)
-		}
-	case providerOpenAI:
-		if effort, ok := openAIReasoningEffort[savedLevel]; ok {
-			return string(effort)
-		}
-	case providerOpenRouter:
-		// OpenRouter mode IDs are the effort level names; the openai-only
-		// extremes degrade to their nearest supported effort (the same
-		// mapping thinkingModeIDForLevel applies for tiers and skills).
-		if mode := thinkingModeIDForLevel(provider, model, string(savedLevel)); mode != "" {
-			return mode
-		}
-	case providerGemini:
-		if budget, ok := geminiThinkingBudget[savedLevel]; ok {
-			return fmt.Sprint(budget)
-		}
+	if mode := thinkingModeIDForLevel(provider, model, string(savedLevel)); mode != "" {
+		return mode
 	}
-
 	return thinkingModeNone
 }

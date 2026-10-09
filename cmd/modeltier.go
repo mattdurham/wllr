@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 
@@ -320,43 +321,118 @@ func activateProviderModel(
 }
 
 // thinkingModeIDForLevel maps a provider-agnostic thinking level (the names a
-// tier can declare, e.g. "high") to the provider-specific mode ID the /thinking
-// picker uses (Anthropic "32768", OpenAI "high"). Returns "" when the level is
-// off or the provider has no reasoning mechanism, meaning no mode is applied.
+// tier or skill can declare, e.g. "high") to the mode ID of the given
+// model's OWN vocabulary. Resolution is per model because models name their
+// thinking differently: the level passes through when the model's set uses
+// it as a mode ID ("high"), maps through the label-equivalent row when the
+// vocabulary names modes differently ("High" → the "32768" Anthropic
+// budget), and otherwise degrades to the nearest ranked mode (ties prefer
+// the stronger mode, so the openai-only extremes still degrade low/xhigh→
+// low/high on OpenRouter). Returns "" when the level is off or unknown, the
+// provider has no reasoning mechanism, or the model's declared set is empty
+// (it cannot reason).
 func thinkingModeIDForLevel(provider, model, level string) string {
+	modes, known := modelThinkingModeVocabulary(provider, model)
+	if !known {
+		modes = providerDefaultThinkingModes(provider)
+	}
+	return thinkingModeIDForSet(modes, level)
+}
+
+// thinkingModeIDForSet resolves a declared level onto one concrete mode set:
+// exact mode-ID match first, then the level's label row, then the nearest
+// ranked mode (ties prefer the stronger mode). Unranked rows (custom
+// endpoint mode IDs outside the standard labels) are skipped rather than
+// guessed.
+func thinkingModeIDForSet(modes []thinkingMode, level string) string {
 	lvl := thinkingLevel(level)
 	if !isValidThinkingLevel(level) || lvl == thinkingOff {
 		return ""
 	}
-	switch provider {
-	case providerAnthropic:
-		if budget := anthropicThinkingBudget[lvl]; budget > 0 {
-			return fmt.Sprint(budget)
+	for _, m := range modes {
+		if m.ID == string(lvl) {
+			return m.ID
 		}
-	case providerOpenAI, providerLocal:
-		// The OpenAI/local reasoning-effort vocabulary uses the level name as
-		// the mode ID ("low", "medium", "high", …), so the level passes through.
-		if _, ok := openAIReasoningEffort[lvl]; ok {
-			return string(lvl)
+	}
+	label := thinkingModeLabelForLevel(lvl)
+	for _, m := range modes {
+		if m.Name == label {
+			return m.ID
 		}
-	case providerOpenRouter:
-		// OpenRouter documents low/medium/high only. The openai-only extremes
-		// degrade to their nearest supported effort so a tier or skill
-		// declaring them still applies a valid setting instead of erroring
-		// (validateTierThinking accepts all six levels for every provider).
-		switch lvl {
-		case thinkingMinimal:
-			return string(thinkingLow)
-		case thinkingXHigh:
-			return string(thinkingHigh)
+	}
+	want := thinkingLevelRank(lvl)
+	bestID, bestDist, bestRank := "", math.MaxFloat64, math.Inf(-1)
+	for _, m := range modes {
+		rank, ok := thinkingModeRank(m)
+		if !ok {
+			continue
 		}
-		if _, ok := openRouterReasoningEffort[lvl]; ok {
-			return string(lvl)
+		dist := math.Abs(rank - want)
+		if dist < bestDist || (dist == bestDist && rank > bestRank) {
+			bestID, bestDist, bestRank = m.ID, dist, rank
 		}
-	case providerGemini:
-		if budget := geminiThinkingBudget[lvl]; budget > 0 {
-			return fmt.Sprint(budget)
-		}
+	}
+	return bestID
+}
+
+// thinkingLevelRank positions a declared level on the cross-vocabulary
+// effort ordering shared with thinkingModeRank.
+func thinkingLevelRank(lvl thinkingLevel) float64 {
+	switch lvl {
+	case thinkingMinimal:
+		return 1
+	case thinkingLow:
+		return 2
+	case thinkingMedium:
+		return 3
+	case thinkingHigh:
+		return 4
+	case thinkingXHigh:
+		return 5
+	}
+	return -1
+}
+
+// thinkingModeRank reads a mode's position on that same ordering from its
+// picker label ("Low", "Medium-Low", "High", …), so budget-ID vocabularies
+// (Anthropic, Gemini) rank alongside effort-ID ones. ok=false for labels
+// outside the ordering; those rows are skipped when degrading.
+func thinkingModeRank(m thinkingMode) (float64, bool) {
+	switch m.Name {
+	case "None":
+		return 0, true
+	case "Minimal":
+		return 1, true
+	case thinkingLabelLow:
+		return 2, true
+	case "Medium-Low":
+		return 2.5, true
+	case thinkingLabelMedium:
+		return 3, true
+	case thinkingLabelHigh:
+		return 4, true
+	case thinkingLabelXHigh:
+		return 5, true
+	case "Max":
+		return 6, true
+	}
+	return 0, false
+}
+
+// thinkingModeLabelForLevel is the picker label a level's row carries in any
+// catalog vocabulary ("high" → "High", also the "32768" row's label).
+func thinkingModeLabelForLevel(lvl thinkingLevel) string {
+	switch lvl {
+	case thinkingMinimal:
+		return "Minimal"
+	case thinkingLow:
+		return thinkingLabelLow
+	case thinkingMedium:
+		return thinkingLabelMedium
+	case thinkingHigh:
+		return thinkingLabelHigh
+	case thinkingXHigh:
+		return thinkingLabelXHigh
 	}
 	return ""
 }

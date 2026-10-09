@@ -78,10 +78,15 @@ func providerOptionsForThinkingMode(provider, modeID, modelID string) fantasy.Pr
 		// default (LM Studio defaults loaded thinking models to "on"), so an
 		// explicit "none" is the only way to actually disable. Unlike openai,
 		// unknown/stale IDs (e.g. the boolean "on") are sent as "none" —
-		// disabling rather than 400-ing (the endpoint rejects anything outside
-		// the six OpenAI values). Local endpoints speak chat completions, so
-		// the chat-completions option type is always correct here.
+		// disabling rather than 400-ing, and "max" counts as unknown here:
+		// native-OpenAI-only (Catwalk declares it for the gpt-5.6 family) and
+		// the endpoint rejects anything outside the six OpenAI values. Local
+		// endpoints speak chat completions, so the chat-completions option
+		// type is always correct here.
 		effort := openAIReasoningEffortForThinkingMode(modeID)
+		if effort != nil && *effort == fantasyopenapiprovider.ReasoningEffortMax {
+			effort = nil
+		}
 		if effort == nil {
 			none := fantasyopenapiprovider.ReasoningEffortNone
 			effort = &none

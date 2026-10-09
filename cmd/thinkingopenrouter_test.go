@@ -309,3 +309,113 @@ func TestFetchOpenRouterModelsCapturesSupportedParameters(t *testing.T) {
 		t.Errorf("c/d supported_parameters = %v, want nil", got)
 	}
 }
+
+// TestStartupThinkingModeRespectsModelVocabulary locks in per-model startup
+// resolution: a mode saved for one model applies to another only when the
+// other model's own declared vocabulary offers the same name. Models name
+// their thinking differently (Anthropic budget IDs, per-family OpenAI effort
+// sets, always-on models without a none level), so unguarded cross-model
+// inheritance would send modes the target model does not declare — up to
+// disabling an always-reasoning model with an inherited "none".
+func TestStartupThinkingModeRespectsModelVocabulary(t *testing.T) {
+	withConfigPath(t)
+	withAuthPath(t) // hermetic: no stored OpenRouter key
+	ctx := context.Background()
+
+	// A mode outside the target family's vocabulary never inherits: gpt-5.6
+	// declares max (no minimal), gpt-5.5 declares neither.
+	if err := saveThinkingMode(providerOpenAI, "gpt-5.6-sol", thinkingModeMax); err != nil {
+		t.Fatal(err)
+	}
+	if got := startupThinkingMode(ctx, &Config{Provider: providerOpenAI, Model: "gpt-5.5"}, providerOpenAI); got != "" {
+		t.Errorf("gpt-5.6 max inherited by gpt-5.5 = %q, want nothing", got)
+	}
+	if got := startupThinkingMode(ctx, &Config{Provider: providerOpenAI, Model: "gpt-5.6-sol"}, providerOpenAI); got != thinkingModeMax {
+		t.Errorf("gpt-5.6 own max = %q, want max", got)
+	}
+	if err := saveThinkingMode(providerOpenAI, "gpt-5.6-sol", thinkingModeMinimal); err != nil {
+		t.Fatal(err)
+	}
+	if got := startupThinkingMode(ctx, &Config{Provider: providerOpenAI, Model: "gpt-5.6-sol"}, providerOpenAI); got != "" {
+		t.Errorf("minimal for a model whose set lacks it = %q, want nothing", got)
+	}
+
+	// Same-name inheritance stays: the standard efforts are shared across the
+	// gpt-5.x family, so a mode saved on gpt-5.5 still restores on gpt-5.4.
+	if err := saveThinkingMode(providerOpenAI, "gpt-5.5", thinkingModeHigh); err != nil {
+		t.Fatal(err)
+	}
+	if got := startupThinkingMode(ctx, &Config{Provider: providerOpenAI, Model: "gpt-5.4"}, providerOpenAI); got != thinkingModeHigh {
+		t.Errorf("gpt-5.5 high inherited by gpt-5.4 = %q, want high", got)
+	}
+
+	// Budget IDs do not cross the Anthropic/OpenAI boundary: "32768" restores
+	// on another Anthropic model (same vocabulary) but not on a clean OpenAI
+	// model (effort names, no such ID).
+	if err := saveThinkingMode(providerAnthropic, claudeOpus48Model, "32768"); err != nil {
+		t.Fatal(err)
+	}
+	if got := startupThinkingMode(ctx, &Config{Provider: providerAnthropic, Model: "claude-sonnet-5"}, providerAnthropic); got != "32768" {
+		t.Errorf("anthropic budget inherited by another anthropic model = %q, want 32768", got)
+	}
+	if got := startupThinkingMode(ctx, &Config{Provider: providerOpenAI, Model: "gpt-5.4-mini"}, providerOpenAI); got != "" {
+		t.Errorf("anthropic budget inherited by openai model = %q, want nothing", got)
+	}
+
+	// GPT-6 Astra reasons always-on (no none level): a global "none" on the
+	// fallback path must not disable it, while the same value restores on a
+	// model that does offer none.
+	if err := saveThinkingMode(providerOpenAI, "gpt-5.4-mini", thinkingModeNone); err != nil {
+		t.Fatal(err)
+	}
+	if got := startupThinkingMode(ctx, &Config{Provider: providerOpenAI, Model: "gpt-6-astra"}, providerOpenAI); got != "" {
+		t.Errorf("global none inherited by always-on astra = %q, want nothing", got)
+	}
+	if got := startupThinkingMode(ctx, &Config{Provider: providerOpenAI, Model: "gpt-5.4-mini"}, providerOpenAI); got != thinkingModeNone {
+		t.Errorf("own none = %q, want none", got)
+	}
+
+	// Unknown models resolve against the provider's standard vocabulary: a
+	// standard effort saved before the model was catalogued still restores,
+	// a nonstandard one does not.
+	if err := saveThinkingMode(providerOpenAI, "future-model", thinkingModeHigh); err != nil {
+		t.Fatal(err)
+	}
+	if got := startupThinkingMode(ctx, &Config{Provider: providerOpenAI, Model: "future-model"}, providerOpenAI); got != thinkingModeHigh {
+		t.Errorf("unknown model standard mode = %q, want high", got)
+	}
+	if err := saveThinkingMode(providerOpenAI, "future-model", thinkingModeMax); err != nil {
+		t.Fatal(err)
+	}
+	if got := startupThinkingMode(ctx, &Config{Provider: providerOpenAI, Model: "future-model"}, providerOpenAI); got != "" {
+		t.Errorf("unknown model nonstandard mode = %q, want nothing", got)
+	}
+}
+
+// TestStartupThinkingModeOpenRouterVocabulary: the OpenRouter pinned-model
+// gate is the declared-vocabulary check — a mode outside OpenRouter's
+// documented set never applies, and a pin declared unable to reason rejects
+// everything.
+func TestStartupThinkingModeOpenRouterVocabulary(t *testing.T) {
+	cfg := withOpenRouterModels(t, "reasoning/model", map[string][]string{
+		"reasoning/model": {"temperature", "reasoning"},
+		"plain/model":     {"temperature"},
+	})
+	ctx := context.Background()
+	if err := saveThinkingMode(providerOpenRouter, "reasoning/model", thinkingModeXHigh); err != nil {
+		t.Fatal(err)
+	}
+	if got := startupThinkingMode(ctx, &Config{Provider: providerOpenRouter, Model: "reasoning/model"}, providerOpenRouter); got != "" {
+		t.Errorf("xhigh on openrouter = %q, want nothing (outside the documented set)", got)
+	}
+	if err := saveThinkingMode(providerOpenRouter, "reasoning/model", thinkingModeHigh); err != nil {
+		t.Fatal(err)
+	}
+	if got := startupThinkingMode(ctx, &Config{Provider: providerOpenRouter, Model: "reasoning/model"}, providerOpenRouter); got != thinkingModeHigh {
+		t.Errorf("own high = %q, want high", got)
+	}
+	if got := startupThinkingMode(ctx, &Config{Provider: providerOpenRouter, Model: "plain/model"}, providerOpenRouter); got != "" {
+		t.Errorf("declared-unable pin = %q, want nothing", got)
+	}
+	_ = cfg
+}

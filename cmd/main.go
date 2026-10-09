@@ -526,7 +526,7 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 			return err
 		}
 		if main := pool.Get(agent.MainAgentID); main != nil {
-			main.SetProviderOptions(providerOptionsForRuntime(currentProvider, savedThinkingMode(currentProvider, cfg.Model), cfg.Model))
+			main.SetProviderOptions(providerOptionsForRuntime(currentProvider, startupThinkingMode(ctx, cfg, currentProvider), cfg.Model))
 		}
 		return nil
 	}
@@ -542,6 +542,13 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 	// consistent with /thinking and tier thinking overrides.
 	m.SetThinkingLevelFn = func(level string) error {
 		modeID := thinkingModeIDForLevel(currentProvider, cfg.Model, level)
+		if currentProvider == providerLocal {
+			// Endpoint-declared sets are not visible to the sync vocabulary
+			// helpers: re-resolve against what the endpoint actually offered.
+			if modes, declared, _ := localThinkingInfo(ctx, cfg); declared {
+				modeID = thinkingModeIDForSet(modes, level)
+			}
+		}
 		if modeID == "" {
 			return fmt.Errorf("provider %s does not support thinking level %q", currentProvider, level)
 		}

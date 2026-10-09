@@ -173,29 +173,73 @@ func TestTiersForModel(t *testing.T) {
 
 func TestThinkingModeIDForLevel(t *testing.T) {
 	cases := []struct {
-		provider, level, want string
+		provider, model, level, want string
 	}{
-		{providerAnthropic, "high", "32768"},
-		{providerAnthropic, "minimal", "2048"},
-		{providerOpenAI, "high", "high"},
-		{providerLocal, "low", "low"},
-		{providerGemini, "medium", "16384"},
-		{providerOpenRouter, "high", "high"},
-		{providerOpenRouter, "low", "low"},
-		{providerOpenRouter, "medium", "medium"},
+		// Unknown models ("m") resolve against the provider's default
+		// vocabulary — the historical behavior.
+		{providerAnthropic, "m", "high", "32768"},
+		{providerAnthropic, "m", "minimal", "2048"},
+		{providerOpenAI, "m", "high", "high"},
+		{providerLocal, "m", "low", "low"},
+		{providerGemini, "m", "medium", "16384"},
+		{providerOpenRouter, "m", "high", "high"},
+		{providerOpenRouter, "m", "low", "low"},
+		{providerOpenRouter, "m", "medium", "medium"},
 		// OpenRouter documents low/medium/high only; the openai-only extremes
 		// degrade to their nearest supported effort.
-		{providerOpenRouter, "minimal", "low"},
-		{providerOpenRouter, "xhigh", "high"},
-		{providerAnthropic, "off", ""},
-		{providerOpenRouter, "off", ""},
-		{providerOpenRouter, "bogus", ""},
-		{providerAnthropic, "bogus", ""},
-		{"unknown-provider", "high", ""},
+		{providerOpenRouter, "m", "minimal", "low"},
+		{providerOpenRouter, "m", "xhigh", "high"},
+		{providerAnthropic, "m", "off", ""},
+		{providerOpenRouter, "m", "off", ""},
+		{providerOpenRouter, "m", "bogus", ""},
+		{providerAnthropic, "m", "bogus", ""},
+		{"unknown-provider", "m", "high", ""},
+		// Known models resolve against their OWN declared vocabulary, so a
+		// level lands on a name the model actually speaks.
+		{providerOpenAI, "gpt-5.5", "minimal", "minimal"},
+		{providerOpenAI, "gpt-5.5", "xhigh", "xhigh"},
+		{providerAnthropic, "claude-opus-4-8", "low", "2048"},
+		{providerAnthropic, "claude-opus-4-8", "xhigh", "65536"},
+		{providerGemini, "gemini-3.5-flash", "minimal", "512"},
+		// Narrower per-model sets degrade instead of sending an unsupported
+		// mode ID: the gpt-5.6 family has no minimal (and adds max), GPT-6
+		// Astra reasons always-on (no none, no minimal), and Haiku offers
+		// only "none".
+		{providerOpenAI, "gpt-5.6-sol", "minimal", "low"},
+		{providerOpenAI, "gpt-6-astra", "minimal", "low"},
+		{providerAnthropic, "claude-haiku-4-5-20251001", "high", "none"},
 	}
 	for _, tc := range cases {
-		if got := thinkingModeIDForLevel(tc.provider, "m", tc.level); got != tc.want {
-			t.Errorf("thinkingModeIDForLevel(%s, %s) = %q, want %q", tc.provider, tc.level, got, tc.want)
+		if got := thinkingModeIDForLevel(tc.provider, tc.model, tc.level); got != tc.want {
+			t.Errorf("thinkingModeIDForLevel(%s, %s, %s) = %q, want %q", tc.provider, tc.model, tc.level, got, tc.want)
+		}
+	}
+}
+
+// TestThinkingModeIDForSet exercises the concrete set resolution directly:
+// exact ID, label-equivalent row, and rank-based degrade (ties prefer the
+// stronger mode, mirroring the openrouter extremes behavior).
+func TestThinkingModeIDForSet(t *testing.T) {
+	cases := []struct {
+		name  string
+		modes []thinkingMode
+		level string
+		want  string
+	}{
+		{"exact id", openAIThinkingModes, "high", "high"},
+		{"label maps budget", anthropicThinkingModes, "medium", "16384"},
+		{"label maps budget high", geminiThinkingModes, "xhigh", "65536"},
+		{"degrade stronger tie", []thinkingMode{{ID: thinkingModeNone, Name: "None"}, {ID: thinkingModeLow, Name: thinkingLabelLow}, {ID: thinkingModeHigh, Name: thinkingLabelHigh}}, "minimal", "low"},
+		{"degrade nearest", gpt56ThinkingModes, "minimal", "low"},
+		{"degrade below", openAIThinkingModes, "xhigh", "xhigh"},
+		{"only none set", []thinkingMode{{ID: thinkingModeNone, Name: "None"}}, "high", "none"},
+		{"empty set", nil, "high", ""},
+		{"off level", openAIThinkingModes, "off", ""},
+		{"bogus level", openAIThinkingModes, "bogus", ""},
+	}
+	for _, tc := range cases {
+		if got := thinkingModeIDForSet(tc.modes, tc.level); got != tc.want {
+			t.Errorf("%s: thinkingModeIDForSet(%s) = %q, want %q", tc.name, tc.level, got, tc.want)
 		}
 	}
 }
