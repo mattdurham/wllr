@@ -22,6 +22,14 @@ type openRouterModelConfig struct {
 	ID            string `json:"id"`
 	Name          string `json:"name"`
 	ContextWindow int64  `json:"context_window"`
+
+	// SupportedParameters is the request-parameter set the OpenRouter model
+	// listing declares for this model; "reasoning" among them means the
+	// model can reason (include_reasoning is the legacy spelling). Empty
+	// for models pinned before this was captured: OpenRouter always
+	// populates the field for every model it lists, so no data means an
+	// older pin, not a reasoning-less model.
+	SupportedParameters []string `json:"supported_parameters,omitempty"`
 }
 
 func (cfg *Config) openRouterModel(id string) (openRouterModelConfig, bool) {
@@ -33,6 +41,31 @@ func (cfg *Config) openRouterModel(id string) (openRouterModelConfig, bool) {
 		}
 	}
 	return openRouterModelConfig{}, false
+}
+
+// openRouterReasoningCapability reports whether a pinned OpenRouter model
+// declares reasoning support, from the model listing's supported_parameters
+// captured at pin time. declared is false when there is no data — models
+// pinned before the parameter was captured, or IDs that are not pinned — and
+// the model is then treated as able to reason, preserving the previous
+// always-offer behavior. "reasoning" is the modern parameter name;
+// "include_reasoning" is the legacy spelling OpenRouter still lists.
+func openRouterReasoningCapability(settings wllrSettings, id string) (supported, declared bool) {
+	for _, model := range settings.OpenRouterModels {
+		if model.ID != id {
+			continue
+		}
+		if len(model.SupportedParameters) == 0 {
+			return true, false
+		}
+		for _, p := range model.SupportedParameters {
+			if p == "reasoning" || p == "include_reasoning" {
+				return true, true
+			}
+		}
+		return false, true
+	}
+	return true, false
 }
 
 func (cfg *Config) pinOpenRouterModel(model openRouterModelConfig) error {
@@ -78,9 +111,10 @@ func fetchOpenRouterModels(
 	}
 	var payload struct {
 		Data []struct {
-			ID            string `json:"id"`
-			Name          string `json:"name"`
-			ContextLength int64  `json:"context_length"`
+			ID                  string   `json:"id"`
+			Name                string   `json:"name"`
+			ContextLength       int64    `json:"context_length"`
+			SupportedParameters []string `json:"supported_parameters"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(&payload); err != nil {
@@ -96,7 +130,12 @@ func fetchOpenRouterModels(
 		}
 		models = append(
 			models,
-			openRouterModelConfig{ID: model.ID, Name: model.Name, ContextWindow: model.ContextLength},
+			openRouterModelConfig{
+				ID:                  model.ID,
+				Name:                model.Name,
+				ContextWindow:       model.ContextLength,
+				SupportedParameters: model.SupportedParameters,
+			},
 		)
 	}
 	return models, nil

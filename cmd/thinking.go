@@ -101,6 +101,19 @@ var openAIReasoningEffortByMode = map[string]fantasyopenapiprovider.ReasoningEff
 	thinkingModeXHigh:   fantasyopenapiprovider.ReasoningEffortXHigh,
 }
 
+// openRouterReasoningEffort maps a thinking level to OpenRouter reasoning
+// effort values. OpenRouter normalizes reasoning across upstreams and
+// documents only low/medium/high (plus an enabled flag for on/off), so the
+// openai-only extremes are absent from the map: levels outside it degrade in
+// thinkingModeIDForLevel rather than being sent and failing on a non-OpenAI
+// upstream. "off" is handled separately (enabled:false — see
+// openRouterReasoningForThinkingMode).
+var openRouterReasoningEffort = map[thinkingLevel]fantasyopenrouterprovider.ReasoningEffort{
+	thinkingLow:    fantasyopenrouterprovider.ReasoningEffortLow,
+	thinkingMedium: fantasyopenrouterprovider.ReasoningEffortMedium,
+	thinkingHigh:   fantasyopenrouterprovider.ReasoningEffortHigh,
+}
+
 // isValidThinkingLevel reports whether s names a known level.
 func isValidThinkingLevel(s string) bool {
 	_, ok := thinkingLevelLabels[thinkingLevel(s)]
@@ -230,35 +243,38 @@ func saveOpenRouterSpeed(id string) error {
 	return saveWllrField("openrouter_speed", id)
 }
 
-// openRouterProviderOptions builds the OpenRouter provider options for the
-// stored routing preference. Returns nil when there is nothing to apply, so a
-// default preference clears any previously-set routing.
-func openRouterProviderOptions() fantasy.ProviderOptions {
-	sortKey := openRouterSpeedSort(savedOpenRouterSpeed())
-	if sortKey == "" {
+// openRouterRuntimeProviderOptions merges the thinking mode's reasoning
+// selection and the stored routing preference into a single
+// openrouter.ProviderOptions: fantasy keeps reasoning and routing in one
+// struct under one fantasy key, so the two selections must combine inside the
+// struct — a per-key merge would let whichever was assigned last silently
+// drop the other. Returns nil when neither applies, so both clear together.
+func openRouterRuntimeProviderOptions(modeID string) fantasy.ProviderOptions {
+	out := &fantasyopenrouterprovider.ProviderOptions{}
+	if reasoning := openRouterReasoningForThinkingMode(modeID); reasoning != nil {
+		out.Reasoning = reasoning
+	}
+	if sortKey := openRouterSpeedSort(savedOpenRouterSpeed()); sortKey != "" {
+		out.Provider = &fantasyopenrouterprovider.Provider{Sort: &sortKey}
+	}
+	if out.Reasoning == nil && out.Provider == nil {
 		return nil
 	}
-	return fantasy.ProviderOptions{
-		fantasyopenrouterprovider.Name: &fantasyopenrouterprovider.ProviderOptions{
-			Provider: &fantasyopenrouterprovider.Provider{Sort: &sortKey},
-		},
-	}
+	return fantasy.ProviderOptions{fantasyopenrouterprovider.Name: out}
 }
 
 // providerOptionsForRuntime returns the provider options applied to the main
-// agent: the reasoning selection plus any provider-routing preference. These
-// occupy distinct fantasy keys (the reasoning struct vs the OpenRouter routing
-// struct), so they merge instead of replacing one another — otherwise setting a
-// speed would silently clear the reasoning mode and vice versa.
+// agent: the reasoning selection plus any provider-routing preference. For
+// OpenRouter the two live in one struct under one fantasy key and merge via
+// openRouterRuntimeProviderOptions; for every other provider the reasoning
+// options are the only entry.
 func providerOptionsForRuntime(provider, modeID, modelID string) fantasy.ProviderOptions {
+	if provider == providerOpenRouter {
+		return openRouterRuntimeProviderOptions(modeID)
+	}
 	out := fantasy.ProviderOptions{}
 	for k, v := range providerOptionsForThinkingMode(provider, modeID, modelID) {
 		out[k] = v
-	}
-	if provider == providerOpenRouter {
-		for k, v := range openRouterProviderOptions() {
-			out[k] = v
-		}
 	}
 	if len(out) == 0 {
 		return nil

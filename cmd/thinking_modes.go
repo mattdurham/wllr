@@ -5,6 +5,7 @@ import (
 	fantasyanthropicprovider "charm.land/fantasy/providers/anthropic"
 	fantasygoogleprovider "charm.land/fantasy/providers/google"
 	fantasyopenapiprovider "charm.land/fantasy/providers/openai"
+	fantasyopenrouterprovider "charm.land/fantasy/providers/openrouter"
 )
 
 // openAIUsesResponsesAPI reports whether a model on the openai provider is
@@ -90,6 +91,23 @@ func providerOptionsForThinkingMode(provider, modeID, modelID string) fantasy.Pr
 				ReasoningEffort: effort,
 			},
 		}
+	case providerOpenRouter:
+		// OpenRouter normalizes reasoning across upstreams into one object:
+		// effort (low/medium/high) plus an enabled flag. "none" maps to
+		// enabled:false — the documented way to disable reasoning; an omitted
+		// object would leave a thinking model on its own default, which is
+		// on. Only the documented effort IDs map; anything else (e.g. a mode
+		// saved while another provider was active) returns nil and omits the
+		// object entirely, so a stale mode can never 400 a request.
+		reasoning := openRouterReasoningForThinkingMode(modeID)
+		if reasoning == nil {
+			return nil
+		}
+		return fantasy.ProviderOptions{
+			fantasyopenrouterprovider.Name: &fantasyopenrouterprovider.ProviderOptions{
+				Reasoning: reasoning,
+			},
+		}
 	case providerGemini:
 		budget := geminiBudgetForThinkingMode(modeID)
 		if budget == nil || *budget <= 0 {
@@ -101,6 +119,26 @@ func providerOptionsForThinkingMode(provider, modeID, modelID string) fantasy.Pr
 					ThinkingBudget: budget,
 				},
 			},
+		}
+	default:
+		return nil
+	}
+}
+
+// openRouterReasoningForThinkingMode maps a thinking mode ID to OpenRouter
+// reasoning options. "none" becomes enabled:false, the documented way to turn
+// reasoning off for models that always reason; the effort IDs pass through
+// verbatim. Returns nil when the mode is outside OpenRouter's documented
+// vocabulary (which omits the reasoning object entirely).
+func openRouterReasoningForThinkingMode(modeID string) *fantasyopenrouterprovider.ReasoningOptions {
+	switch modeID {
+	case thinkingModeNone:
+		enabled := false
+		return &fantasyopenrouterprovider.ReasoningOptions{Enabled: &enabled}
+	case thinkingModeLow, thinkingModeMedium, thinkingModeHigh:
+		effort := fantasyopenrouterprovider.ReasoningEffort(modeID)
+		return &fantasyopenrouterprovider.ReasoningOptions{
+			Effort: fantasyopenrouterprovider.ReasoningEffortOption(effort),
 		}
 	default:
 		return nil

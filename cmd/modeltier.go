@@ -238,7 +238,7 @@ func validateTierThinking(provider, level string) error {
 // that thinking levels map onto.
 func providerSupportsThinking(provider string) bool {
 	switch provider {
-	case providerAnthropic, providerOpenAI, providerGemini, providerLocal:
+	case providerAnthropic, providerOpenAI, providerGemini, providerLocal, providerOpenRouter:
 		return true
 	default:
 		return false
@@ -337,6 +337,20 @@ func thinkingModeIDForLevel(provider, model, level string) string {
 		// The OpenAI/local reasoning-effort vocabulary uses the level name as
 		// the mode ID ("low", "medium", "high", …), so the level passes through.
 		if _, ok := openAIReasoningEffort[lvl]; ok {
+			return string(lvl)
+		}
+	case providerOpenRouter:
+		// OpenRouter documents low/medium/high only. The openai-only extremes
+		// degrade to their nearest supported effort so a tier or skill
+		// declaring them still applies a valid setting instead of erroring
+		// (validateTierThinking accepts all six levels for every provider).
+		switch lvl {
+		case thinkingMinimal:
+			return string(thinkingLow)
+		case thinkingXHigh:
+			return string(thinkingHigh)
+		}
+		if _, ok := openRouterReasoningEffort[lvl]; ok {
 			return string(lvl)
 		}
 	case providerGemini:

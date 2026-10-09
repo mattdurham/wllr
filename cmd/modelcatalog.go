@@ -113,6 +113,17 @@ var (
 		{ID: "32768", Name: "High", Description: "Extended thinking (32K tokens)"},
 		{ID: "65536", Name: "X-High", Description: "Extended thinking (64K tokens)"},
 	}
+	// openRouterThinkingModes is OpenRouter's documented reasoning vocabulary.
+	// OpenRouter normalizes reasoning across upstreams and accepts only the
+	// low/medium/high effort values (plus an enabled flag to disable), so the
+	// openai-only extremes (minimal, xhigh) are not offered: routing an
+	// unsupported effort to a non-OpenAI upstream would fail the request.
+	openRouterThinkingModes = []thinkingMode{
+		{ID: thinkingModeNone, Name: "None", Description: "No extended reasoning"},
+		{ID: thinkingModeLow, Name: thinkingLabelLow, Description: "Extended reasoning (low effort)"},
+		{ID: thinkingModeMedium, Name: thinkingLabelMedium, Description: "Extended reasoning (medium effort)"},
+		{ID: thinkingModeHigh, Name: thinkingLabelHigh, Description: "Extended reasoning (high effort)"},
+	}
 )
 
 // defaultGeminiModel is the default model ID for the Gemini provider.
@@ -364,6 +375,18 @@ func supportedThinkingModesForModel(provider, model string) []thinkingMode {
 			}
 		}
 	}
+	if provider == providerOpenRouter {
+		// OpenRouter speaks one normalized reasoning vocabulary for every
+		// upstream (reasoning.effort + enabled), so every pinned model gets
+		// the standard set — except models its listing declares unable to
+		// reason (mirrors the local provider's declared handling). Models
+		// pinned before the capability was captured carry no data and keep
+		// the set.
+		if supports, declared := openRouterReasoningCapability(loadWllrSettings(), model); declared && !supports {
+			return nil
+		}
+		return openRouterStandardThinkingModes()
+	}
 	if provider == providerLocal && model != "" {
 		if lm, ok := loadWllrSettings().localModelEntry(model); ok && len(lm.ThinkingModes) > 0 {
 			if filtered := thinkingModesFromIDs(lm.ThinkingModes); len(filtered) > 0 {
@@ -373,6 +396,15 @@ func supportedThinkingModesForModel(provider, model string) []thinkingMode {
 		return openAIStandardThinkingModes()
 	}
 	return nil
+}
+
+// openRouterStandardThinkingModes is the standard OpenRouter reasoning
+// vocabulary, in picker order. Returns a fresh copy of the shared catalog rows
+// so callers cannot mutate the catalog through the returned slice.
+func openRouterStandardThinkingModes() []thinkingMode {
+	out := make([]thinkingMode, len(openRouterThinkingModes))
+	copy(out, openRouterThinkingModes)
+	return out
 }
 
 // openAIStandardThinkingModes is the full standard OpenAI reasoning-effort
@@ -431,6 +463,16 @@ func startupThinkingMode(ctx context.Context, cfg *Config, provider string) stri
 		if lvl == "" {
 			return ""
 		}
+		if provider == providerOpenRouter {
+			// A pinned model that OpenRouter's listing declares unable to
+			// reason never gets a reasoning option, even if one is
+			// persisted — the request would carry a parameter the model
+			// cannot use. Models pinned before the capability was captured
+			// (no data) keep the persisted mode.
+			if supports, declared := openRouterReasoningCapability(loadWllrSettings(), cfg.Model); declared && !supports {
+				return ""
+			}
+		}
 		if providerOptionsForThinkingMode(provider, lvl, cfg.Model) != nil {
 			return lvl
 		}
@@ -475,6 +517,13 @@ func currentThinkingModeForModel(provider, model string) string {
 	case providerOpenAI:
 		if effort, ok := openAIReasoningEffort[savedLevel]; ok {
 			return string(effort)
+		}
+	case providerOpenRouter:
+		// OpenRouter mode IDs are the effort level names; the openai-only
+		// extremes degrade to their nearest supported effort (the same
+		// mapping thinkingModeIDForLevel applies for tiers and skills).
+		if mode := thinkingModeIDForLevel(provider, model, string(savedLevel)); mode != "" {
+			return mode
 		}
 	case providerGemini:
 		if budget, ok := geminiThinkingBudget[savedLevel]; ok {

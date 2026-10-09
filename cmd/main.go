@@ -578,13 +578,23 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 		for _, model := range models {
 			out = append(
 				out,
-				harness.OpenRouterModelChoice{ID: model.ID, Name: model.Name, ContextWindow: model.ContextWindow},
+				harness.OpenRouterModelChoice{
+					ID:                  model.ID,
+					Name:                model.Name,
+					ContextWindow:       model.ContextWindow,
+					SupportedParameters: model.SupportedParameters,
+				},
 			)
 		}
 		return out, nil
 	}
 	m.AddOpenRouterModelFn = func(choice harness.OpenRouterModelChoice) error {
-		model := openRouterModelConfig{ID: choice.ID, Name: choice.Name, ContextWindow: choice.ContextWindow}
+		model := openRouterModelConfig{
+			ID:                  choice.ID,
+			Name:                choice.Name,
+			ContextWindow:       choice.ContextWindow,
+			SupportedParameters: choice.SupportedParameters,
+		}
 		candidate := *cfg
 		candidate.Provider, candidate.Model = providerOpenRouter, model.ID
 		prov, lm, buildErr := buildProvider(ctx, &candidate)
@@ -724,6 +734,11 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 		return "unavailable"
 	}
 	m.ThinkingUnsupportedReasonFn = func() string {
+		if currentProvider == providerOpenRouter {
+			// The list is empty for OpenRouter only when the pinned model's
+			// listing declared it unable to reason.
+			return fmt.Sprintf("%s does not support reasoning (per OpenRouter's model listing)", cfg.Model)
+		}
 		if currentProvider != providerLocal {
 			return "this provider/model does not support reasoning"
 		}

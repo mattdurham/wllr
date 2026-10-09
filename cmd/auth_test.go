@@ -8,12 +8,15 @@ import (
 	"testing"
 )
 
-// withAuthPath points WLLR_AUTH at a temp file for the duration of a test.
+// withAuthPath points WLLR_AUTH at a temp file for the duration of a test and
+// clears OPENROUTER_API_KEY so tests stay hermetic: no stored or environment
+// OpenRouter credential from the developer's machine can leak into behavior.
 func withAuthPath(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "auth.json")
 	t.Setenv("WLLR_AUTH", path)
+	t.Setenv("OPENROUTER_API_KEY", "")
 	return path
 }
 

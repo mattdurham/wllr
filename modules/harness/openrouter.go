@@ -16,10 +16,15 @@ const (
 )
 
 // OpenRouterModelChoice is one model from OpenRouter's live catalog.
+// SupportedParameters is the request-parameter set the listing declares for
+// the model ("reasoning" among them means it can reason); the cmd side
+// persists it with the pin so the /thinking picker can exclude models that
+// cannot reason.
 type OpenRouterModelChoice struct {
-	ID            string
-	Name          string
-	ContextWindow int64
+	ID                  string
+	Name                string
+	ContextWindow       int64
+	SupportedParameters []string
 }
 
 type (

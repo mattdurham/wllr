@@ -180,7 +180,16 @@ func TestThinkingModeIDForLevel(t *testing.T) {
 		{providerOpenAI, "high", "high"},
 		{providerLocal, "low", "low"},
 		{providerGemini, "medium", "16384"},
+		{providerOpenRouter, "high", "high"},
+		{providerOpenRouter, "low", "low"},
+		{providerOpenRouter, "medium", "medium"},
+		// OpenRouter documents low/medium/high only; the openai-only extremes
+		// degrade to their nearest supported effort.
+		{providerOpenRouter, "minimal", "low"},
+		{providerOpenRouter, "xhigh", "high"},
 		{providerAnthropic, "off", ""},
+		{providerOpenRouter, "off", ""},
+		{providerOpenRouter, "bogus", ""},
 		{providerAnthropic, "bogus", ""},
 		{"unknown-provider", "high", ""},
 	}
@@ -197,6 +206,15 @@ func TestValidateTierThinking(t *testing.T) {
 	}
 	if err := validateTierThinking(providerAnthropic, "high"); err != nil {
 		t.Errorf("high on anthropic should be valid, got %v", err)
+	}
+	if err := validateTierThinking(providerOpenRouter, "high"); err != nil {
+		t.Errorf("high on openrouter should be valid, got %v", err)
+	}
+	if err := validateTierThinking(providerOpenRouter, "xhigh"); err != nil {
+		t.Errorf("xhigh on openrouter should pass validation (it degrades at apply), got %v", err)
+	}
+	if !providerSupportsThinking(providerOpenRouter) {
+		t.Error("openrouter should report thinking support")
 	}
 	if err := validateTierThinking(providerAnthropic, "nonsense"); err == nil {
 		t.Error("unknown level should error")

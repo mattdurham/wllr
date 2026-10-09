@@ -133,3 +133,27 @@ func TestProviderOptionsForThinking_UnknownProvider(t *testing.T) {
 		t.Errorf("unknown provider = %v, want nil", po)
 	}
 }
+
+func TestCurrentThinkingModeForModel_OpenRouter(t *testing.T) {
+	withConfigPath(t)
+	// Levels map to OpenRouter mode IDs; the openai-only extremes degrade to
+	// their nearest supported effort (same mapping tiers use).
+	for _, tc := range []struct {
+		level, want string
+	}{
+		{string(thinkingOff), thinkingModeNone},
+		{string(thinkingLow), "low"},
+		{string(thinkingMedium), "medium"},
+		{string(thinkingHigh), "high"},
+		{string(thinkingMinimal), "low"},
+		{string(thinkingXHigh), "high"},
+		{"bogus", thinkingModeNone},
+	} {
+		if err := saveThinkingLevel(thinkingLevel(tc.level)); err != nil {
+			t.Fatalf("saveThinkingLevel(%q): %v", tc.level, err)
+		}
+		if got := currentThinkingModeForModel(providerOpenRouter, "m"); got != tc.want {
+			t.Errorf("currentThinkingModeForModel(openrouter) for level %q = %q, want %q", tc.level, got, tc.want)
+		}
+	}
+}
