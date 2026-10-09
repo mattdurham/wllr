@@ -118,6 +118,9 @@ and receives all permissions automatically.
 ```
 extensions/history/
 ├── main.go            # wasip1: init, event handlers, pickers (requires the host)
+├── main_host.go       # !wasip1: func main stub so the package builds on the host
+├── promptfilter.go    # host-testable: shouldRecordUserPrompt (no build tag)
+├── promptfilter_test.go # unit tests for the filter (run on host)
 ├── sessionio.go       # host-testable: loadMessages + transcriptPreview + sanitizePath (no build tag)
 ├── sessionio_test.go  # unit tests for the above (run on host)
 ├── messageentry.go    # JSONL message entry (shared)
@@ -148,6 +151,11 @@ pattern the `tasks` extension uses for `claim.go`/`claim_test.go`.
 - `TestLoadMessages_MissingFile` — error on missing file
 - `TestSanitizePath` — cwd → directory-name mapping
 
+`promptfilter_test.go` covers the recording filter:
+
+- `TestShouldRecordUserPrompt` — direct prompts recorded, queued team traffic
+  filtered, steer-flagged prompts recorded, sub-agent turns skipped
+
 Run them from the extension module:
 
 ```bash
@@ -176,4 +184,7 @@ Only the root agent's directly-sent prompts and the assistant's replies. A
 sub-agent's task arriving, or a lifecycle notification — and is **not** recorded
 as a user message, because once stored it is indistinguishable from a prompt the
 user typed. Sub-agent turns are attributed by `agent_id` and skipped for the same
-reason.
+reason. `/steer` guidance is the one exception: the harness flags those events
+with `steer: true`, and steer is exactly what the user asked the model to hear
+mid-turn, so it is recorded like a prompt (filter in `promptfilter.go`, pinned
+by `TestShouldRecordUserPrompt`).

@@ -9,9 +9,11 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/fantasy"
 
 	"github.com/mattdurham/wllr/modules/agent"
+	"github.com/mattdurham/wllr/modules/extension"
 	"github.com/mattdurham/wllr/modules/sdk"
 	"github.com/mattdurham/wllr/modules/testutil"
 )
@@ -145,6 +147,21 @@ func TestSubmitSteer_IdleAgentWakesTurn(t *testing.T) {
 	}
 }
 
+// containsMsg reports whether the sender captured a message matching want.
+func containsMsg(sender *captureSender, want func(tea.Msg) bool) bool {
+	for _, m := range sender.snapshot() {
+		if want(m) {
+			return true
+		}
+	}
+	return false
+}
+
+var streamDoneMsg = func(m tea.Msg) bool {
+	_, ok := m.(StreamDoneMsg)
+	return ok
+}
+
 // waitFor polls cond until true or the deadline, failing the test with label.
 func waitFor(t *testing.T, cond func() bool, label string) {
 	t.Helper()
@@ -154,5 +171,117 @@ func waitFor(t *testing.T, cond func() bool, label string) {
 			t.Fatalf("timed out waiting for %s", label)
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// TestSteerDispatch_MidTurnSteerFlagged pins the before_agent_start flag shape
+// the history extension filters on: the directly-sent prompt carries no flags,
+// while mid-turn steer guidance carries queued+steer so it is recorded as a
+// user prompt while other queued inbox traffic stays filtered out.
+func TestSteerDispatch_MidTurnSteerFlagged(t *testing.T) {
+	lm := testutil.NewFakeLM()
+	lm.SetScript([]testutil.ScriptedTurn{
+		{
+			Text: "working",
+			ToolCalls: []testutil.ScriptedToolCall{
+				{ID: "tc1", Name: "gate", Input: json.RawMessage(`{}`)},
+			},
+		},
+		{Text: "done"},
+	})
+	pool := agent.NewPool()
+	a, err := pool.Spawn("main", lm, agent.SpawnOpts{ModelName: "fake-model", ContextWindow: 100_000})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	gate := &steerGateTool{release: make(chan struct{})}
+
+	extHost := extension.NewHost(nil)
+	defer func() { _ = extHost.Close(context.Background()) }()
+	events := make(chan sdk.Event, 16)
+	extHost.Bus.Subscribe(sdk.EventBeforeAgentStart, func(_ context.Context, evt sdk.Event) error {
+		events <- evt
+		return nil
+	})
+
+	// Wire first: wireMainAgentCallbacks overwrites SetOnDone and SetToolsFn,
+	// so the gate tool must be installed after it.
+	m := New(pool, "main", nil)
+	m.extHost = extHost
+	sender := &captureSender{}
+	m.wireMainAgentCallbacks(sender)
+	a.SetToolsFn(func() []fantasy.AgentTool { return []fantasy.AgentTool{gate} })
+
+	a.Submit(context.Background(), "start work")
+	waitFor(t, func() bool { return a.Activity().ActiveToolName == "gate" }, "gate tool to start")
+	m.submitSteer("mind the timeout")
+	close(gate.release)
+	waitFor(t, func() bool { return containsMsg(sender, streamDoneMsg) }, "turn completion")
+
+	var steerFlagged, plainPrompt bool
+	deadline := time.After(5 * time.Second)
+	for !steerFlagged || !plainPrompt {
+		select {
+		case evt := <-events:
+			var p sdk.BeforeAgentStartPayload
+			if json.Unmarshal(evt.Payload, &p) != nil {
+				t.Fatalf("bad before_agent_start payload: %s", evt.Payload)
+			}
+			if p.Steer {
+				if p.Prompt != "mind the timeout" || !p.Queued {
+					t.Fatalf("steer event = %+v, want the steer text with queued+steer", p)
+				}
+				steerFlagged = true
+			} else {
+				if p.Prompt != "start work" || p.Queued {
+					t.Fatalf("prompt event = %+v, want the direct prompt without flags", p)
+				}
+				plainPrompt = true
+			}
+		case <-deadline:
+			t.Fatalf("missing before_agent_start events: steer=%v plain=%v", steerFlagged, plainPrompt)
+		}
+	}
+}
+
+// TestSteerDispatch_IdleWakeSteerFlagged pins the idle path: a steer delivered
+// to an idle agent wakes a turn that consumes it through the queued-inbox
+// dispatch loop, so the event carries queued=true plus the steer flag — it
+// must remain distinguishable from an unflagged queued team message.
+func TestSteerDispatch_IdleWakeSteerFlagged(t *testing.T) {
+	pool := agent.NewPool()
+	lm := testutil.NewFakeLMWithResponses("done")
+	_, err := pool.Spawn("main", lm, agent.SpawnOpts{ModelName: "fake-model", ContextWindow: 100_000})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	extHost := extension.NewHost(nil)
+	defer func() { _ = extHost.Close(context.Background()) }()
+	events := make(chan sdk.Event, 16)
+	extHost.Bus.Subscribe(sdk.EventBeforeAgentStart, func(_ context.Context, evt sdk.Event) error {
+		events <- evt
+		return nil
+	})
+
+	m := New(pool, "main", nil)
+	m.extHost = extHost
+	sender := &captureSender{}
+	m.wireMainAgentCallbacks(sender)
+
+	m.submitSteer("do it this way")
+	waitFor(t, func() bool { return containsMsg(sender, streamDoneMsg) }, "woken turn completion")
+
+	select {
+	case evt := <-events:
+		var p sdk.BeforeAgentStartPayload
+		if json.Unmarshal(evt.Payload, &p) != nil {
+			t.Fatalf("bad before_agent_start payload: %s", evt.Payload)
+		}
+		if !p.Queued || !p.Steer || p.Prompt != "do it this way" {
+			t.Fatalf("idle wake steer event = %+v, want the steer text with queued+steer", p)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no before_agent_start event for the idle-wake steer")
 	}
 }

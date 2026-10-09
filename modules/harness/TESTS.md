@@ -368,6 +368,8 @@ dispatched at all.
 | High | `TestSteerCommand_RegisteredAndParsesArgs` | `/steer` builtin lookup, arg joining, empty-args hint | `Instant` true; handler returns `steerSubmitMsg` with joined text; empty args → `NotifyMsg` |
 | High | `TestSubmitSteer_RunningAgentQueuesSteer` | steer submitted while a gated tool call runs | steer-typed message queued in the inbox; never present in the running request |
 | High | `TestSubmitSteer_IdleAgentWakesTurn` | steer submitted to an idle agent | Deliver wakes a turn; steer reaches the provider and the inbox drains to 0 |
+| High | `TestSteerDispatch_MidTurnSteerFlagged` | gated turn with mid-turn steer, extension host bus captured | direct prompt event unflagged; steer event carries queued+steer |
+| High | `TestSteerDispatch_IdleWakeSteerFlagged` | steer submitted to an idle agent, bus captured | woken turn's event carries queued+steer (distinguishable from team traffic) |
 | High | `TestRefreshContextStatus_WritesLiveSegments` | ctx segments derived from the pool after a completed turn | `refreshContextStatus` true; `ctx` = `<in>/<window>`, `ctx rem` = window; input > 0 |
 | Medium | `TestRefreshContextStatus_UnknownWindowReturnsFalse` | unknown model window | helper returns false and writes nothing (stale value untouched) |
 | High | `TestStreamTick_PaintsContextStatus` | 100ms tick with usage known and streaming set | tick handler paints the `ctx` key — the long-turn regression path |

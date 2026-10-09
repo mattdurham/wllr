@@ -195,16 +195,19 @@ func OnShutdown(fn func(reason string)) {
 }
 
 // OnBeforeAgentStart registers a handler called before the agent processes
-// each user message. prompt is the user's message text.
-func OnBeforeAgentStart(fn func(agentID, prompt string, queued bool)) {
+// each user message. prompt is the user's message text; queued is true for
+// inbox-delivered turns (team messages, idle-wake steers); steer is true only
+// for /steer guidance, which history records as a user prompt.
+func OnBeforeAgentStart(fn func(agentID, prompt string, queued, steer bool)) {
 	_sdkOn("before_agent_start", func(payload json.RawMessage) {
 		var p struct {
 			AgentID string `json:"agent_id"`
 			Prompt  string `json:"prompt"`
 			Queued  bool   `json:"queued"`
+			Steer   bool   `json:"steer"`
 		}
 		if err := json.Unmarshal(payload, &p); err == nil && p.Prompt != "" {
-			fn(p.AgentID, p.Prompt, p.Queued)
+			fn(p.AgentID, p.Prompt, p.Queued, p.Steer)
 		}
 	})
 }

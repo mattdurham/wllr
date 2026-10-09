@@ -305,3 +305,15 @@ therefore looked like the user had issued commands they never sent.
 a lifecycle notification) rather than a directly-sent prompt; `agent_id` names
 the agent the turn belongs to. Consumers that record or display prompts filter
 on both. The payload fields existed already — the SDK was dropping them.
+
+*Extended: 2026-11-25 — `Steer` flag.*
+
+The queued filter had a blind spot: `/steer` guidance is inbox-delivered too,
+so history dropped it and steered sessions lost the user's mid-turn guidance on
+resume. The payload gains `steer` (set by all three steer dispatch sites: the
+main agent's mid-turn `SetOnSteer`, the turn-start queued loop when the message
+is steer-typed, and `dispatchAgentSteer` for sub-agents). History records
+`queued && steer` prompts as user messages and still filters everything else
+queued. The SDK callback signature gains a fourth `steer bool` parameter;
+per-extension vendored copies update at their own pace since nothing auto-syncs
+them.

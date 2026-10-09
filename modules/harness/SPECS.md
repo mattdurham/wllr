@@ -995,9 +995,12 @@ state:
 **Rendering.** `wireMainAgentCallbacks` installs `SetOnSteer` on the main
 agent and the spawner installs `SetSteerObserver` on each sub-agent
 (`dispatchAgentSteer`): each delivery dispatches `EventBeforeAgentStart` with
-`Queued: true`, so the transcript extension renders a prompt-style bubble at
-the moment the guidance enters the model's context. Dispatches are
-asynchronous (turn-goroutine / WASM re-entrance rule, §3).
+`Queued: true` and `Steer: true`, so the transcript extension renders a
+prompt-style bubble at the moment the guidance enters the model's context and
+the history extension records it as a user message (its queued filter
+otherwise drops inbox-delivered turns). Idle-delivered steers reach the same
+event through the turn-start queued loop, which flags steer-typed messages.
+Dispatches are asynchronous (turn-goroutine / WASM re-entrance rule, §3).
 
 **Invariant:** `submitSteer` never blocks the bubbletea loop — `Deliver` is
 non-blocking — and never touches `m.streaming`; the wake notifier or the turn

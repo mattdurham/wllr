@@ -147,7 +147,7 @@ func TestBuildPrompt_GlobalTier(t *testing.T) {
 
 		prompt, components := buildPromptWithConfigParts([]promptTool{{Name: "read_file"}}, nil, promptConfig{})
 
-		var globalIdx = -1
+		globalIdx := -1
 		for i := range components {
 			if components[i].Source == "file:"+agentsPath {
 				globalIdx = i
