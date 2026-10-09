@@ -12,10 +12,12 @@
 //	statusline-root  (hstack)
 //	  sl-provider    (text, fg:muted)
 //	  sl-sep1        (text, "  ")
-//	  sl-model       (text)
+//	  sl-cwd         (text, fg:muted)   — working directory; "~/"-collapsed against $HOME
 //	  sl-sep2        (text, "  ")
-//	  sl-agent       (text, fg:muted)   — "agent:<id>"; "agent:main" for the root
+//	  sl-model       (text)
 //	  sl-sep3        (text, "  ")
+//	  sl-agent       (text, fg:muted)   — "agent:<id>"; "agent:main" for the root
+//	  sl-sep4        (text, "  ")
 //	  sl-working     (text, fg:accent)  — empty when idle
 //	  sl-tps         (text, fg:muted)   — "87 t/s"; omitted until the host reports a rate
 //	  sl-ctx         (text, fg:muted)   — "ctx:P%/R%" when a context window is configured
@@ -40,10 +42,12 @@ const (
 	rootID     = "statusline-root"
 	providerID = "sl-provider"
 	sep1ID     = "sl-sep1"
-	modelID    = "sl-model"
+	cwdID      = "sl-cwd"
 	sep2ID     = "sl-sep2"
-	agentID    = "sl-agent"
+	modelID    = "sl-model"
 	sep3ID     = "sl-sep3"
+	agentID    = "sl-agent"
+	sep4ID     = "sl-sep4"
 	workingID  = "sl-working"
 	tpsID      = "sl-tps"
 	ctxID      = "sl-ctx"
@@ -55,6 +59,7 @@ const (
 var (
 	lastProvider    string
 	lastModel       string
+	lastCwd         string // rendered cwd segment or "" when host_info fails
 	lastAgent       string // focused-agent segment text
 	lastWorking     string // rendered working indicator text or ""
 	lastTps         string // generation-speed segment text or "" when hidden
@@ -69,6 +74,9 @@ func init() {
 		info, _ := GetStatusInfo()
 		lastProvider = info.Provider
 		lastModel = info.Model
+		// The cwd is fetched once: it is the host working directory at
+		// session start (the sandbox has no os.Getwd) and does not change.
+		lastCwd = renderCwd()
 		syncDynamicStatus(info)
 		patchAll()
 	})
@@ -140,10 +148,12 @@ func patchAll() {
 	nodes := []UINode{
 		{ID: providerID, Type: "text", Text: ">> " + providerLabel(lastProvider), Props: &muted},
 		UIText(sep1ID, "  "),
-		{ID: modelID, Type: "text", Text: modelLabel(lastModel)},
+		{ID: cwdID, Type: "text", Text: lastCwd, Props: &muted},
 		UIText(sep2ID, "  "),
-		{ID: agentID, Type: "text", Text: lastAgent, Props: &muted},
+		{ID: modelID, Type: "text", Text: modelLabel(lastModel)},
 		UIText(sep3ID, "  "),
+		{ID: agentID, Type: "text", Text: lastAgent, Props: &muted},
+		UIText(sep4ID, "  "),
 		{ID: workingID, Type: "text", Text: lastWorking, Props: &accent},
 	}
 	if lastTps != "" {
@@ -183,6 +193,27 @@ func modelLabel(model string) string {
 		return "select model"
 	}
 	return model
+}
+
+// renderCwd renders the working-directory segment as the host-reported cwd
+// (the WASM sandbox's own os.Getwd is always "/") with the user's home prefix
+// collapsed to "~/" when it matches. An empty string hides the segment when
+// host_info is unavailable, so a host predating the method renders exactly as
+// before this segment existed.
+func renderCwd() string {
+	cwd, _, err := HostInfo()
+	if err != nil || cwd == "" {
+		return ""
+	}
+	if home, herr := GetEnv("HOME"); herr == nil && home != "" {
+		if cwd == home {
+			return "~"
+		}
+		if rest, ok := strings.CutPrefix(cwd, home+"/"); ok {
+			return "~/" + rest
+		}
+	}
+	return cwd
 }
 
 func renderWorking(info StatusInfo) string {

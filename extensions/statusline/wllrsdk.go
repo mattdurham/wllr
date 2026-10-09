@@ -598,6 +598,26 @@ func GetEnv(name string) (string, error) {
 	return r.Value, nil
 }
 
+// HostInfo returns host ground truth: the real working directory and current
+// time (RFC3339Nano). The WASM sandbox has no working directory (guest
+// os.Getwd returns "/") and its clock may be stale, so use these values
+// instead of the guest's own os calls when a path or timestamp is displayed.
+// No permission required.
+func HostInfo() (cwd, now string, err error) {
+	raw := _sdkCallResult("host_info", nil)
+	if raw == nil {
+		return "", "", fmt.Errorf("host_info: no response")
+	}
+	var r struct {
+		CWD string `json:"cwd"`
+		Now string `json:"now"`
+	}
+	if e := json.Unmarshal(raw, &r); e != nil {
+		return "", "", e
+	}
+	return r.CWD, r.Now, nil
+}
+
 // GetOS returns the host operating system and architecture (e.g. "darwin", "arm64").
 // These are the same values as runtime.GOOS and runtime.GOARCH on the host.
 // No permission required.
