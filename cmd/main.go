@@ -526,7 +526,7 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 			return err
 		}
 		if main := pool.Get(agent.MainAgentID); main != nil {
-			main.SetProviderOptions(providerOptionsForRuntime(currentProvider, savedThinkingMode(), cfg.Model))
+			main.SetProviderOptions(providerOptionsForRuntime(currentProvider, savedThinkingMode(currentProvider, cfg.Model), cfg.Model))
 		}
 		return nil
 	}
@@ -548,7 +548,7 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 		if main := pool.Get(agent.MainAgentID); main != nil {
 			main.SetProviderOptions(providerOptionsForRuntime(currentProvider, modeID, cfg.Model))
 		}
-		if err := saveThinkingMode(modeID); err != nil {
+		if err := saveThinkingMode(currentProvider, cfg.Model, modeID); err != nil {
 			slog.Warn("wllr: could not persist thinking mode", "mode", modeID, "error", err)
 		}
 		if err := saveThinkingLevel(thinkingLevel(level)); err != nil {
@@ -753,7 +753,7 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 		if main := pool.Get(agent.MainAgentID); main != nil {
 			main.SetProviderOptions(po)
 		}
-		if saveErr := saveThinkingMode(levelID); saveErr != nil {
+		if saveErr := saveThinkingMode(currentProvider, cfg.Model, levelID); saveErr != nil {
 			slog.Warn("wllr: could not persist thinking mode", "mode", levelID, "error", saveErr)
 		}
 		return nil
@@ -784,7 +784,7 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 	if currentProvider == providerLocal {
 		modes, declared, _ := localThinkingInfo(ctx, cfg)
 		if declared && len(modes) == 0 {
-			if err := saveThinkingMode(""); err != nil {
+			if err := saveThinkingMode(currentProvider, cfg.Model, ""); err != nil {
 				slog.Warn("wllr: could not clear thinking mode", "error", err)
 			}
 			m.SetThinkingUnavailable()

@@ -184,7 +184,7 @@ func TestStartupThinkingModeOpenRouterRespectsDeclaration(t *testing.T) {
 	cfg := withOpenRouterModels(t, "plain/model", map[string][]string{
 		"plain/model": {"temperature"},
 	})
-	if err := saveThinkingMode(thinkingModeHigh); err != nil {
+	if err := saveThinkingMode(providerOpenRouter, "plain/model", thinkingModeHigh); err != nil {
 		t.Fatal(err)
 	}
 	if got := startupThinkingMode(context.Background(), cfg, providerOpenRouter); got != "" {
@@ -193,7 +193,7 @@ func TestStartupThinkingModeOpenRouterRespectsDeclaration(t *testing.T) {
 	cfg = withOpenRouterModels(t, "reasoning/model", map[string][]string{
 		"reasoning/model": {"reasoning"},
 	})
-	if err := saveThinkingMode(thinkingModeHigh); err != nil {
+	if err := saveThinkingMode(providerOpenRouter, "reasoning/model", thinkingModeHigh); err != nil {
 		t.Fatal(err)
 	}
 	if got := startupThinkingMode(context.Background(), cfg, providerOpenRouter); got != thinkingModeHigh {
@@ -201,11 +201,80 @@ func TestStartupThinkingModeOpenRouterRespectsDeclaration(t *testing.T) {
 	}
 	// Legacy pins (no captured data) keep the persisted mode too.
 	cfg = withOpenRouterModels(t, "legacy/model", nil)
-	if err := saveThinkingMode(thinkingModeHigh); err != nil {
+	if err := saveThinkingMode(providerOpenRouter, "legacy/model", thinkingModeHigh); err != nil {
 		t.Fatal(err)
 	}
 	if got := startupThinkingMode(context.Background(), cfg, providerOpenRouter); got != thinkingModeHigh {
 		t.Errorf("legacy pin lost persisted mode: %q", got)
+	}
+}
+
+func TestSavedThinkingModePerModel(t *testing.T) {
+	withOpenRouterModels(t, "reasoning/model", nil)
+	if err := saveThinkingMode(providerOpenRouter, "reasoning/model", thinkingModeHigh); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveThinkingMode(providerOpenRouter, "legacy/model", thinkingModeMedium); err != nil {
+		t.Fatal(err)
+	}
+	if got := savedThinkingMode(providerOpenRouter, "reasoning/model"); got != thinkingModeHigh {
+		t.Errorf("reasoning/model = %q, want %q", got, thinkingModeHigh)
+	}
+	if got := savedThinkingMode(providerOpenRouter, "legacy/model"); got != thinkingModeMedium {
+		t.Errorf("legacy/model = %q, want %q", got, thinkingModeMedium)
+	}
+	// Models without their own entry inherit the last-saved mode (the legacy
+	// global key); other providers never see OpenRouter's entries.
+	if got := savedThinkingMode(providerOpenRouter, "plain/model"); got != thinkingModeMedium {
+		t.Errorf("plain/model fallback = %q, want %q", got, thinkingModeMedium)
+	}
+	if got := savedThinkingMode(providerLocal, "reasoning/model"); got != thinkingModeMedium {
+		t.Errorf("local/reasoning/model fallback = %q, want %q", got, thinkingModeMedium)
+	}
+	// Clearing one model's entry leaves the other model's mode saved.
+	if err := saveThinkingMode(providerOpenRouter, "reasoning/model", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := savedThinkingMode(providerOpenRouter, "reasoning/model"); got != "" {
+		t.Errorf("reasoning/model after clear = %q, want empty", got)
+	}
+	if got := savedThinkingMode(providerOpenRouter, "legacy/model"); got != thinkingModeMedium {
+		t.Errorf("legacy/model after clear = %q, want %q", got, thinkingModeMedium)
+	}
+}
+
+func TestStartupThinkingModeOpenRouterPerModel(t *testing.T) {
+	// Each model resolves the mode saved for it, not the global last-saved one.
+	cfg := withOpenRouterModels(t, "reasoning/model", map[string][]string{
+		"reasoning/model": {"reasoning"},
+		"plain/model":     {"temperature"},
+	})
+	if err := saveThinkingMode(providerOpenRouter, "reasoning/model", thinkingModeHigh); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveThinkingMode(providerOpenRouter, "plain/model", thinkingModeMedium); err != nil {
+		t.Fatal(err)
+	}
+	if got := startupThinkingMode(context.Background(), cfg, providerOpenRouter); got != thinkingModeHigh {
+		t.Errorf("reasoning/model startup = %q, want %q", got, thinkingModeHigh)
+	}
+	// A model whose listing declares it unable to reason never gets a mode at
+	// startup, even an inherited one.
+	cfg = withOpenRouterModels(t, "plain/model", map[string][]string{
+		"plain/model":     {"temperature"},
+		"reasoning/model": {"reasoning"},
+	})
+	if got := startupThinkingMode(context.Background(), cfg, providerOpenRouter); got != "" {
+		t.Errorf("plain/model startup = %q, want empty (declared unable)", got)
+	}
+	// A legacy config (only the pre-per-model "thinking_mode" key, no map)
+	// still resolves at startup for a model without its own entry.
+	cfg = withOpenRouterModels(t, "legacy/model", nil)
+	if err := saveWllrField("thinking_mode", thinkingModeMedium); err != nil {
+		t.Fatal(err)
+	}
+	if got := startupThinkingMode(context.Background(), cfg, providerOpenRouter); got != thinkingModeMedium {
+		t.Errorf("legacy/model startup = %q, want %q (legacy fallback)", got, thinkingModeMedium)
 	}
 }
 

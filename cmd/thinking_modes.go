@@ -201,13 +201,48 @@ func openAIReasoningEffortForThinkingMode(modeID string) *fantasyopenapiprovider
 	return nil // unknown or off
 }
 
-// savedThinkingMode returns the persisted thinking mode ID, or empty string if
-// none is stored or the stored value is unknown.
-func savedThinkingMode() string {
-	return savedWllrField("thinking_mode")
+// thinkingModeKey is the config key under which a model's thinking mode is
+// saved: "provider:model". Provider IDs never contain colons, so the key
+// round-trips unambiguously even though model IDs may contain slashes.
+func thinkingModeKey(provider, model string) string {
+	return provider + ":" + model
 }
 
-// saveThinkingMode persists the thinking mode ID to the "wllr" config group.
-func saveThinkingMode(modeID string) error {
+// savedThinkingMode returns the thinking mode persisted for a provider/model.
+// Models without their own entry fall back to the legacy single
+// "thinking_mode" key: configs written before per-model storage, and models
+// never explicitly set, keep the last-saved mode. Empty string if nothing
+// applies.
+func savedThinkingMode(provider, model string) string {
+	settings := loadWllrSettings()
+	if mode, ok := settings.ThinkingModes[thinkingModeKey(provider, model)]; ok {
+		return mode
+	}
+	return settings.ThinkingMode
+}
+
+// saveThinkingMode persists the thinking mode ID for one provider/model to
+// the "thinking_modes" map in the "wllr" config group; an empty modeID clears
+// that model's entry. The legacy global "thinking_mode" key is mirrored with
+// the saved value so models without their own entry keep inheriting the most
+// recently chosen mode.
+func saveThinkingMode(provider, model, modeID string) error {
+	modes := loadWllrSettings().ThinkingModes
+	key := thinkingModeKey(provider, model)
+	if modeID == "" {
+		delete(modes, key)
+	} else {
+		if modes == nil {
+			modes = map[string]string{}
+		}
+		modes[key] = modeID
+	}
+	if len(modes) == 0 {
+		if err := removeWllrField("thinking_modes"); err != nil {
+			return err
+		}
+	} else if err := saveWllrRawField("thinking_modes", modes); err != nil {
+		return err
+	}
 	return saveWllrField("thinking_mode", modeID)
 }

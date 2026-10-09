@@ -451,14 +451,15 @@ func thinkingModeInSet(modes []thinkingMode, id string) bool {
 }
 
 // startupThinkingMode determines the thinking mode to apply for the current
-// provider/model: the persisted mode when it is valid for that provider. For
+// provider/model: the mode persisted for that provider/model when it is valid
+// for that provider. For
 // local models with an endpoint-declared capability set, a missing or stale
 // persisted mode falls back to the model's endpoint-declared default (so the
 // user sees and can adjust the server's own choice, and an invalid effort can
 // never 400 the request). For non-local providers a stale/invalid mode yields
 // "" (nothing applied — the legacy behavior).
 func startupThinkingMode(ctx context.Context, cfg *Config, provider string) string {
-	lvl := savedThinkingMode()
+	lvl := savedThinkingMode(provider, cfg.Model)
 	if provider != providerLocal {
 		if lvl == "" {
 			return ""
