@@ -34,19 +34,3 @@ type CompactionResult struct {
 	// no-op or failure).
 	Latency time.Duration
 }
-
-// CompactionNotice describes one completed compaction for EventContextUsage
-// consumers. It accompanies the dispatch sent immediately after a successful
-// compaction so the UI can surface a compaction message while the turn is
-// still running (the end-of-turn dispatch carries a nil notice).
-type CompactionNotice struct {
-	// Trigger is the compaction trigger kind (see CompactionTrigger*).
-	Trigger string
-	// MessagesCompacted is the number of history messages folded into the
-	// summary.
-	MessagesCompacted int
-	// EstimatedInputTokens is the chars/4 estimate of the post-compaction
-	// context (history + system prompt + tools) when computable. Zero means
-	// unknown — consumers must keep displaying their previous value.
-	EstimatedInputTokens int64
-}

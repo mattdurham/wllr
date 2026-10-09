@@ -23,7 +23,7 @@ type gatedLM struct {
 	mu      sync.Mutex
 	calls   int
 	// failFirst makes the first Stream call yield a stream error after the gate
-	// releases, modelling a turn that fails mid-stream while later turns succeed.
+	// releases, modeling a turn that fails mid-stream while later turns succeed.
 	failFirst bool
 }
 
@@ -155,7 +155,7 @@ func TestDeliver_WhileRunning_DrainsAfterTurn(t *testing.T) {
 }
 
 // gatedAlwaysErrLM gates every Stream call on release, then yields a stream
-// error — every turn fails, modelling a persistently broken provider. Used to
+// error — every turn fails, modeling a persistently broken provider. Used to
 // prove the error-path drain chain terminates instead of looping.
 type gatedAlwaysErrLM struct {
 	started chan struct{}
