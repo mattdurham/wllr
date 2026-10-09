@@ -11,6 +11,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"syscall"
 
 	"github.com/mattdurham/wllr/modules/agent"
+	"github.com/mattdurham/wllr/modules/client"
 	"github.com/mattdurham/wllr/modules/extension"
 	"github.com/mattdurham/wllr/modules/harness"
 	"github.com/mattdurham/wllr/modules/sdk"
@@ -51,6 +53,59 @@ func looksLikeFlag(s string) bool {
 	return len(s) > 0 && s[0] == '-'
 }
 
+// serveConfig is the operator-supplied multi-instance configuration for
+// `wllr serve`: how this instance names itself and which peers the browser may
+// switch to.
+type serveConfig struct {
+	SelfID string
+	Peers  []server.Peer
+}
+
+// parseServeInstances turns -instance-id/-peer/-peers/-peer-token into the
+// server's peer table, reusing the shared instance parser so `wllr serve` and
+// `wllr-multiplex` declare instances identically.
+//
+// Unlike `wllr-multiplex`, where "no instances" is an error, a plain
+// `wllr serve` must behave exactly as today: with no -peer and no -peers it
+// returns an empty peer list (no error). The same is true when a peer source was
+// given but yielded no entries (an empty `-peers` file): that is "no peers", not
+// a startup failure, so an operator who generates an empty file can still start
+// the server. Both cases are handled explicitly rather than by catching a generic
+// parser error, so a genuine parser error is never swallowed.
+func parseServeInstances(
+	selfID string,
+	peerFlags []string,
+	peersFile, peerToken string,
+) (serveConfig, error) {
+	if selfID == "" {
+		selfID = server.DefaultSelfID
+	}
+	if len(peerFlags) == 0 && peersFile == "" {
+		return serveConfig{SelfID: selfID}, nil
+	}
+	// "peer"/"peers" are the flag names `wllr serve` actually exposes, so a
+	// parser error names a flag the operator can pass.
+	cfgs, err := client.BuildInstances(client.InstanceFlags(peerFlags), peersFile, peerToken, "peer", "peers")
+	if err != nil {
+		if errors.Is(err, client.ErrNoInstances) {
+			slog.Warn("wllr: no peers configured; continuing without peers", "peers", peersFile)
+			return serveConfig{SelfID: selfID}, nil
+		}
+		return serveConfig{}, err
+	}
+	return serveConfig{SelfID: selfID, Peers: peersFromConfigs(cfgs)}, nil
+}
+
+// peersFromConfigs maps the shared client.Config shape onto the server's
+// server-owned Peer type, so modules/server never imports modules/client.
+func peersFromConfigs(cfgs []client.Config) []server.Peer {
+	peers := make([]server.Peer, 0, len(cfgs))
+	for _, c := range cfgs {
+		peers = append(peers, server.Peer{ID: c.ID, BaseURL: c.BaseURL, Token: c.Token})
+	}
+	return peers
+}
+
 // runServe starts the API server over the already-wired pool and blocks until
 // the process receives SIGINT/SIGTERM (or ctx is cancelled), then shuts the
 // HTTP server down gracefully. The caller's deferred cleanups (extension host,
@@ -61,11 +116,20 @@ func looksLikeFlag(s string) bool {
 // scene-graph patches) is published to the stream instead of dropped, and —
 // because the agent bridge carries the sub-agent spawner — create_agent and the
 // team tools work headlessly. Only the sink differs from the TUI's teaSink.
-func runServe(ctx context.Context, pool *agent.AgentPool, h *extension.Host, m *harness.Model, addr string) error {
+func runServe(
+	ctx context.Context,
+	pool *agent.AgentPool,
+	h *extension.Host,
+	m *harness.Model,
+	addr string,
+	sc serveConfig,
+) error {
 	token := os.Getenv("WLLR_API_TOKEN")
 	srv := server.New(pool, server.Options{
-		Addr:  addr,
-		Token: token,
+		Addr:   addr,
+		Token:  token,
+		Peers:  sc.Peers,
+		SelfID: sc.SelfID,
 	})
 	// Serve mode owns the single-slot context-usage dispatcher: the TUI harness
 	// is not running, so nothing else claims it here.

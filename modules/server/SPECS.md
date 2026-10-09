@@ -25,6 +25,11 @@ methods.
   bubbletea. It can run with no TTY, which is what `wllr serve` relies on. It
   implements the renderer-neutral `sdk.UISink` (`HubSink`) and imports neither
   `modules/extension` nor `modules/harness`.
+- **Peer proxying stays stdlib.** The instance reverse proxy (`proxy.go`) uses
+  `net/http/httputil`, so the dependency list above is unchanged. In particular
+  the server does **not** import `modules/client`: the operator's peer table is
+  the server-owned `Peer` type, and `cmd` maps the shared instance-declaration
+  parser onto it.
 - **Shared, not duplicated, scene logic.** The server owns its own scene model
   and HTML renderer, but the graph-mutation semantics it uses (`sdk.ApplyOp` and
   friends) and the layout helpers (`sdk.ParseDimension`, `sdk.ResolveConstraint`,
@@ -81,6 +86,39 @@ methods.
     posted back routes through the harness `classifyCoreSelection`. Nothing about
     model selection is re-implemented server-side, so the browser's model menu is
     the terminal's.
+12. **Peer topology and credentials stay server-side.** `GET /api/instances`
+    reports ids and status only — never a peer `BaseURL` or `Token`. A `down`
+    entry's `error` is a sanitized cause (`unreachable`, `timeout`, `http <code>`,
+    `malformed response`), never the peer's scheme, host, port, or path: the raw
+    `net/http` error would otherwise embed them. The proxy
+    injects the peer's bearer token (`Authorization: Bearer <peerToken>`) and
+    deletes the inbound credential in both forms the origin accepts (the
+    `Authorization` header **and** the `?token=` query parameter), so the browser
+    never holds a peer credential and an origin token is never relayed to a peer.
+    A 3xx `Location` from a peer is reduced to a same-origin absolute path:
+    any target carrying a scheme or authority — an absolute `http://host/x`, a
+    protocol-relative `//host/x`, a backslash variant such as `/\host/x`, or a
+    non-path scheme such as `javascript:` — collapses to its path and query (or
+    `/`), so a cross-origin target can never reach the browser. Peer response
+    headers are sanitised for the same reason: `Location` is relativised and
+    `Set-Cookie` is stripped (nothing in the system is cookie-based), so a peer
+    cannot plant state in the browser under the origin's origin.
+13. **The instance proxy is not an open proxy.** Proxy targets come only from
+    operator configuration (`Options.Peers`), and only a path under
+    `/api/instances/{id}/api/` for a *known* peer id is forwarded. An unknown id
+    (including the self id, which is served in-process and deliberately not
+    proxiable) is `404`; a path outside the `/api` prefix never matches the route
+    and is never forwarded. Containment is **lexical**: the origin only
+    guarantees the forwarded path is under the proxy prefix. A `%2e%2e` segment
+    is forwarded as a literal `..` under that prefix (the escape survives the
+    mux, which cleans only the escaped path), so resolving `..` is the peer's
+    responsibility, not the origin's.
+14. **Switching instances is view-only.** The page renders one instance at a
+    time and holds exactly one `EventSource`, which it closes and re-opens on
+    switch. No cursor or sequence number is merged across instances
+    (cross-reference `modules/client` SPECS invariant 2); the page's `resetView`
+    clears every per-instance surface, and a stale-response guard drops a reply
+    issued for an instance the user has switched away from.
 
 ## HTTP surface
 
@@ -100,6 +138,8 @@ methods.
 | GET    | `/api/models`        | Selectable models: `models[]` (each with a provider-qualified `key`), the `callback` to select under, and the live `current` provider/model |
 | GET    | `/api/commands`      | Registered slash commands: `commands[]` (`{name,desc,instant}`) for autocomplete and help (see below) |
 | POST   | `/api/ui/callback`   | `{"callback","value"}` (or `"args"`) → routes a UI selection back to the engine (see below) |
+| GET    | `/api/instances`     | This origin's `self` id and one entry per configured peer (`id`, `self`, `status`, `protocol`, `last_seq`, optional `error`) — ids and status only, never a URL or token (see below) |
+| ANY    | `/api/instances/{id}/api/…` | Reverse-proxies a known peer's `/api` surface (including its SSE stream) with the peer token injected server-side (see below) |
 | GET    | `/`                  | Self-contained HTML front end (client.go); any other non-API path → `404` |
 
 An omitted `agent` resolves to the root agent (`main`). An unknown agent yields
@@ -163,6 +203,85 @@ own `Sum()` (system + tools + history), so the browser and terminal agree.
 
 `last_request.is_estimate` distinguishes the pre-first-turn `chars/4` baseline
 seed from a real provider report, exactly as the modal labels it.
+
+### Instances (`GET /api/instances`)
+
+`wllr serve` may be given an operator-configured peer table (`Options.Peers`,
+from the `-peer`/`-peers`/`-peer-token` flags). This endpoint reports this origin
+and those peers so the page's instance selector can list them. It sits on
+`s.mux`, so it is behind `authenticate` exactly like every other route. A
+non-`GET` method is `405 {"error":"GET only"}`.
+
+```json
+{
+  "self": "local",
+  "instances": [
+    {"id":"local","self":true, "status":"ok",  "protocol":1,"last_seq":1234},
+    {"id":"ci",   "self":false,"status":"ok",  "protocol":1,"last_seq":45},
+    {"id":"dev",  "self":false,"status":"down","protocol":0,"last_seq":0,
+     "error":"unreachable"}
+  ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `self` (top level) | This origin's own instance ID (`Options.SelfID`, default `DefaultSelfID` = `"local"`). |
+| `instances[]` | Self first, then peers in configured order. The order is deterministic. |
+| `id` | Instance ID. The only key the page needs. |
+| `self` (per entry) | `true` for the local instance. |
+| `status` | `"ok"` or `"down"`. |
+| `protocol` | The instance's wire protocol version. Self is read in-process (`ProtocolVersion`); a peer comes from its `GET /api/health`. Informational: the page does not gate on it (it only warns on a `ready` protocol mismatch), and the origin proxies to a peer regardless. |
+| `last_seq` | The instance's last published hub sequence. Self in-process (`s.hub.LastSeq()`); a peer from its `/api/health`. Informational. |
+| `error` | `omitempty`; present only when `status == "down"`. A sanitized failure class — `unreachable`, `timeout`, `http <status>`, or `malformed response` — never the peer's scheme, host, port, or path (invariant 12). |
+
+Two deliberate choices worth stating explicitly:
+
+1. **The top-level `self` string and the per-entry `self` bool are different
+   fields.** `"self": "local"` names the origin; `"self": true` marks the
+   origin's entry in `instances[]`. They read alike but mean different things.
+2. **`protocol` and `last_seq` are always present** (no `omitempty` on the ints)
+   and are `0` for a `down` instance, which keeps the contract pointer-free.
+   They are informational: the page's selector renders only `id` and `status`,
+   so they are exposed for other clients rather than gating the page.
+
+Peer health is probed **concurrently**, one goroutine per peer, each bounded by
+`probeTimeout` (1.5 s), so one dead peer cannot delay the list beyond its own
+timeout. A result is cached for `probeTTL` (5 s) so repeated polls of the
+endpoint cannot hammer a down peer. The probe runs on a **request-independent
+base context**, so a client that aborts its own `GET /api/instances` cannot
+cancel a probe (and cache a false `down`); a probe whose attempt *is* cancelled
+is indeterminate and is never cached at all. A peer whose id is empty, outside
+the routable charset (`^[A-Za-z0-9._-]+$`), duplicates another, collides with
+self, or whose `BaseURL` is unusable is dropped at `New` (`buildPeers`) with a
+warning: startup does not fail and no phantom instance reaches the selector.
+
+**Never exposed:** a peer's `BaseURL` or `Token`, nor any of either inside the
+`error` string. Ids, status, and a sanitized cause only.
+
+### Peer proxy (`/api/instances/{id}/api/…`)
+
+The origin reverse-proxies a peer's whole `/api` surface — including the SSE
+stream — under `/api/instances/{id}/api/`, so the browser page can keep using
+its existing relative paths prefixed by the selected instance. The route is a Go
+1.22+ wildcard pattern (`/api/instances/{id}/api/`), so a path outside that
+prefix never matches and is never forwarded.
+
+| Aspect | Behaviour |
+|---|---|
+| Path rewrite | `/api/instances/ci/api/history?agent=main` → `<peer>/api/history?agent=main`. The `/api/instances/ci` prefix is stripped *before* the peer's base path is joined, so a `BaseURL` that carries a path (`http://host/wllr`) receives `/wllr/api/history` — the same URL the health probe resolves. The query is re-encoded through `url.Values.Encode()` (keys sorted, values re-escaped), not forwarded byte-for-byte. |
+| Query | The inbound `token` parameter is deleted before forwarding; every other parameter is preserved (re-encoded). |
+| Headers | The inbound `Authorization` is deleted; when the peer has a token, `Authorization: Bearer <peerToken>` is set. Hop-by-hop headers are handled by the stdlib proxy. |
+| Body | Forwarded verbatim (needed for `POST /api/submit`, `/api/cancel`, `/api/inbox/*`, `/api/ui/callback`). |
+| Unknown `{id}` | `404 {"error":"unknown instance"}` — includes the self id and any dropped peer. |
+| Non-`/api` path | `/api/instances/ci/secret` and `/api/instances/ci/` do not match the route pattern; they fall through to `/` → `handleClient` → `404`. Never forwarded. Containment is lexical: a `%2e%2e` segment is forwarded as a literal `..` under the prefix (the mux cleans only the escaped path), so cleaning `..` is the peer's responsibility. |
+| Response | Status, body, and sanitised headers forward. A 3xx `Location` is reduced to a same-origin absolute path — any scheme/authority (absolute, protocol-relative `//host`, a backslash variant, or a non-path scheme) is collapsed to its path+query (or `/`), so a cross-origin target never reaches the browser (invariant 12). `Set-Cookie` is stripped, so a peer cannot plant a cookie in the browser under the origin's origin. `text/event-stream` is flushed immediately (the stdlib `httputil` proxy does this for that content type). |
+| Peer unreachable | `502 {"error":"instance unreachable"}` via the proxy's `ErrorHandler`. A down peer is a clean per-instance fault, not a hang. A peer that accepts the connection but never writes response headers is bounded by the shared transport's `ResponseHeaderTimeout` (`probeTimeout`), so it becomes a prompt 502 rather than an indefinite hang. |
+
+The `Rewrite` hook deletes both credential forms the origin accepts (the
+`Authorization` header and the `?token=` query parameter) before injecting the
+peer's own token, so a browser URL carrying the origin's token is never relayed
+to a peer (invariant 12).
 
 ## Event schema
 
@@ -303,6 +422,10 @@ stream as any other client, which is what demonstrates the renderer-neutral sink
   an arrow-key-highlighted selection, and a preview pane — agent tree, text
   input, and the **`/context` breakdown modal**);
 - a composer (`POST /api/submit`) and a stop button (`POST /api/cancel`);
+- an **instance selector** (the top-bar `<select id="instance">`): this origin
+  and the operator-configured peers from `GET /api/instances`, switchable one at
+  a time over a single re-subscribed stream (see "Instance selector and
+  switching" below);
 - a **queued-messages pane** (the focused agent's undrained messages, from
   `GET /api/inbox`, with a clickable clear posting to `/api/inbox/clear`) and a
   **tool-activity pane** (a rolling list of recent tool calls and their
@@ -378,6 +501,53 @@ Picker items, agent-tree nodes, and text-input submits post the frame's
 selection reaches the same engine handler the terminal would have invoked (see
 "UI callbacks" above).
 
+### Instance selector and switching
+
+The top-bar `#instance` selector is built from `GET /api/instances`. Each option
+is labelled with the instance id, suffixed `(down)` when its probe failed. Every
+per-instance call is routed through one `api(path)` helper: the local instance
+keeps the plain relative path (served in-process) and a peer is prefixed with
+`api/instances/<id>/` (the origin's reverse proxy). `GET /api/instances` and
+`GET /api/health` are the only calls that stay unprefixed.
+
+Switching is view-only. `switchInstance` closes the page's single `EventSource`,
+clears every per-instance surface via `resetView` (focus, agents, in-flight
+bubbles, usage, statuses, provider, chat-area flag, inbox, tools, commands,
+suggestions, the transcript, the three scene containers, the queued/tool panes,
+the agent selector, the status bar, the model button, the console, and the
+composer's disabled state), re-seeds from the new instance, and re-subscribes.
+Two safeguards keep instances from leaking into each other:
+
+- **A stale-response guard.** Each `refresh*` captures `state.instance` when it
+  starts and drops its response if the user has switched away, so a slow reply
+  from instance A can never paint into instance B's view.
+- **Direct DOM reset of the composer.** `resetView` re-enables `#input`/`#send`
+  directly rather than through `setInstanceReachable(true)`, which early-returns
+  when the reachability flag is already true and would otherwise leave a down
+  instance's disabled composer disabled forever.
+
+The selection is persisted in `localStorage` and reflected in a `?instance=`
+query parameter (so a reload or a shared link lands on the same instance). The
+`?instance=` value is written by building on the existing query string
+(`URLSearchParams`), so unrelated parameters such as `?token=` survive, and the
+fragment (`location.hash`) is re-appended, so a deep link's anchor survives a
+switch. An
+unknown deep link falls back to `self`. A down instance shows `id (down)`, its
+stream's `onerror` disables the composer, and `refreshInstances` re-runs on every
+`ready` frame (and on `onerror`) so the selector reflects a recovered peer
+without a switch — the page does not poll on a timer.
+
+### Known limitation: the page requires auth to be disabled
+
+The HTML front end talks to the API over `fetch()` and `EventSource`, neither of
+which can present a bearer token, and the page does not read the token from its
+own URL. Under `WLLR_API_TOKEN` every call from the page is a `401`, so the page
+is inert: the instance selector stays empty and the stream never opens. **Auth
+and the browser page are mutually exclusive**: an operator who needs auth must
+not use the browser page (use `wllr-multiplex` or curl with a bearer token
+instead). This is pre-existing and out of scope to change here; the page is a
+loopback convenience.
+
 ### Split picker and the `/context` modal
 
 A `picker` frame whose `picker.split` is set renders the terminal's two-pane
@@ -399,3 +569,10 @@ The numbers come from the engine; only their formatting is done in the page.
   token.
 - **Token** comes from `Options.Token`; `wllr serve` reads `WLLR_API_TOKEN`.
   Empty disables auth.
+- **SelfID** names this origin in `GET /api/instances`; it defaults to
+  `DefaultSelfID` (`"local"`).
+- **Peers** is the operator's remote-instance table (`[]Peer` of `{ID, BaseURL,
+  Token}`). The URL and token stay server-side (invariant 12). `wllr serve`
+  builds it from the repeatable `-peer id=url` flag, `-peers <file.json>`, and
+  the `-peer-token` default. With no peers configured, `GET /api/instances`
+  returns just this origin and every other behaviour is unchanged.

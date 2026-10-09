@@ -19,6 +19,7 @@ import (
 	yaml "gopkg.in/yaml.v3"
 
 	"github.com/mattdurham/wllr/modules/agent"
+	"github.com/mattdurham/wllr/modules/client"
 	"github.com/mattdurham/wllr/modules/extension"
 	"github.com/mattdurham/wllr/modules/harness"
 	"github.com/mattdurham/wllr/modules/mcp"
@@ -60,6 +61,23 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 		defaultPprofAddr(),
 		"listen address for net/http/pprof debug server (use empty string to disable)",
 	)
+	selfID := flag.String(
+		"instance-id",
+		"",
+		"this instance's id in the browser's instance selector (default local)",
+	)
+	peersFile := flag.String(
+		"peers",
+		"",
+		"JSON file with [{id,url,token}] peers the browser may switch to",
+	)
+	peerToken := flag.String(
+		"peer-token",
+		os.Getenv("WLLR_PEER_TOKEN"),
+		"bearer token applied to peers without their own",
+	)
+	var peerFlags client.InstanceFlags
+	flag.Var(&peerFlags, "peer", "peer as id=url (repeatable; browser-selectable instance)")
 	flag.Parse()
 
 	cfg, err := LoadConfig()
@@ -838,7 +856,12 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 	// HTTP/SSE API server in place of the interactive program. It shares the full
 	// wiring above (so nothing is bypassed) and blocks until a signal arrives.
 	if *serveAddr != "" {
-		if err := runServe(ctx, pool, h, &m, *serveAddr); err != nil {
+		sc, err := parseServeInstances(*selfID, peerFlags, *peersFile, *peerToken)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "wllr: "+err.Error())
+			os.Exit(1)
+		}
+		if err := runServe(ctx, pool, h, &m, *serveAddr, sc); err != nil {
 			fmt.Fprintln(os.Stderr, "wllr: "+err.Error())
 			os.Exit(1)
 		}

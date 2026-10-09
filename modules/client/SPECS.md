@@ -37,6 +37,31 @@ The client is the integration point precisely because it is outside all of them.
   `AgentKey()` yields the globally unique `"<instance>/<agent>"`.
 - **`Backoff`** — reconnect schedule (exponential, capped, jittered).
 
+## Instance declaration
+
+`InstanceFlags` and `BuildInstances` are the single instance-declaration parser
+shared by `wllr-multiplex` and `wllr serve`, so the two binaries accept instances
+identically:
+
+- **`InstanceFlags`** collects repeated `id=url` command-line declarations and
+  implements `flag.Value`, so a binary can bind it with `flag.Var` without this
+  package importing `flag`.
+- **`BuildInstances(flags, configPath, defaultToken, instanceFlag, configFlag)`**
+  merges flag declarations (which take `defaultToken`) with a JSON file of
+  `[{"id","url","token"}]` entries; an entry's own `token` wins over the default.
+  `instanceFlag`/`configFlag` are the caller's flag names, so an error names a
+  flag the caller has (`"instance"`/`"config"` for `wllr-multiplex`,
+  `"peer"`/`"peers"` for `wllr serve`). Flag instances come first, file entries
+  after. A flag declaration or a file entry missing `id`/`url` is an error (a
+  file entry is validated like a flag entry, not silently dropped). Both sources
+  whitespace-trim each `id`/`url`, so `-peer " ci = http://x "` and
+  `[{"id":" ci ","url":" http://x "}]` yield the same instance. The empty
+  case is an error wrapping `ErrNoInstances`, so a caller that may legitimately
+  have none (a plain `wllr serve`) recognizes it with `errors.Is` and continues; a caller that
+  needs at least one lets it bubble up.
+
+The package still depends only on `wire`, `sdk`, and the standard library.
+
 ## Invariants
 
 1. **Identity is always `instance/agent`.** An event's `Seq` is meaningful only

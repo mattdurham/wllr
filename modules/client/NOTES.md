@@ -1,5 +1,36 @@
 # modules/client — NOTES
 
+## Why the instance-declaration parser lives here
+
+`wllr serve` and `wllr-multiplex` both take a repeatable `id=url` flag and a
+JSON `[{"id","url","token"}]` file, with the same token precedence. Two copies
+of the same ~25-line parser would drift, so it lives once, here — the package
+that already owns `Config`, the type the parser produces. An alternative was
+`cmd/internal` (a shared command package), but that adds a package boundary for
+no additional property: `client` is already imported by both binaries, and the
+parser is naturally an operations helper on the type it builds.
+
+### One function, not three
+
+The design sketched three names — `ParseInstanceFlags`, `LoadInstanceFile`, and
+`BuildInstances`. The shipped shape is a single `BuildInstances` (plus the
+`InstanceFlags` flag helper). Each of the split parts would have had exactly one
+caller and no independent user, so the split was two extra exported names for
+nothing. `BuildInstances` is the exact shape the `wllr-multiplex` `buildConfigs`
+already had, so the behavior and every error string `wllr-multiplex` emits are
+unchanged — the refactor is behavior-preserving, pinned by `instances_test.go`.
+The one addition since is that `BuildInstances` now takes the *caller's* flag
+labels (`instanceFlag`, `configFlag`) so error wording names a flag the caller
+actually has: `wllr-multiplex` passes `"instance"`/`"config"` (its strings are
+byte-for-byte unchanged), `wllr serve` passes `"peer"`/`"peers"`. It also returns
+a `ErrNoInstances` sentinel for the zero-instance case, so `wllr serve` can recognize
+"a peer source was given but yielded nothing" and continue rather than abort. The
+refactor is otherwise behavior-preserving except for one deliberate validation
+change: a file entry with an empty `id` or `url` is now rejected at startup
+(`wllr-multiplex` previously accepted `[{"id":"ci","url":""}]` unchecked), so
+file entries are validated exactly like flag entries — the M3 review item, and
+`client/SPECS.md` describes it.
+
 ## The cursor bug that the gap test caught
 
 The first cut adopted the `ready` frame's `Seq` as the resume cursor, on the

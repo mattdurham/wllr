@@ -26,6 +26,19 @@ reconnection and the resume cursor. No real engine or socket is required.
 | `TestMultiplexerInstancesSorted` | Instance IDs are returned sorted |
 | `TestAgentKeyAndParse` | `AgentKey`/`ParseAgentRef`/`AgentRef.String` round-trip |
 
+## instances_test.go
+
+| Test | Intent |
+|------|--------|
+| `TestBuildInstancesFromFlags` | `id=url` flags parse; id and URL are whitespace-trimmed and carry the default token |
+| `TestBuildInstancesFromFile` | The `[{id,url,token}]` file shape; an entry's own token wins over the default |
+| `TestBuildInstancesTrimsFileEntry` | A file entry's `id`/`url` are whitespace-trimmed like a flag entry, so `[{"id":" ci ","url":" http://x "}]` behaves like `-peer " ci = http://x "` |
+| `TestBuildInstancesFlagsAndFile` | Both sources merge, flags first (today's `buildConfigs` order) |
+| `TestBuildInstancesRejectsBadFlag` | A flag without `id=url` errors with the exact `bad -instance …` string |
+| `TestBuildInstancesRejectsBadFileEntry` | A file entry with an empty `id`/`url` errors (validated like a flag entry), not silently dropped |
+| `TestBuildInstancesLabelsNameCallerFlags` | The error wording uses the caller's flag names (`-peer` for `wllr serve`, not `-instance`) |
+| `TestBuildInstancesRequiresOne` | No flags and no file is an error (`no instances: …`) wrapping `ErrNoInstances` |
+
 ## stream_test.go
 
 | Test | Intent |

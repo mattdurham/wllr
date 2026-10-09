@@ -17,7 +17,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -37,26 +36,9 @@ func main() {
 	}
 }
 
-// instanceFlag collects repeated -instance id=url flags.
-type instanceFlag []string
-
-func (f *instanceFlag) String() string { return strings.Join(*f, ",") }
-
-func (f *instanceFlag) Set(v string) error {
-	*f = append(*f, v)
-	return nil
-}
-
-// fileConfig is one entry in the JSON config file.
-type fileConfig struct {
-	ID    string `json:"id"`
-	URL   string `json:"url"`
-	Token string `json:"token,omitempty"`
-}
-
 func run(args []string) error {
 	fs := flag.NewFlagSet("wllr-multiplex", flag.ContinueOnError)
-	var instances instanceFlag
+	var instances client.InstanceFlags
 	fs.Var(&instances, "instance", "instance as id=url (repeatable)")
 	configPath := fs.String("config", "", "JSON file with [{id,url,token}] instances")
 	token := fs.String(
@@ -69,7 +51,7 @@ func run(args []string) error {
 	}
 	rest := fs.Args()
 
-	cfgs, err := buildConfigs(instances, *configPath, *token)
+	cfgs, err := client.BuildInstances(instances, *configPath, *token, "instance", "config")
 	if err != nil {
 		return err
 	}
@@ -94,50 +76,6 @@ func run(args []string) error {
 		return err
 	}
 	return runCommand(ctx, mux, verb, verbArgs)
-}
-
-// buildConfigs merges flag and file declarations. Flag instances apply the
-// default token; file instances may set their own.
-func buildConfigs(
-	instances instanceFlag,
-	configPath, defaultToken string,
-) ([]client.Config, error) {
-	var cfgs []client.Config
-	for _, raw := range instances {
-		id, url, ok := strings.Cut(raw, "=")
-		if !ok || strings.TrimSpace(id) == "" || strings.TrimSpace(url) == "" {
-			return nil, fmt.Errorf("bad -instance %q: want id=url", raw)
-		}
-		cfgs = append(
-			cfgs,
-			client.Config{
-				ID:      strings.TrimSpace(id),
-				BaseURL: strings.TrimSpace(url),
-				Token:   defaultToken,
-			},
-		)
-	}
-	if configPath != "" {
-		data, err := os.ReadFile(configPath)
-		if err != nil {
-			return nil, err
-		}
-		var fileCfgs []fileConfig
-		if err := json.Unmarshal(data, &fileCfgs); err != nil {
-			return nil, fmt.Errorf("parse %s: %w", configPath, err)
-		}
-		for _, fc := range fileCfgs {
-			tok := fc.Token
-			if tok == "" {
-				tok = defaultToken
-			}
-			cfgs = append(cfgs, client.Config{ID: fc.ID, BaseURL: fc.URL, Token: tok})
-		}
-	}
-	if len(cfgs) == 0 {
-		return nil, errors.New("no instances: pass -instance id=url or -config file.json")
-	}
-	return cfgs, nil
 }
 
 // runCommand dispatches a targeted REST verb.

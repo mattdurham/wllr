@@ -15,6 +15,13 @@ their streams into one, tagging every event with its source instance.
 It does **not** embed the engine: it links only `wire` and `sdk`, so client
 binaries are small and many can run against many servers.
 
+`instances.go` also holds the shared **instance-declaration parser**:
+`InstanceFlags` (a `flag.Value` collecting repeated `id=url` declarations) and
+`BuildInstances`, which merges those flags with a JSON instances file into
+`Config`s. `wllr serve` reuses this same parser for its own `-peer`/`-peers`
+flags, so the command line and the client agree on what an instance declaration
+is.
+
 # Specification
 
 - [Contracts and invariants](../../modules/client/SPECS.md)
@@ -29,6 +36,8 @@ binaries are small and many can run against many servers.
 - `Multiplexer` — N instances merged into one `<-chan Tagged`
 - `Tagged` — a `wire.Event` + its `Instance` + a `Gap` flag; `AgentKey()` = `"instance/agent"`
 - `Backoff` — reconnect schedule (exponential, capped, jittered)
+- `InstanceFlags` / `BuildInstances` (instances.go) — the `id=url` flag parser
+  and instances-file merge, shared with `wllr serve`
 
 # Application
 

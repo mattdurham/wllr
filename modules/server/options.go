@@ -17,6 +17,12 @@ type Options struct {
 	Token string
 	// MainID is the root agent's ID. Defaults to agent.MainAgentID.
 	MainID string
+	// SelfID names this instance in GET /api/instances. Defaults to DefaultSelfID.
+	SelfID string
+	// Peers are operator-configured remote wllr instances the browser front end
+	// may switch to. Their URLs and tokens stay server-side: GET /api/instances
+	// reports ids and status only, and the proxy injects the token.
+	Peers []Peer
 	// Backlog is the number of recent events retained for replay to clients
 	// that pass a `since` cursor. Defaults to DefaultBacklog.
 	Backlog int

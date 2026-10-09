@@ -26,6 +26,10 @@ const DefaultBacklog = 4096
 // DefaultAddr is the default loopback listen address.
 const DefaultAddr = "127.0.0.1:8765"
 
+// DefaultSelfID names this origin in GET /api/instances when no SelfID is
+// configured.
+const DefaultSelfID = "local"
+
 // agentIDKey is the JSON field name for the agent every response concerns, used
 // by the history/submit/cancel/inbox handlers so the wire spelling is defined
 // once.
@@ -49,13 +53,22 @@ type Server struct {
 	sink     *HubSink
 	mux      *http.ServeMux
 	logger   *slog.Logger
+	probe    *instanceProbe
+	proxies  map[string]http.Handler
 
 	// messageEnd is invoked when a turn's assistant text is finalized. See
 	// SetMessageEndNotifier.
 	messageEnd func(role, content string)
-	token      string
-	addr       string
-	mainID     string
+	selfID     string
+
+	token  string
+	addr   string
+	mainID string
+
+	// peers is the filtered operator-configured peer table. Peer ids and selfID are
+	// the only instance information that leaves the server — never a peer URL or
+	// token.
+	peers []Peer
 }
 
 // New builds a Server over pool. It does not start serving or install observers;
@@ -77,17 +90,26 @@ func New(pool *agent.AgentPool, opts Options) *Server {
 	if addr == "" {
 		addr = DefaultAddr
 	}
+	selfID := opts.SelfID
+	if selfID == "" {
+		selfID = DefaultSelfID
+	}
 	hub := NewHub(backlog)
+	peers, proxies := buildPeers(opts.Peers, selfID, logger)
 	s := &Server{
-		pool:   pool,
-		hub:    hub,
-		bridge: NewBridge(pool, hub, mainID),
-		sink:   NewHubSink(pool, hub, mainID),
-		mux:    http.NewServeMux(),
-		token:  opts.Token,
-		addr:   addr,
-		mainID: mainID,
-		logger: logger,
+		pool:    pool,
+		hub:     hub,
+		bridge:  NewBridge(pool, hub, mainID),
+		sink:    NewHubSink(pool, hub, mainID),
+		mux:     http.NewServeMux(),
+		token:   opts.Token,
+		addr:    addr,
+		mainID:  mainID,
+		logger:  logger,
+		peers:   peers,
+		proxies: proxies,
+		selfID:  selfID,
+		probe:   newInstanceProbe(),
 	}
 	s.routes()
 	return s
@@ -195,6 +217,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/models", s.handleModels)
 	s.mux.HandleFunc("/api/commands", s.handleCommands)
 	s.mux.HandleFunc("/api/ui/callback", s.handleUICallback)
+	s.mux.HandleFunc("/api/instances", s.handleInstances)
+	s.mux.HandleFunc("/api/instances/{id}/api/", s.handlePeerProxy)
 	s.mux.HandleFunc("/", s.handleClient)
 }
 

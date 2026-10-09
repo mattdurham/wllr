@@ -16,6 +16,13 @@ It installs the renderer-neutral `sdk.UISink` (`HubSink`), so serve mode drives
 the *same* extension bridges the TUI uses and a browser sees the same UI requests
 the terminal would render.
 
+It can also front a small **peer table**: an operator may configure remote wllr
+instances, and the origin reports them — ids and status only — from
+`GET /api/instances` and reverse-proxies each peer's `/api` surface (SSE included)
+under `/api/instances/{id}/api/`, injecting the peer's token server-side. The
+browser switches between instances one at a time; it never merges them and never
+holds a peer URL or credential.
+
 # Specification
 
 - [Contracts and invariants](../../modules/server/SPECS.md)
@@ -30,14 +37,24 @@ the terminal would render.
 - `Bridge` — translates engine callbacks into `wire.Event`s
 - `HubSink` — the HTTP/SSE `sdk.UISink` implementation
 - `SceneModel` / `htmlscene.go` — scene graph → HTML (shared `sdk` graph ops)
+- `instances.go` — `GET /api/instances` (self + peers, ids/status only) and the
+  TTL-cached peer health probe (`instanceProbe`); a down entry's `error` is a
+  sanitized cause, never the peer URL
+- `proxy.go` — the peer reverse proxy (`net/http/httputil`): forwards a known
+  peer's `/api` surface with the peer token injected and origin credentials
+  stripped server-side
 - `client.go` — the self-contained browser front end
 
 # Cross-cutting Decisions
 
 - [The wire protocol is a leaf package](../decisions/wire-protocol-extraction.md)
 - [The TUI is decoupled behind Renderer + UIBridge](../decisions/tui-decoupled-behind-renderer.md)
+- [Serve instances switch via an origin-server reverse proxy](../decisions/serve-instance-switching.md)
 
 # Dependencies
 
 `agent`, `sdk`, `wire`, standard library. Does **not** import `harness` or
-`extension`, so it runs with no TTY (`wllr serve`).
+`extension`, so it runs with no TTY (`wllr serve`). Peer proxying adds no
+dependency: `net/http/httputil` is standard library, and `modules/client` is
+still **not** imported (the operator's peer table is the server-owned `Peer`
+type).

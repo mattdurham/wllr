@@ -8,6 +8,14 @@ package server
 // access — which is what demonstrates the point of the renderer-neutral sink:
 // the TUI and this page drive one engine through one contract.
 //
+// A page may switch between instances: GET /api/instances lists this origin and
+// its operator-configured peers, and every per-instance call is prefixed with
+// the selected instance via api(). The local instance keeps the plain relative
+// path and is served in-process; a peer goes through the origin server's reverse
+// proxy, which injects the peer token server-side. Switching is view-only: one
+// instance is rendered at a time, one EventSource is held and re-subscribed on
+// switch, and no cursor or sequence number is ever merged across instances.
+//
 // Rendering rules that mirror the terminal front end:
 //   - The transcript is seeded from GET /api/history and extended by the
 //     user_message / token / tool_call / tool_result / turn_done frames; a
@@ -40,7 +48,7 @@ const clientHTML = `<!DOCTYPE html>
   #topbar { display:flex; align-items:center; gap:12px; padding:6px 10px;
     border-bottom:1px solid var(--line); background:var(--panel); }
   #topbar .spacer { flex:1; }
-  #agent { background:var(--wn-bg); color:var(--wn-fg); border:1px solid var(--line);
+  #agent, #instance { background:var(--wn-bg); color:var(--wn-fg); border:1px solid var(--line);
     border-radius:4px; padding:2px 6px; }
   #working { color:var(--wn-accent); }
   #working.off { visibility:hidden; }
@@ -149,6 +157,7 @@ const clientHTML = `<!DOCTYPE html>
 <body>
   <header id="topbar">
     <strong>wllr</strong>
+    <select id="instance" title="switch instance"></select>
     <select id="agent" title="focus agent"></select>
     <button id="modelbtn" class="ghost" title="switch model">model</button>
     <button id="contextbtn" class="ghost" title="context breakdown">context</button>
@@ -182,7 +191,7 @@ const clientHTML = `<!DOCTYPE html>
   <form id="composer">
     <div id="suggest" hidden></div>
     <textarea id="input" placeholder="Message wllr  (Enter to send, Shift+Enter for newline, / for commands)"></textarea>
-    <button type="submit">Send</button>
+    <button type="submit" id="send">Send</button>
     <button type="button" class="ghost" id="cancel">Stop</button>
   </form>
   <div id="overlay"><div class="card" id="overlay-card"></div></div>
@@ -202,9 +211,55 @@ const clientHTML = `<!DOCTYPE html>
     tools: [],       // recent tool activity, newest last
     commands: [],    // registered slash commands (GET /api/commands)
     suggestions: [], // commands matching the in-progress /word
-    sugIdx: 0        // highlighted suggestion
+    sugIdx: 0,       // highlighted suggestion
+    instance: "",    // selected instance id ("" until /api/instances answers)
+    self: "",        // this origin's own instance id
+    instances: [],   // [{id,self,status,protocol,last_seq}] from GET /api/instances
+    reachable: true  // the selected instance's stream is connected
   };
+  // es is the single EventSource. It is module-scope (not local to connect)
+  // because a switch must be able to close it before re-subscribing.
+  var es = null;
   var $ = function (id) { return document.getElementById(id); };
+
+  // api prefixes a per-instance API path with the selected instance. The local
+  // instance is served in-process, so it keeps the plain relative path; a peer
+  // goes through the origin server's reverse proxy.
+  function api(p) {
+    return (state.instance === state.self || !state.instance)
+      ? p
+      : "api/instances/" + encodeURIComponent(state.instance) + "/" + p;
+  }
+
+  // stale reports whether a refresh issued for instance id has been overtaken by
+  // a switch. Every refresh* (and every fetcher that opens an overlay) captures
+  // state.instance when it starts and drops its response if the user switched
+  // away, so a slow reply from instance A can never paint into instance B's view.
+  function stale(id) { return id !== state.instance; }
+
+  // instanceFromURL reads the deep-link ?instance= selection, and storedInstance
+  // the last selection, so a reload or a shared link lands on the same instance.
+  function instanceFromURL() {
+    var m = /[?&]instance=([^&]+)/.exec(location.search);
+    return m ? decodeURIComponent(m[1]) : "";
+  }
+  function storedInstance() {
+    try { return localStorage.getItem("wllr.instance") || ""; } catch (e) { return ""; }
+  }
+  // rememberInstance makes the selection shareable and survives a reload. The page
+  // is served only at "/", so a query parameter is safe and the relative base
+  // stays "/". The new query is built from the existing one so unrelated params
+  // survive: rewriting to "?instance=<id>" alone would silently drop a ?token=
+  // (the only way the page can be reached under WLLR_API_TOKEN) and any future
+  // parameter. The fragment is re-appended so a deep link's anchor survives too.
+  function rememberInstance(id) {
+    try { localStorage.setItem("wllr.instance", id); } catch (e) { /* private mode */ }
+    if (window.history && history.replaceState) {
+      var q = new URLSearchParams(location.search);
+      q.set("instance", id);
+      history.replaceState(null, "", "?" + q.toString() + location.hash);
+    }
+  }
 
   // esc is never used to build markup: text goes in via textContent. Kept for
   // the rare attribute assignment.
@@ -347,19 +402,23 @@ const clientHTML = `<!DOCTYPE html>
     sel.value = state.focused;
   }
   function refreshAgents() {
-    return fetch("api/agents").then(function (r) { return r.json(); })
-      .then(function (d) { renderAgents(d.agents); })
+    var id = state.instance;
+    return fetch(api("api/agents")).then(function (r) { return r.json(); })
+      .then(function (d) { if (stale(id)) { return; } renderAgents(d.agents); })
       .catch(function () {});
   }
   function refreshHistory() {
-    return fetch("api/history?agent=" + encodeURIComponent(state.focused))
+    var id = state.instance;
+    return fetch(api("api/history?agent=" + encodeURIComponent(state.focused)))
       .then(function (r) { return r.json(); })
-      .then(function (d) { renderHistory(d.messages); })
+      .then(function (d) { if (stale(id)) { return; } renderHistory(d.messages); })
       .catch(function () {});
   }
   function refreshScene() {
-    return fetch("api/scene").then(function (r) { return r.json(); })
+    var id = state.instance;
+    return fetch(api("api/scene")).then(function (r) { return r.json(); })
       .then(function (d) {
+        if (stale(id)) { return; }
         (d.areas || []).forEach(function (a) { applyAreaHTML({ area: a.area, html: a.html }); });
       })
       .catch(function () {});
@@ -372,9 +431,10 @@ const clientHTML = `<!DOCTYPE html>
   // /api/inbox/clear. The pane hides when the queue is empty, exactly as the
   // TUI hides it.
   function refreshInbox() {
-    return fetch("api/inbox?agent=" + encodeURIComponent(state.focused))
+    var id = state.instance;
+    return fetch(api("api/inbox?agent=" + encodeURIComponent(state.focused)))
       .then(function (r) { return r.json(); })
-      .then(function (d) { renderInbox(d.messages || []); })
+      .then(function (d) { if (stale(id)) { return; } renderInbox(d.messages || []); })
       .catch(function () {});
   }
   function renderInbox(msgs) {
@@ -398,7 +458,7 @@ const clientHTML = `<!DOCTYPE html>
     });
   }
   function clearInbox() {
-    fetch("api/inbox/clear", {
+    fetch(api("api/inbox/clear"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ agent: state.focused })
@@ -457,7 +517,9 @@ const clientHTML = `<!DOCTYPE html>
   // browser never hardcodes the picker-key encoding: it echoes back the key the
   // server built, exactly as the terminal picker would.
   function openModelPicker() {
-    fetch("api/models").then(function (r) { return r.json(); }).then(function (d) {
+    var id = state.instance;
+    fetch(api("api/models")).then(function (r) { return r.json(); }).then(function (d) {
+      if (stale(id)) { return; }
       var models = d.models || [];
       if (!models.length) { consoleLine("[wllr] no models configured", false); return; }
       openOverlay(function (card) {
@@ -484,8 +546,10 @@ const clientHTML = `<!DOCTYPE html>
     }).catch(function () { consoleLine("[wllr] could not load models", false); });
   }
   function refreshModels() {
-    return fetch("api/models").then(function (r) { return r.json(); })
+    var id = state.instance;
+    return fetch(api("api/models")).then(function (r) { return r.json(); })
       .then(function (d) {
+        if (stale(id)) { return; }
         state.provider = (d.current || {}).provider || "";
         var active = (d.models || []).filter(function (m) { return m.active; })[0];
         var label = active ? (active.name || active.id) : ((d.current || {}).model || "model");
@@ -591,9 +655,11 @@ const clientHTML = `<!DOCTYPE html>
     return out.join("\n");
   }
   function openContextModal() {
-    fetch("api/context?agent=" + encodeURIComponent(state.focused))
+    var id = state.instance;
+    fetch(api("api/context?agent=" + encodeURIComponent(state.focused)))
       .then(function (r) { return r.json(); })
       .then(function (c) {
+        if (stale(id)) { return; }
         openOverlay(function (card) {
           card.appendChild(el("h2", null, "/context \u2014 " + (c.agent_id || state.focused)));
           card.appendChild(el("pre", null, buildContextText(c)));
@@ -778,7 +844,17 @@ const clientHTML = `<!DOCTYPE html>
   // --- stream -------------------------------------------------------------
   function handle(f) {
     switch (f.kind) {
-      case "ready": break;
+      case "ready":
+        setInstanceReachable(true);
+        // Refresh the selector on every ready frame: a peer that has recovered
+        // must lose its "(down)" label without requiring a switch, and the page
+        // does not poll.
+        refreshInstances();
+        if (f.protocol && f.protocol !== __PROTOCOL__) {
+          consoleLine("[warn] instance " + state.instance + " protocol " + f.protocol +
+            ", client expects " + __PROTOCOL__, false);
+        }
+        break;
       case "user_message":
         appendMessage("user", (f.inbox && f.inbox.length)
           ? f.inbox.map(function (m) { return m.content; }).join("\n")
@@ -835,14 +911,120 @@ const clientHTML = `<!DOCTYPE html>
     }
   }
 
+  // connect opens the single stream for the selected instance. A switch closes
+  // this one and calls connect again, so there is never more than one
+  // EventSource and no cursor is shared across instances.
   function connect() {
-    var es = new EventSource("api/stream");
+    es = new EventSource(api("api/stream"));
     es.onmessage = function (ev) {
       var f;
       try { f = JSON.parse(ev.data); } catch (e) { return; }
       handle(f);
     };
-    es.onerror = function () { /* EventSource reconnects automatically */ };
+    es.onerror = function () {
+      setInstanceReachable(false);
+      refreshInstances();
+    };
+  }
+
+  // setInstanceReachable disables the composer while the selected instance's
+  // stream is down, so a dead peer cannot silently swallow input, and re-enables
+  // it when its stream reports ready.
+  function setInstanceReachable(on) {
+    if (state.reachable === on) { return; }
+    state.reachable = on;
+    $("input").disabled = !on;
+    $("send").disabled = !on;
+  }
+
+  // refreshInstances loads GET /api/instances (always the origin route, never
+  // prefixed) and rebuilds the selector.
+  function refreshInstances() {
+    return fetch("api/instances").then(function (r) { return r.json(); })
+      .then(function (d) {
+        state.self = d.self || "";
+        state.instances = d.instances || [];
+        renderInstances();
+      })
+      .catch(function () {});
+  }
+  function renderInstances() {
+    var sel = $("instance");
+    sel.innerHTML = "";
+    state.instances.forEach(function (inst) {
+      var label = inst.status === "ok" ? inst.id : inst.id + " (" + inst.status + ")";
+      var o = el("option", null, label);
+      o.value = inst.id;
+      sel.appendChild(o);
+    });
+    sel.value = state.instance;
+  }
+  // knownInstance reports whether id is one of the instances the origin lists,
+  // so an unknown deep link falls back to self instead of wedging the page.
+  function knownInstance(id) {
+    return state.instances.some(function (inst) { return inst.id === id; });
+  }
+
+  // switchInstance shows exactly one instance's view. It closes the single stream,
+  // clears every per-instance surface (resetView) so instance A's transcript,
+  // scene, statuses, queue, tools, usage, and focus can never appear in B's view,
+  // then re-seeds from the new instance and re-subscribes.
+  function switchInstance(id) {
+    if (!knownInstance(id)) { id = state.self; }
+    if (!id) { return; }
+    if (es) { es.close(); es = null; }
+    state.instance = id;
+    $("instance").value = id;
+    resetView();
+    rememberInstance(id);
+    connect();
+    refreshAgents().then(refreshHistory);
+    refreshScene();
+    refreshModels();
+    refreshInbox();
+    refreshCommands();
+  }
+
+  // resetView clears every per-instance surface before the new instance is
+  // seeded, so nothing from the previous instance can leak into this one. The
+  // fallback transcript and the three scene containers are cleared wholesale,
+  // which removes every scene area and its slot.
+  function resetView() {
+    state.focused = "main";
+    state.agents = [];
+    state.stream = {};
+    state.usage = null;
+    state.statuses = {};
+    state.provider = "";
+    state.chatArea = false;
+    state.inbox = [];
+    state.tools = [];
+    state.commands = [];
+    state.suggestions = [];
+    state.sugIdx = 0;
+    $("transcript").innerHTML = "";
+    $("scene-main").innerHTML = "";
+    $("scene-side").innerHTML = "";
+    $("scene-status").innerHTML = "";
+    $("queue-pane").hidden = true;
+    $("queue-list").innerHTML = "";
+    $("tool-pane").hidden = true;
+    $("tool-list").innerHTML = "";
+    $("agent").innerHTML = "";
+    $("statusbar").innerHTML = "";
+    $("modelbtn").textContent = "model";
+    $("usage").textContent = "";
+    $("console").innerHTML = "";
+    $("console").className = "";
+    // Set the DOM directly, not via setInstanceReachable(true): that early-returns
+    // when state.reachable is already true and would leave a down instance's
+    // disabled composer disabled forever.
+    $("input").disabled = false;
+    $("send").disabled = false;
+    state.reachable = true;
+    setWorking(false);
+    closeOverlay();
+    closeSuggest();
   }
 
   // --- composer -----------------------------------------------------------
@@ -850,15 +1032,16 @@ const clientHTML = `<!DOCTYPE html>
     if (!callback) { return; }
     var body = { callback: callback, value: value };
     if (args && args.length) { body.args = args; }
-    fetch("api/ui/callback", {
+    fetch(api("api/ui/callback"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body)
     }).catch(function () {});
   }
   function refreshCommands() {
-    return fetch("api/commands").then(function (r) { return r.json(); })
-      .then(function (d) { state.commands = d.commands || []; })
+    var id = state.instance;
+    return fetch(api("api/commands")).then(function (r) { return r.json(); })
+      .then(function (d) { if (stale(id)) { return; } state.commands = d.commands || []; })
       .catch(function () {});
   }
 
@@ -997,14 +1180,14 @@ const clientHTML = `<!DOCTYPE html>
     if (runCommand(content)) { input.value = ""; closeSuggest(); return; }
     input.value = "";
     closeSuggest();
-    fetch("api/submit", {
+    fetch(api("api/submit"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ agent: state.focused, content: content })
     }).then(refreshInbox).catch(function () {});
   }
   function cancel() {
-    fetch("api/cancel", {
+    fetch(api("api/cancel"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ agent: state.focused })
@@ -1034,6 +1217,9 @@ const clientHTML = `<!DOCTYPE html>
     refreshInbox();
     renderTools();
   });
+  $("instance").addEventListener("change", function (e) {
+    switchInstance(e.target.value);
+  });
   $("queue-clear").addEventListener("click", clearInbox);
   $("modelbtn").addEventListener("click", openModelPicker);
   $("contextbtn").addEventListener("click", openContextModal);
@@ -1048,14 +1234,8 @@ const clientHTML = `<!DOCTYPE html>
         consoleLine("[warn] server protocol " + h.protocol + ", client expects " + expect, false);
       }
     }).catch(function () {});
-  refreshAgents().then(refreshHistory);
-  refreshScene();
-  refreshModels();
-  refreshInbox();
-  refreshCommands();
-  renderTools();
-  renderStatus();
-  connect();
+  var target = instanceFromURL() || storedInstance();
+  refreshInstances().then(function () { switchInstance(target || state.self); });
 })();
 </script>
 </body>

@@ -308,7 +308,11 @@ thinking selection applies through the same `apply*` methods the terminal uses.
 - **One process, one session.** The server fronts a single pool. Aggregating
   many wllr instances is a client-side concern (dial N `/api/stream`
   endpoints), deliberately out of this package: instances are separate processes
-  with process-global singletons (extension host, config file, session dir).
+  with process-global singletons (extension host, config file, session dir). The
+  server now knows an operator-configured peer table and can *proxy* a peer's API
+  surface, but it still fronts one pool and holds no state about a peer beyond its
+  health; aggregation *by merging* (one timeline across instances) remains
+  client-side and out of this package — the browser switches, it does not merge.
 
 ## The Bridge and the root-agent wiring are two consumers of one stream
 
@@ -352,3 +356,98 @@ the listen address through `Options.Addr` — the caller passes it in, so it can
 keep its own copy. Neither had a caller. Two exported methods that only forward
 an unexported field are API surface a reader must consider and reject, so they
 were deleted; the underlying `sink.SceneModel()` accessor is untouched.
+
+## Why the origin server proxies peers (A1), not a client per peer (A2)
+
+The browser must be able to read a *peer* instance's API surface. Two designs
+were considered. **A2** keeps a long-lived `modules/client` follower per peer in
+serve mode, reads each peer's `/api/stream`, and re-serves the merged state to
+the browser. **A1** (chosen) gives the origin a small `net/http/httputil`
+reverse proxy: a peer's whole `/api` surface, including its SSE stream, is
+forwarded under `/api/instances/{id}/api/…` with the peer token injected
+server-side.
+
+A1 wins on every axis that matters here:
+
+- **Size.** A1 is a little under 200 lines of stdlib (`proxy.go`, ~90 of them
+  code) plus a health probe
+  (`instances.go`). A2 needs a `modules/client` connection per peer, a reader
+  goroutine each, a buffer of peer frames, and a re-encode of every peer frame
+  into the origin's stream — new mutable server state with its own lifecycle.
+- **No new dependency, no lifecycle.** `httputil` is standard library, so the
+  server's dependency list is unchanged; there is no goroutine to start, stop, or
+  restart when a peer flaps.
+- **Outages stay visible.** A2 hides a peer outage behind `Follow`'s
+  forever-retry: the browser sees a connection that is simply quiet, and adds a
+  second reconnect layer under the browser's own `EventSource` reconnect. A1 lets
+  the peer's own HTTP status surface: the probe reports `down` and the proxy
+  answers `502`, so the page can disable the composer and show `id (down)`.
+- **The page gets nothing extra.** The browser already reconnects its
+  `EventSource` natively and holds no cursor, so a server-side re-serve buys no
+  latency or correctness it cannot get from an honest forward.
+
+A1 is also what keeps the security story simple: the token lives on the origin
+(where the operator configured it) and is injected on the way out, so the browser
+never sees it (invariant 12).
+
+## Why the down-peer `error` is a sanitized cause
+
+The probe's raw `net/http` error is not a safe value to hand a browser: a dial
+failure reads `Get "http://127.0.0.1:8766/api/health": dial tcp
+127.0.0.1:8766: connect: connection refused`, which embeds the peer's scheme,
+host, port, and path — exactly what invariant 12 promises never to expose. So
+`instances.go`'s `probeCause` classifies a probe failure into a fixed vocabulary
+(`unreachable`, `timeout`), and the non-200 and decode paths report `http <code>`
+and `malformed response`. A status code reveals nothing about topology and is
+kept verbatim because it is the most useful thing an operator can see.
+
+**Consequence:** the `error` is a coarse *class*, not a forwarded message, so a
+probe cannot become a side channel that enumerates the (server-only) peer table.
+The proxy's own failure path is separate and already generic — it answers
+`502 {"error":"instance unreachable"}` and never includes the upstream error.
+
+## Why not CORS / direct browser→peer connections (Approach B)
+
+Approach B has the browser talk to each peer directly, with CORS on the peer.
+It fails on credentials. `EventSource` cannot set request headers, so a bearer
+credential would have to travel as `?token=` — which lands in browser history,
+referrer headers, and proxy logs — or live in `localStorage`, i.e. a credential
+the page can read. CORS would additionally widen a loopback, token-authenticated
+API to every origin the browser visits, and a mixed-content page (an `https`
+front end) could not reach an `http` peer at all. It would also thread N base
+URLs through every call site instead of one `api()` helper. Rejected.
+
+## Why switching, not merging (Approach C)
+
+The Hub stamps its own monotonic `Seq` per instance, so a merged browser view
+would mix cursors: a gap in instance A tells the page nothing about instance B,
+and resuming from one `since` across two streams is meaningless (`modules/client`
+SPECS invariant 2). Merging would also require an `instance` field on
+`wire.Event` and a second merge implementation — and merging is already
+`wllr-multiplex`'s job. The browser therefore **switches**: one instance rendered
+at a time, one stream, no shared cursor.
+
+## Why one `EventSource`, re-subscribed on switch
+
+The page holds a single module-scope `EventSource` (`var es`) rather than one per
+instance. A per-instance view needs no fan-out, the browser already reconnects a
+stream natively, and the page holds no cursor to preserve. `switchInstance`
+closes the old stream, sets the new instance, calls `resetView`, and opens one
+new stream. What keeps instances from leaking into each other is not the stream
+count but two page-side rules: `resetView` clears every per-instance surface, and
+`stale(id)` drops a refresh whose instance has since been switched away from.
+Both are pinned by `TestHandleClientHasInstanceSelector`: it asserts the
+`resetView` reset markers, that `function stale(` exists, and that
+`if (stale(id))` is applied at least as many times as there are guarded fetch
+paths (the `refresh*` functions plus the model picker and the `/context` modal,
+which fetch before opening an overlay).
+
+## Why the proxy strips `?token=` too
+
+The origin's `authenticate` accepts the token as a query parameter
+(`?token=…`) as well as a bearer header. If the proxy forwarded `RawQuery`
+verbatim, a browser URL carrying the origin's token would be relayed to the peer
+— the origin's credential handed to a different process. The `Rewrite` hook
+therefore deletes **both** forms the origin accepts (the `Authorization` header
+and the `token` query parameter) before injecting the peer's own token. This is
+covered by `TestPeerProxyDropsOriginTokenQuery`.

@@ -106,6 +106,7 @@ The HTTP surface for the HTML front end.
 | `TestHandleClientHasQueueAndToolPanes` | The page carries the queued-messages and tool-activity panes (containers, clear button, and driver functions over `/api/inbox`, `/api/inbox/clear`, and the `tool_call`/`tool_result` frames), and the queued pane never interpolates message text into markup |
 | `TestHandleClientHasCommandAutocomplete` | The page carries the slash-command autocomplete (the `#suggest` dropdown, `/api/commands`, the shared `slashWordAt` rule, and the dispatch that routes `/model`, `/thinking`, `/openrouter-speed` and extension commands through the callback endpoint) |
 | `TestHandleClientScriptParses` | The embedded `<script>` body passes `node --check` (Go cannot compile-check the page's JavaScript); skips when node is unavailable |
+| `TestHandleClientHasInstanceSelector` | The page has the instance selector and `api()` routing: `switchInstance`/`resetView`/`state.self`, `EventSource(api("api/stream"))`, exactly one `new EventSource(`, no unprefixed per-instance call, and every per-instance reset marker in `resetView` |
 | `TestHandleClientRejectsUnknownPath` | Only `/` serves the page; other non-API paths → `404` |
 | `TestHandleSceneSnapshot` | `GET /api/scene` returns areas in order with rendered HTML and the protocol version |
 | `TestHandleSceneRejectsNonGet` | `POST /api/scene` → `405` |
@@ -184,6 +185,48 @@ passed, not what a real engine did with it.
 | `TestUICallback_UnsupportedSentinelsAre501` | `ErrNoCoreHandler`/`ErrNoExtensionHost` → `501`, not `500` |
 | `TestUICallback_OtherErrorIs500` | Any other router error → `500` |
 
+## instances_test.go
+
+The `GET /api/instances` contract and the peer health probe, driven against a
+real `httptest` peer (a real TCP `/api/health`) through the fully wrapped handler.
+
+| Test | Intent |
+|------|--------|
+| `TestHandleInstancesDefaultsSelfID` | No peers → `200`, `self == DefaultSelfID`, exactly one entry (`self:true`, `status:"ok"`, `protocol:ProtocolVersion`) |
+| `TestHandleInstancesRejectsNonGet` | `POST /api/instances` → `405`, matching every other handler's method guard |
+| `TestHandleInstancesListsSelfAndPeers` | Self first then the peer with the health it reported (`protocol`/`last_seq`); the probe sent `Authorization: Bearer <peerToken>` (client SPECS invariant 9); the body contains neither the peer URL nor its token (invariant 12) |
+| `TestHandleInstancesReportsPeerDown` | A closed peer still yields `200`; that entry is `status:"down"` with a non-empty `error`, and a healthy peer in the same request is unaffected (failure isolation) |
+| `TestHandleInstancesErrorOmitsPeerTopology` | A down peer's `error` is the sanitized class (`unreachable`) and the body contains no `http://`, peer host, or peer port — the raw `net/http` error must not leak (invariant 12) |
+| `TestProbeCauseClassifiesWithoutTopology` | `probeCause` maps a connection-refused `url.Error` → `unreachable` and a (wrapped) `context.DeadlineExceeded` → `timeout`, emitting no host/port/`http` in either case |
+| `TestProbeOnceReportsNon200Status` | A peer answering `401` is `down` with `error == "http 401"` — a status code is safe to show |
+| `TestProbeRejectsNonWllr200` | A `200` from a non-wllr service (`{"hello":"world"}`, no `ok`/`protocol`) is `down` with `error == "malformed response"`, not healthy |
+| `TestProbeCanceledRequestDoesNotCacheDown` | A cancelled probe attempt is indeterminate and is not cached as `down`; a cancelled *request* context does not cancel a probe against a healthy peer (the probe runs on a request-independent base context) |
+| `TestHandleInstancesCachesPeerProbe` | Two sequential polls hit the peer's `/api/health` exactly once (the `probeTTL` cache) |
+| `TestHandleInstancesSkipsInvalidPeers` | Empty id, an id outside the routable charset (`bad/id`, `has space`), duplicate id, self-collision, and an unparseable URL are dropped (`buildPeers`); only `self` + one peer remain, and a dropped/self id is not proxiable (`404`) |
+
+## proxy_test.go
+
+The reverse proxy's rewrite, credential handling, body/stream forwarding, and
+fault behaviour. The peer is a real `httptest` server that records what it
+received, so the assertions are on the forwarded request, not a mock.
+
+| Test | Intent |
+|------|--------|
+| `TestPeerProxyForwardsAPIPathQueryAndToken` | Prefix stripped (`/api/instances/ci/api/history` → `/api/history`), query preserved, inbound `Authorization` replaced by the peer token |
+| `TestPeerProxyForwardsPathToPeerBase` | A peer `BaseURL` carrying a path (`http://host/wllr`) still receives `/wllr/api/history`: the prefix is stripped *before* the base path is joined (the probe/proxy parity L2) |
+| `TestPeerProxyDropsOriginTokenQuery` | An inbound `?token=` is deleted before forwarding and every other parameter survives (invariant 12) |
+| `TestPeerProxyForwardsPostBody` | A `POST` body is forwarded verbatim and the peer's response returns unchanged |
+| `TestPeerProxyStreamsSSE` | Two peer SSE frames arrive and the response is flushed (`rec.Flushed`) — the buffering regression guard |
+| `TestPeerProxyUnknownInstance404` | An unknown id and the self id both `404`; the peer sees zero requests (invariant 13) |
+| `TestPeerProxyRejectsNonAPIPath` | `/api/instances/ci/secret` and `/api/instances/ci/` `404` with zero requests at the peer — not an open proxy (invariant 13) |
+| `TestPeerProxyReturns502WhenPeerDown` | A closed peer → `502` with `instance unreachable` (failure isolation) |
+| `TestPeerProxyReturns502WhenPeerStalls` | A peer that accepts the connection but never writes response headers → prompt `502` (the shared transport's `ResponseHeaderTimeout`), not an indefinite hang |
+| `TestPeerProxyStripsPeerLocationOrigin` | A 3xx peer `Location` is reduced to a same-origin absolute path: an absolute `http://evil.example/x?y=1` → `/x?y=1`, a protocol-relative `//evil.example/x` → `/x`, backslash variants and an opaque `javascript:` → a plain path, and an already-relative `/relative?q=1` is left unchanged (invariant 12) |
+| `TestPeerProxyStripsPeerSetCookie` | A peer `Set-Cookie` is not forwarded to the browser, so a peer cannot plant origin-scoped state (invariant 12) |
+| `TestPeerProxyLogsFailure` | A proxy failure is logged with the peer id (the browser body stays generic) |
+| `TestPeerAPIURLJoinsBasePath` | The probe helper resolves a peer `BaseURL` with a path (`http://host/wllr`) or trailing slash to its effective URL (L2); see `TestPeerProxyForwardsPathToPeerBase` for the proxy half |
+| `TestServerAuthCoversInstanceRoutes` | With a token configured, both new routes are `401` without it (server SPECS invariant 6) |
+
 ## Headless bridge installation
 
 `cmd/serve.go` installs the harness bridges via
@@ -207,6 +250,23 @@ stub, so `create_agent` is attempted for real in serve mode.
 `api server listening`, serves the HTML client at `/` (17011 bytes, `EventSource`
 present, protocol placeholder substituted), answers `/api/health` and
 `/api/scene`, returns `404` for an unknown path, and shuts down cleanly.
+
+Multi-instance switching is verified live against two built binaries on
+different ports (`wllr serve 127.0.0.1:8765 -instance-id local -peer
+dev=http://127.0.0.1:8766` plus a plain `wllr serve 127.0.0.1:8766`):
+
+- `GET /api/instances` lists `self` then `dev`, both `status:"ok"`,
+  `protocol:1`; `grep 8766` over the body finds nothing (no URL/token leak).
+- `/api/instances/dev/api/health` returns the peer's health through the proxy;
+  `/api/instances/dev/api/stream` streams the peer's `ready` and `ui_area`
+  frames.
+- `/api/instances/dev/secret` and an unknown id both `404`; a third peer pointed
+  at a closed port reports `status:"down"` with the sanitized cause
+  (`error:"unreachable"`, no host/port in the body), and its proxy answers `502`.
+- In a browser the selector lists `local` and `dev`; switching swaps transcript,
+  scene areas, statuses, queue, tools, usage, and focus; `?instance=dev`
+  survives a reload; and stopping `dev` shows `dev (down)` with a disabled
+  composer without disturbing `local`.
 
 The extension-driven scene path is verified live against a **real model turn**
 with the bundled extensions built (`make builtins`): on session start

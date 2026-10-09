@@ -1,5 +1,9 @@
 # Knowledge Log
 
+## 2026-10-09
+
+* **Update**: Recorded the serve-instance-switching decision (origin-server reverse proxy over per-peer client followers / direct browser connections / hub merge; switch, not merge) and captured the browser-instance work in the `server` package doc (`instances.go` — `GET /api/instances` and the sanitized-peer-error contract; `proxy.go` — the peer reverse proxy; dependency list unchanged) and the `client` package doc (`instances.go` — the `InstanceFlags`/`BuildInstances` parser shared with `wllr serve`).
+
 ## 2026-09-23
 
 * **Update**: `/history` session selection now uses the split picker — `ShowPickerParams.Split` + per-item `Preview` in `modules/sdk`, split rendering/filtering/pgup-pgdn in `PickerView`, and a capped `transcriptPreview` in the history extension. Documented in harness SPECS/NOTES/TESTS, sdk SPECS invariant 18, extension SPECS/TESTS, `docs/extensions.md`, and the history README.

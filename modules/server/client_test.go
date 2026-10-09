@@ -123,7 +123,11 @@ func TestHandleClientScriptParses(t *testing.T) {
 	if err := os.WriteFile(path, []byte(js), 0o600); err != nil {
 		t.Fatalf("write script: %v", err)
 	}
-	cmd := exec.Command(node, "--check", path) //nolint:gosec // node path resolved via LookPath; input is our own embedded page
+	cmd := exec.Command(
+		node,
+		"--check",
+		path,
+	) //nolint:gosec // node path resolved via LookPath; input is our own embedded page
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("client JavaScript failed syntax check: %v\n%s", err, out)
@@ -155,6 +159,102 @@ func TestHandleClientHasCommandAutocomplete(t *testing.T) {
 	for _, want := range []string{"__wllr:model", "__wllr:thinking", "__wllr:speed"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("command dispatch missing callback %q", want)
+		}
+	}
+}
+
+// TestHandleClientHasInstanceSelector pins the page's instance-switching
+// behavior. Switching is view-only: exactly one EventSource is held and
+// re-subscribed on switch, every per-instance call goes through api(), and
+// resetView clears every per-instance surface so instance A's transcript,
+// scene, statuses, queue, tools, usage, and focus can never appear in B's view.
+func TestHandleClientHasInstanceSelector(t *testing.T) {
+	srv := New(nil, Options{})
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	body := rec.Body.String()
+
+	for _, want := range []string{
+		`id="instance"`, "api/instances", "switchInstance", "resetView",
+		"state.self", "api/instances/", "encodeURIComponent(state.instance)",
+		`EventSource(api("api/stream"))`,
+		// The stale-response guard itself: the invariant names it as the thing
+		// that keeps a slow instance-A reply out of instance B's view, so the
+		// guard's definition must exist and be applied by every fetcher that can
+		// paint into the view.
+		"function stale(",
+		// H1a: rememberInstance builds the new query from the existing one, so a
+		// switch/reload keeps ?token= (and any other parameter) instead of
+		// clobbering the query. The negative check below makes the old clobbering
+		// form detectable.
+		"URLSearchParams(location.search)", `q.set("instance", id)`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("client page missing %q", want)
+		}
+	}
+	// Pin that the guard is actually applied, not just defined: every refresh* /
+	// overlay-opening fetch must drop its response when the instance changed.
+	// There are eight guarded fetch paths (agents, history, scene, inbox, models,
+	// commands, the model picker, and the /context modal); a lower count means a
+	// path was left unguarded.
+	if n := strings.Count(body, "if (stale(id))"); n < 8 {
+		t.Errorf("page applies if (stale(id)) %d times, want >= 8 (the guarded fetch paths)", n)
+	}
+	// H1a regression, negative half: the pre-fix rememberInstance rewrote the
+	// query to "?instance=<id>" alone, silently dropping a ?token= and any other
+	// parameter.
+	if strings.Contains(body, `"?instance=" + encodeURIComponent(`) {
+		t.Error("rememberInstance must build on location.search, not clobber it with ?instance=")
+	}
+	// L6: the ready handler refreshes the selector, so a peer that has recovered
+	// loses its "(down)" label without a switch (the page does not poll).
+	if start := strings.Index(body, `case "ready":`); start >= 0 {
+		ready := body[start:]
+		if end := strings.Index(ready, `case "user_message":`); end >= 0 {
+			ready = ready[:end]
+		}
+		if !strings.Contains(ready, "refreshInstances();") {
+			t.Error("ready handler does not call refreshInstances(), so a recovered peer keeps its (down) label")
+		}
+	} else {
+		t.Error(`client page missing case "ready":`)
+	}
+	// resetView's per-instance reset list: each marker must be present so a
+	// switch cannot leak instance A's view into instance B.
+	for _, want := range []string{
+		`state.focused = "main"`, "state.stream = {}", "state.statuses = {}",
+		"state.tools = []", "state.inbox = []", "state.usage = null",
+		"state.agents = []", "state.chatArea = false",
+		`$("scene-main").innerHTML = ""`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("resetView missing reset %q", want)
+		}
+	}
+	// One stream, re-subscribed on switch: no merged cursors, no per-instance
+	// EventSource (client SPECS invariant 2).
+	if n := strings.Count(body, "new EventSource("); n != 1 {
+		t.Errorf("page has %d EventSource constructions, want exactly 1", n)
+	}
+	// Every per-instance call is prefixed via api(); only the origin routes
+	// /api/instances and /api/health stay unprefixed.
+	for _, bad := range []string{
+		`fetch("api/history`, `fetch("api/agents`, `fetch("api/scene`,
+		`fetch("api/inbox`, `fetch("api/models`, `fetch("api/context`,
+		`fetch("api/commands`, `fetch("api/submit`, `fetch("api/cancel`,
+		`fetch("api/ui/callback`, `new EventSource("api/stream")`,
+	} {
+		if strings.Contains(body, bad) {
+			t.Errorf("per-instance call not routed through api(): %q", bad)
+		}
+	}
+	// Keep the existing no-raw-text-into-markup property intact.
+	for _, bad := range []string{
+		"innerHTML = content", "innerHTML = f.text", "innerHTML = text",
+	} {
+		if strings.Contains(body, bad) {
+			t.Errorf("client must not interpolate raw message text into markup: %q", bad)
 		}
 	}
 }
