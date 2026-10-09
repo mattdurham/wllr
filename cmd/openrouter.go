@@ -50,8 +50,8 @@ func (cfg *Config) openRouterModel(id string) (openRouterModelConfig, bool) {
 // the model is then treated as able to reason, preserving the previous
 // always-offer behavior. "reasoning" is the modern parameter name;
 // "include_reasoning" is the legacy spelling OpenRouter still lists.
-func openRouterReasoningCapability(settings wllrSettings, id string) (supported, declared bool) {
-	for _, model := range settings.OpenRouterModels {
+func openRouterReasoningCapability(models []openRouterModelConfig, id string) (supported, declared bool) {
+	for _, model := range models {
 		if model.ID != id {
 			continue
 		}

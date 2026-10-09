@@ -382,7 +382,7 @@ func supportedThinkingModesForModel(provider, model string) []thinkingMode {
 		// reason (mirrors the local provider's declared handling). Models
 		// pinned before the capability was captured carry no data and keep
 		// the set.
-		if supports, declared := openRouterReasoningCapability(loadWllrSettings(), model); declared && !supports {
+		if supports, declared := openRouterReasoningCapability(loadWllrSettings().OpenRouterModels, model); declared && !supports {
 			return nil
 		}
 		return openRouterStandardThinkingModes()
@@ -469,7 +469,7 @@ func startupThinkingMode(ctx context.Context, cfg *Config, provider string) stri
 			// persisted — the request would carry a parameter the model
 			// cannot use. Models pinned before the capability was captured
 			// (no data) keep the persisted mode.
-			if supports, declared := openRouterReasoningCapability(loadWllrSettings(), cfg.Model); declared && !supports {
+			if supports, declared := openRouterReasoningCapability(cfg.OpenRouterModels, cfg.Model); declared && !supports {
 				return ""
 			}
 		}

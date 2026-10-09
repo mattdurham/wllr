@@ -53,20 +53,20 @@ func TestOpenRouterReasoningCapability(t *testing.T) {
 		{ID: "legacy-param/model", SupportedParameters: []string{"include_reasoning"}},
 		{ID: "uncaptured/model"},
 	}}
-	if supports, declared := openRouterReasoningCapability(settings, "reasoning/model"); !supports || !declared {
+	if supports, declared := openRouterReasoningCapability(settings.OpenRouterModels, "reasoning/model"); !supports || !declared {
 		t.Errorf("reasoning/model = (%v, %v), want (true, true)", supports, declared)
 	}
-	if supports, declared := openRouterReasoningCapability(settings, "plain/model"); supports || !declared {
+	if supports, declared := openRouterReasoningCapability(settings.OpenRouterModels, "plain/model"); supports || !declared {
 		t.Errorf("plain/model = (%v, %v), want (false, true)", supports, declared)
 	}
-	if supports, declared := openRouterReasoningCapability(settings, "legacy-param/model"); !supports || !declared {
+	if supports, declared := openRouterReasoningCapability(settings.OpenRouterModels, "legacy-param/model"); !supports || !declared {
 		t.Errorf("legacy spelling must count as reasoning-capable, got (%v, %v)", supports, declared)
 	}
 	// No captured data means an older pin: treated as able, not declared.
-	if supports, declared := openRouterReasoningCapability(settings, "uncaptured/model"); !supports || declared {
+	if supports, declared := openRouterReasoningCapability(settings.OpenRouterModels, "uncaptured/model"); !supports || declared {
 		t.Errorf("uncaptured/model = (%v, %v), want (true, false)", supports, declared)
 	}
-	if supports, declared := openRouterReasoningCapability(settings, "not-pinned"); !supports || declared {
+	if supports, declared := openRouterReasoningCapability(settings.OpenRouterModels, "not-pinned"); !supports || declared {
 		t.Errorf("not-pinned = (%v, %v), want (true, false)", supports, declared)
 	}
 }
