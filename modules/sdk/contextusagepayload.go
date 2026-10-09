@@ -19,10 +19,10 @@ package sdk
 // folded away. Extensions use a non-empty Trigger as the signal to surface a
 // compaction notice.
 type ContextUsagePayload struct {
+	Trigger           string       `json:"trigger,omitempty"`
 	Usage             ContextUsage `json:"usage"`
-	Compacted         bool         `json:"compacted"`
 	Compactions       int          `json:"compactions,omitempty"`
 	ThresholdPct      float64      `json:"threshold_pct,omitempty"`
-	Trigger           string       `json:"trigger,omitempty"`
 	MessagesCompacted int          `json:"messages_compacted,omitempty"`
+	Compacted         bool         `json:"compacted"`
 }

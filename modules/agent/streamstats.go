@@ -59,14 +59,23 @@ type tokSample struct {
 // tests are deterministic. A streamStats is owned by one turn, but its live
 // rate is read from the UI goroutine, so every method takes the internal lock.
 type streamStats struct {
-	mu sync.Mutex
-
 	// spanStart is when the currently open provider-call span began. Zero when
 	// no span is open (before the first step, and after finish).
 	spanStart time.Time
 	// lastTokenAt is the arrival time of the most recent text delta in the
 	// open span. Zero inside a span that has streamed nothing yet (TTFT window).
-	lastTokenAt time.Time
+	lastTokenAt  time.Time
+	lastSampleAt time.Time
+	lastSpark    string
+
+	// Sparkline state (all guarded by mu). samples records cumulative
+	// totalChars at token arrivals for the trailing-window rate; hist holds
+	// at most sparkPoints one-second windowed rates, oldest first, rendered
+	// as a constant-width frame (see sparkPoints);
+	// lastSampleAt is when hist last grew (sample cadence); lastSpark is the
+	// bars frozen at finish and shown while idle.
+	samples []tokSample
+	hist    []float64
 	// spanChars counts text-delta characters in the open span for the live
 	// chars/4 estimate. Reset when the span closes — the step's reported
 	// output tokens supersede the estimate, and carrying the chars forward
@@ -81,21 +90,13 @@ type streamStats struct {
 	doneOutput int64
 	// streamedNS is the accumulated duration of closed spans.
 	streamedNS time.Duration
-	// finished marks that finish has run; after it, live returns lastTps.
-	finished bool
 	// lastTps is the frozen end-of-turn rate.
 	lastTps float64
 
-	// Sparkline state (all guarded by mu). samples records cumulative
-	// totalChars at token arrivals for the trailing-window rate; hist holds
-	// at most sparkPoints one-second windowed rates, oldest first, rendered
-	// as a constant-width frame (see sparkPoints);
-	// lastSampleAt is when hist last grew (sample cadence); lastSpark is the
-	// bars frozen at finish and shown while idle.
-	samples      []tokSample
-	hist         []float64
-	lastSampleAt time.Time
-	lastSpark    string
+	mu sync.Mutex
+
+	// finished marks that finish has run; after it, live returns lastTps.
+	finished bool
 }
 
 func newStreamStats() *streamStats { return &streamStats{} }

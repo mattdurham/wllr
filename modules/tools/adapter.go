@@ -153,8 +153,8 @@ func (a *sdkToolAdapter) Run(ctx context.Context, call fantasy.ToolCall) (fantas
 	}
 
 	type execResult struct {
-		result extension.ToolResult
 		err    error
+		result extension.ToolResult
 	}
 	done := make(chan execResult, 1) // buffered: abandoned goroutine never blocks
 	execCtx, cancelExec := context.WithTimeout(ctx, toolCallTimeout)
