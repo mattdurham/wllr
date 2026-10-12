@@ -27,7 +27,7 @@ func TestIsContextTooLong_Nil(t *testing.T) {
 
 // TestIsContextTooLong_StructuredProviderError is the core regression guard:
 // the adapter parses its own rejection format and sets the flag, so detection
-// must not depend on wllr recognising the wording. The message here is kronk's
+// must not depend on wllr recognizing the wording. The message here is kronk's
 // "input tokens [N] exceed context window [M]", which the previous
 // string-matching implementation did not match at all.
 func TestIsContextTooLong_StructuredProviderError(t *testing.T) {
@@ -119,7 +119,7 @@ func TestIsContextTooLong_UnrelatedError(t *testing.T) {
 }
 
 // TestIsContextTooLong_ProviderFormats pins detection for every rejection
-// format the fantasy adapters recognise, using the structured fields each
+// format the fantasy adapters recognize, using the structured fields each
 // adapter sets. Six of these nine were missed by the previous
 // string-matching implementation, so this table is the coverage contract for
 // the local provider in particular: providerLocal is OpenAI-compatible, and

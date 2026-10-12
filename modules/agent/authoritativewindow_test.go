@@ -232,7 +232,7 @@ func TestExecuteTurn_ReactiveAdoptsAuthoritativeWindow(t *testing.T) {
 }
 
 // TestAdoptAuthoritativeContextWindow_DrivesUsageTrigger ties the clamp to the
-// behaviour it exists for: a prompt that exceeded the model's real window while
+// behavior it exists for: a prompt that exceeded the model's real window while
 // the stale window still reported it as comfortably under the trigger must
 // cross the 80% threshold once the real window is adopted — so the next turn
 // compacts instead of being rejected again.

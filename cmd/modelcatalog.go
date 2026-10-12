@@ -77,7 +77,7 @@ var (
 	// picker order. It is also the default set for local models whose endpoint
 	// does not declare one (see openAIStandardThinkingModes).
 	openAIThinkingModes = []thinkingMode{
-		{ID: thinkingModeNone, Name: "None", Description: "No extended reasoning"},
+		{ID: thinkingModeNone, Name: thinkingLabelNone, Description: "No extended reasoning"},
 		{ID: thinkingModeMinimal, Name: "Minimal", Description: "Minimal extended reasoning"},
 		{ID: thinkingModeLow, Name: thinkingLabelLow, Description: "Extended reasoning (low effort)"},
 		{ID: thinkingModeMedium, Name: thinkingLabelMedium, Description: "Extended reasoning (medium effort)"},
@@ -88,7 +88,7 @@ var (
 	// family and gpt-6-sol/luna: minimal is gone, and a new "max" level above
 	// xhigh is added.
 	gpt56ThinkingModes = []thinkingMode{
-		{ID: thinkingModeNone, Name: "None", Description: "No extended reasoning"},
+		{ID: thinkingModeNone, Name: thinkingLabelNone, Description: "No extended reasoning"},
 		{ID: thinkingModeLow, Name: thinkingLabelLow, Description: "Extended reasoning (low effort)"},
 		{ID: thinkingModeMedium, Name: thinkingLabelMedium, Description: "Extended reasoning (medium effort)"},
 		{ID: thinkingModeHigh, Name: thinkingLabelHigh, Description: "Extended reasoning (high effort)"},
@@ -118,7 +118,7 @@ var (
 	// openai-only extremes (minimal, xhigh) are not offered: routing an
 	// unsupported effort to a non-OpenAI upstream would fail the request.
 	openRouterThinkingModes = []thinkingMode{
-		{ID: thinkingModeNone, Name: "None", Description: "No extended reasoning"},
+		{ID: thinkingModeNone, Name: thinkingLabelNone, Description: "No extended reasoning"},
 		{ID: thinkingModeLow, Name: thinkingLabelLow, Description: "Extended reasoning (low effort)"},
 		{ID: thinkingModeMedium, Name: thinkingLabelMedium, Description: "Extended reasoning (medium effort)"},
 		{ID: thinkingModeHigh, Name: thinkingLabelHigh, Description: "Extended reasoning (high effort)"},
@@ -166,7 +166,7 @@ var modelCatalog = map[string][]modelInfo{
 			Name:          "Claude Haiku 4.5",
 			ContextWindow: 200000,
 			ThinkingModes: []thinkingMode{
-				{ID: thinkingModeNone, Name: "None", Description: "No extended thinking"},
+				{ID: thinkingModeNone, Name: thinkingLabelNone, Description: "No extended thinking"},
 			},
 		},
 		{

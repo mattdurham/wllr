@@ -143,7 +143,7 @@ func openRouterReasoningForThinkingMode(modeID string) *fantasyopenrouterprovide
 	case thinkingModeLow, thinkingModeMedium, thinkingModeHigh:
 		effort := fantasyopenrouterprovider.ReasoningEffort(modeID)
 		return &fantasyopenrouterprovider.ReasoningOptions{
-			Effort: fantasyopenrouterprovider.ReasoningEffortOption(effort),
+			Effort: new(effort),
 		}
 	default:
 		return nil

@@ -49,22 +49,12 @@ var thinkingLevelLabels = map[thinkingLevel]string{
 // thinkingLabel* are the picker label strings shared by the level labels and
 // the catalog thinking-mode rows.
 const (
+	thinkingLabelNone   = "None"
 	thinkingLabelLow    = "Low"
 	thinkingLabelMedium = "Medium"
 	thinkingLabelHigh   = "High"
 	thinkingLabelXHigh  = "X-High"
 )
-
-// anthropicThinkingBudget maps a level to Anthropic extended-thinking token
-// budgets. 0 means thinking is disabled (no ThinkingProviderOption emitted).
-var anthropicThinkingBudget = map[thinkingLevel]int64{
-	thinkingOff:     0,
-	thinkingMinimal: 2_048,
-	thinkingLow:     4_096,
-	thinkingMedium:  16_384,
-	thinkingHigh:    32_768,
-	thinkingXHigh:   65_536,
-}
 
 // geminiThinkingBudget maps a level to Gemini thinking-budget tokens. 0 disables.
 var geminiThinkingBudget = map[thinkingLevel]int64{
@@ -74,17 +64,6 @@ var geminiThinkingBudget = map[thinkingLevel]int64{
 	thinkingMedium:  16_384,
 	thinkingHigh:    32_768,
 	thinkingXHigh:   65_536,
-}
-
-// openAIReasoningEffort maps a level to OpenAI reasoning_effort values. The
-// bool is false for thinkingOff (no reasoning-effort option emitted).
-var openAIReasoningEffort = map[thinkingLevel]fantasyopenapiprovider.ReasoningEffort{
-	thinkingOff:     fantasyopenapiprovider.ReasoningEffortNone,
-	thinkingMinimal: fantasyopenapiprovider.ReasoningEffortMinimal,
-	thinkingLow:     fantasyopenapiprovider.ReasoningEffortLow,
-	thinkingMedium:  fantasyopenapiprovider.ReasoningEffortMedium,
-	thinkingHigh:    fantasyopenapiprovider.ReasoningEffortHigh,
-	thinkingXHigh:   fantasyopenapiprovider.ReasoningEffortXHigh,
 }
 
 // openAIReasoningEffortByMode maps standard OpenAI reasoning-effort mode IDs
@@ -104,19 +83,6 @@ var openAIReasoningEffortByMode = map[string]fantasyopenapiprovider.ReasoningEff
 	thinkingModeHigh:    fantasyopenapiprovider.ReasoningEffortHigh,
 	thinkingModeXHigh:   fantasyopenapiprovider.ReasoningEffortXHigh,
 	thinkingModeMax:     fantasyopenapiprovider.ReasoningEffortMax,
-}
-
-// openRouterReasoningEffort maps a thinking level to OpenRouter reasoning
-// effort values. OpenRouter normalizes reasoning across upstreams and
-// documents only low/medium/high (plus an enabled flag for on/off), so the
-// openai-only extremes are absent from the map: levels outside it degrade in
-// thinkingModeIDForLevel rather than being sent and failing on a non-OpenAI
-// upstream. "off" is handled separately (enabled:false — see
-// openRouterReasoningForThinkingMode).
-var openRouterReasoningEffort = map[thinkingLevel]fantasyopenrouterprovider.ReasoningEffort{
-	thinkingLow:    fantasyopenrouterprovider.ReasoningEffortLow,
-	thinkingMedium: fantasyopenrouterprovider.ReasoningEffortMedium,
-	thinkingHigh:   fantasyopenrouterprovider.ReasoningEffortHigh,
 }
 
 // isValidThinkingLevel reports whether s names a known level.

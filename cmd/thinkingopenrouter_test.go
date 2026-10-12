@@ -376,7 +376,7 @@ func TestStartupThinkingModeRespectsModelVocabulary(t *testing.T) {
 	}
 
 	// Unknown models resolve against the provider's standard vocabulary: a
-	// standard effort saved before the model was catalogued still restores,
+	// standard effort saved before the model was cataloged still restores,
 	// a nonstandard one does not.
 	if err := saveThinkingMode(providerOpenAI, "future-model", thinkingModeHigh); err != nil {
 		t.Fatal(err)

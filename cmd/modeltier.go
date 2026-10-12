@@ -399,7 +399,7 @@ func thinkingLevelRank(lvl thinkingLevel) float64 {
 // outside the ordering; those rows are skipped when degrading.
 func thinkingModeRank(m thinkingMode) (float64, bool) {
 	switch m.Name {
-	case "None":
+	case thinkingLabelNone:
 		return 0, true
 	case "Minimal":
 		return 1, true
