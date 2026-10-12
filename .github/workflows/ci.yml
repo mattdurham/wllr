@@ -142,6 +142,29 @@ jobs:
       - name: Build
         run: go build ./...
 
+  # Native `go build ./...` and `go test ./...` skip //go:build wasip1 files, so
+  # a wasip1 extension referencing an uncommitted symbol passes every other job
+  # and only breaks in the real WASM build. This job compiles each extension for
+  # GOOS=wasip1. It needs neither TinyGo nor Docker.
+  wasip1:
+    name: WASM Extensions (wasip1)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+
+      - name: Compile-check WASM extensions for wasip1
+        run: scripts/check-wasip1-extensions.sh
+
   staticcheck:
     name: Static Analysis (staticcheck)
     runs-on: ubuntu-latest

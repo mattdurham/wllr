@@ -24,6 +24,7 @@
 #   make golines          — auto-fix line length
 #   make deadcode         — check for unreachable code
 #   make staticcheck      — run staticcheck (additional static analysis)
+#   make wasip1           — compile-check WASM extensions for GOOS=wasip1
 #   make install-tools    — install all code quality tools
 #   make ci               — run full CI pipeline locally
 #   make precommit        — run build and all quality checks (REQUIRED before commit)
@@ -77,7 +78,7 @@ PACKAGES = $(shell go list -e -f '{{if .GoFiles}}{{.ImportPath}}{{end}}' ./...)
 
 .DEFAULT_GOAL := build
 
-.PHONY: all build builtins extensions optional-extensions install clean clean-extensions lint test format precommit ci install-tools nilaway betteralign betteralign-fix gofumpt-check gofumpt golines-check golines format-all deadcode staticcheck docs-check generate-models
+.PHONY: all build builtins extensions optional-extensions install clean clean-extensions lint test format precommit ci install-tools nilaway betteralign betteralign-fix gofumpt-check gofumpt golines-check golines format-all deadcode staticcheck wasip1 docs-check generate-models
 
 all: extensions build
 
@@ -192,6 +193,14 @@ staticcheck:
 	@staticcheck -f stylish ./...
 	@echo "==> Staticcheck passed!"
 
+# Compile-check every WASM extension for GOOS=wasip1. Native `go build ./...`
+# and `go test ./...` skip //go:build wasip1 files entirely, so a wasip1 file
+# referencing an uncommitted symbol passes every other check and only fails in
+# the real WASM build. Needs neither TinyGo nor Docker, so CI can run it.
+wasip1:
+	@echo "==> Compile-checking WASM extensions for wasip1..."
+	@scripts/check-wasip1-extensions.sh
+
 # Check that statically registered native and bundled extension tools have
 # discoverable input/output contract docs.
 docs-check:
@@ -266,43 +275,49 @@ ci:
 	@echo "🔄 Running CI pipeline locally..."
 	@echo ""
 	@PASS=0; FAIL=0; \
-	echo "── [1/7] Format check (gofumpt)"; \
+	echo "── [1/8] Format check (gofumpt)"; \
 	if $(MAKE) gofumpt-check > /tmp/wllr-ci-gofumpt.log 2>&1; then \
 		echo "   ✅ PASS"; PASS=$$((PASS + 1)); \
 	else \
 		echo "   ❌ FAIL"; tail -20 /tmp/wllr-ci-gofumpt.log | sed 's/^/   /'; FAIL=$$((FAIL + 1)); \
 	fi; \
-	echo "── [2/7] Line length check (golines)"; \
+	echo "── [2/8] Line length check (golines)"; \
 	if $(MAKE) golines-check > /tmp/wllr-ci-golines.log 2>&1; then \
 		echo "   ✅ PASS"; PASS=$$((PASS + 1)); \
 	else \
 		echo "   ❌ FAIL"; tail -20 /tmp/wllr-ci-golines.log | sed 's/^/   /'; FAIL=$$((FAIL + 1)); \
 	fi; \
-	echo "── [3/7] Lint (golangci-lint - 40+ linters)"; \
+	echo "── [3/8] Lint (golangci-lint - 40+ linters)"; \
 	if $(MAKE) lint > /tmp/wllr-ci-lint.log 2>&1; then \
 		echo "   ✅ PASS"; PASS=$$((PASS + 1)); \
 	else \
 		echo "   ❌ FAIL"; tail -30 /tmp/wllr-ci-lint.log | sed 's/^/   /'; FAIL=$$((FAIL + 1)); \
 	fi; \
-	echo "── [4/7] Struct alignment (betteralign)"; \
+	echo "── [4/8] Struct alignment (betteralign)"; \
 	if $(MAKE) betteralign > /tmp/wllr-ci-betteralign.log 2>&1; then \
 		echo "   ✅ PASS"; PASS=$$((PASS + 1)); \
 	else \
 		echo "   ❌ FAIL"; tail -20 /tmp/wllr-ci-betteralign.log | sed 's/^/   /'; FAIL=$$((FAIL + 1)); \
 	fi; \
-	echo "── [5/7] Tests"; \
+	echo "── [5/8] Tests"; \
 	if $(MAKE) test > /tmp/wllr-ci.log 2>&1; then \
 		echo "   ✅ PASS"; PASS=$$((PASS + 1)); \
 	else \
 		echo "   ❌ FAIL"; tail -30 /tmp/wllr-ci.log | sed 's/^/   /'; FAIL=$$((FAIL + 1)); \
 	fi; \
-	echo "── [6/7] Deadcode check"; \
+	echo "── [6/8] WASM extensions (wasip1)"; \
+	if $(MAKE) wasip1 > /tmp/wllr-ci-wasip1.log 2>&1; then \
+		echo "   ✅ PASS"; PASS=$$((PASS + 1)); \
+	else \
+		echo "   ❌ FAIL"; tail -20 /tmp/wllr-ci-wasip1.log | sed 's/^/   /'; FAIL=$$((FAIL + 1)); \
+	fi; \
+	echo "── [7/8] Deadcode check"; \
 	if $(MAKE) deadcode > /tmp/wllr-ci-deadcode.log 2>&1; then \
 		echo "   ✅ PASS"; PASS=$$((PASS + 1)); \
 	else \
 		echo "   ❌ FAIL"; tail -20 /tmp/wllr-ci-deadcode.log | sed 's/^/   /'; FAIL=$$((FAIL + 1)); \
 	fi; \
-	echo "── [7/7] Staticcheck"; \
+	echo "── [8/8] Staticcheck"; \
 	if $(MAKE) staticcheck > /tmp/wllr-ci-staticcheck.log 2>&1; then \
 		echo "   ✅ PASS"; PASS=$$((PASS + 1)); \
 	else \
@@ -321,43 +336,47 @@ ci:
 precommit:
 	@echo "==> Running pre-commit quality checks..."
 	@echo ""
-	@echo "[1/10] Auto-formatting code (gofumpt)..."
+	@echo "[1/11] Auto-formatting code (gofumpt)..."
 	@$(MAKE) gofumpt
 	@echo "✅ gofumpt: formatted"
 	@echo ""
-	@echo "[2/10] Auto-fixing line length (golines)..."
+	@echo "[2/11] Auto-fixing line length (golines)..."
 	@$(MAKE) golines
 	@echo "✅ golines: fixed"
 	@echo ""
-	@echo "[3/10] Running golangci-lint (40+ linters)..."
+	@echo "[3/11] Running golangci-lint (40+ linters)..."
 	@$(MAKE) lint
 	@echo "✅ golangci-lint: clean"
 	@echo ""
-	@echo "[4/10] Checking struct alignment (betteralign)..."
+	@echo "[4/11] Checking struct alignment (betteralign)..."
 	@$(MAKE) betteralign
 	@echo "✅ betteralign: clean"
 	@echo ""
-	@echo "[5/10] Running nil safety checks (nilaway)..."
+	@echo "[5/11] Running nil safety checks (nilaway)..."
 	@$(MAKE) nilaway
 	@echo "✅ nilaway: clean"
 	@echo ""
-	@echo "[6/10] Building project..."
+	@echo "[6/11] Building project..."
 	@$(MAKE) build
 	@echo "✅ build: successful"
 	@echo ""
-	@echo "[7/10] Running tests..."
+	@echo "[7/11] Compile-checking WASM extensions (wasip1)..."
+	@$(MAKE) wasip1
+	@echo "✅ wasip1: all extensions compile"
+	@echo ""
+	@echo "[8/11] Running tests..."
 	@$(MAKE) test
 	@echo "✅ tests: all passing"
 	@echo ""
-	@echo "[8/10] Running tool contract docs check..."
+	@echo "[9/11] Running tool contract docs check..."
 	@$(MAKE) docs-check
 	@echo "✅ docs-check: tool contracts complete"
 	@echo ""
-	@echo "[9/10] Running deadcode check..."
+	@echo "[10/11] Running deadcode check..."
 	@$(MAKE) deadcode
 	@echo "✅ deadcode: no unreachable code"
 	@echo ""
-	@echo "[10/10] Running staticcheck..."
+	@echo "[11/11] Running staticcheck..."
 	@$(MAKE) staticcheck
 	@echo "✅ staticcheck: clean"
 	@echo ""
