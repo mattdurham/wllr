@@ -749,7 +749,8 @@ Orchestrator inbox receives:
 
 ### finishTurn shutdown detection
 
-`finishTurn` runs after `isRunning` transitions to false. It:
+`finishTurn` owns turn completion: it runs with `isRunning` still true and releases
+the flag as its last act on each exit path (see Ownership below). It:
 
 1. Drains the inbox for messages that arrived **during** the current turn.
 2. Scans for any system message whose JSON content has `event == "shutdown_request"`.
@@ -793,10 +794,17 @@ messages still drain into a follow-up turn.
 
 ### Invariants
 
-**Invariant:** `pendingShutdownFrom` is only read and written inside `finishTurn`, which
-runs after each `isRunning.Store(false)`. Because at most one goroutine can hold
-`isRunning == true` at a time, no additional mutex is needed for `pendingShutdownFrom`.
-`Submit` must never access this field.
+**Invariant (Ownership):** `finishTurn` holds `isRunning == true` for the whole of its
+body and clears the flag only once the turn's shared state is settled — on the drain
+exit immediately before `Submit("")` (whose CAS requires the flag clear), and at the end
+of every other path. It must never release the flag on entry. Because at most one
+goroutine can hold `isRunning == true` at a time, that ownership is what serializes
+access to `pendingShutdownFrom`; releasing early would let a concurrent `Submit` win the
+CAS and run a second `finishTurn` that races the first on the same field (and can shut
+the agent down twice).
+
+**Invariant:** `pendingShutdownFrom` is only read and written by the turn goroutine that
+owns the agent (`isRunning == true`). `Submit` must never access this field.
 
 **Invariant:** Drain turns triggered from `finishTurn` use the original context passed to
 `Submit`, not `context.Background()`. This allows harness shutdown to cancel in-flight
@@ -817,9 +825,11 @@ next `finishTurn` can act on it.
 calls `onDone(nil)` and returns; the normal path at the bottom of `finishTurn` is
 therefore not reached. No double-`onDone` is possible.
 
-**Invariant:** `pool.Close` is idempotent. Calling it from `finishTurn` after
-`isRunning.Store(false)` is safe — the agent is no longer running when Close is called,
-and Close acquires `p.mu.Lock` without any pool lock being held by the agent goroutine.
+**Invariant:** `pool.Close` is idempotent. Calling it from `finishTurn` while the turn
+goroutine still owns the agent (`isRunning == true`) is safe — safety does not depend on
+the flag: `Close` acquires `p.mu.Lock` and the agent goroutine holds no pool lock at
+that point. Holding ownership across `Close` is in fact required, so no concurrent
+`Submit` can win the CAS and start a turn against an agent being removed.
 
 **Invariant:** System messages are never recorded in `a.history` on the drain-turn path
 (§9). An AGENT_SHUTDOWN message sent by the worker to the creator's inbox is a system

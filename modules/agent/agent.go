@@ -1437,7 +1437,14 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 // their 30-minute timeout.
 func (a *Agent) finishTurn(ctx context.Context, err error, ctxErr error, onDone func(error), consumed []sdk.Message) {
 	a.markTurnDone()
-	a.isRunning.Store(false)
+
+	// Ownership (isRunning) is held for the whole of this function and released
+	// only once this turn's shared state has been settled. Releasing it up front
+	// lets a concurrent Submit win the CAS and start a second turn whose
+	// finishTurn reads and writes pendingShutdownFrom while this one is still
+	// doing the same — a data race, and a way to shut an agent down twice. The
+	// one place the flag must clear early is the drain hand-off below, because
+	// Submit's CAS requires it; by then nothing here is touched again.
 
 	// Drain after successful turns AND after failed turns: a message delivered
 	// while a turn was running must be processed even if that turn errored, so a
@@ -1494,9 +1501,9 @@ func (a *Agent) finishTurn(ctx context.Context, err error, ctxErr error, onDone 
 		}
 
 		// Check for a deferred shutdown_request from a previous finishTurn cycle.
-		// invariant: pendingShutdownFrom is only written and read from finishTurn,
-		// which runs after isRunning transitions to false. Submit must never access
-		// this field.
+		// invariant: pendingShutdownFrom is only written and read by the turn that
+		// owns the agent (isRunning true), never by Submit. finishTurn holds that
+		// ownership until this state is settled — see the note at its top.
 		if shutdownFrom == "" {
 			shutdownFrom = a.pendingShutdownFrom
 		}
@@ -1509,13 +1516,16 @@ func (a *Agent) finishTurn(ctx context.Context, err error, ctxErr error, onDone 
 			for _, m := range normalPending {
 				a.AppendInbox(m)
 			}
-			// invariant: pendingShutdownFrom is only written and read from finishTurn,
-			// which runs after isRunning transitions to false. Submit must never access
-			// this field.
+			// invariant: pendingShutdownFrom is only written and read by the turn that
+			// owns the agent (isRunning true), never by Submit.
 			a.pendingShutdownFrom = shutdownFrom // "" if no shutdown pending
 			// Do NOT fire onDone here: the drain sub-turn's finishTurn will fire it
 			// when the inbox is finally empty, preventing a double StreamDoneMsg.
 			// Pass the original ctx so harness shutdown can cancel drain turns.
+			//
+			// Release before handing off: Submit's CAS needs the flag clear, and this
+			// turn's shared state is settled by the line above.
+			a.isRunning.Store(false)
 			a.Submit(ctx, "")
 			return
 		}
@@ -1557,9 +1567,8 @@ func (a *Agent) finishTurn(ctx context.Context, err error, ctxErr error, onDone 
 
 		// Handle deferred shutdown if present.
 		if shutdownFrom != "" {
-			// invariant: pendingShutdownFrom is only written and read from finishTurn,
-			// which runs after isRunning transitions to false. Submit must never access
-			// this field.
+			// invariant: pendingShutdownFrom is only written and read by the turn that
+			// owns the agent (isRunning true), never by Submit.
 			a.pendingShutdownFrom = "" // clear deferred state
 			a.shutdownRequested.Store(false)
 
@@ -1580,6 +1589,7 @@ func (a *Agent) finishTurn(ctx context.Context, err error, ctxErr error, onDone 
 					slog.Warn("finishTurn: failed to close self", "agent", a.id, "err", err)
 				}
 			}
+			a.isRunning.Store(false)
 			if onDone != nil {
 				onDone(nil)
 			}
@@ -1587,6 +1597,7 @@ func (a *Agent) finishTurn(ctx context.Context, err error, ctxErr error, onDone 
 		}
 	}
 
+	a.isRunning.Store(false)
 	if onDone != nil {
 		onDone(err)
 	}
