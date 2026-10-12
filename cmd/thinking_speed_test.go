@@ -23,7 +23,7 @@ func TestOpenRouterSpeedSortMapping(t *testing.T) {
 		if err := saveOpenRouterSpeed(tc.id); err != nil {
 			t.Fatalf("saveOpenRouterSpeed(%q): %v", tc.id, err)
 		}
-		po := openRouterProviderOptions()
+		po := openRouterRuntimeProviderOptions("")
 		if tc.want == "" {
 			if po != nil {
 				t.Errorf("%q: want no routing sent, got %v", tc.id, po)
@@ -50,10 +50,15 @@ func TestOpenRouterSpeedAppliesAndPersistsIndependently(t *testing.T) {
 		t.Errorf("speedDisplayFor(openrouter) = %q, want nitro", got)
 	}
 	// A reasoning level set afterwards must not drop the routing preference:
-	// both are persisted in separate config fields.
+	// both are persisted in separate config fields, and both ride in the one
+	// openrouter.ProviderOptions struct under the single fantasy key.
 	po := providerOptionsForRuntime(providerOpenRouter, "high", "")
-	if _, ok := po[fantasyopenrouterprovider.Name]; !ok {
-		t.Fatalf("routing lost: %#v", po)
+	opts, ok := po[fantasyopenrouterprovider.Name].(*fantasyopenrouterprovider.ProviderOptions)
+	if !ok || opts.Provider == nil || opts.Provider.Sort == nil || opts.Reasoning == nil || opts.Reasoning.Effort == nil {
+		t.Fatalf("routing and reasoning must coexist in one struct: %#v", po)
+	}
+	if *opts.Provider.Sort != openRouterSpeedThroughput || *opts.Reasoning.Effort != fantasyopenrouterprovider.ReasoningEffortHigh {
+		t.Errorf("merged options = sort %v effort %v, want throughput/high", opts.Provider.Sort, opts.Reasoning.Effort)
 	}
 	if got := savedOpenRouterSpeed(); got != "nitro" {
 		t.Errorf("routing preference = %q, want nitro", got)
@@ -92,7 +97,7 @@ func TestOpenRouterSpeedDefaultClearsConfig(t *testing.T) {
 	if got := savedWllrField("openrouter_speed"); got != "" {
 		t.Errorf("after default, stored = %q, want removed", got)
 	}
-	if po := openRouterProviderOptions(); po != nil {
+	if po := openRouterRuntimeProviderOptions(""); po != nil {
 		t.Errorf("after default, options = %v, want nil", po)
 	}
 }
@@ -106,7 +111,7 @@ func TestOpenRouterSpeedRejectsUnknownOption(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A persisted unknown value must not produce a sort (fail closed).
-	if po := openRouterProviderOptions(); po != nil {
+	if po := openRouterRuntimeProviderOptions(""); po != nil {
 		t.Errorf("unknown option produced options: %v", po)
 	}
 }

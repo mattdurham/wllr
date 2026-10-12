@@ -78,15 +78,20 @@ func (m *Model) applyThinkingSelection(levelID string) {
 // SetThinkingForModel switches the active thinking display after a model or
 // provider switch: it applies the mode via SelectThinkingFn (so the main
 // agent's provider options match the new model, and the choice is persisted
-// for the provider) and refreshes the status. An empty level clears the
-// display. No-op when the callback is not wired.
+// for the provider) and refreshes the status. An empty level means no mode
+// resolved for this model — it only clears the DISPLAY; SelectThinkingFn is
+// not invoked with "" because that persists an empty entry and would erase
+// the mode saved for the model (e.g. its vocabulary does not offer the
+// level a previous model saved). No-op when the callback is not wired.
 func (m *Model) SetThinkingForModel(levelID string) {
 	if m.SelectThinkingFn == nil {
 		return
 	}
-	if err := m.SelectThinkingFn(levelID); err != nil {
-		m.pushNotification(fmt.Sprintf("⚠ could not set thinking level: %v", err))
-		return
+	if levelID != "" {
+		if err := m.SelectThinkingFn(levelID); err != nil {
+			m.pushNotification(fmt.Sprintf("⚠ could not set thinking level: %v", err))
+			return
+		}
 	}
 	m.activeThinking = levelID
 	m.live.setStatus("think", levelID)

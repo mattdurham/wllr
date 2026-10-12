@@ -530,7 +530,7 @@ func TestCurrentThinkingModeForModel_Better(t *testing.T) {
 			provider:   "anthropic",
 			model:      "claude-sonnet-4-6",
 			setupLevel: thinkingLow,
-			wantMode:   "4096", // low budget for Anthropic
+			wantMode:   "2048", // nearest budget at-or-below the low level
 		},
 		{
 			name:       "anthropic high level",

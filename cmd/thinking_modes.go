@@ -5,6 +5,7 @@ import (
 	fantasyanthropicprovider "charm.land/fantasy/providers/anthropic"
 	fantasygoogleprovider "charm.land/fantasy/providers/google"
 	fantasyopenapiprovider "charm.land/fantasy/providers/openai"
+	fantasyopenrouterprovider "charm.land/fantasy/providers/openrouter"
 )
 
 // openAIUsesResponsesAPI reports whether a model on the openai provider is
@@ -77,10 +78,15 @@ func providerOptionsForThinkingMode(provider, modeID, modelID string) fantasy.Pr
 		// default (LM Studio defaults loaded thinking models to "on"), so an
 		// explicit "none" is the only way to actually disable. Unlike openai,
 		// unknown/stale IDs (e.g. the boolean "on") are sent as "none" —
-		// disabling rather than 400-ing (the endpoint rejects anything outside
-		// the six OpenAI values). Local endpoints speak chat completions, so
-		// the chat-completions option type is always correct here.
+		// disabling rather than 400-ing, and "max" counts as unknown here:
+		// native-OpenAI-only (Catwalk declares it for the gpt-5.6 family) and
+		// the endpoint rejects anything outside the six OpenAI values. Local
+		// endpoints speak chat completions, so the chat-completions option
+		// type is always correct here.
 		effort := openAIReasoningEffortForThinkingMode(modeID)
+		if effort != nil && *effort == fantasyopenapiprovider.ReasoningEffortMax {
+			effort = nil
+		}
 		if effort == nil {
 			none := fantasyopenapiprovider.ReasoningEffortNone
 			effort = &none
@@ -88,6 +94,23 @@ func providerOptionsForThinkingMode(provider, modeID, modelID string) fantasy.Pr
 		return fantasy.ProviderOptions{
 			fantasyopenapiprovider.Name: &fantasyopenapiprovider.ProviderOptions{
 				ReasoningEffort: effort,
+			},
+		}
+	case providerOpenRouter:
+		// OpenRouter normalizes reasoning across upstreams into one object:
+		// effort (low/medium/high) plus an enabled flag. "none" maps to
+		// enabled:false — the documented way to disable reasoning; an omitted
+		// object would leave a thinking model on its own default, which is
+		// on. Only the documented effort IDs map; anything else (e.g. a mode
+		// saved while another provider was active) returns nil and omits the
+		// object entirely, so a stale mode can never 400 a request.
+		reasoning := openRouterReasoningForThinkingMode(modeID)
+		if reasoning == nil {
+			return nil
+		}
+		return fantasy.ProviderOptions{
+			fantasyopenrouterprovider.Name: &fantasyopenrouterprovider.ProviderOptions{
+				Reasoning: reasoning,
 			},
 		}
 	case providerGemini:
@@ -101,6 +124,26 @@ func providerOptionsForThinkingMode(provider, modeID, modelID string) fantasy.Pr
 					ThinkingBudget: budget,
 				},
 			},
+		}
+	default:
+		return nil
+	}
+}
+
+// openRouterReasoningForThinkingMode maps a thinking mode ID to OpenRouter
+// reasoning options. "none" becomes enabled:false, the documented way to turn
+// reasoning off for models that always reason; the effort IDs pass through
+// verbatim. Returns nil when the mode is outside OpenRouter's documented
+// vocabulary (which omits the reasoning object entirely).
+func openRouterReasoningForThinkingMode(modeID string) *fantasyopenrouterprovider.ReasoningOptions {
+	switch modeID {
+	case thinkingModeNone:
+		enabled := false
+		return &fantasyopenrouterprovider.ReasoningOptions{Enabled: &enabled}
+	case thinkingModeLow, thinkingModeMedium, thinkingModeHigh:
+		effort := fantasyopenrouterprovider.ReasoningEffort(modeID)
+		return &fantasyopenrouterprovider.ReasoningOptions{
+			Effort: fantasyopenrouterprovider.ReasoningEffortOption(effort),
 		}
 	default:
 		return nil
@@ -163,13 +206,48 @@ func openAIReasoningEffortForThinkingMode(modeID string) *fantasyopenapiprovider
 	return nil // unknown or off
 }
 
-// savedThinkingMode returns the persisted thinking mode ID, or empty string if
-// none is stored or the stored value is unknown.
-func savedThinkingMode() string {
-	return savedWllrField("thinking_mode")
+// thinkingModeKey is the config key under which a model's thinking mode is
+// saved: "provider:model". Provider IDs never contain colons, so the key
+// round-trips unambiguously even though model IDs may contain slashes.
+func thinkingModeKey(provider, model string) string {
+	return provider + ":" + model
 }
 
-// saveThinkingMode persists the thinking mode ID to the "wllr" config group.
-func saveThinkingMode(modeID string) error {
+// savedThinkingMode returns the thinking mode persisted for a provider/model.
+// Models without their own entry fall back to the legacy single
+// "thinking_mode" key: configs written before per-model storage, and models
+// never explicitly set, keep the last-saved mode. Empty string if nothing
+// applies.
+func savedThinkingMode(provider, model string) string {
+	settings := loadWllrSettings()
+	if mode, ok := settings.ThinkingModes[thinkingModeKey(provider, model)]; ok {
+		return mode
+	}
+	return settings.ThinkingMode
+}
+
+// saveThinkingMode persists the thinking mode ID for one provider/model to
+// the "thinking_modes" map in the "wllr" config group; an empty modeID clears
+// that model's entry. The legacy global "thinking_mode" key is mirrored with
+// the saved value so models without their own entry keep inheriting the most
+// recently chosen mode.
+func saveThinkingMode(provider, model, modeID string) error {
+	modes := loadWllrSettings().ThinkingModes
+	key := thinkingModeKey(provider, model)
+	if modeID == "" {
+		delete(modes, key)
+	} else {
+		if modes == nil {
+			modes = map[string]string{}
+		}
+		modes[key] = modeID
+	}
+	if len(modes) == 0 {
+		if err := removeWllrField("thinking_modes"); err != nil {
+			return err
+		}
+	} else if err := saveWllrRawField("thinking_modes", modes); err != nil {
+		return err
+	}
 	return saveWllrField("thinking_mode", modeID)
 }

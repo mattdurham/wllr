@@ -155,6 +155,8 @@ func LoadConfig() (*Config, error) {
 
 type wllrSettings struct {
 	ContextWindows   map[string]int64        `json:"context_windows"`
+	ThinkingModes    map[string]string       `json:"thinking_modes"`
+	ThinkingMode     string                  `json:"thinking_mode"`
 	ModelTiers       map[string]modelTier    `json:"model_tiers"`
 	Provider         string                  `json:"provider"`
 	Model            string                  `json:"model"`
