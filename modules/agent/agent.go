@@ -47,6 +47,16 @@ type Agent struct {
 	// SetProviderOptions. Guarded by lmMu; read once per turn in Submit.
 	providerOpts fantasy.ProviderOptions
 
+	// canonical is the append-only canonical transcript: the verbatim record of
+	// every message, tool call, and tool result for this session. Compaction
+	// rewrites history but never touches canonical, which is what makes exact
+	// pre-compaction detail retrievable through the recall tool (issue #42).
+	// Created lazily by CanonicalTranscript; guarded by canonicalMu.
+	canonical *Transcript
+
+	liveStats *streamStats
+	onSteerFn func(content string)
+
 	id           string
 	name         string
 	modelName    string // for context window lookup
@@ -68,14 +78,9 @@ type Agent struct {
 	activeToolName   string
 	lastToolName     string
 
-	history []sdk.Message
+	lastSpark string // frozen end-of-turn sparkline bars, kept visible while idle
 
-	// canonical is the append-only canonical transcript: the verbatim record of
-	// every message, tool call, and tool result for this session. Compaction
-	// rewrites history but never touches canonical, which is what makes exact
-	// pre-compaction detail retrievable through the recall tool (issue #42).
-	// Created lazily by CanonicalTranscript; guarded by canonicalMu.
-	canonical *Transcript
+	history []sdk.Message
 
 	opts SpawnOpts
 
@@ -88,36 +93,10 @@ type Agent struct {
 	// chars/4 baseline by seedUsageEstimate before a fresh session's first
 	// provider call, and again at turn end by setLastUsage; read by
 	// LastUsage(). Protected by lastUsageMu.
-	lastUsage fantasy.Usage
-	// usageReported records whether any provider-reported usage has ever been
-	// stored on this agent. Until it is true, executeTurn seeds lastUsage with
-	// a chars/4 baseline (contextEstimate) at turn start, so a fresh session
-	// shows the size of what is actually sent — system prompt, tool
-	// definitions, and the conversation — instead of 0. Once real usage is
-	// reported, seeding is permanently disabled: reported numbers are
-	// authoritative and already include everything on the wire.
-	usageReported bool
-	// usageIsEstimate marks the currently stored lastUsage as a seed rather
-	// than provider-reported. The first real step report replaces it outright:
-	// the seed deliberately overestimates (chars/4), so a peak rule would pin
-	// the display to the overestimate until real usage grew past it. Cleared
-	// by observeStepUsage's first replacement and by markUsageReported.
-	usageIsEstimate bool
-	contextWindow   int64 // resolved input context window for this model
+	lastUsage     fantasy.Usage
+	contextWindow int64 // resolved input context window for this model
 
-	// liveStats tracks provider-stream timing for the in-flight turn so the
-	// statusline can show generation speed (tokens/second). Installed at
-	// streamTurn entry, finished and frozen into lastTps at its exit; nil
-	// whenever no turn is streaming. See streamstats.go for the span
-	// lifecycle (tool execution and sub-agent wait time are excluded from
-	// the denominator by construction). streamTpsMu guards liveStats,
-	// lastTps, and lastSpark — deliberately separate from lastUsageMu
-	// because usage and speed are written at different points of the turn
-	// and read by different tick paths.
-	streamTpsMu sync.Mutex
-	liveStats   *streamStats
-	lastTps     float64 // frozen end-of-turn tokens/second, kept visible while idle
-	lastSpark   string  // frozen end-of-turn sparkline bars, kept visible while idle
+	lastTps float64 // frozen end-of-turn tokens/second, kept visible while idle
 
 	// compactionCount is the number of successful context compactions this agent
 	// has run for its session lifetime. Monotonically non-decreasing; no-op
@@ -143,7 +122,6 @@ type Agent struct {
 	// onSteer is called on the turn goroutine when a /steer message is
 	// delivered into the running turn at a step boundary. Set via SetOnSteer.
 	onSteerMu sync.RWMutex
-	onSteerFn func(content string)
 
 	// onTurnStart is called after Submit successfully claims a turn and drains
 	// inbox messages into that turn. Set via SetOnTurnStart.
@@ -164,6 +142,17 @@ type Agent struct {
 
 	lastSummaryMu sync.RWMutex
 
+	// liveStats tracks provider-stream timing for the in-flight turn so the
+	// statusline can show generation speed (tokens/second). Installed at
+	// streamTurn entry, finished and frozen into lastTps at its exit; nil
+	// whenever no turn is streaming. See streamstats.go for the span
+	// lifecycle (tool execution and sub-agent wait time are excluded from
+	// the denominator by construction). streamTpsMu guards liveStats,
+	// lastTps, and lastSpark — deliberately separate from lastUsageMu
+	// because usage and speed are written at different points of the turn
+	// and read by different tick paths.
+	streamTpsMu sync.Mutex
+
 	// cancelMu protects the cancel function for the current active turn.
 	cancelMu sync.Mutex
 
@@ -181,6 +170,20 @@ type Agent struct {
 	// inbox instead of starting a new goroutine. The running goroutine drains
 	// inbox on completion (drain-until-empty pattern). See NOTES.md §17.
 	isRunning atomic.Bool
+	// usageReported records whether any provider-reported usage has ever been
+	// stored on this agent. Until it is true, executeTurn seeds lastUsage with
+	// a chars/4 baseline (contextEstimate) at turn start, so a fresh session
+	// shows the size of what is actually sent — system prompt, tool
+	// definitions, and the conversation — instead of 0. Once real usage is
+	// reported, seeding is permanently disabled: reported numbers are
+	// authoritative and already include everything on the wire.
+	usageReported bool
+	// usageIsEstimate marks the currently stored lastUsage as a seed rather
+	// than provider-reported. The first real step report replaces it outright:
+	// the seed deliberately overestimates (chars/4), so a peak rule would pin
+	// the display to the overestimate until real usage grew past it. Cleared
+	// by observeStepUsage's first replacement and by markUsageReported.
+	usageIsEstimate bool
 }
 
 // SetOnToken sets the callback invoked for each text delta during streaming.

@@ -19,9 +19,8 @@ import (
 const openRouterModelsURL = "https://openrouter.ai/api/v1/models/user"
 
 type openRouterModelConfig struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	ContextWindow int64  `json:"context_window"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
 
 	// SupportedParameters is the request-parameter set the OpenRouter model
 	// listing declares for this model; "reasoning" among them means the
@@ -30,6 +29,7 @@ type openRouterModelConfig struct {
 	// populates the field for every model it lists, so no data means an
 	// older pin, not a reasoning-less model.
 	SupportedParameters []string `json:"supported_parameters,omitempty"`
+	ContextWindow       int64    `json:"context_window"`
 }
 
 func (cfg *Config) openRouterModel(id string) (openRouterModelConfig, bool) {

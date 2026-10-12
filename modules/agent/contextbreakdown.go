@@ -29,24 +29,8 @@ import (
 
 // ContextBreakdown is the context accounting for one agent.
 type ContextBreakdown struct {
-	// ContextWindow is the resolved input window for this agent's model.
-	// Zero when unknown (model metadata unresolved).
-	ContextWindow int64
-
-	// LastRequest is the provider-reported usage from the most recently
-	// completed turn: the largest per-step input (see contextUsageFromResult),
-	// which includes that step's accumulated tool traffic and cache effects.
-	// Before the first provider report it carries the turn-start baseline
-	// seed instead (chars/4 over the outgoing request — see seedUsageEstimate);
-	// LastRequestIsEstimate distinguishes the two.
-	LastRequest fantasy.Usage
-
-	// LastRequestIsEstimate is true when LastRequest holds the pre-first-step
-	// baseline seed rather than provider-reported numbers.
-	LastRequestIsEstimate bool
-
-	// SystemTokens estimates the system prompt (chars/4).
-	SystemTokens int64
+	CanonicalByKind         map[string]int64
+	CanonicalMessagesByRole map[string]int64
 
 	// SystemComponents decomposes the system prompt into its labeled sources:
 	// the prompt extension's report (built-in rules, tools list, prompt files,
@@ -57,11 +41,6 @@ type ContextBreakdown struct {
 	// has arrived (older prompt extension, or nothing set yet).
 	SystemComponents []sdk.SystemPromptComponent
 
-	// ToolTokens estimates the serialized tool definitions sent with each
-	// request (chars/4). ToolCount is the number of definitions.
-	ToolTokens int64
-	ToolCount  int
-
 	// ToolsByTool attributes the tool-definition tokens to each tool,
 	// heaviest first. Definitions are static per session, but they are
 	// often the second-largest resident cost after history, and the
@@ -69,6 +48,35 @@ type ContextBreakdown struct {
 	// Per-tool values are each rounded down (chars/4 individually), so they
 	// may trail ToolTokens by up to ToolCount-1 tokens of rounding.
 	ToolsByTool []ToolSize
+
+	// LargestMessages is the heaviest history messages, heaviest first
+	// (capped at maxLargestMessages). A single oversized user message or
+	// pasted document is the most common way a window fills, and the
+	// by-role totals alone cannot reveal which specific prompt did it.
+	LargestMessages []MessageSize
+
+	CanonicalByTool []ToolSize
+
+	// LastRequest is the provider-reported usage from the most recently
+	// completed turn: the largest per-step input (see contextUsageFromResult),
+	// which includes that step's accumulated tool traffic and cache effects.
+	// Before the first provider report it carries the turn-start baseline
+	// seed instead (chars/4 over the outgoing request — see seedUsageEstimate);
+	// LastRequestIsEstimate distinguishes the two.
+	LastRequest fantasy.Usage
+
+	// ContextWindow is the resolved input window for this agent's model.
+	// Zero when unknown (model metadata unresolved).
+	ContextWindow int64
+
+	// SystemTokens estimates the system prompt (chars/4).
+	SystemTokens int64
+
+	// ToolTokens estimates the serialized tool definitions sent with each
+	// request (chars/4). ToolCount is the number of definitions.
+	ToolTokens int64
+	ToolCount  int
+
 	// HistoryTokens estimates the LLM-facing history — user/assistant text
 	// only (chars/4). UserTokens and AssistantTokens split it by role, and
 	// TurnCount counts the user messages (one per recorded turn).
@@ -76,12 +84,6 @@ type ContextBreakdown struct {
 	UserTokens      int64
 	AssistantTokens int64
 	TurnCount       int
-
-	// LargestMessages is the heaviest history messages, heaviest first
-	// (capped at maxLargestMessages). A single oversized user message or
-	// pasted document is the most common way a window fills, and the
-	// by-role totals alone cannot reveal which specific prompt did it.
-	LargestMessages []MessageSize
 
 	// FilteredTokens estimates system/steering messages held in history but
 	// filtered from LLM context by sdkToFantasyMessages. They cost memory,
@@ -95,11 +97,12 @@ type ContextBreakdown struct {
 	// tool result — see TranscriptKind constants), CanonicalMessagesByRole
 	// further splits the message kind by role, and CanonicalByTool attributes
 	// tool traffic (calls + results) to the producing tool, heaviest first.
-	CanonicalChars          int64
-	CanonicalEntries        int
-	CanonicalByKind         map[string]int64
-	CanonicalMessagesByRole map[string]int64
-	CanonicalByTool         []ToolSize
+	CanonicalChars   int64
+	CanonicalEntries int
+
+	// LastRequestIsEstimate is true when LastRequest holds the pre-first-step
+	// baseline seed rather than provider-reported numbers.
+	LastRequestIsEstimate bool
 }
 
 // Sum returns the estimated total of all LLM-facing buckets (system + tools +

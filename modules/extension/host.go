@@ -57,25 +57,15 @@ func (e *Extension) HasPermission(p sdk.Permission) bool {
 type Host struct {
 	runtime wazero.Runtime
 
+	// Interface bridges — set once at startup via Set* methods.
+	agents       AgentBridge
+	teams        TeamBridge
+	capabilities CapabilityProvider
+	ui           UIBridge
+	mcp          MCPBridge
+
 	logger   *slog.Logger
 	dispatch map[string]func(ctx context.Context, ext *Extension, req sdk.HostCallRequest) sdk.HostCallResponse
-
-	// cwd is the host working directory at startup, injected into WASM
-	// modules (WLLR_CWD env) and reported via host_info. The WASM sandbox has
-	// no working directory, so guest os.Getwd() returns "/"; extensions that
-	// need the real launch directory must take it from the host.
-	cwd string
-
-	// configMu guards the config-isolation paths below.
-	configMu sync.RWMutex
-
-	// extensionsRoot is the directory holding per-extension folders, each with
-	// its own config.yaml. sharedConfigPath is the app-level config file that
-	// holds every group in one document. Together they let the host keep one
-	// extension's configuration out of reach of another. Set via
-	// SetConfigIsolation before extensions are loaded.
-	extensionsRoot   string
-	sharedConfigPath string
 
 	// Bus is the shared event stream. All DispatchEvent calls publish here
 	// in addition to dispatching to WASM extensions.
@@ -93,15 +83,27 @@ type Host struct {
 	// These are checked before WASM dispatch in ExecuteTool.
 	nativeTools map[string]func(ctx context.Context, input json.RawMessage) (string, bool)
 
-	// Interface bridges — set once at startup via Set* methods.
-	agents       AgentBridge
-	teams        TeamBridge
-	capabilities CapabilityProvider
-	ui           UIBridge
-	mcp          MCPBridge
-	taskLedger   *TaskLedger
+	taskLedger *TaskLedger
 
-	extensions    []*Extension
+	// cwd is the host working directory at startup, injected into WASM
+	// modules (WLLR_CWD env) and reported via host_info. The WASM sandbox has
+	// no working directory, so guest os.Getwd() returns "/"; extensions that
+	// need the real launch directory must take it from the host.
+	cwd string
+
+	// extensionsRoot is the directory holding per-extension folders, each with
+	// its own config.yaml. sharedConfigPath is the app-level config file that
+	// holds every group in one document. Together they let the host keep one
+	// extension's configuration out of reach of another. Set via
+	// SetConfigIsolation before extensions are loaded.
+	extensionsRoot   string
+	sharedConfigPath string
+
+	extensions []*Extension
+
+	// configMu guards the config-isolation paths below.
+	configMu sync.RWMutex
+
 	nativeToolsMu sync.RWMutex
 
 	mu sync.RWMutex

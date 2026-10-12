@@ -112,8 +112,8 @@ func renderSystemComponents(sb *strings.Builder, b agent.ContextBreakdown) {
 // renderToolsByExtension.
 type toolGroup struct {
 	name  string
-	total int64
 	tools []agent.ToolSize
+	total int64
 }
 
 // renderToolsByExtension groups the per-tool token list under its owning

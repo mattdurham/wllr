@@ -23,8 +23,8 @@ const (
 type OpenRouterModelChoice struct {
 	ID                  string
 	Name                string
-	ContextWindow       int64
 	SupportedParameters []string
+	ContextWindow       int64
 }
 
 type (
