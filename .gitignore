@@ -67,6 +67,6 @@ extensions/agents/agents
 cmd/cmd
 
 # Compiled extension binaries
-history
+/extensions/history/history
 extensions/lsp/lsp
 extensions/lsp/lsp_enhanced

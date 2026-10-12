@@ -16,7 +16,7 @@ the agent.
 
 ## Recording
 
-Subscribes to four lifecycle events:
+Subscribes to five lifecycle events:
 
 | Event | Recorded as |
 |-------|-------------|
@@ -97,6 +97,7 @@ chat goes blank.
 | `session` | `type`, `id`, `timestamp` (RFC3339Nano), `cwd` |
 | `message` | `type`, `id`, `timestamp`, `role` (`user`/`assistant`), `content` |
 | `tool_call` | `type`, `id`, `timestamp`, `tool_call_id`, `tool_name`, `input` |
+| `compaction` | `type`, `id`, `timestamp`, `trigger`, `messages_compacted` |
 
 ## Commands
 
@@ -124,6 +125,7 @@ extensions/history/
 ├── sessionio.go       # host-testable: loadMessages + transcriptPreview + sanitizePath (no build tag)
 ├── sessionio_test.go  # unit tests for the above (run on host)
 ├── messageentry.go    # JSONL message entry (shared)
+├── compactionentry.go # JSONL compaction metadata entry (wasip1)
 ├── sessionheader.go   # JSONL session header (wasip1)
 ├── toolcallentry.go   # JSONL tool-call entry (wasip1)
 ├── storedmsg.go       # normalized message (shared)
