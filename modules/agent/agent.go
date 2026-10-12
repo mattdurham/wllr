@@ -1241,6 +1241,31 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 			a.finishTurn(ctx, compactionErr, nil, onDone, inboxMsgs)
 			return
 		}
+		if result.Summary == "" {
+			// Nothing could be folded: the history was too short, or no
+			// user-bounded span exceeded the keep-recent budget, so
+			// result.History is byte-identical to the request the provider
+			// just rejected. The retry would re-send the same payload and fail
+			// the same way — the before_provider_request interceptor never sees
+			// the error, so it cannot reroute differently on the second attempt
+			// — so report the rejection once, with the reason, instead of
+			// burning a guaranteed-doomed round trip.
+			reactiveErr := fmt.Errorf(
+				"context too long and history has no summarizable span: %w",
+				err,
+			)
+			slog.Error(
+				"agent: reactive context compaction had nothing to summarize",
+				"agent",
+				a.id,
+				"model",
+				modelName,
+				"error",
+				reactiveErr,
+			)
+			a.finishTurn(ctx, reactiveErr, nil, onDone, inboxMsgs)
+			return
+		}
 		a.observeCompaction(result)
 		history = result.History
 		a.historyMu.Lock()
@@ -1770,9 +1795,30 @@ func toolResultText(result any) string {
 
 // isContextTooLong returns true when the API rejected the request because the
 // prompt exceeded the model's context window.
+//
+// The structured check comes first. Every fantasy provider adapter parses its
+// own wire formats into ProviderError at the point of failure — Anthropic,
+// Google, Kronk, and the five OpenAI-compatible variants (openai, alibaba,
+// baseten, fireworks, vercel) — so consulting the parsed flag covers all of
+// them without wllr having to track each provider's rejection wording. Matching
+// on the error string alone missed most of those formats (kronk's
+// "input tokens [N] exceed context window [M]", google's "input token count N
+// exceeds the maximum M", alibaba's "Range of input length should be [1, N]",
+// baseten's "Input length N exceeds the maximum allowed input length of M
+// tokens", vercel's "Input too long: N input tokens, limit is M"), so a local
+// model rejecting an oversized prompt took no reactive compaction at all and
+// the turn simply failed.
+//
+// The substring fallback below remains for a rejection that arrives as a bare
+// error string with no ProviderError in its chain. It is deliberately narrow:
+// the structured path is the one that is expected to fire.
 func isContextTooLong(err error) bool {
 	if err == nil {
 		return false
+	}
+	var providerErr *fantasy.ProviderError
+	if errors.As(err, &providerErr) && providerErr.IsContextTooLarge() {
+		return true
 	}
 	s := err.Error()
 	return strings.Contains(s, "prompt is too long") ||

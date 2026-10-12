@@ -337,8 +337,9 @@ after a successful `compactHistory` call, under `lastSummaryMu.Lock()`.
 ### Compaction During Tool Loops
 
 Before every provider step after the first, Fantasy's `PrepareStep` hook checks
-the previous step's provider-reported input usage plus its output and a
-conservative estimate of the newest messages, including tool results. The
+the previous step's provider-reported prompt size (input plus cache tokens, the
+same numerator `shouldCompactByUsage` uses) plus its output and a conservative
+estimate of the newest messages, including tool results. The
 full provider-facing message size is used when an endpoint omits usage. The
 threshold is the configured percentage when enabled, capped at 85% of the
 model window and by the output reserve. Reaching it summarizes the active
@@ -357,10 +358,27 @@ the history and retries the aborted turn exactly once. This is the fallback path
 compaction was not triggered or not sufficient. The retry uses the same recent-history budget as
 proactive compaction and preserves the generated summary in the agent state.
 
+**Detection:** `isContextTooLong` reads the parsed `*fantasy.ProviderError` via `errors.As` and
+consults `IsContextTooLarge()`. Each fantasy provider adapter parses its own rejection format into
+that struct — Anthropic, Google, Kronk, and the five OpenAI-compatible variants (openai, alibaba,
+baseten, fireworks, vercel) — so wllr does not track provider wording. This matters for
+`providerLocal`, which is OpenAI-compatible and therefore shares the adapter that recognises five
+distinct formats. A narrow substring fallback remains for a rejection that arrives as a bare error
+string with no `ProviderError` in its chain. Detection must not be reimplemented by matching the
+error text alone: doing so previously missed six of the nine supported formats, so a local model
+rejecting an oversized prompt took no reactive compaction and the turn failed outright.
+
 **Invariant:** The reactive retry happens at most once per turn. If the retry also fails with a context error, the error is reported to `onDone` and the turn ends.
 
 **Invariant:** If reactive compaction fails, no retry is attempted. The compaction error is logged,
 shown to the user, and reported to `onDone`.
+
+**Invariant:** If reactive compaction is a no-op (empty summary — the history was too short, or no
+user-bounded span exceeded the keep-recent budget), the resulting history is byte-identical to the
+request the provider just rejected, so no retry is attempted. The context-too-long error is reported
+to `onDone` with a missing-summarizable-span reason instead of burning a guaranteed-doomed round
+trip. The `before_provider_request` interceptor takes no error argument, so it cannot route the
+second attempt differently and the retry could not succeed.
 
 ### Percentage-Based Compaction Trigger
 
