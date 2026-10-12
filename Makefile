@@ -156,7 +156,7 @@ install-tools:
 # Nil safety checks
 nilaway:
 	@echo "==> Running nil safety checks (nilaway)..."
-	@nilaway -include-pkgs "github.com/modernice/wllr/..." ./...
+	@nilaway -include-pkgs "github.com/mattdurham/wllr/..." ./...
 	@echo "==> Nil safety checks passed!"
 
 # Struct alignment checks
