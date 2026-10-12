@@ -173,6 +173,16 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 	metrics := newWllrMetrics()
 	pool.SetUsageObserver(metrics.recordTurn)
 	pool.SetLifecycleObserver(metrics.recordLifecycle)
+	// A provider rejection reveals the model's real window; the agent clamps its
+	// session window to it and reports the correction here. Keep the local
+	// discovery cache on the same value so the /models picker and tier
+	// resolution size against the limit the provider actually enforced, rather
+	// than the stale endpoint/config value that was just rejected.
+	pool.SetContextWindowObserver(func(model string, _, authoritative int64) {
+		if cfg.Provider == providerLocal {
+			rememberDiscoveredLocalWindow(model, authoritative)
+		}
+	})
 	cleanupPprof := startDebugServer(*pprofAddr, metrics)
 	defer cleanupPprof()
 	// Route the host's own diagnostic logs through the configured default handler

@@ -1226,6 +1226,10 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 	// retry the aborted turn once. This preserves a summary instead of silently
 	// discarding older messages.
 	if err != nil && isContextTooLong(err) {
+		// The rejection carries the model's real window. Adopt it before
+		// compacting so the retry, and every later turn, sizes against the
+		// true limit instead of the estimate that just failed.
+		a.adoptAuthoritativeContextWindow(pool, modelName, err)
 		result, cerr := compactHistory(childCtx, lm, history, priorSummary, keepRecent, CompactionTriggerReactive)
 		if cerr != nil {
 			compactionErr := fmt.Errorf("context compaction failed after context limit: %w", cerr)
@@ -1825,6 +1829,68 @@ func isContextTooLong(err error) bool {
 		strings.Contains(s, "context_length_exceeded") ||
 		strings.Contains(s, "maximum context length") ||
 		strings.Contains(s, "tokens > ") // Anthropic: "213370 tokens > 200000 maximum"
+}
+
+// authoritativeContextWindow returns the model's real context window as
+// reported by a context-too-long rejection, or 0 when the error carries no
+// number.
+//
+// fantasy's provider adapters parse each vendor's rejection into
+// ProviderError.ContextMaxTokens at the point of failure (Anthropic, Google,
+// Kronk, and the five OpenAI-compatible variants), so the authoritative limit
+// is available whenever the structured flag is set. A rejection that arrives as
+// a bare string has no number to recover and yields 0.
+func authoritativeContextWindow(err error) int64 {
+	if err == nil {
+		return 0
+	}
+	var providerErr *fantasy.ProviderError
+	if errors.As(err, &providerErr) && providerErr.ContextMaxTokens > 0 {
+		return int64(providerErr.ContextMaxTokens)
+	}
+	return 0
+}
+
+// adoptAuthoritativeContextWindow clamps this agent's context window to the
+// maximum a context-too-long rejection reported, so the next turn's 80%
+// usage trigger and the ctx display size against the model's real limit rather
+// than the estimate that just failed.
+//
+// The clamp is downward-only. A reported maximum at or above the current
+// window leaves it unchanged: the request would not have been rejected for
+// exceeding that number, so it most likely describes a different limit and
+// adopting it would inflate the window. A model whose window was unknown
+// (<= 0) adopts the reported value outright.
+//
+// The correction is session-scoped by design. It updates the in-memory agent
+// and pool windows but never the user's configuration, so a misparsed limit
+// cannot persist across restarts; the warning names both values so a genuinely
+// wrong config is visible and fixable.
+func (a *Agent) adoptAuthoritativeContextWindow(pool *AgentPool, modelName string, err error) {
+	reported := authoritativeContextWindow(err)
+	if reported <= 0 {
+		return
+	}
+	a.lmMu.Lock()
+	previous := a.contextWindow
+	if previous > 0 && reported >= previous {
+		a.lmMu.Unlock()
+		return
+	}
+	a.contextWindow = reported
+	a.lmMu.Unlock()
+
+	if pool != nil {
+		pool.SetModelContextWindow(modelName, reported)
+		pool.notifyContextWindowCorrected(modelName, previous, reported)
+	}
+	slog.Warn(
+		"agent: provider reported a smaller context window than resolved; adopting it for this session",
+		"agent", a.id,
+		"model", modelName,
+		"previous_window", previous,
+		"authoritative_window", reported,
+	)
 }
 
 // sdkToFantasyMessages converts sdk.Message history to fantasy.Message format.

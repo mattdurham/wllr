@@ -47,6 +47,14 @@ type AgentPool struct {
 	// lifecycleObserver, when set, is called whenever an agent is added to or
 	// removed from the pool. Set via SetLifecycleObserver.
 	lifecycleObserver func(AgentLifecycle)
+	// contextWindowObserver, when set, is called when a provider context-too-long
+	// rejection reveals a model's real context window and the agent clamps its
+	// session window to it. The host uses it to keep any window cache (the local
+	// model picker and tier resolution) coherent with the correction without
+	// giving the agent package a cmd dependency. previous is the window that was
+	// replaced; authoritative is the provider-reported value now in effect.
+	// Set via SetContextWindowObserver.
+	contextWindowObserver func(model string, previous, authoritative int64)
 	// providerRequestInterceptor, when set, runs the before_provider_request
 	// transform chain just before each agent turn streams to the provider. It can
 	// redact the outgoing messages, reroute the model, or block the request.

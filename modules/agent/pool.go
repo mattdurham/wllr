@@ -199,6 +199,31 @@ func (p *AgentPool) notifyWake(id string) {
 	}
 }
 
+// SetContextWindowObserver installs a callback invoked when a provider
+// context-too-long rejection corrects a model's context window for the session
+// (see Agent.adoptAuthoritativeContextWindow). The host wires this to keep its
+// own window caches — the local-model discovery cache that the /models picker
+// and tier resolution read — on the corrected value, so every consumer sizes
+// against the same limit the provider enforced. previous is the replaced
+// window; authoritative is the value now in effect. Thread-safe; may be called
+// before or after agents are spawned.
+func (p *AgentPool) SetContextWindowObserver(fn func(model string, previous, authoritative int64)) {
+	p.dispatchMu.Lock()
+	p.contextWindowObserver = fn
+	p.dispatchMu.Unlock()
+}
+
+// notifyContextWindowCorrected calls the registered contextWindowObserver, if
+// any.
+func (p *AgentPool) notifyContextWindowCorrected(model string, previous, authoritative int64) {
+	p.dispatchMu.RLock()
+	fn := p.contextWindowObserver
+	p.dispatchMu.RUnlock()
+	if fn != nil {
+		fn(model, previous, authoritative)
+	}
+}
+
 // Deliver appends msg to the named agent's inbox and, when wake is true,
 // ensures the agent processes it: if the agent is idle it starts a drain turn
 // (empty-content Submit), and if it is already running the drain-until-empty

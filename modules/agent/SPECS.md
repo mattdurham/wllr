@@ -28,6 +28,13 @@ Package `agent` manages sub-agents and teams for the bob harness. Each `Agent` w
   agent goroutines and must be safe for concurrent use and non-blocking. Pool
   membership events are reported **after** releasing `p.mu`, never while holding
   it, so an observer cannot deadlock against the pool.
+- The optional `contextWindowObserver` is read/written under `p.dispatchMu` and
+  is invoked when a provider context-too-long rejection corrects a model's
+  context window (see Reactive Fallback). It receives the model, the replaced
+  window, and the authoritative value, so the host can keep its own window
+  caches (the local-model discovery cache read by the /models picker and tier
+  resolution) on the corrected value. Invoked from the agent's turn goroutine;
+  must be non-blocking.
 - The optional `subagentResolver` is read/written under `p.mu`. `ResolveSubagentModel`
   consults it only when the spawn request omits a model name; an explicit model
   always resolves through `modelFactory` first. The resolver returns both the
@@ -379,6 +386,28 @@ request the provider just rejected, so no retry is attempted. The context-too-lo
 to `onDone` with a missing-summarizable-span reason instead of burning a guaranteed-doomed round
 trip. The `before_provider_request` interceptor takes no error argument, so it cannot route the
 second attempt differently and the retry could not succeed.
+
+**Authoritative window:** A context-too-long rejection also carries the model's real context
+window (`ProviderError.ContextMaxTokens`, populated by the same adapters that populate the
+detection flag). `adoptAuthoritativeContextWindow` clamps the agent's session window to that value
+before compacting, and mirrors it onto the pool's per-model window, so the next turn's 80% trigger
+and the ctx display size against the limit the provider actually enforced rather than the stale
+estimate that was just rejected. The ctx denominator is the agent's own window
+(`Agent.ContextWindow`, which `MainAgentContextUsage` reads first), so correcting it corrects the
+trigger, the statusline, and the `/context` breakdown together.
+
+**Invariant:** The clamp is downward-only. A reported maximum at or above the current window
+leaves it unchanged — the request would not have been rejected for exceeding that number, so the
+value most likely describes a different limit, and adopting it would inflate the window and
+suppress compaction. A window that never resolved (`<= 0`) adopts the reported value outright.
+
+**Invariant:** The correction is session-scoped. It updates the in-memory agent and pool windows
+and never the user's configuration, so a misparsed limit cannot persist across restarts. It is
+logged at WARN with both the previous and authoritative values, so a genuinely wrong config is
+visible and fixable.
+
+**Invariant:** The host is notified through `SetContextWindowObserver` after the clamp, so any
+window cache it maintains follows the same value the agent now sizes against.
 
 ### Percentage-Based Compaction Trigger
 
