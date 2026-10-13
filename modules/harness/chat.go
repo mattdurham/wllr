@@ -147,7 +147,11 @@ func (c ChatView) View() string {
 	// content with space-only rows. Those rows are layout space, not transcript
 	// content; trim them here so lower panes do not appear separated by a large
 	// blank gap. The outer model still pads the complete view to terminal height.
-	return strings.TrimRight(c.vp.View(), " \n")
+	out := c.vp.View()
+	if c.selActive && c.selDirty {
+		out = c.highlightSelection(out)
+	}
+	return strings.TrimRight(out, " \n")
 }
 
 // toolInputPreview returns a single-line summary of the tool's JSON input,

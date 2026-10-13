@@ -105,6 +105,8 @@ Sub-agents spawned via `harnessAgentBridge.Spawn` (delegated to `agent.Spawner`)
 | `updateTools`      | `ToolCallStartMsg`, `ToolCallDoneMsg`, `ConsoleMsg`                               |
 | `updateActions`    | `SubmitMsg`, `CommandMsg`, `clearMsg`, `setModelMsg`, `abortStreamMsg`, `dispatchOnCommandMsg` |
 | `updateExtension`  | `sessionStartDoneMsg`, `ExtensionEventResultMsg`, `ReloadMsg`, `NotifyMsg`, `StatusUpdateMsg` |
+| `updateMouseSelection` | `tea.MouseClickMsg` / `tea.MouseMotionMsg` / `tea.MouseReleaseMsg` (left button) — transcript drag-to-select |
+| `updateMouseClick` | `tea.MouseClickMsg` (left button) — queued-messages `[ clear ]` button |
 
 After all sub-handlers return false, remaining messages are forwarded to `m.input` (all messages) and `m.chat` (non-key messages only, to prevent viewport key bindings from stealing typed characters).
 
@@ -166,6 +168,9 @@ there is no built-in message renderer.
 | `externalContent` | Last content set via `SetExternalContent` (re-applied on resize) |
 | `toolLog`         | Per-turn tool-call log (independent of the transcript; shown by `/tools`) |
 | `vp`              | The bubbles/viewport model                               |
+| `selActive`       | A left-button press is in progress inside the transcript  |
+| `selDirty`        | The pointer moved after the press (a non-empty selection)  |
+| `selAnchor` / `selFocus` | Viewport-relative screen cells holding the selection ends |
 
 ### Key Methods
 
@@ -175,7 +180,38 @@ there is no built-in message renderer.
 - `AddToolCall(id, name, input)` / `UpdateToolCall(id, isError, output)` / `ClearToolLog()`: maintain the per-turn tool log.
 - `ToolActivityLines(width, height)`: renders the most recent tool log entries as compact status rows, hard-wrapped to `width` **display columns** and capped at `height` rows. Measurement is by display width, not rune count: a rune-count split under-measures wide characters (emoji, CJK), emitting rows wider than the pane.
 - `ToolLogModal()`: renders the tool log for the `/tools` modal.
-- `View()`: returns the viewport view.
+- `View()`: returns the viewport view, with the selection span highlighted when a drag is in progress.
+
+### Mouse text selection (selection.go)
+
+Dragging the left mouse button over the transcript selects text and copies it
+to the system clipboard on release. Selection coordinates are **viewport-relative
+screen cells** (`selCell{Row, Col}`, row 0 = first visible transcript line, col 0
+= its left edge) rather than byte offsets into the content. This is deliberate:
+the transcript is a single ANSI string that the viewport soft-wraps, so a screen
+cell is the only coordinate that maps 1:1 to what the user sees, and copy text is
+produced from the viewport's own rendered output (`visibleLines`, ANSI-stripped).
+
+- `BeginSelection(col, row)` — records the anchor; the selection is active but
+  not dirty, so a press with no drag copies nothing.
+- `ExtendSelection(col, row)` — moves the focus, clamped to the visible lines; sets
+  `selDirty` when the focus differs from the anchor.
+- `EndSelection() (text, ok)` — returns the selected text and clears the selection;
+  `ok` is false for an empty selection.
+- `SelectedText()` / `HasSelection()` / `ClearSelection()` — read/clear helpers.
+- `View()` overlays `selectionStyle` on the affected columns with `ansi.Cut`
+  (display-width aware, ANSI-safe) without altering the underlying glyphs.
+
+`Model.updateMouseSelection` routes the events: a left press inside the recorded
+chat geometry starts a selection; left motion extends it; left release copies via
+`tea.SetClipboard` (OSC52) and notifies. It runs before `updateMouseClick` and is
+suppressed while an overlay is active (the recorded geometry may be stale behind
+a modal). The chat viewport's screen geometry is recorded by `View` into
+`liveState.chatGeom` each render, mirroring the queue button's `queueGeom`.
+
+**Invariant:** A press without drag never schedules a clipboard command. Highlighting
+does not change the rendered text (`ansi.Strip` of the highlighted and plain views
+are identical).
 
 **Invariant:** The viewport (scroll, size, tail-follow behavior) is harness-owned; transcript content is always external. The tool log is independent of the transcript and never appears in it. The harness always renders a separate tool activity pane below the transcript in the normal view.
 

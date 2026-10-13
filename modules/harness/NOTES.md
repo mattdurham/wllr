@@ -1222,3 +1222,42 @@ the statusline's `get_status_info`-driven path (`renderContext`) from overwritin
 **Consequence:** `refreshContextStatus()` is now called from four sites; it remains a
 no-op (returns false, writes nothing) when the window is unknown. Coverage:
 startupctx_test.go, livectx_test.go.
+
+### Mouse drag-to-select copies transcript text (2026-10-13)
+
+The mouse previously only drove the queue `[ clear ]` button; because the view
+captures the mouse (`tea.MouseModeCellMotion`), the terminal's own drag-select
+and copy-on-select never fire inside wllr. Users expect selecting transcript
+text to copy it, so the transcript now owns a selection of its own.
+
+**Decision:** a left-button press inside the transcript starts a selection,
+drag motion extends it, and release copies it to the system clipboard with
+`tea.SetClipboard` (OSC52, so it works over SSH/tmux) plus a count
+notification. Selection is stored in **viewport-relative screen cells**
+(`selCell{Row, Col}`), not byte offsets into the transcript string.
+
+**Rationale:** the transcript is one ANSI string produced by WASM and
+soft-wrapped by the bubbles viewport. Mapping screen cells back to content bytes
+would mean re-deriving the viewport's wrap maths (and would drift when wrapping
+changes). A screen cell is the coordinate the user actually selected, and copy
+text can be read straight from the viewport's own rendered output. Highlighting
+is a per-line `ansi.Cut` span overlay, which is display-width aware and does not
+break escape sequences; `ansi.Strip` of the highlighted view equals the plain
+view, so highlighting never alters the glyphs.
+
+**Why the click doesn't copy:** `selDirty` distinguishes a press from a drag, so
+a stray click schedules no clipboard command. Release always clears the
+selection, so a stale highlight cannot linger.
+
+**Geometry from the render, like the queue button.** The transcript's absolute
+row depends on every pane above it, so `View` records `chatRow`/`chatHeight`
+into `liveState` each render and the handler hit-tests against that. Clamped to
+the visible lines, so a drag beyond the transcript tracks the nearest valid cell.
+**Overlays suppress selection** (`overlayActive()`): a modal owns the display and
+the recorded geometry may be stale behind it.
+
+**Consequence:** `updateMouseSelection` runs before `updateMouseClick` so clicks
+inside the transcript are claimed as selections while clicks on the queue button
+(below the transcript) still fall through. `MouseModeCellMotion` already
+delivers drag motion, so the mouse mode needed no change. Coverage:
+selection_test.go.

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/fantasy"
@@ -44,9 +45,17 @@ type liveState struct {
 	queueRow      int
 	queueBtnStart int
 	queueBtnEnd   int
-	mu            sync.RWMutex
-	streaming     bool
-	hasError      bool
+
+	// Geometry of the chat transcript viewport, recorded by View on the last
+	// render. chatRow is the 0-based terminal row of the transcript's first
+	// visible line; chatHeight is the number of visible transcript lines drawn
+	// below it. chatHeight <= 0 means the transcript is not on screen (an overlay
+	// owns the display, or the chat area is hidden).
+	chatRow    int
+	chatHeight int
+	mu         sync.RWMutex
+	streaming  bool
+	hasError   bool
 }
 
 func (s *liveState) setStreaming(v bool, start time.Time, hasErr bool) {
@@ -82,6 +91,23 @@ func (s *liveState) queueGeom() (row, btnStart, btnEnd int) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.queueRow, s.queueBtnStart, s.queueBtnEnd
+}
+
+// setChatGeom records the chat transcript viewport's screen geometry from the
+// latest render. height <= 0 encodes "transcript not on screen".
+func (s *liveState) setChatGeom(row, height int) {
+	s.mu.Lock()
+	s.chatRow = row
+	s.chatHeight = height
+	s.mu.Unlock()
+}
+
+// chatGeom returns the chat transcript viewport's screen geometry from the
+// latest render.
+func (s *liveState) chatGeom() (row, height int) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.chatRow, s.chatHeight
 }
 
 func (s *liveState) setModel(model string) {
@@ -1027,6 +1053,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if n, cmd, ok := m.updateExtension(msg); ok {
 		return n, cmd
 	}
+	if n, cmd, ok := m.updateMouseSelection(msg); ok {
+		return n, cmd
+	}
 	if n, cmd, ok := m.updateMouseClick(msg); ok {
 		return n, cmd
 	}
@@ -1290,6 +1319,48 @@ func (m Model) clearMainQueue() (Model, tea.Cmd, bool) {
 		m.pushNotification("Queue is already empty")
 	}
 	return m, nil, true
+}
+
+// updateMouseSelection drives drag-to-select text copying in the chat
+// transcript. A left-button press inside the transcript starts a selection; drag
+// motion extends it; release copies the selected text to the system clipboard
+// via OSC52 and notifies. A press with no drag copies nothing, so a stray click
+// is harmless. Clicks elsewhere in the window are left for updateMouseClick
+// (the queue [ clear ] button). Overlays suppress selection: a modal owns the
+// display and the recorded transcript geometry may be stale behind it.
+func (m Model) updateMouseSelection(msg tea.Msg) (Model, tea.Cmd, bool) {
+	if m.overlayActive() {
+		return m, nil, false
+	}
+	row, height := m.live.chatGeom()
+	switch msg := msg.(type) {
+	case tea.MouseClickMsg:
+		if msg.Button != tea.MouseLeft || height <= 0 {
+			return m, nil, false
+		}
+		if msg.Y < row || msg.Y >= row+height {
+			return m, nil, false
+		}
+		m.chat.BeginSelection(msg.X, msg.Y-row)
+		return m, nil, true
+	case tea.MouseMotionMsg:
+		if msg.Button != tea.MouseLeft || !m.chat.HasSelection() {
+			return m, nil, false
+		}
+		m.chat.ExtendSelection(msg.X, msg.Y-row)
+		return m, nil, true
+	case tea.MouseReleaseMsg:
+		if msg.Button != tea.MouseLeft || !m.chat.HasSelection() {
+			return m, nil, false
+		}
+		text, ok := m.chat.EndSelection()
+		if !ok {
+			return m, nil, true
+		}
+		m.pushNotification(fmt.Sprintf("Copied %d characters to clipboard", utf8.RuneCountInString(text)))
+		return m, tea.SetClipboard(text), true
+	}
+	return m, nil, false
 }
 
 // updateMouseClick handles left-clicks on the queued-messages pane's
@@ -2792,6 +2863,9 @@ func (m Model) View() tea.View {
 	// immediately before rendering to make the layout invariant hold even when
 	// a worker goroutine queued or drained a message between updates.
 	m.syncLayoutWithQueue(queued)
+	// Reset last render's transcript geometry; it is re-recorded below only when
+	// the transcript actually renders (overlays suppress it).
+	m.live.setChatGeom(0, 0)
 	// Render the input box once — it's used for both height calculation and output.
 	inputBox := m.renderInputBox()
 
@@ -2825,7 +2899,12 @@ func (m Model) View() tea.View {
 			sb.WriteString("\n")
 		}
 		if m.chat.height > 0 {
-			sb.WriteString(strings.TrimRight(m.chat.View(), "\n") + "\n")
+			chatView := strings.TrimRight(m.chat.View(), "\n")
+			// Record the transcript viewport's screen position for mouse text
+			// selection: its first line is the row after every line already
+			// written to sb (each ends with "\n").
+			m.live.setChatGeom(strings.Count(sb.String(), "\n"), renderedLineCount(chatView))
+			sb.WriteString(chatView + "\n")
 		}
 		// queuedHeight may intentionally return zero on small terminals so the
 		// queue cannot push the input box below the visible screen. Keep the

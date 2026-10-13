@@ -17,6 +17,15 @@ type ChatView struct {
 	vp              viewport.Model
 	width           int
 	height          int
+
+	// Mouse text selection, stored in viewport-relative screen cells (see
+	// selCell). selActive spans a left-button press inside the transcript to the
+	// following release; selDirty records whether the pointer actually moved, so
+	// a bare click does not copy a single cell. See selection.go.
+	selActive bool
+	selDirty  bool
+	selAnchor selCell
+	selFocus  selCell
 }
 
 // SetExternalContent replaces the viewport content with the supplied string

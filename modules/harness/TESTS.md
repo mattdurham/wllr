@@ -398,3 +398,18 @@ dispatched at all.
 | High | `TestAbortStreamMsg_ArmsQueueFlushWhenTurnActive` | double-Esc abort during an active turn | handled; `cancelFlushQueue` armed |
 | Medium | `TestEsc_IdleDoesNotArmQueueFlush` | Esc with the main agent idle | `cancelFlushQueue` remains false |
 | Medium | `TestStreamDone_NormalCompletionDoesNotFlushQueue` | armed flag but `Err == nil` | flag reset; queue untouched (drain already happened in the agent) |
+
+### selection_test.go
+
+| Priority | Test | Scenario | Assertions |
+|---|---|---|---|
+| High | `TestChatView_SelectionSingleLine` | press + drag within one line | `SelectedText` and `EndSelection` return the dragged span; `EndSelection` clears the selection |
+| High | `TestChatView_SelectionMultiLine` | drag across two lines | text joins the lines with `\n` |
+| High | `TestChatView_BareClickCopiesNothing` | press with no drag | `EndSelection` returns `("", false)` |
+| High | `TestHighlightCols_OnlySelectedSpan` | highlight a middle span | stripped text unchanged; prefix/suffix before and after the span unaltered; styling applied |
+| High | `TestChatView_ViewHighlightKeepsText` | render before/after selecting | View differs (highlight applied); stripped text identical; clearing restores the plain render |
+| High | `TestMouseSelection_DragCopies` | full `Update` path: click, motion, release | selected text tracks the drag; release schedules a clipboard cmd; selection cleared |
+| High | `TestMouseSelection_BareClickCopiesNothing` | click + release at one cell | no clipboard cmd; selection cleared |
+| Medium | `TestChatView_SelectionClampsToVisible` | drag far beyond the transcript | focus clamps to the last visible cell |
+| Medium | `TestMouseSelection_OutsideTranscriptNotHandled` | click above/below the transcript | handler returns not-handled |
+| Medium | `TestMouseSelection_SuppressedByOverlay` | click with a modal open | handler returns not-handled |
