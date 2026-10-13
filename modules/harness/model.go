@@ -408,6 +408,13 @@ type Model struct {
 	streaming          bool
 	consoleVisible     bool
 
+	// cancelFlushQueue is set when the user cancels the main agent's turn with
+	// Esc while messages are queued for it. On the resulting canceled
+	// StreamDoneMsg the harness starts a fresh turn to deliver that queue
+	// immediately, instead of leaving it stranded until the next manual submit
+	// (issue #48 preserved the queue; this makes the cancel deliver it).
+	cancelFlushQueue bool
+
 	chatAppendDirty            bool
 	chatAppendRefreshScheduled bool
 }
@@ -1202,6 +1209,10 @@ func (m Model) updateKeyPress(msg tea.Msg) (Model, tea.Cmd, bool) {
 		// cancels it. Sub-agents are not cancelled: esc means "stop what I
 		// asked you for", not "abandon everything I delegated".
 		if m.mainTurnActive() {
+			// Arm the post-cancel queue flush so the queued messages the user
+			// already typed are delivered as a fresh turn instead of being
+			// stranded (see cancelFlushQueue).
+			m.cancelFlushQueue = true
 			m.cancelMainTurn()
 			m.live.setStatus("stream", "cancelling…")
 			return m, nil, true
@@ -1690,6 +1701,39 @@ func (m Model) updateStream(msg tea.Msg) (Model, tea.Cmd, bool) {
 		m.chatAppendID = ""
 		m.chatAppendText = ""
 		m.refreshWASMChat()
+		// Esc-cancel deliberately preserves the queue (issue #48). When the user
+		// cancels while messages are queued, deliver them now as a fresh turn
+		// rather than leaving them stranded until the next manual submit.
+		// Only a user-initiated cancel arms this (cancelFlushQueue); a turn that
+		// ended normally already drained its own queue via drain-until-empty, and
+		// a harness-shutdown cancel must not start new work.
+		if m.cancelFlushQueue {
+			m.cancelFlushQueue = false
+			if msg.Err != nil && errors.Is(msg.Err, context.Canceled) && m.agentPool != nil {
+				if main := m.agentPool.Get(agent.MainAgentID); main != nil && main.InboxLen() > 0 {
+					n := main.InboxLen()
+					m.streaming = true
+					m.streamStart = time.Now()
+					m.live.setStreaming(true, m.streamStart, false)
+					m.pushNotification(fmt.Sprintf("Sending %d queued message(s)", n))
+					// pool.Send is non-blocking (Submit launches the turn in a
+					// goroutine and detaches its callbacks), so this drains the
+					// inbox into a fresh turn without stalling the update loop.
+					if err := m.agentPool.Send(m.mainAgentID, ""); err != nil {
+						m.pushNotification(fmt.Sprintf("⚠ flush queued messages: %v", err))
+						m.streaming = false
+						m.live.setStreaming(false, time.Time{}, true)
+					} else {
+						// Mirror submitToAgent's indicator ticks so the flush turn's
+						// "working." animation runs like any other turn.
+						cmds = append(cmds,
+							func() tea.Msg { return streamTickMsg{} },
+							tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return streamTickMsg{} }),
+						)
+					}
+				}
+			}
+		}
 		// A one-shot `--exec` run ends when its turn does, so the process exits
 		// instead of waiting for input. Only the main turn ends the run: a
 		// sub-agent finishing must not terminate it while work continues.
@@ -1782,6 +1826,9 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 		return m, nil, true
 
 	case abortStreamMsg:
+		if m.mainTurnActive() {
+			m.cancelFlushQueue = true
+		}
 		m.cancelActiveTurn()
 		return m, nil, true
 

@@ -48,4 +48,7 @@ ungated: the user's `/queue` command and the harness UI (`ctrl+x`, the
 
 Esc-cancelling a turn preserves the queue (issue #48 option (a)); only an
 explicit clear — by the user or by an agent via `queue_cancel` — discards
-queued messages.
+queued messages. Preserved messages are not stranded, though: after a user
+cancel the harness immediately starts a fresh turn that delivers them (harness
+NOTES "cancel delivers the queue"). A harness-shutdown cancel leaves the queue
+untouched.

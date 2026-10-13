@@ -25,7 +25,7 @@ func NewInputArea(width int) InputArea {
 	// Override InsertNewline to only fire on shift+enter.
 	ta.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("shift+enter"))
 	_ = ta.Focus()
-	return InputArea{ta: ta, width: width}
+	return InputArea{ta: ta, width: width, histIdx: -1}
 }
 
 // SetWidth updates the textarea width.
@@ -66,9 +66,11 @@ func (i InputArea) Update(msg tea.Msg) (InputArea, tea.Cmd) {
 				args := parts[1:]
 				return i, func() tea.Msg { return CommandMsg{Name: name, Args: args} }
 			}
+			i.recordHistory(content)
 			return i, func() tea.Msg { return SubmitMsg{Content: content} }
 
 		case keyEsc:
+			i.histIdx = -1
 			if i.lastWasEsc {
 				i.lastWasEsc = false
 				i.ta.Reset()
@@ -77,6 +79,23 @@ func (i InputArea) Update(msg tea.Msg) (InputArea, tea.Cmd) {
 			i.lastWasEsc = true
 			i.ta.Reset()
 			return i, nil
+
+		case "up":
+			i.lastWasEsc = false
+			// Recall older submitted prompts. Up is only a history key when the
+			// box is empty or a recall is already in progress; with text in the
+			// box it stays a cursor move, so multi-line editing is unaffected.
+			if i.histIdx != -1 || strings.TrimSpace(i.ta.Value()) == "" {
+				i.historyOlder()
+				return i, nil
+			}
+
+		case "down":
+			i.lastWasEsc = false
+			if i.histIdx != -1 {
+				i.historyNewer()
+				return i, nil
+			}
 
 		default:
 			i.lastWasEsc = false
@@ -91,4 +110,56 @@ func (i InputArea) Update(msg tea.Msg) (InputArea, tea.Cmd) {
 // View renders the input area.
 func (i InputArea) View() string {
 	return i.ta.View()
+}
+
+// recordHistory appends a submitted prompt to the recall history and resets
+// navigation. Consecutive duplicates are collapsed so repeated up-arrow presses
+// do not do nothing, and the list is capped at maxInputHistory.
+func (i *InputArea) recordHistory(content string) {
+	i.histIdx = -1
+	i.histDraft = ""
+	if content == "" {
+		return
+	}
+	if n := len(i.history); n > 0 && i.history[n-1] == content {
+		return
+	}
+	i.history = append(i.history, content)
+	if len(i.history) > maxInputHistory {
+		i.history = i.history[len(i.history)-maxInputHistory:]
+	}
+}
+
+// historyOlder loads the previous submitted prompt into the box. The first
+// recall saves the current contents as a draft so historyNewer can restore it.
+func (i *InputArea) historyOlder() {
+	if len(i.history) == 0 {
+		return
+	}
+	switch {
+	case i.histIdx == -1:
+		i.histDraft = i.ta.Value()
+		i.histIdx = len(i.history) - 1
+	case i.histIdx > 0:
+		i.histIdx--
+	default:
+		return // already at the oldest entry
+	}
+	i.ta.SetValue(i.history[i.histIdx])
+}
+
+// historyNewer loads the next newer prompt, or restores the draft once past
+// the newest entry, ending recall.
+func (i *InputArea) historyNewer() {
+	if i.histIdx == -1 {
+		return
+	}
+	if i.histIdx < len(i.history)-1 {
+		i.histIdx++
+		i.ta.SetValue(i.history[i.histIdx])
+		return
+	}
+	i.histIdx = -1
+	i.ta.SetValue(i.histDraft)
+	i.histDraft = ""
 }

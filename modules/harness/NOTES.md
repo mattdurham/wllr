@@ -1016,6 +1016,51 @@ config, not a terminal signal or flow-control key, and not a readline editing
 key. The pre-existing ctrl+t/ctrl+q conflicts with zellij noted in the issue
 are left for a separate report.
 
+### Addendum: cancel delivers the queue (2026-10-13) 
+
+Issue #48 chose option (a): Esc-cancel preserves the queue and does not
+auto-execute it. That left a gap in practice — the user had already typed and
+queued messages, then hit Esc, and the messages sat idle until they submitted
+something else. Preserving the *content* is right (never destroy typed input),
+but stranding it is not: the reported expectation is that cancelling the
+current turn still sends what was already queued, as its own turn.
+
+**Decision:** Esc-cancel is now "stop this turn, then deliver the queue."
+`Model` gains `cancelFlushQueue`, armed in the two user-cancel paths
+(the global Esc handler when `mainTurnActive()`, and the double-Esc
+`abortStreamMsg`). On the resulting `StreamDoneMsg` with
+`errors.Is(err, context.Canceled)`, if the main agent has queued messages the
+handler re-arms streaming and starts a fresh turn via `pool.Send(main, "")`,
+which drains the inbox synchronously. A fresh `context.Background()` backs the
+flush turn, so it is independent of the canceled one.
+
+**Why harness-side, not agent-side:** the agent's `finishTurn` sees only
+`ctxErr`; a user cancel and a harness-shutdown cancel both surface as
+`context.Canceled`, so the agent cannot tell them apart. Starting new work
+during shutdown would be wrong, and re-draining inside `finishTurn` could loop
+on a canceled parent context. Gating on the user-initiated flag in the harness
+keeps the shutdown path clean: a shutdown cancel leaves `cancelFlushQueue`
+false and the queue untouched (issue #48 semantics retained).
+
+**Consequence:** the queue is still never discarded by Esc — the messages are
+delivered, not lost — so the "preserve vs discard" split from #48 (only ctrl+x
+/ `[ clear ]` / `queue_cancel` discard) still holds. New coverage:
+`flushqueue_test.go` (arm on Esc/abort, flush on canceled done, no flush on
+normal completion or unarmed cancel).
+
+### Input recall history (2026-10-13)
+
+The input box now remembers submitted prompts: Up on an empty box loads the
+most recent message, Up/Down walk older/newer, and Down past the newest
+restores the draft. History lives on `InputArea` (`history`/`histIdx`/
+`histDraft`), bounded at 100 entries with consecutive duplicates collapsed.
+
+**Up is only a history key when the box is empty or a recall is already in
+progress.** The textarea is multi-line, so hijacking Up unconditionally would
+break cursor movement while editing. This matches the requested behavior ("up
+on an empty window") without regressing editing. Covered by
+`inputhistory_test.go`.
+
 ## /context is a modal over two views of the same window (2026-09-24)
 
 The statusline already shows the headline (`ctx:used/max` from

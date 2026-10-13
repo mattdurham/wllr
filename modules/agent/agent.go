@@ -1511,8 +1511,11 @@ func (a *Agent) finishTurn(ctx context.Context, err error, ctxErr error, onDone 
 	// paths, so every turn — including an error-path drain turn — has consumed its
 	// batch before it can fail; the chain only continues while genuinely new
 	// messages arrive, so a persistent error costs one failed turn per arriving
-	// batch, never an infinite loop. Cancellations still terminate the chain: the
-	// queue is deliberately preserved (issue #48) for the next explicit Submit.
+	// batch, never an infinite loop. Cancellations still terminate the chain at
+	// this layer: the queue is deliberately preserved (issue #48). The harness
+	// re-submits the preserved queue after a user cancel (harness NOTES "cancel
+	// delivers the queue"), but the agent itself never auto-drains a canceled
+	// turn — a harness-shutdown cancel must not start new work.
 	if ctxErr == nil {
 		pending := a.DrainInbox()
 

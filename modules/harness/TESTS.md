@@ -375,3 +375,26 @@ dispatched at all.
 | High | `TestStreamTick_PaintsContextStatus` | 100ms tick with usage known and streaming set | tick handler paints the `ctx` key — the long-turn regression path |
 | High | `TestResetHistoryMsg_PaintsContextStatus` | restore rewrites the ctx segment in the same update | model with a known window; `Update(ResetHistoryMsg{...})` | `ctx` was empty before; non-empty after — the restored-conversation path |
 | High | `TestExtensionTick_PaintsContextStatusWhileIdle` | idle 1s tick keeps ctx visible | known window, no turn run; `updateExtension(extensionTickMsg{})` | handler handled; `ctx` key painted — the vanish-between-turns regression path |
+
+### inputhistory_test.go
+
+| Priority | Test | Scenario | Assertions |
+|---|---|---|---|
+| High | `TestInputArea_UpOnEmptyRecallsMostRecent` | Up on an empty box, then Up/Down | first Up loads the newest submission; further Up walks older; Down walks newer and restores the (empty) draft past the newest |
+| High | `TestModel_UpOnEmptyInputRecallsLastMessage` | full Update path | Enter clears the box and records history; Up recalls the last message |
+| Medium | `TestInputArea_HistoryRecordsSubmits` | two submissions | `history` holds both, oldest first |
+| Medium | `TestInputArea_UpWithTextMovesCursorNotHistory` | Up with text in the box | value unchanged; no recall started |
+| Medium | `TestInputArea_HistoryDedupesConsecutive` | same text submitted twice | history length 1 |
+| Medium | `TestInputArea_HistoryCapped` | more than `maxInputHistory` submissions | length capped; newest entry retained |
+| Medium | `TestInputArea_EscClearsRecallState` | Esc during recall | recall ends (`histIdx == -1`) and input clears |
+
+### flushqueue_test.go
+
+| Priority | Test | Scenario | Assertions |
+|---|---|---|---|
+| High | `TestStreamDone_CancelFlushesQueuedMessages` | Esc arm + canceled `StreamDoneMsg` with a non-empty inbox | streaming resumes; flag reset; flush cmd drains the inbox to 0 |
+| High | `TestStreamDone_CancelWithoutFlagPreservesQueue` | canceled done with no flush armed (shutdown-like) | streaming stays false; queue preserved (issue #48) |
+| High | `TestEsc_CancellingActiveTurnArmsQueueFlush` | Esc during an active main turn | handled; `cancelFlushQueue` armed |
+| High | `TestAbortStreamMsg_ArmsQueueFlushWhenTurnActive` | double-Esc abort during an active turn | handled; `cancelFlushQueue` armed |
+| Medium | `TestEsc_IdleDoesNotArmQueueFlush` | Esc with the main agent idle | `cancelFlushQueue` remains false |
+| Medium | `TestStreamDone_NormalCompletionDoesNotFlushQueue` | armed flag but `Err == nil` | flag reset; queue untouched (drain already happened in the agent) |

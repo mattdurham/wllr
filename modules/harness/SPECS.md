@@ -246,11 +246,15 @@ Called after every key event. Computes `slashWordAt(input.Value())`. If a slash 
 
 InputArea only receives key events that the model-level overlay/global handlers do not consume.
 
-- **Enter**: submits trimmed content. Empty → no-op. `/word...` → `CommandMsg`. Plain text → `SubmitMsg`.
+- **Enter**: submits trimmed content. Empty → no-op. `/word...` → `CommandMsg`. Plain text → `SubmitMsg` (and is recorded in the recall history; slash commands are not).
 - **Shift+Enter**: inserts a newline (overrides default Enter binding in textarea).
-- **Esc (first press)**: clears the textarea, sets `lastWasEsc = true`. No message emitted.
+- **Esc (first press)**: clears the textarea, sets `lastWasEsc = true`, ends any recall. No message emitted.
 - **Esc (second consecutive press)**: clears textarea, emits `abortStreamMsg{}`.
+- **Up**: recalls history when the box is empty or a recall is already in progress — the first press loads the most recent submitted message, further presses walk to older entries. With text in the box (and no recall active) it is forwarded to the textarea as a cursor move, so multi-line editing is unaffected.
+- **Down**: while recalling, walks back toward newer entries; past the newest it restores the draft that was in the box when recall started and ends recall.
 - **Any other key**: clears `lastWasEsc`.
+
+The recall history is bounded at `maxInputHistory` (100) entries, oldest dropped first; consecutive duplicate submissions are collapsed so repeated Up presses always move.
 
 ---
 
@@ -277,6 +281,7 @@ No key is forwarded to the input area while the modal is open.
 - `Ctrl+Q` always quits regardless of streaming state.
 - `Ctrl+X` (issue #48) discards every message queued for the main agent and pushes a notification with the discarded count. It works while a turn is running (`agent.Agent.ClearInbox` is deliberately ungated; see agent SPECS §3). Overlays own the keyboard first, so ctrl+x does not fire behind a modal/picker.
 - A left-click on the `[ clear ]` button in the queued-messages pane header does the same as ctrl+x. The button's screen geometry is recorded by `View` into `liveState`; clicks land only within those cells (issue #48).
+- Cancelling the main turn with `Esc` (or the double-Esc `abortStreamMsg`) arms a one-shot queue flush (harness NOTES §"Cancel delivers the queue": issue #48 follow-up). When the resulting canceled `StreamDoneMsg` arrives, if the main agent has queued messages the harness starts a fresh turn (`pool.Send(main, "")`) to deliver them immediately instead of leaving them stranded until the next manual submit. A harness-shutdown cancel does not arm the flush and leaves the queue untouched.
 
 ---
 
