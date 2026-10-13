@@ -431,3 +431,49 @@ func TestExecuteTurn_ReactiveCompaction_DispatchesNotice(t *testing.T) {
 		t.Errorf("retried turn response missing from stream: %q", streamed)
 	}
 }
+
+// TestExecuteTurn_ReactiveCompaction_NoSummarizableSpan pins the reactive
+// guard: when compaction has nothing to fold (here, a one-message history that
+// fails compactHistory's len(history) < 2 check), the history is byte-identical
+// to the request the provider just rejected. Retrying would re-send the same
+// payload and fail the same way, so the turn must surface the rejection once —
+// with the reason — instead of burning a doomed round trip.
+func TestExecuteTurn_ReactiveCompaction_NoSummarizableSpan(t *testing.T) {
+	pool := NewPool()
+	lm := &reactiveLM{}
+	a, err := pool.Spawn(MainAgentID, lm, SpawnOpts{ContextWindow: 200_000})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	// A single small message: quiet for the proactive estimate and the usage
+	// trigger, but still no summarizable span for reactive compaction.
+	a.historyMu.Lock()
+	a.history = []sdk.Message{{Role: sdk.RoleUser, Content: "anchor task"}}
+	a.historyMu.Unlock()
+
+	done := make(chan error, 1)
+	a.SetOnDone(func(e error) { done <- e })
+	a.Submit(context.Background(), "go")
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("turn error = nil, want the context-too-long rejection")
+		}
+		if !strings.Contains(err.Error(), "no summarizable span") {
+			t.Errorf("turn error = %q, want it to mention the missing summarizable span", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for turn")
+	}
+
+	// Exactly one Stream call: the failed attempt. No summarization call and no
+	// retry, because compaction could not change the payload.
+	if lm.calls != 1 {
+		t.Errorf("LM Stream calls = %d, want 1 (failed turn only, no doomed retry)", lm.calls)
+	}
+	if got := a.CompactionCount(); got != 0 {
+		t.Errorf("CompactionCount = %d, want 0 (no-op compaction must not count)", got)
+	}
+}

@@ -52,8 +52,15 @@ jobs:
         with:
           go-version: '1.23.x'
 
+      # Built from source with the repo's Go toolchain rather than fetched as a
+      # prebuilt binary: the release binaries are built with an older Go, and
+      # golangci-lint refuses to run when it was built with a lower Go version
+      # than the target (go.mod requires 1.27.0). Older releases also cannot
+      # read go1.27 export data. Matches `make install-tools`.
       - name: Install golangci-lint
-        run: curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.10.1
+        env:
+          GOTOOLCHAIN: go1.27.0
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
 
       - name: Run golangci-lint
         run: golangci-lint run --timeout=10m
@@ -74,9 +81,13 @@ jobs:
         with:
           go-version: '1.23.x'
 
+      # Built with the toolchain go.mod targets. nilaway analyses the packages
+      # it is pointed at, so building it with an older Go than the target makes
+      # every dependency report "package requires newer Go version" and the job
+      # fails without ever analysing our code. Matches `make install-tools`.
       - name: Install nilaway
         env:
-          GOTOOLCHAIN: go1.26.3
+          GOTOOLCHAIN: go1.27.0
         run: go install go.uber.org/nilaway/cmd/nilaway@latest
 
       - name: Run nilaway
@@ -142,6 +153,29 @@ jobs:
       - name: Build
         run: go build ./...
 
+  # Native `go build ./...` and `go test ./...` skip //go:build wasip1 files, so
+  # a wasip1 extension referencing an uncommitted symbol passes every other job
+  # and only breaks in the real WASM build. This job compiles each extension for
+  # GOOS=wasip1. It needs neither TinyGo nor Docker.
+  wasip1:
+    name: WASM Extensions (wasip1)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+
+      - name: Compile-check WASM extensions for wasip1
+        run: scripts/check-wasip1-extensions.sh
+
   staticcheck:
     name: Static Analysis (staticcheck)
     runs-on: ubuntu-latest
@@ -158,9 +192,11 @@ jobs:
         with:
           go-version: '1.23.x'
 
+      # Same toolchain rule as nilaway: staticcheck parses the target's export
+      # data, so it must be built with a Go at least as new as go.mod's.
       - name: Install staticcheck
         env:
-          GOTOOLCHAIN: go1.26.3
+          GOTOOLCHAIN: go1.27.0
         run: go install honnef.co/go/tools/cmd/staticcheck@latest
 
       - name: Run staticcheck

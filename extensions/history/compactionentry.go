@@ -2,9 +2,9 @@
 
 package main
 
-// compactionEntry is one compaction-metadata record in a session JSONL file.
-// Written when the engine folds history into a summary; the field tags mirror
-// the other session entries so the file stays uniformly parsable.
+// compactionEntry is one compaction-metadata record appended to a session
+// JSONL file by recordCompaction. Loaders skip non-"message" entries, so
+// these lines persist for inspection without affecting message loading.
 type compactionEntry struct {
 	Type              string `json:"type"`
 	ID                string `json:"id"`

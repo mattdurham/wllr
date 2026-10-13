@@ -28,6 +28,13 @@ Package `agent` manages sub-agents and teams for the bob harness. Each `Agent` w
   agent goroutines and must be safe for concurrent use and non-blocking. Pool
   membership events are reported **after** releasing `p.mu`, never while holding
   it, so an observer cannot deadlock against the pool.
+- The optional `contextWindowObserver` is read/written under `p.dispatchMu` and
+  is invoked when a provider context-too-long rejection corrects a model's
+  context window (see Reactive Fallback). It receives the model, the replaced
+  window, and the authoritative value, so the host can keep its own window
+  caches (the local-model discovery cache read by the /models picker and tier
+  resolution) on the corrected value. Invoked from the agent's turn goroutine;
+  must be non-blocking.
 - The optional `subagentResolver` is read/written under `p.mu`. `ResolveSubagentModel`
   consults it only when the spawn request omits a model name; an explicit model
   always resolves through `modelFactory` first. The resolver returns both the
@@ -389,8 +396,9 @@ after a successful `compactHistory` call, under `lastSummaryMu.Lock()`.
 ### Compaction During Tool Loops
 
 Before every provider step after the first, Fantasy's `PrepareStep` hook checks
-the previous step's provider-reported input usage plus its output and a
-conservative estimate of the newest messages, including tool results. The
+the previous step's provider-reported prompt size (input plus cache tokens, the
+same numerator `shouldCompactByUsage` uses) plus its output and a conservative
+estimate of the newest messages, including tool results. The
 full provider-facing message size is used when an endpoint omits usage. The
 threshold is the configured percentage when enabled, capped at 85% of the
 model window and by the output reserve. Reaching it summarizes the active
@@ -409,10 +417,49 @@ the history and retries the aborted turn exactly once. This is the fallback path
 compaction was not triggered or not sufficient. The retry uses the same recent-history budget as
 proactive compaction and preserves the generated summary in the agent state.
 
+**Detection:** `isContextTooLong` reads the parsed `*fantasy.ProviderError` via `errors.As` and
+consults `IsContextTooLarge()`. Each fantasy provider adapter parses its own rejection format into
+that struct — Anthropic, Google, Kronk, and the five OpenAI-compatible variants (openai, alibaba,
+baseten, fireworks, vercel) — so wllr does not track provider wording. This matters for
+`providerLocal`, which is OpenAI-compatible and therefore shares the adapter that recognises five
+distinct formats. A narrow substring fallback remains for a rejection that arrives as a bare error
+string with no `ProviderError` in its chain. Detection must not be reimplemented by matching the
+error text alone: doing so previously missed six of the nine supported formats, so a local model
+rejecting an oversized prompt took no reactive compaction and the turn failed outright.
+
 **Invariant:** The reactive retry happens at most once per turn. If the retry also fails with a context error, the error is reported to `onDone` and the turn ends.
 
 **Invariant:** If reactive compaction fails, no retry is attempted. The compaction error is logged,
 shown to the user, and reported to `onDone`.
+
+**Invariant:** If reactive compaction is a no-op (empty summary — the history was too short, or no
+user-bounded span exceeded the keep-recent budget), the resulting history is byte-identical to the
+request the provider just rejected, so no retry is attempted. The context-too-long error is reported
+to `onDone` with a missing-summarizable-span reason instead of burning a guaranteed-doomed round
+trip. The `before_provider_request` interceptor takes no error argument, so it cannot route the
+second attempt differently and the retry could not succeed.
+
+**Authoritative window:** A context-too-long rejection also carries the model's real context
+window (`ProviderError.ContextMaxTokens`, populated by the same adapters that populate the
+detection flag). `adoptAuthoritativeContextWindow` clamps the agent's session window to that value
+before compacting, and mirrors it onto the pool's per-model window, so the next turn's 80% trigger
+and the ctx display size against the limit the provider actually enforced rather than the stale
+estimate that was just rejected. The ctx denominator is the agent's own window
+(`Agent.ContextWindow`, which `MainAgentContextUsage` reads first), so correcting it corrects the
+trigger, the statusline, and the `/context` breakdown together.
+
+**Invariant:** The clamp is downward-only. A reported maximum at or above the current window
+leaves it unchanged — the request would not have been rejected for exceeding that number, so the
+value most likely describes a different limit, and adopting it would inflate the window and
+suppress compaction. A window that never resolved (`<= 0`) adopts the reported value outright.
+
+**Invariant:** The correction is session-scoped. It updates the in-memory agent and pool windows
+and never the user's configuration, so a misparsed limit cannot persist across restarts. It is
+logged at WARN with both the previous and authoritative values, so a genuinely wrong config is
+visible and fixable.
+
+**Invariant:** The host is notified through `SetContextWindowObserver` after the clamp, so any
+window cache it maintains follows the same value the agent now sizes against.
 
 ### Percentage-Based Compaction Trigger
 
@@ -754,7 +801,8 @@ Orchestrator inbox receives:
 
 ### finishTurn shutdown detection
 
-`finishTurn` runs after `isRunning` transitions to false. It:
+`finishTurn` owns turn completion: it runs with `isRunning` still true and releases
+the flag as its last act on each exit path (see Ownership below). It:
 
 1. Drains the inbox for messages that arrived **during** the current turn.
 2. Scans for any system message whose JSON content has `event == "shutdown_request"`.
@@ -798,10 +846,17 @@ messages still drain into a follow-up turn.
 
 ### Invariants
 
-**Invariant:** `pendingShutdownFrom` is only read and written inside `finishTurn`, which
-runs after each `isRunning.Store(false)`. Because at most one goroutine can hold
-`isRunning == true` at a time, no additional mutex is needed for `pendingShutdownFrom`.
-`Submit` must never access this field.
+**Invariant (Ownership):** `finishTurn` holds `isRunning == true` for the whole of its
+body and clears the flag only once the turn's shared state is settled — on the drain
+exit immediately before `Submit("")` (whose CAS requires the flag clear), and at the end
+of every other path. It must never release the flag on entry. Because at most one
+goroutine can hold `isRunning == true` at a time, that ownership is what serializes
+access to `pendingShutdownFrom`; releasing early would let a concurrent `Submit` win the
+CAS and run a second `finishTurn` that races the first on the same field (and can shut
+the agent down twice).
+
+**Invariant:** `pendingShutdownFrom` is only read and written by the turn goroutine that
+owns the agent (`isRunning == true`). `Submit` must never access this field.
 
 **Invariant:** Drain turns triggered from `finishTurn` use the original context passed to
 `Submit`, not `context.Background()`. This allows harness shutdown to cancel in-flight
@@ -822,9 +877,11 @@ next `finishTurn` can act on it.
 calls `onDone(nil)` and returns; the normal path at the bottom of `finishTurn` is
 therefore not reached. No double-`onDone` is possible.
 
-**Invariant:** `pool.Close` is idempotent. Calling it from `finishTurn` after
-`isRunning.Store(false)` is safe — the agent is no longer running when Close is called,
-and Close acquires `p.mu.Lock` without any pool lock being held by the agent goroutine.
+**Invariant:** `pool.Close` is idempotent. Calling it from `finishTurn` while the turn
+goroutine still owns the agent (`isRunning == true`) is safe — safety does not depend on
+the flag: `Close` acquires `p.mu.Lock` and the agent goroutine holds no pool lock at
+that point. Holding ownership across `Close` is in fact required, so no concurrent
+`Submit` can win the CAS and start a turn against an agent being removed.
 
 **Invariant:** System messages are never recorded in `a.history` on the drain-turn path
 (§9). An AGENT_SHUTDOWN message sent by the worker to the creator's inbox is a system

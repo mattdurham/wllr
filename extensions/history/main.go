@@ -29,12 +29,11 @@ func init() {
 	// queued message is inbox-delivered work — a sub-agent's task arriving, or a
 	// lifecycle notification — which would otherwise be recorded as if the user
 	// typed it. Recording one is indistinguishable from a real prompt once
-	// stored, so it must be filtered here.
-	OnBeforeAgentStart(func(agentID, prompt string, queued bool) {
-		if queued {
-			return
-		}
-		if agentID != "" && agentID != "main" {
+	// stored, so it must be filtered here. /steer guidance is the exception:
+	// the harness flags it steer:true, and it is exactly what the user asked
+	// the model to hear mid-turn, so it is recorded like a prompt.
+	OnBeforeAgentStart(func(agentID, prompt string, queued, steer bool) {
+		if !shouldRecordUserPrompt(agentID, queued, steer) {
 			return
 		}
 		recordMessage("user", prompt)

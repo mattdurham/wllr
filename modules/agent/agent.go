@@ -1312,6 +1312,10 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 	// retry the aborted turn once. This preserves a summary instead of silently
 	// discarding older messages.
 	if err != nil && isContextTooLong(err) {
+		// The rejection carries the model's real window. Adopt it before
+		// compacting so the retry, and every later turn, sizes against the
+		// true limit instead of the estimate that just failed.
+		a.adoptAuthoritativeContextWindow(pool, modelName, err)
 		result, cerr := compactHistory(childCtx, lm, history, priorSummary, keepRecent, CompactionTriggerReactive)
 		if cerr != nil {
 			compactionErr := fmt.Errorf("context compaction failed after context limit: %w", cerr)
@@ -1325,6 +1329,31 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 				compactionErr,
 			)
 			a.finishTurn(ctx, compactionErr, nil, onDone, inboxMsgs)
+			return
+		}
+		if result.Summary == "" {
+			// Nothing could be folded: the history was too short, or no
+			// user-bounded span exceeded the keep-recent budget, so
+			// result.History is byte-identical to the request the provider
+			// just rejected. The retry would re-send the same payload and fail
+			// the same way — the before_provider_request interceptor never sees
+			// the error, so it cannot reroute differently on the second attempt
+			// — so report the rejection once, with the reason, instead of
+			// burning a guaranteed-doomed round trip.
+			reactiveErr := fmt.Errorf(
+				"context too long and history has no summarizable span: %w",
+				err,
+			)
+			slog.Error(
+				"agent: reactive context compaction had nothing to summarize",
+				"agent",
+				a.id,
+				"model",
+				modelName,
+				"error",
+				reactiveErr,
+			)
+			a.finishTurn(ctx, reactiveErr, nil, onDone, inboxMsgs)
 			return
 		}
 		a.observeCompaction(result)
@@ -1491,7 +1520,14 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 // their 30-minute timeout.
 func (a *Agent) finishTurn(ctx context.Context, err error, ctxErr error, onDone func(error), consumed []sdk.Message) {
 	a.markTurnDone()
-	a.isRunning.Store(false)
+
+	// Ownership (isRunning) is held for the whole of this function and released
+	// only once this turn's shared state has been settled. Releasing it up front
+	// lets a concurrent Submit win the CAS and start a second turn whose
+	// finishTurn reads and writes pendingShutdownFrom while this one is still
+	// doing the same — a data race, and a way to shut an agent down twice. The
+	// one place the flag must clear early is the drain hand-off below, because
+	// Submit's CAS requires it; by then nothing here is touched again.
 
 	// Drain after successful turns AND after failed turns: a message delivered
 	// while a turn was running must be processed even if that turn errored, so a
@@ -1548,9 +1584,9 @@ func (a *Agent) finishTurn(ctx context.Context, err error, ctxErr error, onDone 
 		}
 
 		// Check for a deferred shutdown_request from a previous finishTurn cycle.
-		// invariant: pendingShutdownFrom is only written and read from finishTurn,
-		// which runs after isRunning transitions to false. Submit must never access
-		// this field.
+		// invariant: pendingShutdownFrom is only written and read by the turn that
+		// owns the agent (isRunning true), never by Submit. finishTurn holds that
+		// ownership until this state is settled — see the note at its top.
 		if shutdownFrom == "" {
 			shutdownFrom = a.pendingShutdownFrom
 		}
@@ -1563,13 +1599,16 @@ func (a *Agent) finishTurn(ctx context.Context, err error, ctxErr error, onDone 
 			for _, m := range normalPending {
 				a.AppendInbox(m)
 			}
-			// invariant: pendingShutdownFrom is only written and read from finishTurn,
-			// which runs after isRunning transitions to false. Submit must never access
-			// this field.
+			// invariant: pendingShutdownFrom is only written and read by the turn that
+			// owns the agent (isRunning true), never by Submit.
 			a.pendingShutdownFrom = shutdownFrom // "" if no shutdown pending
 			// Do NOT fire onDone here: the drain sub-turn's finishTurn will fire it
 			// when the inbox is finally empty, preventing a double StreamDoneMsg.
 			// Pass the original ctx so harness shutdown can cancel drain turns.
+			//
+			// Release before handing off: Submit's CAS needs the flag clear, and this
+			// turn's shared state is settled by the line above.
+			a.isRunning.Store(false)
 			a.Submit(ctx, "")
 			return
 		}
@@ -1611,9 +1650,8 @@ func (a *Agent) finishTurn(ctx context.Context, err error, ctxErr error, onDone 
 
 		// Handle deferred shutdown if present.
 		if shutdownFrom != "" {
-			// invariant: pendingShutdownFrom is only written and read from finishTurn,
-			// which runs after isRunning transitions to false. Submit must never access
-			// this field.
+			// invariant: pendingShutdownFrom is only written and read by the turn that
+			// owns the agent (isRunning true), never by Submit.
 			a.pendingShutdownFrom = "" // clear deferred state
 			a.shutdownRequested.Store(false)
 
@@ -1634,6 +1672,7 @@ func (a *Agent) finishTurn(ctx context.Context, err error, ctxErr error, onDone 
 					slog.Warn("finishTurn: failed to close self", "agent", a.id, "err", err)
 				}
 			}
+			a.isRunning.Store(false)
 			if onDone != nil {
 				onDone(nil)
 			}
@@ -1641,6 +1680,7 @@ func (a *Agent) finishTurn(ctx context.Context, err error, ctxErr error, onDone 
 		}
 	}
 
+	a.isRunning.Store(false)
 	if onDone != nil {
 		onDone(err)
 	}
@@ -1856,15 +1896,98 @@ func toolResultText(result any) string {
 
 // isContextTooLong returns true when the API rejected the request because the
 // prompt exceeded the model's context window.
+//
+// The structured check comes first. Every fantasy provider adapter parses its
+// own wire formats into ProviderError at the point of failure — Anthropic,
+// Google, Kronk, and the five OpenAI-compatible variants (openai, alibaba,
+// baseten, fireworks, vercel) — so consulting the parsed flag covers all of
+// them without wllr having to track each provider's rejection wording. Matching
+// on the error string alone missed most of those formats (kronk's
+// "input tokens [N] exceed context window [M]", google's "input token count N
+// exceeds the maximum M", alibaba's "Range of input length should be [1, N]",
+// baseten's "Input length N exceeds the maximum allowed input length of M
+// tokens", vercel's "Input too long: N input tokens, limit is M"), so a local
+// model rejecting an oversized prompt took no reactive compaction at all and
+// the turn simply failed.
+//
+// The substring fallback below remains for a rejection that arrives as a bare
+// error string with no ProviderError in its chain. It is deliberately narrow:
+// the structured path is the one that is expected to fire.
 func isContextTooLong(err error) bool {
 	if err == nil {
 		return false
+	}
+	var providerErr *fantasy.ProviderError
+	if errors.As(err, &providerErr) && providerErr.IsContextTooLarge() {
+		return true
 	}
 	s := err.Error()
 	return strings.Contains(s, "prompt is too long") ||
 		strings.Contains(s, "context_length_exceeded") ||
 		strings.Contains(s, "maximum context length") ||
 		strings.Contains(s, "tokens > ") // Anthropic: "213370 tokens > 200000 maximum"
+}
+
+// authoritativeContextWindow returns the model's real context window as
+// reported by a context-too-long rejection, or 0 when the error carries no
+// number.
+//
+// fantasy's provider adapters parse each vendor's rejection into
+// ProviderError.ContextMaxTokens at the point of failure (Anthropic, Google,
+// Kronk, and the five OpenAI-compatible variants), so the authoritative limit
+// is available whenever the structured flag is set. A rejection that arrives as
+// a bare string has no number to recover and yields 0.
+func authoritativeContextWindow(err error) int64 {
+	if err == nil {
+		return 0
+	}
+	var providerErr *fantasy.ProviderError
+	if errors.As(err, &providerErr) && providerErr.ContextMaxTokens > 0 {
+		return int64(providerErr.ContextMaxTokens)
+	}
+	return 0
+}
+
+// adoptAuthoritativeContextWindow clamps this agent's context window to the
+// maximum a context-too-long rejection reported, so the next turn's 80%
+// usage trigger and the ctx display size against the model's real limit rather
+// than the estimate that just failed.
+//
+// The clamp is downward-only. A reported maximum at or above the current
+// window leaves it unchanged: the request would not have been rejected for
+// exceeding that number, so it most likely describes a different limit and
+// adopting it would inflate the window. A model whose window was unknown
+// (<= 0) adopts the reported value outright.
+//
+// The correction is session-scoped by design. It updates the in-memory agent
+// and pool windows but never the user's configuration, so a misparsed limit
+// cannot persist across restarts; the warning names both values so a genuinely
+// wrong config is visible and fixable.
+func (a *Agent) adoptAuthoritativeContextWindow(pool *AgentPool, modelName string, err error) {
+	reported := authoritativeContextWindow(err)
+	if reported <= 0 {
+		return
+	}
+	a.lmMu.Lock()
+	previous := a.contextWindow
+	if previous > 0 && reported >= previous {
+		a.lmMu.Unlock()
+		return
+	}
+	a.contextWindow = reported
+	a.lmMu.Unlock()
+
+	if pool != nil {
+		pool.SetModelContextWindow(modelName, reported)
+		pool.notifyContextWindowCorrected(modelName, previous, reported)
+	}
+	slog.Warn(
+		"agent: provider reported a smaller context window than resolved; adopting it for this session",
+		"agent", a.id,
+		"model", modelName,
+		"previous_window", previous,
+		"authoritative_window", reported,
+	)
 }
 
 // sdkToFantasyMessages converts sdk.Message history to fantasy.Message format.

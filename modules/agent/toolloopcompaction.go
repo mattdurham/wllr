@@ -58,11 +58,15 @@ func (c *toolLoopCompactor) prepare(
 	}
 
 	last := opts.Steps[len(opts.Steps)-1]
-	// Provider input usage is the reliable baseline. The most recent step's
-	// tool results have not yet been counted in that input, so estimate their
-	// additional cost conservatively at two bytes per token.
-	predicted := last.Usage.InputTokens + last.Usage.OutputTokens + estimateFantasyMessageBytes(last.Messages)/2
-	if last.Usage.InputTokens == 0 {
+	// Provider input usage is the reliable baseline. As in shouldCompactByUsage,
+	// the prompt size is InputTokens plus cached tokens: a cache-served step can
+	// report most of its prompt as cache reads, and counting InputTokens alone
+	// would undercount it and let the loop run on past the threshold. The most
+	// recent step's tool results have not yet been counted in that input, so
+	// estimate their additional cost conservatively at two bytes per token.
+	promptTokens := last.Usage.InputTokens + last.Usage.CacheReadTokens + last.Usage.CacheCreationTokens
+	predicted := promptTokens + last.Usage.OutputTokens + estimateFantasyMessageBytes(last.Messages)/2
+	if promptTokens == 0 {
 		// Some compatible endpoints omit usage entirely. Fall back to the
 		// current provider-facing message size in that case.
 		if estimated := estimateFantasyMessageBytes(messages) / 2; estimated > predicted {

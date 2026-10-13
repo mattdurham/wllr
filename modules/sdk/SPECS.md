@@ -108,9 +108,11 @@ pathed or timestamped artifacts.
 
 | Field           | Type   | Description                      |
 |-----------------|--------|----------------------------------|
+| `agent_id`      | string | The agent the turn belongs to (omitted for the root) |
 | `prompt`        | string | The user-facing agent prompt     |
 | `system_prompt` | string | The system prompt for this agent |
 | `queued`        | bool   | True when the prompt is waiting in the agent inbox rather than starting immediately |
+| `steer`         | bool   | True when the prompt is `/steer` guidance injected into a running or woken turn; history recorders persist steer but not other queued traffic |
 
 ### BeforeProviderRequestPayload (`EventBeforeProviderRequest`)
 

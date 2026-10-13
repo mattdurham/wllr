@@ -204,6 +204,16 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 	metrics := newWllrMetrics()
 	pool.SetUsageObserver(metrics.recordTurn)
 	pool.SetLifecycleObserver(metrics.recordLifecycle)
+	// A provider rejection reveals the model's real window; the agent clamps its
+	// session window to it and reports the correction here. Keep the local
+	// discovery cache on the same value so the /models picker and tier
+	// resolution size against the limit the provider actually enforced, rather
+	// than the stale endpoint/config value that was just rejected.
+	pool.SetContextWindowObserver(func(model string, _, authoritative int64) {
+		if cfg.Provider == providerLocal {
+			rememberDiscoveredLocalWindow(model, authoritative)
+		}
+	})
 	cleanupPprof := startDebugServer(*pprofAddr, metrics)
 	defer cleanupPprof()
 	// Route the host's own diagnostic logs through the configured default handler
@@ -557,7 +567,7 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 			return err
 		}
 		if main := pool.Get(agent.MainAgentID); main != nil {
-			main.SetProviderOptions(providerOptionsForRuntime(currentProvider, savedThinkingMode(), cfg.Model))
+			main.SetProviderOptions(providerOptionsForRuntime(currentProvider, startupThinkingMode(ctx, cfg, currentProvider), cfg.Model))
 		}
 		return nil
 	}
@@ -573,13 +583,20 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 	// consistent with /thinking and tier thinking overrides.
 	m.SetThinkingLevelFn = func(level string) error {
 		modeID := thinkingModeIDForLevel(currentProvider, cfg.Model, level)
+		if currentProvider == providerLocal {
+			// Endpoint-declared sets are not visible to the sync vocabulary
+			// helpers: re-resolve against what the endpoint actually offered.
+			if modes, declared, _ := localThinkingInfo(ctx, cfg); declared {
+				modeID = thinkingModeIDForSet(modes, level)
+			}
+		}
 		if modeID == "" {
 			return fmt.Errorf("provider %s does not support thinking level %q", currentProvider, level)
 		}
 		if main := pool.Get(agent.MainAgentID); main != nil {
 			main.SetProviderOptions(providerOptionsForRuntime(currentProvider, modeID, cfg.Model))
 		}
-		if err := saveThinkingMode(modeID); err != nil {
+		if err := saveThinkingMode(currentProvider, cfg.Model, modeID); err != nil {
 			slog.Warn("wllr: could not persist thinking mode", "mode", modeID, "error", err)
 		}
 		if err := saveThinkingLevel(thinkingLevel(level)); err != nil {
@@ -609,13 +626,23 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 		for _, model := range models {
 			out = append(
 				out,
-				harness.OpenRouterModelChoice{ID: model.ID, Name: model.Name, ContextWindow: model.ContextWindow},
+				harness.OpenRouterModelChoice{
+					ID:                  model.ID,
+					Name:                model.Name,
+					ContextWindow:       model.ContextWindow,
+					SupportedParameters: model.SupportedParameters,
+				},
 			)
 		}
 		return out, nil
 	}
 	m.AddOpenRouterModelFn = func(choice harness.OpenRouterModelChoice) error {
-		model := openRouterModelConfig{ID: choice.ID, Name: choice.Name, ContextWindow: choice.ContextWindow}
+		model := openRouterModelConfig{
+			ID:                  choice.ID,
+			Name:                choice.Name,
+			ContextWindow:       choice.ContextWindow,
+			SupportedParameters: choice.SupportedParameters,
+		}
 		candidate := *cfg
 		candidate.Provider, candidate.Model = providerOpenRouter, model.ID
 		prov, lm, buildErr := buildProvider(ctx, &candidate)
@@ -755,6 +782,11 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 		return "unavailable"
 	}
 	m.ThinkingUnsupportedReasonFn = func() string {
+		if currentProvider == providerOpenRouter {
+			// The list is empty for OpenRouter only when the pinned model's
+			// listing declared it unable to reason.
+			return fmt.Sprintf("%s does not support reasoning (per OpenRouter's model listing)", cfg.Model)
+		}
 		if currentProvider != providerLocal {
 			return "this provider/model does not support reasoning"
 		}
@@ -769,7 +801,7 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 		if main := pool.Get(agent.MainAgentID); main != nil {
 			main.SetProviderOptions(po)
 		}
-		if saveErr := saveThinkingMode(levelID); saveErr != nil {
+		if saveErr := saveThinkingMode(currentProvider, cfg.Model, levelID); saveErr != nil {
 			slog.Warn("wllr: could not persist thinking mode", "mode", levelID, "error", saveErr)
 		}
 		return nil
@@ -800,7 +832,7 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 	if currentProvider == providerLocal {
 		modes, declared, _ := localThinkingInfo(ctx, cfg)
 		if declared && len(modes) == 0 {
-			if err := saveThinkingMode(""); err != nil {
+			if err := saveThinkingMode(currentProvider, cfg.Model, ""); err != nil {
 				slog.Warn("wllr: could not clear thinking mode", "error", err)
 			}
 			m.SetThinkingUnavailable()

@@ -10,4 +10,10 @@ type BeforeAgentStartPayload struct {
 	Prompt       string `json:"prompt"`
 	SystemPrompt string `json:"system_prompt"`
 	Queued       bool   `json:"queued,omitempty"`
+	// Steer marks the prompt as /steer guidance injected into a running or
+	// woken turn, not ordinary queued inbox traffic. Transcripts may render
+	// both, but session-history recorders must persist only steer: a queued
+	// team message stored as a user prompt is indistinguishable from
+	// something the user typed.
+	Steer bool `json:"steer,omitempty"`
 }

@@ -70,14 +70,23 @@ type CompactConfig struct {
 // of the context window. Returns false when usage or window is zero (caller falls
 // back to the heuristic shouldCompact for the first turn or when unconfigured).
 //
+// The numerator is the full prompt size the provider processed — InputTokens plus
+// cached tokens — matching sdk.ContextUsageFromFantasy, which computes the ctx
+// percentage shown to the user. Counting InputTokens alone undercounted every
+// cache-served turn (Anthropic reports cache reads additively, so a 170k prompt
+// can arrive as 20k input + 150k cache read): the statusline showed 85% while
+// this trigger computed 10% and never fired, so the turn ran on to a
+// context-too-long rejection instead of compacting at the threshold.
+//
 // Note: thresholdPct is a fraction in (0, 1] (e.g. 0.80 = 80%). This is a different
 // scale from ContextUsage.Percent, which is a percentage in [0, 100]. Do not compare
 // ContextUsage.Percent directly to thresholdPct without converting.
 func shouldCompactByUsage(lastUsage fantasy.Usage, contextWindow int64, thresholdPct float64) bool {
-	if lastUsage.InputTokens == 0 || contextWindow == 0 || thresholdPct <= 0 {
+	inputTokens := lastUsage.InputTokens + lastUsage.CacheReadTokens + lastUsage.CacheCreationTokens
+	if inputTokens <= 0 || contextWindow == 0 || thresholdPct <= 0 {
 		return false
 	}
-	pct := float64(lastUsage.InputTokens) / float64(contextWindow)
+	pct := float64(inputTokens) / float64(contextWindow)
 	return pct >= thresholdPct
 }
 

@@ -515,6 +515,41 @@ func TestShouldCompactByUsage_AtThreshold(t *testing.T) {
 	}
 }
 
+// TestShouldCompactByUsage_CacheTokensCountTowardThreshold pins the trigger's
+// numerator to the same "true prompt size" the display uses. Anthropic reports
+// cache reads additively to input_tokens, so a mostly-cache-served prompt can
+// report a small InputTokens alongside a large CacheReadTokens. Counting only
+// InputTokens made the trigger disagree with the ctx percentage the user sees:
+// the display said 85% while the trigger computed 10% and never fired.
+func TestShouldCompactByUsage_CacheTokensCountTowardThreshold(t *testing.T) {
+	// 20k fresh + 150k cache read = 170k of a 200k window = 85%.
+	u := fantasy.Usage{InputTokens: 20_000, CacheReadTokens: 150_000}
+	if !shouldCompactByUsage(u, 200_000, 0.80) {
+		t.Error("expected true at 85% (input+cache_read) with threshold 0.80, got false")
+	}
+}
+
+// TestShouldCompactByUsage_CacheCreationCountsTowardThreshold covers the
+// cache-write side of the same rule: a turn that mostly created cache entries
+// is just as full as one that read them.
+func TestShouldCompactByUsage_CacheCreationCountsTowardThreshold(t *testing.T) {
+	// 20k fresh + 150k cache creation = 170k of a 200k window = 85%.
+	u := fantasy.Usage{InputTokens: 20_000, CacheCreationTokens: 150_000}
+	if !shouldCompactByUsage(u, 200_000, 0.80) {
+		t.Error("expected true at 85% (input+cache_creation) with threshold 0.80, got false")
+	}
+}
+
+// TestShouldCompactByUsage_CacheTokensBelowThreshold is the negative control:
+// summing cache tokens must not make the trigger fire early.
+func TestShouldCompactByUsage_CacheTokensBelowThreshold(t *testing.T) {
+	// 10k fresh + 140k cache read = 150k of a 200k window = 75%.
+	u := fantasy.Usage{InputTokens: 10_000, CacheReadTokens: 140_000}
+	if shouldCompactByUsage(u, 200_000, 0.80) {
+		t.Error("expected false at 75% (input+cache_read) with threshold 0.80, got true")
+	}
+}
+
 // TestShouldCompactByUsage_ZeroUsage verifies that zero InputTokens always returns false.
 func TestShouldCompactByUsage_ZeroUsage(t *testing.T) {
 	// First turn before any usage is recorded: InputTokens is 0.

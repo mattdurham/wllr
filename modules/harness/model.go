@@ -821,6 +821,10 @@ func (m *Model) WireMainAgentCallbacks(sink sdk.AgentUISink) {
 				AgentID: mainID,
 				Prompt:  message.Content,
 				Queued:  true,
+				// An idle wake consumes steer-typed messages through this
+				// loop; flag them so the history extension records them as
+				// user prompts while queued team traffic stays filtered.
+				Steer: message.Type == sdk.MessageTypeSteer,
 			})
 			dispatchTurnStart(extHostForToken, payload)
 		}
@@ -849,6 +853,8 @@ func (m *Model) WireMainAgentCallbacks(sink sdk.AgentUISink) {
 	// Steer deliveries render at the moment they are injected into the running
 	// turn — that is when the model will see them. The queued:true payload
 	// makes the transcript extension render it as a prompt-style bubble, and
+	// steer:true marks it for the history extension, which persists steer
+	// guidance as a user message but filters other queued inbox traffic.
 	// dispatchTurnStart detaches onto its own goroutine because this callback
 	// fires on the turn goroutine (mid-turn, possibly inside a WASM call).
 	a.AddOnSteer(func(content string) {
@@ -859,6 +865,7 @@ func (m *Model) WireMainAgentCallbacks(sink sdk.AgentUISink) {
 			AgentID: mainID,
 			Prompt:  content,
 			Queued:  true,
+			Steer:   true,
 		})
 		dispatchTurnStart(extHostForToken, payload)
 	})
@@ -3383,6 +3390,7 @@ func dispatchAgentSteer(extHost *extension.Host) func(agentID, content string) {
 			AgentID: agentID,
 			Prompt:  content,
 			Queued:  true,
+			Steer:   true,
 		})
 		if err != nil {
 			return

@@ -39,6 +39,14 @@ type AgentPool struct {
 	// that agent (wake=true). The harness uses it to drive the TUI streaming
 	// indicator for the main agent. Set via SetWakeNotifier.
 	wakeNotifier func(id string)
+	// contextWindowObserver, when set, is called when a provider context-too-long
+	// rejection reveals a model's real context window and the agent clamps its
+	// session window to it. The host uses it to keep any window cache (the local
+	// model picker and tier resolution) coherent with the correction without
+	// giving the agent package a cmd dependency. previous is the window that was
+	// replaced; authoritative is the provider-reported value now in effect.
+	// Set via SetContextWindowObserver.
+	contextWindowObserver func(model string, previous, authoritative int64)
 	// providerRequestInterceptor, when set, runs the before_provider_request
 	// transform chain just before each agent turn streams to the provider. It can
 	// redact the outgoing messages, reroute the model, or block the request.
