@@ -1175,3 +1175,46 @@ Deliberately out of scope: seeding at spawn time. Before the first `Submit` ther
 no resolved tool set (`toolsFn` may not be installed) and no prompt — the estimate
 would be fiction. A fresh idle session shows no ctx segment until the first turn
 begins, which is truthful: nothing has been sent yet.
+
+*Addendum (2026-10-06):* the turn-start seed left two gaps — a resumed conversation and
+an idle fresh session both showed no ctx segment until the next turn reported. §51
+closes both with `SeedContextBaseline`.
+
+## 51. Session-start and history-restore ctx seed (2026-10-06)
+
+The turn-start baseline seed (§50) only fires inside `executeTurn`, so two states showed
+no ctx segment at all: an idle fresh session (no turn yet) and a conversation restored
+via `/history` before the next prompt. A *resumed* conversation was worse than merely
+blank — if any turn had already run this process, `usageReported` was set, so the
+statusline kept painting the **previous** conversation's context size until the next
+turn corrected it.
+
+**Decision:** `Agent.SeedContextBaseline(pool, resetReported)` and its pool wrapper
+`AgentPool.SeedMainAgentBaseline(resetReported)` reuse the §50 estimator
+(`contextEstimate(history, systemPrompt, "", nil)`) to seed `lastUsage` and dispatch
+`EventContextUsage` from outside a turn:
+
+- **Session start** (`resetReported=false`): the harness calls
+  `SeedMainAgentBaseline(false)` once the `session_start` handlers have run, so the
+  assembled system prompt is on the agent. The indicator appears at startup rather than
+  waiting for the user's first prompt.
+- **History restore** (`resetReported=true`): `SetAgentHistory` calls
+  `SeedContextBaseline(p, true)` after swapping the transcript. Passing `true` clears the
+  `usageReported` latch first, discarding the previous conversation's reported usage so
+  the reseed takes effect instead of being squashed.
+
+`lastUsage` is normally written only from the `Submit` goroutine; this path runs on the
+harness/session goroutine, so the write takes `lastUsageMu` and the SPECS invariant is
+restated in terms of the lock, not goroutine identity. Tool definitions are omitted —
+the dynamic tool list is per-turn and unavailable here — so the estimate slightly
+undershoots; the next turn's provider report (which counts tools) replaces it, exactly as
+the §50 seed is replaced.
+
+**Rationale:** the ctx segment's whole value is telling the operator how full the window
+is *before* the expensive turn runs. A blank or stale number at the two moments the
+conversation is known but idle defeats that. Seeding from the same estimator the
+compaction path trusts keeps the two from drifting.
+
+**Consequence:** `SeedMainAgentBaseline` is main-agent-only for the dispatch (sub-agents
+record the baseline on themselves but never drive the indicator), matching every other
+context-usage dispatch. Coverage: seedbaseline_test.go.

@@ -1146,3 +1146,34 @@ focused transcript, the extension returns focus and the transcript to the
 root, so the user is never left looking at a dead scene. Coverage:
 killagents_test.go (kill key dispatch, root refusal, esc still closes),
 kill_test.go in modules/agent (turn interrupt, subtree cascade, root guard).
+
+## ctx appears at startup and after history restore (2026-10-06)
+
+`refreshContextStatus()` used to run only on the 100ms stream tick and on
+`StreamDoneMsg`, so the statusline ctx segment was invisible from startup until the first
+turn reported, and stayed hidden across an idle gap between turns. A conversation
+restored with `/history` was worse: if a turn had already run this process, the display
+kept the *previous* conversation's size until the next turn corrected it.
+
+**Decision:** paint (and keep painting) the ctx segment outside turns.
+
+1. **Session start.** The `sessionStartDoneMsg` handler calls
+   `agentPool.SeedMainAgentBaseline(false)` — the `session_start` handlers have run, so
+   the main agent's system prompt is assembled — then `refreshContextStatus()`. The
+   segment is populated from startup rather than waiting for the first prompt.
+2. **Idle tick.** The 1s `extensionTickMsg` handler calls `refreshContextStatus()`,
+   which keeps ctx live while idle (the stream tick only runs during a turn).
+3. **History restore.** `ResetHistoryMsg` calls `refreshContextStatus()` after the
+   bridge has replaced the history and reseeded the agent's usage baseline
+   (`SetAgentHistory` → `SeedContextBaseline(p, true)`; see agent NOTES §51), so the
+   restored conversation's size shows immediately.
+
+**Rationale:** the ctx segment is only useful before/without a turn — its whole job is to
+warn how full the window is going into the next request. Recomputing it from
+`MainAgentContextUsage()` on the existing 1s tick is a lock-and-read, and it also keeps
+the statusline's `get_status_info`-driven path (`renderContext`) from overwriting the
+`EventContextUsage`-driven value with an empty one on the next tick.
+
+**Consequence:** `refreshContextStatus()` is now called from four sites; it remains a
+no-op (returns false, writes nothing) when the window is unknown. Coverage:
+startupctx_test.go, livectx_test.go.

@@ -366,7 +366,14 @@ updates the context-usage status keys via `setStatus`:
 - When `cu.ContextWindow == 0`: both keys are deleted (empty string to `setStatus`).
 
 **Invariant:** The `ctx` and `ctx rem` keys are only present when a context window is
-configured and at least one turn has completed. Updated once per `StreamDoneMsg`.
+resolvable for the main agent. `refreshContextStatus()` writes them from
+`MainAgentContextUsage()` and is called from `StreamDoneMsg`, the 100ms `streamTickMsg`
+(so ctx appears and advances mid-turn), the 1s `extensionTickMsg` (so ctx stays live
+while idle instead of vanishing between turns), the `sessionStartDoneMsg` handler (after
+`SeedMainAgentBaseline(false)`, so ctx is painted from startup), and the `ResetHistoryMsg`
+handler (after the bridge reseeds the restored conversation's baseline). The helper
+returns false and writes nothing when the window is unknown; `StreamDoneMsg`'s clear
+branch owns deletion. See agent SPECS §18 for `SeedContextBaseline`.
 
 ### Generation speed (`tps`)
 
@@ -662,10 +669,21 @@ root transcript. Clearing `focusedAgent` locally would leave the sub-agent's
 scene on screen (the transcript is extension-owned) and esc would appear to do
 nothing, which is exactly the bug this rule prevents.
 
+**Context usage at session start and on restore.** Once the `session_start` handlers
+have run, the harness calls `agentPool.SeedMainAgentBaseline(false)` (the system prompt is
+now assembled on the main agent) and then `refreshContextStatus()`, so the statusline
+shows the context baseline from startup instead of staying hidden until the first turn.
+On `ResetHistoryMsg` the bridge has already replaced the agent history and reseeded its
+usage baseline (agent SPECS §18, `SetAgentHistory` → `SeedContextBaseline(p, true)`); the
+handler calls `refreshContextStatus()` so the ctx segment reflects the restored
+conversation immediately rather than the previous value.
+
 **Invariant:** focus and the transcript are reconciled together. An agent
 self-closes after processing its shutdown request without telling the extension
 that focused it, so on each `extensionTickMsg` the harness checks whether
-`focusedAgent` still names a live agent. When it does not, `reconcileFocusedAgent`
+`focusedAgent` still names a live agent. The same tick also calls
+`refreshContextStatus()` so the ctx segment stays live while the agent is idle (the
+100ms stream tick only runs during a turn). When it does not, `reconcileFocusedAgent`
 resets focus to the root, clears the `agent` status key, empties the transcript
 area, and dispatches `agents:transcript_rebuild` with an empty ID so the root
 conversation is re-rendered. Reconciling both halves is the point: the statusline

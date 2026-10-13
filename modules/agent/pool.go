@@ -328,15 +328,26 @@ func (p *AgentPool) MainAgentContextUsage() sdk.ContextUsage {
 	if a == nil {
 		return sdk.ContextUsage{}
 	}
-	// Fall back to the pool's per-model resolution when the agent's own window
-	// is unset (e.g. a zero-value or externally constructed agent), so the
-	// display degrades to the pool view instead of vanishing (window 0 hides
-	// the ctx segment entirely).
-	window := a.ContextWindow()
-	if window <= 0 {
-		window = p.ContextWindowForModel(a.ModelName())
+	return sdk.ContextUsageFromFantasy(a.LastUsage(), a.resolvedWindow(p))
+}
+
+// SeedMainAgentBaseline installs the main agent's context-usage display
+// baseline from its current history and system prompt and dispatches it, so
+// the statusline ctx segment is populated before the first turn (session
+// start) and immediately after a history restore, instead of staying hidden
+// until the next provider report. No-op when the main agent is absent.
+//
+// resetReported must be true only on the history-restore path (see
+// Agent.SeedContextBaseline); SetAgentHistory already reseeds, so ordinary
+// callers pass false.
+func (p *AgentPool) SeedMainAgentBaseline(resetReported bool) {
+	p.mu.RLock()
+	a := p.agents[MainAgentID]
+	p.mu.RUnlock()
+	if a == nil {
+		return
 	}
-	return sdk.ContextUsageFromFantasy(a.LastUsage(), window)
+	a.SeedContextBaseline(p, resetReported)
 }
 
 // MainAgentTps returns the main agent's current generation speed in output
@@ -904,6 +915,12 @@ func (p *AgentPool) SetAgentHistory(id string, history []sdk.Message) error {
 	a.historyMu.Lock()
 	a.history = replacement
 	a.historyMu.Unlock()
+	// The restored conversation replaces whatever context was on display:
+	// reseed the usage baseline from the restored history (main agent only) so
+	// the statusline reflects it immediately, instead of showing the previous
+	// conversation's size — or nothing, when no turn had run yet — until the
+	// next turn reports real usage.
+	a.SeedContextBaseline(p, true)
 	return nil
 }
 

@@ -373,3 +373,5 @@ dispatched at all.
 | High | `TestRefreshContextStatus_WritesLiveSegments` | ctx segments derived from the pool after a completed turn | `refreshContextStatus` true; `ctx` = `<in>/<window>`, `ctx rem` = window; input > 0 |
 | Medium | `TestRefreshContextStatus_UnknownWindowReturnsFalse` | unknown model window | helper returns false and writes nothing (stale value untouched) |
 | High | `TestStreamTick_PaintsContextStatus` | 100ms tick with usage known and streaming set | tick handler paints the `ctx` key — the long-turn regression path |
+| High | `TestResetHistoryMsg_PaintsContextStatus` | restore rewrites the ctx segment in the same update | model with a known window; `Update(ResetHistoryMsg{...})` | `ctx` was empty before; non-empty after — the restored-conversation path |
+| High | `TestExtensionTick_PaintsContextStatusWhileIdle` | idle 1s tick keeps ctx visible | known window, no turn run; `updateExtension(extensionTickMsg{})` | handler handled; `ctx` key painted — the vanish-between-turns regression path |

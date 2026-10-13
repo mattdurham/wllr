@@ -606,6 +606,64 @@ func (a *Agent) seedUsageEstimate(estimate int64, pool *AgentPool, contextWindow
 	}
 }
 
+// SeedContextBaseline installs a chars/4 estimate of the agent's current
+// context — its history plus effective system prompt — as lastUsage and, for
+// the main agent, dispatches it as EventContextUsage. It is the restore-time
+// and session-start analog of seedUsageEstimate: it populates the ctx
+// indicator before any turn has run, instead of leaving it hidden until the
+// first provider report.
+//
+// resetReported selects the reported-usage latch behavior:
+//
+//   - false (session start): a fresh session has no provider-reported usage,
+//     so the estimate stands in until the first turn's report replaces it.
+//   - true (history restore): the conversation was replaced, so any stored
+//     usage describes the previous conversation and is discarded (usageReported
+//     cleared) before re-seeding; without this the indicator would show the old
+//     conversation's size, or nothing when no turn had run yet.
+//
+// Tool definitions are omitted: the dynamic tool list is resolved per turn and
+// is unavailable on these paths. The next turn's provider report — which counts
+// tools — replaces the estimate.
+//
+// Unlike seedUsageEstimate (turn goroutine), this runs from the harness or
+// session path, so it takes lastUsageMu for the state write. Main-agent only
+// dispatch, matching every other context-usage dispatch.
+func (a *Agent) SeedContextBaseline(pool *AgentPool, resetReported bool) {
+	estimate := contextEstimate(a.History(), a.SystemPrompt(), "", nil)
+	a.lastUsageMu.Lock()
+	if resetReported {
+		a.usageReported = false
+	}
+	if !a.usageReported {
+		a.lastUsage = fantasy.Usage{InputTokens: estimate}
+		a.usageIsEstimate = true
+	}
+	a.lastUsageMu.Unlock()
+	if pool == nil || a.id != MainAgentID {
+		return
+	}
+	pool.dispatchContextUsage(
+		sdk.ContextUsageFromFantasy(a.LastUsage(), a.resolvedWindow(pool)),
+		nil,
+		a.CompactionCount(),
+	)
+}
+
+// resolvedWindow returns the agent's own context window, falling back to the
+// pool's per-model resolution when the agent's own window is unset (e.g. an
+// externally constructed agent), so the display degrades to the pool view
+// rather than hiding — a zero window hides the ctx segment entirely.
+func (a *Agent) resolvedWindow(pool *AgentPool) int64 {
+	if w := a.ContextWindow(); w > 0 {
+		return w
+	}
+	if pool != nil {
+		return pool.ContextWindowForModel(a.ModelName())
+	}
+	return 0
+}
+
 // observeStepUsage records one provider step's usage mid-turn, from
 // streamTurn's OnStepFinish callback (turn goroutine — the same thread that
 // already calls setLastUsage at turn end and pool.addTokens per delta).

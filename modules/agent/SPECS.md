@@ -526,6 +526,21 @@ successful turn end with reported tokens): reported numbers are authoritative an
 already include everything on the wire, so re-seeding each turn would bounce the
 display up to the overestimate at every turn start.
 
+**Session-start and history-restore seed:** `SeedContextBaseline(pool, resetReported)`
+generalizes the baseline seed to the two moments where no turn has (yet) run but the
+context is already known — session start (once the system prompt is assembled) and
+history restore. It stores the same chars/4 estimate of `history + system prompt` and,
+for the main agent only, dispatches `EventContextUsage`, so the statusline shows the
+context size immediately instead of staying hidden until the first provider report.
+`resetReported` selects the latch behavior: `false` at session start (no reported usage
+exists, the estimate stands in); `true` on history restore (the latch is cleared first,
+because the stored usage describes the *previous* conversation and would otherwise
+suppress the reseed — leaving the display at the old conversation's size, or nothing when
+no turn had run yet). `AgentPool.SeedMainAgentBaseline(resetReported)` is the
+main-agent-scoped wrapper; `SetAgentHistory` calls it with `true`. Tool definitions are
+omitted (the dynamic tool list is resolved per turn); the next turn's report — which
+counts tools — replaces the estimate.
+
 **Invariant:** the first real step report **replaces** the seed outright rather than
 peaking against it — the seed deliberately overestimates (chars/4), so a peak rule
 would pin the display to the overestimate until real usage grew past it. Later steps
@@ -540,8 +555,10 @@ failed turn produced no authoritative numbers.
 first turn of the session starts; from the first turn's provider call onward it is
 the baseline seed (until the first real report replaces it) or real reported usage.
 
-**Invariant:** `lastUsage` is only written from inside the `Submit` goroutine (turn
-goroutine), preventing concurrent writes.
+**Invariant:** `lastUsage` is written from the `Submit` goroutine (turn goroutine)
+except for `SeedContextBaseline`, which runs from the harness/session path (session
+start, history restore) and takes `lastUsageMu` for the write — the lock, not the
+goroutine identity, is what prevents concurrent writes.
 
 ### EventContextUsage Dispatch
 
@@ -572,6 +589,7 @@ There are two dispatch kinds:
 
 **Invariant:** `dispatchContextUsage` is called after successful compactions, after every
 completed provider step of a main-agent turn (per-step, via `observeStepUsage`), at
+session start and on history restore (`SeedContextBaseline`, main agent only), at
 turn start of a fresh session (the baseline seed, main agent only — see lastUsage
 above), and at the end of every main-agent turn — successful **and** failed. A failed turn re-dispatches the
 retained last-known usage (skipped only while nothing is known yet), so the statusline

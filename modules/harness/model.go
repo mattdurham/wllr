@@ -1108,6 +1108,10 @@ func (m Model) updateWindow(msg tea.Msg) (Model, tea.Cmd, bool) {
 		m.streamContent = ""
 		m.picker.Close()
 		m.pushNotification("History restored — conversation loaded from selected point.")
+		// The bridge has already replaced the agent history and reseeded its usage
+		// baseline; rewrite the live ctx status so the statusline shows the
+		// restored conversation's size immediately rather than the old value.
+		m.refreshContextStatus()
 		extHost := m.extHost
 		mainID := m.mainAgentID
 		if extHost == nil {
@@ -2080,6 +2084,14 @@ func (m Model) updateExtension(msg tea.Msg) (Model, tea.Cmd, bool) {
 			}
 		}
 		m.updateSuggestions()
+		// Populate the ctx segment before the first turn: with session_start
+		// handled, the main agent's system prompt is assembled, so seed its
+		// context baseline and write the live status now. Without this the
+		// statusline hides ctx until the first provider report paints it.
+		if m.agentPool != nil {
+			m.agentPool.SeedMainAgentBaseline(false)
+		}
+		m.refreshContextStatus()
 		// Start the 1-second extension tick after session is ready.
 		return m, tea.Tick(time.Second, func(time.Time) tea.Msg { return extensionTickMsg{} }), true
 
@@ -2088,6 +2100,10 @@ func (m Model) updateExtension(msg tea.Msg) (Model, tea.Cmd, bool) {
 		if cmd := m.reconcileFocusedAgent(); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+		// Keep the ctx segment live while idle: the stream tick only runs during
+		// a turn, so without this the statusline would drop ctx back out (or never
+		// show it) between turns. Cheap — MainAgentContextUsage is a lock + read.
+		m.refreshContextStatus()
 		if m.extHost != nil {
 			extHost := m.extHost
 			cmds = append(cmds, func() tea.Msg {

@@ -280,3 +280,12 @@ through the agent/pool accessors.
 | `TestKill_RunningAgentInterruptsTurnImmediately` | hard kill ends a mid-turn agent now | scripted tool-call turn blocked in a ctx-aware gate tool; `pool.Close` while blocked | turn ends with an error within 5s without releasing the gate; agent removed; second Close is ErrAgentNotFound |
 | `TestKill_CascadesSubtree` | kill removes descendants, keeps kin | tree main/a/b + sibling z; close main/a | a and a/b gone; main and z untouched |
 | `TestKill_SubtreeRunningAgentsCancelled` | killing a parent cancels descendants' turns | parent + child mid-turn in a gate; close parent | child's turn ends with an error; both removed from the pool |
+
+### seedbaseline_test.go
+
+| Test | Scenario | Setup | Assertions |
+|------|----------|-------|------------|
+| `TestSeedContextBaseline_MainDispatchesEstimate` | session-start seed paints ctx before any turn | main agent, 200k window, 4000-char system prompt | one dispatch; `InputTokens` > 0; `ContextWindow` = 200000; `LastUsage` equals the dispatched estimate |
+| `TestSetAgentHistory_ReseedsStaleUsage` | **the restore fix:** stale reported usage is discarded and reseeded | main agent with prior 999999-token reported usage; `SetAgentHistory` with 16k chars of history | `LastUsage` becomes a fresh in-range estimate; one dispatch; `usageReported` cleared; `usageIsEstimate` set |
+| `TestSeedContextBaseline_ReportedUsageIsRetained` | the latch holds on the session-start path | reported usage 5555, `resetReported=false` | `LastUsage` stays 5555 — the seed never clobbers reported numbers |
+| `TestSeedContextBaseline_SubAgentNoDispatch` | main-indicator guard | sub-agent, `SeedContextBaseline` | zero dispatches; baseline still recorded on the sub-agent itself |
