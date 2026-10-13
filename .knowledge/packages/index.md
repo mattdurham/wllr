@@ -12,6 +12,9 @@ Spec-driven Go packages — each has SPECS.md / NOTES.md / TESTS.md.
 * [tools](tools.md) — Pure adapter from `sdk.Tool` to `fantasy.AgentTool`.
 * [mcp](mcp.md) — Bridge to external MCP server subprocesses.
 * [testutil](testutil.md) — Fake LM/provider test helpers.
+* [wire](wire.md) — The HTTP/SSE protocol contract (frame envelope + event kinds); a leaf.
+* [server](server.md) — Exposes the engine over HTTP: REST + SSE stream, and a self-contained HTML front end.
+* [client](client.md) — HTTP/SSE client for one or many instances, including the N-instance multiplexer.
 
 ## Built-in Extensions (embedded in the binary)
 

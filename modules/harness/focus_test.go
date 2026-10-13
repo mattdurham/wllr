@@ -109,7 +109,11 @@ func TestFocusPublishesAgentStatus(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("spawn sub-agent: %v", err)
 	}
-	bridge := &harnessUIBridge{pool: m.agentPool, live: m.live}
+	bridge := &harnessUIBridge{
+		pool:   m.agentPool,
+		mainID: m.mainAgentID,
+		sink:   &teaSink{pool: m.agentPool, live: m.live, mainID: m.mainAgentID},
+	}
 
 	if got := bridge.GetStatusInfo().Statuses["agent"]; got != "" {
 		t.Fatalf("initial agent status = %q, want empty (root)", got)
@@ -136,7 +140,11 @@ func TestFocusedAgentStatusClearsWhenAgentClosed(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("spawn sub-agent: %v", err)
 	}
-	bridge := &harnessUIBridge{pool: m.agentPool, live: m.live}
+	bridge := &harnessUIBridge{
+		pool:   m.agentPool,
+		mainID: m.mainAgentID,
+		sink:   &teaSink{pool: m.agentPool, live: m.live, mainID: m.mainAgentID},
+	}
 
 	m, _ = callUpdate(m, FocusAgentMsg{AgentID: "main/kid"})
 	if got := bridge.GetStatusInfo().Statuses["agent"]; got != "main/kid" {

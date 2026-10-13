@@ -69,6 +69,7 @@ mismatched endpoint overrides.
 | `TestSpawner_Spawn_ParentIDConvention` | Parent ID derived from scoped ID | Various ID formats | parentID extracted correctly |
 | `TestSpawner_Spawn_AgentIdentitySuffix` | System prompt gets identity suffix | Spawn with base prompt | Agent spawned (suffix verified via pool.Get) |
 | `TestSpawner_Spawn_UnknownModel` | Unknown model returns error | Non-existent model name | Error returned |
+| `TestSpawner_FailureNotificationTargetsCreator` | Nested child failure | Child with non-main creator fails | Creator receives `agent_failed` JSON with error, not hard-coded `main` |
 
 `Spawner.SetToolCallObserver` is covered indirectly by harness tool activity tests; the nil-observer path is exercised by existing spawner tests.
 
@@ -91,9 +92,26 @@ mismatched endpoint overrides.
 | `TestIdleNotification_TopLevelAgentDoesNotSelfNotify` | main never self-notifies | Spawn main (no creator), run a turn | main inbox empty after turn (no loop) |
 | `TestIdleNotification_SuppressedDuringShutdown` | Shutdown path suppresses idle notice | Deliver shutdown_request, run worker | Creator gets exactly 1 AGENT_SHUTDOWN, 0 idle notices |
 | `TestIdleNotification_MultipleWorkersCoalesce` | N workers idle-notify shared creator | 5 workers each run + go idle | Each worker's idle notice in creator history exactly once (no loss/dup) |
-| `TestIdleNotification_WakesCreator` | Structured lifecycle protocol | Child idles with creator | Creator receives `agent_idle` JSON containing child and creator IDs and is woken |
-| `TestSpawner_FailureNotificationTargetsCreator` | Nested child failure | Child with non-main creator fails | Creator receives `agent_failed` JSON with error, not hard-coded `main` |
-| `TestIdleNotification_SuppressedDuringShutdown`, `TestDeliver_ShutdownRequestToIdleAgent` | Shutdown acknowledgement | Child processes shutdown request | Creator receives `AGENT_SHUTDOWN` through wake-enabled delivery |
+
+### observers_additive_test.go
+
+| Test | Scenario | Setup | Assertions |
+|------|----------|-------|------------|
+| `TestAddUsageObserverCoexistsWithSet` | Additive usage observers | Set then Add (then replace) | No turn fires an observer before completion; the replace path is exercised |
+| `TestAddLifecycleObserverCoexistsWithSet` | Both lifecycle observers fire | Set then Add, spawn | Both the `set:` and `add:` observers receive the spawn |
+| `TestSetLifecycleObserverReplaces` | Set replaces the list | Add then Set (no-op), spawn | The previously-added observer does not fire |
+
+### callbacks_additive_test.go
+
+Covers the per-agent turn callbacks (`OnToken`/`OnDone`/`OnToolCall`/
+`OnTurnStart`/`OnSteer`), which are additive for the same reason the pool
+observables are: two independent consumers observe one agent's turn.
+
+| Test | Scenario | Setup | Assertions |
+|------|----------|-------|------------|
+| `TestAdditiveAgentCallbacksCoexist` | Set and Add both observe a turn | `SetOnToken`+`AddOnToken`, `SetOnDone`+`AddOnDone`, real LM turn | Both token observers fire with equal counts; both done observers fire exactly once |
+| `TestSetAgentCallbacksReplaces` | Set still owns the list | Add, then Set (no-op), then `SetOnToken(nil)`, real LM turn | The added observer never fires; clearing with nil does not panic at token time |
+| `TestAdditiveToolCallAndTurnStartCallbacks` | Tool-call and turn-start are additive | Set+Add on both, real LM turn | Both turn-start observers fire exactly once |
 
 ### toolloopcompaction_test.go
 

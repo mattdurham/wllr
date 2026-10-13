@@ -31,14 +31,6 @@ type Agent struct {
 
 	cancel context.CancelFunc
 
-	onToken func(token string)
-
-	onDone func(err error)
-
-	onToolCallFn func(id, toolName, input string)
-
-	onTurnStart func(content string, inbox []sdk.Message)
-
 	toolsFn func() []fantasy.AgentTool
 
 	// providerOpts holds the current provider-specific request options (e.g.
@@ -55,7 +47,6 @@ type Agent struct {
 	canonical *Transcript
 
 	liveStats *streamStats
-	onSteerFn func(content string)
 
 	id           string
 	name         string
@@ -80,7 +71,17 @@ type Agent struct {
 
 	lastSpark string // frozen end-of-turn sparkline bars, kept visible while idle
 
+	onTokenFns []func(token string)
+
+	onDoneFns []func(err error)
+
+	onToolCallFns []func(id, toolName, input string)
+
+	onTurnStartFns []func(content string, inbox []sdk.Message)
+
 	history []sdk.Message
+
+	onSteerFns []func(content string)
 
 	opts SpawnOpts
 
@@ -110,21 +111,26 @@ type Agent struct {
 	// history alone is too coarse for orchestrators supervising sub-agents.
 	activityMu sync.RWMutex
 
-	// onToken is called per text delta. Set via SetOnToken before calling Submit.
+	// onTokenFns are called per text delta. SetOnToken replaces the list;
+	// AddOnToken appends. See SetOnToken.
 	onTokenMu sync.RWMutex
 
-	// onDone is called when a turn completes (with nil or an error). Set via SetOnDone.
+	// onDoneFns are called when a turn completes (with nil or an error).
+	// SetOnDone replaces the list; AddOnDone appends.
 	onDoneMu sync.RWMutex
 
-	// onToolCall is called when a tool call is dispatched. Set via SetOnToolCall.
+	// onToolCallFns are called when a tool call is dispatched. SetOnToolCall
+	// replaces the list; AddOnToolCall appends.
 	onToolCallMu sync.RWMutex
 
-	// onSteer is called on the turn goroutine when a /steer message is
-	// delivered into the running turn at a step boundary. Set via SetOnSteer.
+	// onSteerFns are called on the turn goroutine when a /steer message is
+	// delivered into the running turn at a step boundary. SetOnSteer replaces
+	// the list; AddOnSteer appends.
 	onSteerMu sync.RWMutex
 
-	// onTurnStart is called after Submit successfully claims a turn and drains
-	// inbox messages into that turn. Set via SetOnTurnStart.
+	// onTurnStartFns are called after Submit successfully claims a turn and
+	// drains inbox messages into that turn. SetOnTurnStart replaces the list;
+	// AddOnTurnStart appends.
 	onTurnStartMu sync.RWMutex
 
 	// toolsFn, if set, is called on each Submit to get the current tool list.
@@ -187,27 +193,78 @@ type Agent struct {
 }
 
 // SetOnToken sets the callback invoked for each text delta during streaming.
-// Thread-safe; may be called before each Submit.
+// It replaces any previously registered token callbacks; AddOnToken appends
+// instead of replacing. Thread-safe; may be called before each Submit.
 func (a *Agent) SetOnToken(fn func(token string)) {
 	a.onTokenMu.Lock()
-	a.onToken = fn
+	if fn == nil {
+		a.onTokenFns = nil
+	} else {
+		a.onTokenFns = []func(string){fn}
+	}
+	a.onTokenMu.Unlock()
+}
+
+// AddOnToken registers an additional token callback alongside any already set.
+// It exists so two independent consumers — a front end's frame publisher and an
+// extension-dispatch forwarder — can both observe streaming without one
+// clobbering the other. A nil fn is ignored. Thread-safe.
+func (a *Agent) AddOnToken(fn func(token string)) {
+	if fn == nil {
+		return
+	}
+	a.onTokenMu.Lock()
+	a.onTokenFns = append(a.onTokenFns, fn)
 	a.onTokenMu.Unlock()
 }
 
 // SetOnDone sets the callback invoked when a turn finishes (err may be nil).
-// Thread-safe; may be called before each Submit.
+// It replaces any previously registered done callbacks; AddOnDone appends
+// instead of replacing. Thread-safe; may be called before each Submit.
 func (a *Agent) SetOnDone(fn func(err error)) {
 	a.onDoneMu.Lock()
-	a.onDone = fn
+	if fn == nil {
+		a.onDoneFns = nil
+	} else {
+		a.onDoneFns = []func(error){fn}
+	}
+	a.onDoneMu.Unlock()
+}
+
+// AddOnDone registers an additional turn-completion callback alongside any
+// already set. A nil fn is ignored. Thread-safe.
+func (a *Agent) AddOnDone(fn func(err error)) {
+	if fn == nil {
+		return
+	}
+	a.onDoneMu.Lock()
+	a.onDoneFns = append(a.onDoneFns, fn)
 	a.onDoneMu.Unlock()
 }
 
 // SetOnTurnStart sets the callback invoked after a turn claims its content and
 // pending inbox messages, before the provider request starts. The inbox slice
-// is a copy owned by the callback. Thread-safe.
+// is a copy owned by the callback. It replaces any previously registered
+// turn-start callbacks; AddOnTurnStart appends instead of replacing.
+// Thread-safe.
 func (a *Agent) SetOnTurnStart(fn func(content string, inbox []sdk.Message)) {
 	a.onTurnStartMu.Lock()
-	a.onTurnStart = fn
+	if fn == nil {
+		a.onTurnStartFns = nil
+	} else {
+		a.onTurnStartFns = []func(string, []sdk.Message){fn}
+	}
+	a.onTurnStartMu.Unlock()
+}
+
+// AddOnTurnStart registers an additional turn-start callback alongside any
+// already set. A nil fn is ignored. Thread-safe.
+func (a *Agent) AddOnTurnStart(fn func(content string, inbox []sdk.Message)) {
+	if fn == nil {
+		return
+	}
+	a.onTurnStartMu.Lock()
+	a.onTurnStartFns = append(a.onTurnStartFns, fn)
 	a.onTurnStartMu.Unlock()
 }
 
@@ -233,10 +290,26 @@ func (a *Agent) AppendSystemPrompt(text string) {
 
 // SetOnToolCall sets the callback invoked when the agent dispatches a tool call.
 // The callback receives the tool call ID, tool name, and JSON input string.
-// Thread-safe; may be called before each Submit.
+// It replaces any previously registered tool-call callbacks; AddOnToolCall
+// appends instead of replacing. Thread-safe; may be called before each Submit.
 func (a *Agent) SetOnToolCall(fn func(id, toolName, input string)) {
 	a.onToolCallMu.Lock()
-	a.onToolCallFn = fn
+	if fn == nil {
+		a.onToolCallFns = nil
+	} else {
+		a.onToolCallFns = []func(string, string, string){fn}
+	}
+	a.onToolCallMu.Unlock()
+}
+
+// AddOnToolCall registers an additional tool-call callback alongside any already
+// set. A nil fn is ignored. Thread-safe.
+func (a *Agent) AddOnToolCall(fn func(id, toolName, input string)) {
+	if fn == nil {
+		return
+	}
+	a.onToolCallMu.Lock()
+	a.onToolCallFns = append(a.onToolCallFns, fn)
 	a.onToolCallMu.Unlock()
 }
 
@@ -882,29 +955,39 @@ func (a *Agent) Submit(ctx context.Context, content string) {
 	a.cancelMu.Unlock()
 
 	// Capture callbacks and pool reference now (avoid holding locks in goroutine).
+	// The lists are copied so a callback registered concurrently with the turn
+	// cannot change the set this turn runs with.
 	a.onTokenMu.RLock()
-	onToken := a.onToken
+	onTokenFns := make([]func(string), len(a.onTokenFns))
+	copy(onTokenFns, a.onTokenFns)
 	a.onTokenMu.RUnlock()
+	onToken := chainTokenCallbacks(onTokenFns)
 
 	a.onDoneMu.RLock()
-	onDone := a.onDone
+	onDoneFns := make([]func(error), len(a.onDoneFns))
+	copy(onDoneFns, a.onDoneFns)
 	a.onDoneMu.RUnlock()
+	onDone := chainDoneCallbacks(onDoneFns)
 
 	a.toolsFnMu.RLock()
 	toolsFn := a.toolsFn
 	a.toolsFnMu.RUnlock()
 
 	a.onToolCallMu.RLock()
-	onToolCall := a.onToolCallFn
+	onToolCallFns := make([]func(string, string, string), len(a.onToolCallFns))
+	copy(onToolCallFns, a.onToolCallFns)
 	a.onToolCallMu.RUnlock()
+	onToolCall := chainToolCallCallbacks(onToolCallFns)
 
 	// turnStarted gates the turn goroutine on the start callback having run, so
 	// the prompt is announced before any assistant output.
 	var turnStarted chan struct{}
 
 	a.onTurnStartMu.RLock()
-	onTurnStart := a.onTurnStart
+	onTurnStartFns := make([]func(string, []sdk.Message), len(a.onTurnStartFns))
+	copy(onTurnStartFns, a.onTurnStartFns)
 	a.onTurnStartMu.RUnlock()
+	onTurnStart := chainTurnStartCallbacks(onTurnStartFns)
 	// The turn-start callback is invoked off this goroutine.
 	//
 	// Submit is reachable from a host call (agent_deliver, agent_run,

@@ -28,6 +28,16 @@ Append-only design decision log. Never delete entries; add an `*Addendum (date):
 
 **Consequence:** `SetProgram` must be called before `prog.Run()`. Goroutines must not access `m.program` directly — they use the captured `prog` local.
 
+*Addendum (2026-10-08):* Direct `prog.Send` use is now confined to the TUI's own `teaSink`. The extension bridges, the pool observers, and the main-agent callbacks route effects through the renderer-neutral `sdk.UISink` (see SPECS §3a), so a non-terminal front end — the HTTP server's `HubSink`, or an embedder's `FuncSink` — can drive the same engine without a terminal. `m.program` remains for the model's own statusline/scene refresh and the exec/quit paths.
+
+*Addendum (2026-10-08, inbound direction):* The outbound effect path (above) is matched by an inbound one. A picker or text-input selection used to be resolvable only inside `Model.updateKeyPressPicker`/`updateKeyPressTextInput`, which need the live model and an event loop. `sdk.UICallbackRouter` and `harness.ExtensionRouter` (SPECS §3b) give a non-terminal front end the same return path: the server's `/api/ui/callback` posts the callback id and the router either dispatches `EventOnCommand` to the host or hands it to an installed core handler. The `__wllr:` core/extension split is `sdk.IsCoreCallback` in both front ends.
+
+*Addendum (2026-10-08, core handler):* Serve mode now installs `Model.CoreCallbackFunc()` as the router's core handler, so model / provider-model / thinking / OpenRouter-routing selections take effect from a browser, not just the terminal.
+
+**Decision:** the callback-id → apply-action mapping (`classifyCoreSelection`, `coredispatch.go`) is shared by the TUI picker branch and the headless `ResolveCoreCallback`, rather than duplicating a second branch table. **Rationale:** the mapping is a contract — if the browser and the terminal disagreed on which callback selects a model, the same picker row would do different things in each front end. The *apply* semantics were already shared (both reach `applyModelSelection`/`applyThinkingSelection`/…); only the id→message/action classification was at risk of drift, so that is what was single-sourced. The refactor to the TUI branch produces byte-identical internal messages, so terminal behavior is unchanged (pinned by the existing picker tests). **Scope:** only the stateless selections are shared; the multi-step setup flows (auth, local-model, context-window, catalog, add-model) carry live `Model` state built up across earlier interactions and remain terminal-only — a headless caller POSTing `__wllr:auth` gets `501`, not a broken flow.
+
+**Consequence:** `Model` is now reachable from the server's callback path. In serve mode nothing else reads the display state the apply methods touch (`activeModel`, `live`), because the `teaSink` is not installed, so there is no reader to race with; the engine mutations (`SelectModelFn` → pool) are already synchronized. A future multi-session server must revisit this — sharing one `Model` across sessions would make that display state shared too.
+
 ---
 
 ## 3. OnAbort sends abortStreamMsg instead of calling cancelStream directly
@@ -124,7 +134,7 @@ Append-only design decision log. Never delete entries; add an `*Addendum (date):
 
 **Rationale:** A goroutine-based batcher (e.g. a ticker goroutine that drains a channel every 30ms) requires careful lifecycle management — the goroutine must be started and stopped in sync with agent turns. With multiple agents potentially active simultaneously, managing per-agent goroutines adds complexity and risk of goroutine leaks. The time-based approach is simpler: each `onToken` call checks whether enough time has passed and flushes synchronously if so. The `flush()` call at `onDone` drains any tail tokens. No goroutines are created or destroyed per turn.
 
-**Consequence:** Tokens are dispatched from within the fantasy streaming goroutine (via `prog.Send`), so the batcher does not need to be goroutine-safe with itself — only with potential concurrent `flush()` calls, which are protected by the mutex.
+**Consequence:** Tokens are dispatched from within the fantasy streaming goroutine (delivered to the front-end sink), so the batcher does not need to be goroutine-safe with itself — only with potential concurrent `flush()` calls, which are protected by the mutex.
 
 *Addendum (2026-10-06):* The batcher's flush contract expanded from "onDone only" to "segment boundaries + onDone". A multi-segment agentic turn (narration → tool call → narration → …) is ONE turn, so `onDone` fires only at the very end — any text segment's final <75ms of tokens sat in the buffer until the NEXT segment's first token flushed them, and the final segment's tail sat there through the entire remaining turn. The visible symptom: narration frozen mid-sentence ("Waiting for the") for minutes while the orchestrator slept between polls. `toolCallForwarder` now flushes when a tool call is dispatched (the exact text-segment→silence boundary), and the sub-agent path (`dispatchSegmentedTokens`) gained the flush it never had — its dispatch-only batcher's flush was previously discarded with `_`, so a sub-agent's last-segment tail was NEVER dispatched, permanently shortening focused transcripts. Flushing is idempotent, so the extra call sites stay no-ops when the buffer is empty.
 
@@ -175,6 +185,8 @@ Append-only design decision log. Never delete entries; add an `*Addendum (date):
 **Rationale:** Users may type `/cmd arg /another` — the second `/` should trigger autocomplete for the second command. Finding the *last* `/` that is word-start ensures the autocomplete tracks the command the user is currently typing, not an earlier slash in the input. The no-trailing-space condition ensures autocomplete only shows while the user is still typing the command name, not after they have added a space (at which point they are typing arguments).
 
 **Consequence:** Autocomplete is not shown when the user types a path like `/usr/local` (because `/local` is preceded by `r`, not a space). This is intentional — path completions are out of scope.
+
+**Update — shared with the browser front end:** the rule now lives in `sdk.SlashWordAt`, and `slashWordAt` delegates to it. The HTML client reimplements the identical predicate in JavaScript, so its autocomplete triggers under the same conditions as the terminal's; keeping one definition (and a test pinning the two together) makes a divergence a test failure rather than a subtle UI difference. The command *list* is likewise shared: `Registry.ListInfo` feeds `GET /api/commands` through `Model.CommandLister`, and `Model.RegisterCommand` (driven by `HubSink.SetCommandRegistrar`) puts extension commands registered after serve-mode wiring into the same registry, so the two front ends cannot offer different commands.
 
 ---
 
@@ -1146,3 +1158,91 @@ focused transcript, the extension returns focus and the transcript to the
 root, so the user is never left looking at a dead scene. Coverage:
 killagents_test.go (kill key dispatch, root refusal, esc still closes),
 kill_test.go in modules/agent (turn interrupt, subtree cascade, root guard).
+
+## Scene graph operations moved to sdk so both renderers share one implementation
+
+Building the HTML renderer (`modules/server/htmlscene.go`) surfaced a duplication
+risk: the server needs the same patch semantics as `SceneRenderer` — insert
+indexing, batch atomicity, the append/replace rules, the "insert needs a root"
+guard — and the same layout resolution (`fill`/`auto`/`N`/`N%`, the 1/2/4 side
+expansion). Reimplementing those in the server would be exactly the
+front-end duplication the renderer-neutral sink was created to remove.
+
+**Decision:** move the pure logic to `modules/sdk` (`uigraph.go`,
+`uilayout.go`) as exported helpers and have the harness call them. `ApplyPatch`
+now delegates to `sdk.ApplyOp`; `Render`/`RenderNode`/`RenderAppendTextNode` use
+`sdk.CloneNode`/`sdk.FindNode`; `styleFromProps` uses `sdk.ParseDimension` and
+`sdk.PropSides`; `ConstrainWidth`/`ConstrainHeight` use
+`sdk.ResolveConstraint`; `collapseBlankLineRuns` delegates to
+`sdk.CollapseBlankLineRuns`.
+
+**Rationale:** `sdk` already owns the scene-graph *types* (`UINode`,
+`UIPatchOp`, `UIArea`), so it is the natural home for their reference semantics;
+the harness keeps only the terminal-specific rendering (lipgloss). The op-error
+strings moved with the code, so both front ends reject a bad batch identically.
+
+**Consequence:** `resolveConstraint` and `collapseBlankLineRuns` stay as
+package-local shims (one line each) so existing call sites and
+`scene_test.go`/`spacing_test.go` read unchanged. `scene_test.go` and the
+sdk/server suites all pass, and `modules/server/scenemodel_test.go` re-asserts
+the same behaviours against the shared code, pinning the two front ends together.
+
+## ModelChoice/key/callback are shared with the HTTP front end
+
+The `/model` picker's three cross-boundary facts — the choice shape, the row-key
+encoding (`provider<US>modelID`), and the `__wllr:model` callback id — were
+harness-private. The browser front end needs all three, and a mismatch fails
+silently (a selection that matches nothing).
+
+**Decision:** `ModelChoice` is now a type alias of `sdk.ModelChoice`;
+`modelPickerKey`/`splitModelPickerKey` delegate to
+`sdk.ModelPickerKey`/`sdk.SplitModelPickerKey`, and `modelPickerCallback` is
+`sdk.ModelPickerCallback`.
+
+**Rationale:** these values cross a process boundary and must have one
+definition — the same reason `IsCoreCallback` and the scene-graph ops already
+live in `sdk`. An alias (rather than moving the type) keeps every existing
+`ModelChoice{...}` literal in `cmd` and the harness tests compiling unchanged,
+including `ContextWindow`/`ContextWindowKnown`, which the sublabel rendering
+reads.
+
+**Consequence:** serve mode passes `Model.ModelListFn` to the server as an
+`sdk.ModelLister`, so `GET /api/models` returns exactly this picker's list, and
+a browser selection routes back through the same `classifyCoreSelection` path
+(harness `coredispatch.go`). No picker behaviour changed; the existing
+`modeltier_ui_test.go` suite still passes.
+
+---
+
+## Serve mode runs the session-boot and message-end dispatches the TUI's loop normally runs
+
+**Decision:** three synchronous, exported counterparts of TUI-only dispatches —
+`Model.DispatchSessionStart`, `Model.DispatchModelChanged`, and
+`Model.DispatchMessageEnd` — plus additive main-agent callback wiring
+(`WireMainAgentCallbacks`).
+
+**Rationale:** the browser front end has no bubbletea program, so `Init` never
+runs and there is no update loop. Everything those two places dispatch was
+therefore skipped in serve mode, and each omission showed up as a distinct
+user-visible break — not as an error:
+
+| Missing dispatch | Symptom |
+|---|---|
+| `EventSessionStart` | the `agents` extension never creates the `chat` area, so the browser has no extension-driven transcript |
+| root-agent callbacks | the agent has no tool list (chat works, tools silently unavailable) and its `EventToken`/`EventBeforeAgentStart` never fire, so the chat area receives no streamed text and no user-prompt bubbles |
+| `EventModelChanged` | the `statusline` extension never learns the provider/model |
+| `EventMessageEnd` | the `agents` extension never renders the finalized assistant bubble, so markdown arrives as raw text |
+
+**Why the root agent could not simply be wired before:** the server's per-agent
+`Bridge` and this wiring both attached to the same agent through single-slot
+`Set*` callbacks, so whichever ran second replaced the other. The agent
+callbacks are now additive (see the `agent` package NOTES), which removes the
+ordering dependency; serve mode passes a no-op `&sdk.FuncSink{}` because the
+Bridge already publishes the root agent's stream frames, and the wiring is
+needed only for its extension-dispatch side effects and the tool list.
+
+**Consequence:** `DispatchMessageEnd` is driven by the server's message-end
+notifier, which fires with the turn's accumulated assistant text — the
+server-side equivalent of the TUI's accumulated `m.streamContent`. The three
+dispatch methods are no-ops with a nil host, so a build with no extensions
+serves normally.

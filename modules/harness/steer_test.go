@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/fantasy"
 
 	"github.com/mattdurham/wllr/modules/agent"
@@ -147,19 +146,14 @@ func TestSubmitSteer_IdleAgentWakesTurn(t *testing.T) {
 	}
 }
 
-// containsMsg reports whether the sender captured a message matching want.
-func containsMsg(sender *captureSender, want func(tea.Msg) bool) bool {
-	for _, m := range sender.snapshot() {
-		if want(m) {
+// containsDone reports whether the sink captured a turn-completion effect.
+func containsDone(sender *captureSender) bool {
+	for _, e := range sender.snapshot() {
+		if e.kind == "done" {
 			return true
 		}
 	}
 	return false
-}
-
-var streamDoneMsg = func(m tea.Msg) bool {
-	_, ok := m.(StreamDoneMsg)
-	return ok
 }
 
 // waitFor polls cond until true or the deadline, failing the test with label.
@@ -204,19 +198,19 @@ func TestSteerDispatch_MidTurnSteerFlagged(t *testing.T) {
 		return nil
 	})
 
-	// Wire first: wireMainAgentCallbacks overwrites SetOnDone and SetToolsFn,
-	// so the gate tool must be installed after it.
+	// Wire first: WireMainAgentCallbacks installs SetOnDone and SetToolsFn, so
+	// the gate tool must be installed after it.
 	m := New(pool, "main", nil)
 	m.extHost = extHost
 	sender := &captureSender{}
-	m.wireMainAgentCallbacks(sender)
+	m.WireMainAgentCallbacks(sender)
 	a.SetToolsFn(func() []fantasy.AgentTool { return []fantasy.AgentTool{gate} })
 
 	a.Submit(context.Background(), "start work")
 	waitFor(t, func() bool { return a.Activity().ActiveToolName == "gate" }, "gate tool to start")
 	m.submitSteer("mind the timeout")
 	close(gate.release)
-	waitFor(t, func() bool { return containsMsg(sender, streamDoneMsg) }, "turn completion")
+	waitFor(t, func() bool { return containsDone(sender) }, "turn completion")
 
 	var steerFlagged, plainPrompt bool
 	deadline := time.After(5 * time.Second)
@@ -267,10 +261,10 @@ func TestSteerDispatch_IdleWakeSteerFlagged(t *testing.T) {
 	m := New(pool, "main", nil)
 	m.extHost = extHost
 	sender := &captureSender{}
-	m.wireMainAgentCallbacks(sender)
+	m.WireMainAgentCallbacks(sender)
 
 	m.submitSteer("do it this way")
-	waitFor(t, func() bool { return containsMsg(sender, streamDoneMsg) }, "woken turn completion")
+	waitFor(t, func() bool { return containsDone(sender) }, "woken turn completion")
 
 	select {
 	case evt := <-events:

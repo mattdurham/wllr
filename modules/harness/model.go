@@ -139,6 +139,11 @@ type Model struct {
 	// send messages back. Set via SetProgram.
 	program *tea.Program
 
+	// sink is the renderer-neutral front-end seam, built in SetProgram. It is
+	// shared by the extension bridges, the pool observers, and the main-agent
+	// callbacks. Nil before SetProgram.
+	sink *teaSink
+
 	// logFn is used for warning/debug logging from the harness (e.g. tool adapter).
 	// If nil, warnings are silently dropped.
 	logFn func(int, string)
@@ -493,59 +498,25 @@ func New(pool *agent.AgentPool, mainAgentID string, h *extension.Host) Model {
 // and installs the interface bridges on the extension host.
 func (m *Model) SetProgram(p *tea.Program) {
 	m.program = p
+	// The sink is the front-end seam for every user-visible effect. It is built
+	// unconditionally: the main-agent callbacks need it even when there is no
+	// extension host.
+	sink := &teaSink{
+		prog:   p,
+		live:   m.live,
+		scene:  m.scene,
+		pool:   m.agentPool,
+		cmds:   m.commands,
+		mainID: m.mainAgentID,
+	}
+	m.sink = sink
 	if m.extHost != nil {
 		pool := m.agentPool
 		extHostRef := m.extHost
 		logFnRef := m.logFn
 		mainID := m.mainAgentID
 
-		spawner := agent.NewSpawner(pool, func(agentID string) []fantasy.AgentTool {
-			return withRecallTool(tools.BuildFantasyTools(extHostRef, agentID, logFnRef), pool, agentID)
-		}, func(text string) {
-			p.Send(NotifyMsg{Text: "⚠ " + text})
-		})
-		spawner.SetToolCallObserver(func(agentID, id, toolName, input string) {
-			p.Send(ToolCallStartMsg{AgentID: agentID, ID: id, ToolName: toolName, Input: input})
-		})
-		// Forward each sub-agent's streamed text as EventToken keyed by agent,
-		// so a focused view can render it live. Each agent gets its own batcher;
-		// nothing is sent to the main chat. The flusher delivers a batcher's
-		// held tail at segment boundaries and turn end — without it the final
-		// <75ms of a sub-agent's last text segment would never be dispatched
-		// at all (the dispatch-only batcher's flush was previously discarded),
-		// leaving focused transcripts permanently one fragment short.
-		dispatchTokens, flushAgentTokens := dispatchSegmentedTokens(extHostRef)
-		spawner.SetTokenObserver(dispatchTokens)
-		spawner.SetTokenFlushObserver(flushAgentTokens)
-		// Render mid-turn steer deliveries in the focused sub-agent transcript,
-		// attributed to that agent, at the moment they enter its context.
-		spawner.SetSteerObserver(dispatchAgentSteer(extHostRef))
-		// Attribute each sub-agent's turn start to that agent, so a focused
-		// transcript shows the prompt alongside the reply.
-		//
-		// This MUST NOT dispatch synchronously. A sub-agent's first turn starts
-		// inside Spawn, which itself runs inside the spawning extension's WASM
-		// call — so a synchronous dispatch here re-enters that same extension and
-		// blocks forever on its non-reentrant call mutex (the create_agent
-		// deadlock). Dispatching from its own goroutine keeps the turn start off
-		// the caller's stack.
-		spawner.SetPromptObserver(dispatchAgentPrompt(extHostRef))
-
-		m.extHost.SetAgentBridge(&harnessAgentBridge{
-			pool:    pool,
-			spawner: spawner,
-			mainID:  mainID,
-			prog:    p,
-		})
-		m.extHost.SetTeamBridge(&harnessTeamBridge{pool: pool})
-		m.extHost.SetUIBridge(&harnessUIBridge{
-			pool:   pool,
-			prog:   p,
-			live:   m.live,
-			mainID: mainID,
-			cmds:   m.commands,
-			scene:  m.scene,
-		})
+		installExtensionWiring(extHostRef, pool, mainID, logFnRef, sink)
 
 		// Wire context-usage dispatcher so agent turns forward EventContextUsage
 		// to WASM extensions without a circular import between agent and extension.
@@ -589,9 +560,7 @@ func (m *Model) SetProgram(p *tea.Program) {
 			// Drive the TUI streaming indicator when a Deliver (e.g. a sub-agent's
 			// idle notification or result) wakes the main agent off the bubbletea loop.
 			pool.SetWakeNotifier(func(id string) {
-				if id == mainID {
-					p.Send(agentWakeupMsg{})
-				}
+				sink.AgentWakeup(id)
 			})
 			// Wire the before_provider_request transform chain so extensions can
 			// redact messages (PII), reroute the model, or block the request just
@@ -605,7 +574,80 @@ func (m *Model) SetProgram(p *tea.Program) {
 		}
 	}
 
-	m.wireMainAgentCallbacks(p)
+	m.WireMainAgentCallbacks(sink)
+}
+
+// installExtensionWiring builds the sub-agent spawner, wires its observers, and
+// installs the agent, team, and UI bridges on host — every user-visible effect
+// routed through the renderer-neutral sink. It is shared by the TUI (via
+// SetProgram) and by non-terminal front ends (via InstallHeadlessBridges), so
+// both drive the same engine and both can spawn sub-agents. A nil host is a
+// no-op; a nil sink degrades to silent no-ops.
+func installExtensionWiring(
+	host *extension.Host,
+	pool *agent.AgentPool,
+	mainID string,
+	logFn func(int, string),
+	sink sdk.UISink,
+) *agent.Spawner {
+	if host == nil {
+		return nil
+	}
+	sink = sinkOrNil(sink)
+	spawner := agent.NewSpawner(pool, func(agentID string) []fantasy.AgentTool {
+		return withRecallTool(tools.BuildFantasyTools(host, agentID, logFn), pool, agentID)
+	}, func(text string) {
+		sink.Notify("⚠ " + text)
+	})
+	spawner.SetToolCallObserver(func(agentID, id, toolName, input string) {
+		sink.ToolCallStart(agentID, id, toolName, input)
+	})
+	// Forward each sub-agent's streamed text as EventToken keyed by agent,
+	// so a focused view can render it live. Each agent gets its own batcher;
+	// nothing is sent to the main chat. The flusher delivers a batcher's
+	// held tail at segment boundaries and turn end — without it the final
+	// <75ms of a sub-agent's last text segment would never be dispatched
+	// at all (the dispatch-only batcher's flush was previously discarded),
+	// leaving focused transcripts permanently one fragment short.
+	dispatchTokens, flushAgentTokens := dispatchSegmentedTokens(host)
+	spawner.SetTokenObserver(dispatchTokens)
+	spawner.SetTokenFlushObserver(flushAgentTokens)
+	// Render mid-turn steer deliveries in the focused sub-agent transcript,
+	// attributed to that agent, at the moment they enter its context.
+	spawner.SetSteerObserver(dispatchAgentSteer(host))
+	// Attribute each sub-agent's turn start to that agent, so a focused
+	// transcript shows the prompt alongside the reply.
+	//
+	// This MUST NOT dispatch synchronously. A sub-agent's first turn starts
+	// inside Spawn, which itself runs inside the spawning extension's WASM
+	// call — so a synchronous dispatch here re-enters that same extension and
+	// blocks forever on its non-reentrant call mutex (the create_agent
+	// deadlock). Dispatching from its own goroutine keeps the turn start off
+	// the caller's stack.
+	spawner.SetPromptObserver(dispatchAgentPrompt(host))
+
+	host.SetAgentBridge(&harnessAgentBridge{pool: pool, spawner: spawner, mainID: mainID, sink: sink})
+	host.SetTeamBridge(&harnessTeamBridge{pool: pool})
+	host.SetUIBridge(&harnessUIBridge{pool: pool, sink: sink, mainID: mainID})
+	return spawner
+}
+
+// InstallHeadlessBridges installs the full extension bridges on host for a
+// non-terminal front end, backed by sink. It builds the sub-agent spawner, so
+// create_agent and the team tools work headlessly — the gap that previously
+// left serve mode with only the no-op earlyAgentBridge stub.
+//
+// The caller still owns the pieces that are front-end specific: in serve mode
+// the server wires the context-usage dispatcher and the per-agent stream
+// observers, so this installer does not claim them. Wire the main-agent
+// callbacks separately (Model.WireMainAgentCallbacks) so the root agent gets
+// its tools and its extension events are dispatched; the sink passed there can
+// be a no-op one when the server's Bridge already publishes the stream frames.
+func InstallHeadlessBridges(host *extension.Host, pool *agent.AgentPool, mainID string, logFn func(int, string), sink sdk.UISink) {
+	if mainID == "" {
+		mainID = agent.MainAgentID
+	}
+	installExtensionWiring(host, pool, mainID, logFn, sink)
 }
 
 // interceptProviderRequest runs the before_provider_request transform chain via
@@ -659,10 +701,10 @@ func (b *tokenBatcher) onToken(token string) {
 		b.buf.Reset()
 		b.lastSend = now
 		b.mu.Unlock()
-		// A nil program marks a dispatch-only batcher (sub-agent output):
-		// there is no main-chat TokenMsg to send, only the extension event.
-		if b.p != nil {
-			b.p.Send(TokenMsg{Token: s})
+		// A nil sink marks a dispatch-only batcher (sub-agent output): there is no
+		// main-chat token to deliver, only the extension event.
+		if b.sink != nil {
+			b.sink.Token(s)
 		}
 		if b.dispatch != nil {
 			b.dispatch(s)
@@ -678,8 +720,8 @@ func (b *tokenBatcher) flush() {
 	b.buf.Reset()
 	b.mu.Unlock()
 	if s != "" {
-		if b.p != nil {
-			b.p.Send(TokenMsg{Token: s})
+		if b.sink != nil {
+			b.sink.Token(s)
 		}
 		if b.dispatch != nil {
 			b.dispatch(s)
@@ -696,8 +738,8 @@ func (b *tokenBatcher) flush() {
 // Without the mid-turn flush the tail of every text segment sits in the
 // buffer until the NEXT segment's first token arrives (or turn end), so the
 // final narration before a long tool call renders incomplete for minutes.
-func makeBatchedOnToken(p msgSender, dispatch func(string)) (onToken func(string), flush func()) {
-	b := &tokenBatcher{p: p, dispatch: dispatch}
+func makeBatchedOnToken(sink sdk.TokenSink, dispatch func(string)) (onToken func(string), flush func()) {
+	b := &tokenBatcher{sink: sink, dispatch: dispatch}
 	return b.onToken, b.flush
 }
 
@@ -710,8 +752,22 @@ func makeDispatchOnlyBatcher(dispatch func(string)) (onToken func(string), flush
 	return b.onToken, b.flush
 }
 
-// wireMainAgentCallbacks sets the onToken, onDone, and toolsFn callbacks on the main agent.
-func (m *Model) wireMainAgentCallbacks(p msgSender) {
+// WireMainAgentCallbacks sets the onToken, onDone, and toolsFn callbacks on the
+// main agent. It is exported so a non-terminal front end (serve mode) can wire
+// the root agent exactly as the TUI does.
+//
+// The agent callbacks are registered ADDITIVELY (AddOnToken, AddOnDone, …) so a
+// second consumer — the server's per-agent Bridge observers, which publish the
+// root agent's stream frames — is not clobbered. Historically these were
+// single-slot Set* calls, which is why serve mode could not wire the root agent
+// at all: doing so would have silently replaced the Bridge's observers. That
+// coupling is why the root agent had no tools and its extension events
+// (before_agent_start/token/message_end) were never dispatched in serve mode.
+//
+// A caller that passes a sink whose Token/StreamDone/ToolCallStart are no-ops
+// (sdk.FuncSink{}) gets only the extension-dispatch side effects, which is what
+// serve mode wants: the Bridge already owns those frames.
+func (m *Model) WireMainAgentCallbacks(sink sdk.AgentUISink) {
 	if m.agentPool == nil {
 		return
 	}
@@ -747,9 +803,9 @@ func (m *Model) wireMainAgentCallbacks(p msgSender) {
 			)
 		}
 	}
-	onToken, stopBatch := makeBatchedOnToken(p, dispatchToken)
-	a.SetOnToken(onToken)
-	a.SetOnTurnStart(func(content string, messages []sdk.Message) {
+	onToken, stopBatch := makeBatchedOnToken(sink, dispatchToken)
+	a.AddOnToken(onToken)
+	a.AddOnTurnStart(func(content string, messages []sdk.Message) {
 		if extHostForToken == nil {
 			return
 		}
@@ -780,9 +836,9 @@ func (m *Model) wireMainAgentCallbacks(p msgSender) {
 			dispatchTurnStart(extHostForToken, payload)
 		}
 	})
-	a.SetOnDone(func(err error) {
+	a.AddOnDone(func(err error) {
 		stopBatch()
-		p.Send(StreamDoneMsg{Err: err})
+		sink.StreamDone(err)
 	})
 	extHost := m.extHost
 	logFn := m.logFn
@@ -793,7 +849,7 @@ func (m *Model) wireMainAgentCallbacks(p msgSender) {
 			agent.MainAgentID,
 		)
 	})
-	a.SetOnToolCall(toolCallForwarder(mainID, p, stopBatch))
+	a.AddOnToolCall(toolCallForwarder(mainID, sink, stopBatch))
 	// Steer deliveries render at the moment they are injected into the running
 	// turn — that is when the model will see them. The queued:true payload
 	// makes the transcript extension render it as a prompt-style bubble, and
@@ -801,7 +857,7 @@ func (m *Model) wireMainAgentCallbacks(p msgSender) {
 	// guidance as a user message but filters other queued inbox traffic.
 	// dispatchTurnStart detaches onto its own goroutine because this callback
 	// fires on the turn goroutine (mid-turn, possibly inside a WASM call).
-	a.SetOnSteer(func(content string) {
+	a.AddOnSteer(func(content string) {
 		if extHostForToken == nil {
 			return
 		}
@@ -823,12 +879,12 @@ func (m *Model) wireMainAgentCallbacks(p msgSender) {
 // orchestrator turns. Flush the tail first so the text is complete before the
 // tool activity appears, then forward the tool call to the UI. Flushing is
 // idempotent; onDone flushes again at turn end.
-func toolCallForwarder(agentID string, p msgSender, flushTail func()) func(id, toolName, input string) {
+func toolCallForwarder(agentID string, sink sdk.ToolCallSink, flushTail func()) func(id, toolName, input string) {
 	return func(id, toolName, input string) {
 		if flushTail != nil {
 			flushTail()
 		}
-		p.Send(ToolCallStartMsg{AgentID: agentID, ID: id, ToolName: toolName, Input: input})
+		sink.ToolCallStart(agentID, id, toolName, input)
 	}
 }
 
@@ -918,19 +974,48 @@ func (m *Model) setActiveProviderModel(provider, model string) tea.Cmd {
 	return m.dispatchModelChanged()
 }
 
+// modelChangedEvent builds the EventModelChanged dispatched to extensions. It
+// is shared by the TUI (via dispatchModelChanged) and by headless front ends
+// (via DispatchModelChanged) so both report the same provider/model to
+// extensions such as the bundled `statusline` extension.
+func (m Model) modelChangedEvent() (sdk.Event, error) {
+	payload, err := json.Marshal(sdk.ModelChangedPayload{Provider: m.activeProvider, Model: m.activeModel})
+	if err != nil {
+		return sdk.Event{}, err
+	}
+	return sdk.Event{Type: sdk.EventModelChanged, Payload: payload}, nil
+}
+
 func (m Model) dispatchModelChanged() tea.Cmd {
 	if m.extHost == nil {
 		return nil
 	}
-	provider := m.activeProvider
-	modelName := m.activeModel
 	extHost := m.extHost
 	return func() tea.Msg {
-		payload, _ := json.Marshal(sdk.ModelChangedPayload{Provider: provider, Model: modelName})
-		evt := sdk.Event{Type: sdk.EventModelChanged, Payload: payload}
+		evt, err := m.modelChangedEvent()
+		if err != nil {
+			return ExtensionEventResultMsg{Err: err}
+		}
 		results, err := extHost.DispatchEvent(context.Background(), evt)
 		return ExtensionEventResultMsg{Results: results, Err: err}
 	}
+}
+
+// DispatchModelChanged dispatches EventModelChanged synchronously and returns
+// the dispatch error. It is the headless counterpart of Init's
+// dispatchModelChanged: a front end with no tea program still needs the model
+// and provider reported to extensions (the bundled `statusline` extension
+// renders them), and needs a repaint when the model changes later.
+func (m Model) DispatchModelChanged(ctx context.Context) error {
+	if m.extHost == nil {
+		return nil
+	}
+	evt, err := m.modelChangedEvent()
+	if err != nil {
+		return err
+	}
+	_, err = m.extHost.DispatchEvent(ctx, evt)
+	return err
 }
 
 // Init returns the initial command.
@@ -967,13 +1052,11 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// cmdDispatchSessionStart sends EventSessionStart to all extensions asynchronously.
-func (m Model) cmdDispatchSessionStart() tea.Cmd {
-	if m.extHost == nil {
-		return nil
-	}
-	extHost := m.extHost
-	tools := extHost.GetRegisteredTools()
+// sessionStartEvent builds the EventSessionStart dispatched to extensions. It
+// is shared by the TUI (via cmdDispatchSessionStart) and by headless front ends
+// (via DispatchSessionStart) so both hand extensions an identical payload.
+func (m Model) sessionStartEvent() (sdk.Event, error) {
+	tools := m.extHost.GetRegisteredTools()
 	promptTools := make([]sdk.PromptTool, 0, len(tools))
 	for _, tool := range tools {
 		promptTools = append(promptTools, sdk.PromptTool{Name: tool.Name})
@@ -983,16 +1066,54 @@ func (m Model) cmdDispatchSessionStart() tea.Cmd {
 	for _, command := range commands {
 		promptCommands = append(promptCommands, sdk.PromptCommand{Name: command.Name, Desc: command.Desc})
 	}
+	wd, _ := os.Getwd()
+	payload, err := json.Marshal(sdk.SessionStartPayload{
+		Reason: "new_session", Tools: promptTools, Commands: promptCommands,
+		CWD: wd, StartedAt: time.Now().Format(time.RFC3339Nano),
+	})
+	if err != nil {
+		return sdk.Event{}, err
+	}
+	return sdk.Event{Type: sdk.EventSessionStart, Payload: payload}, nil
+}
+
+// cmdDispatchSessionStart sends EventSessionStart to all extensions asynchronously.
+func (m Model) cmdDispatchSessionStart() tea.Cmd {
+	if m.extHost == nil {
+		return nil
+	}
+	extHost := m.extHost
 	return func() tea.Msg {
-		wd, _ := os.Getwd()
-		payload, _ := json.Marshal(sdk.SessionStartPayload{
-			Reason: "new_session", Tools: promptTools, Commands: promptCommands,
-			CWD: wd, StartedAt: time.Now().Format(time.RFC3339Nano),
-		})
-		evt := sdk.Event{Type: sdk.EventSessionStart, Payload: payload}
+		evt, err := m.sessionStartEvent()
+		if err != nil {
+			return sessionStartDoneMsg{Err: err}
+		}
 		results, err := extHost.DispatchEvent(context.Background(), evt)
 		return sessionStartDoneMsg{Results: results, Err: err}
 	}
+}
+
+// DispatchSessionStart dispatches EventSessionStart synchronously and returns
+// the dispatch error. It is the headless equivalent of Init's
+// cmdDispatchSessionStart.
+//
+// A non-terminal front end has no tea program, so Init never runs — but
+// extensions create their UI scene areas in response to session start. The
+// bundled `agents` extension, for example, creates the "chat" transcript area
+// on session start; without this call a browser would receive no chat
+// transcript at all, only the fallback. Call it after the extension bridges are
+// installed so the extension's ui_create_area/ui_patch calls reach the front
+// end's sink.
+func (m Model) DispatchSessionStart(ctx context.Context) error {
+	if m.extHost == nil {
+		return nil
+	}
+	evt, err := m.sessionStartEvent()
+	if err != nil {
+		return err
+	}
+	_, err = m.extHost.DispatchEvent(ctx, evt)
+	return err
 }
 
 // Update handles all incoming messages.
@@ -1348,23 +1469,22 @@ func (m Model) updateKeyPressPicker(kp tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		m.picker.Close()
 		// Core-owned pickers (callback prefixed "__wllr:") route to a harness
 		// handler instead of dispatching EventOnCommand to a WASM extension.
-		if callback == modelPickerCallback {
-			// The list spans providers, so the key encodes the owner. A
-			// provider-qualified key routes through the cross-provider switch;
-			// a bare key stays a same-provider model (or tier) selection.
-			if provider, modelID, ok := splitModelPickerKey(id); ok && provider != "" {
+		// Core-owned selections that carry their full state in the id are
+		// classified by the shared helper (coredispatch.go), so the terminal and
+		// a headless front end agree on the callback-id -> action mapping.
+		if sel := classifyCoreSelection(callback, id); sel.kind != coreSelectNone {
+			switch sel.kind {
+			case coreSelectModel:
+				return m, func() tea.Msg { return setModelMsg{Model: sel.value} }, true
+			case coreSelectProviderModel:
 				return m, func() tea.Msg {
-					return setProviderModelMsg{Provider: provider, Model: modelID}
+					return setProviderModelMsg{Provider: sel.provider, Model: sel.value}
 				}, true
+			case coreSelectThinking:
+				return m, func() tea.Msg { return setThinkingMsg{Level: sel.value} }, true
+			case coreSelectSpeed:
+				return m, func() tea.Msg { return setOpenRouterSpeedMsg{ID: sel.value} }, true
 			}
-			_, modelID, _ := splitModelPickerKey(id)
-			return m, func() tea.Msg { return setModelMsg{Model: modelID} }, true
-		}
-		if callback == thinkingPickerCallback {
-			return m, func() tea.Msg { return setThinkingMsg{Level: id} }, true
-		}
-		if callback == openRouterSpeedPickerCallback {
-			return m, func() tea.Msg { return setOpenRouterSpeedMsg{ID: id} }, true
 		}
 		if callback == authPickerCallback {
 			provider := m.authPromptProvider
@@ -2372,8 +2492,8 @@ func (m Model) submitToAgent(content, display string) (tea.Model, tea.Cmd) {
 			} else {
 				// EnsureMainAgent creates the pool entry, but harness-owned
 				// callbacks and dynamic tool wiring belong here.
-				if m.program != nil {
-					m.wireMainAgentCallbacks(m.program)
+				if m.sink != nil {
+					m.WireMainAgentCallbacks(m.sink)
 				}
 				// The first Send failed before enqueueing, so retrying does not
 				// duplicate the user message.
@@ -2453,6 +2573,27 @@ func (m Model) cmdDispatchMessageEnd(role, content string) tea.Cmd {
 		results, err := extHost.DispatchEvent(context.Background(), evt)
 		return ExtensionEventResultMsg{Results: results, Err: err}
 	}
+}
+
+// DispatchMessageEnd dispatches EventMessageEnd synchronously and returns the
+// dispatch error. It is the headless counterpart of cmdDispatchMessageEnd.
+//
+// The TUI fires this from its update loop when a stream completes; a front end
+// with no tea loop must fire it itself. Extensions depend on it: the bundled
+// `agents` extension renders the finalized assistant bubble (markdown → ANSI)
+// in its chat area only on message end, so without this a browser would show
+// raw streamed text and never the rendered message. Extensions such as
+// `history` use it to record the response.
+func (m Model) DispatchMessageEnd(ctx context.Context, role, content string) error {
+	if m.extHost == nil || content == "" {
+		return nil
+	}
+	payload, err := json.Marshal(sdk.MessageEndPayload{Role: role, Content: content})
+	if err != nil {
+		return err
+	}
+	_, err = m.extHost.DispatchEvent(ctx, sdk.Event{Type: sdk.EventMessageEnd, Payload: payload})
+	return err
 }
 
 func (m Model) cmdDispatchAfterProviderResponse() tea.Cmd {
@@ -2604,21 +2745,12 @@ func (m Model) dropdownHeight() int {
 // slashWordAt finds the index of a slash that starts the current incomplete
 // command word — the last "/" that is either at position 0 or preceded by a
 // space, with no space between it and the end of the string.
-// Returns -1 if no such position exists.
+//
+// The rule is the shared sdk.SlashWordAt so the browser's autocomplete triggers
+// under exactly the same conditions as the terminal's: a divergence would make
+// the dropdown appear in one front end and not the other.
 func slashWordAt(val string) int {
-	idx := strings.LastIndex(val, "/")
-	if idx < 0 {
-		return -1
-	}
-	// Must be word-start: first char or preceded by a space.
-	if idx > 0 && val[idx-1] != ' ' {
-		return -1
-	}
-	// No space between the / and end of input (still typing the command).
-	if strings.ContainsRune(val[idx+1:], ' ') {
-		return -1
-	}
-	return idx
+	return sdk.SlashWordAt(val)
 }
 
 // updateSuggestions recomputes the autocomplete list based on current input.

@@ -218,3 +218,72 @@ terminal reporting, and all three workspace-mode placeholders.
 **Scenario:** The three cache-reporting conventions: OpenAI (raw input excludes cached: 10k + 80k cache-read), Anthropic (cache read AND creation additive: 10k + 70k + 5k), and a fully cache-served turn (raw input 0 + 90k cache-read).
 **Assertion:** Display `InputTokens` is the sum (90000 / 85000 / 90000) and Percent matches the sum — a fully cached turn never displays zero used context.
 **Rationale:** Providers subtract or add cache tokens incompatibly; only the sum reconstructs the true prompt size, and the raw field alone blanked the statusline on cache-heavy sessions.
+
+## Shared scene-graph logic (uigraph_test.go)
+
+These tests cover the pure helpers both front-end renderers depend on
+(`uigraph.go`, `uilayout.go`). They are the direct unit tests; the renderers add
+their own integration tests, and `modules/server/scenemodel_test.go` re-asserts
+the same patch behaviours to pin the two front ends together.
+
+| Test | Intent |
+|------|--------|
+| `TestApplyOp_SetRootAndClone` | `set_root` deep-copies: mutating the result (including the props slice) never touches the source |
+| `TestApplyOp_InsertIndexAndErrors` | Index-0 inserts first; missing parent, no root, out-of-range index, and a missing node all error |
+| `TestApplyOp_TextOpsRejectNonText` | `append_text`/`replace_text` on a non-text node error, as does a missing target |
+| `TestApplyOp_RemoveRootVsChild` | Removing a child prunes it; removing the root yields `nil` (empty area); a missing node errors |
+| `TestApplyOp_UnknownOp` | An unrecognised op errors rather than silently no-op'ing |
+| `TestCollapseBlankLineRuns` | A single blank line survives; runs of 3+ collapse to 2 |
+| `TestPropSides` | 1/2/4-length specs expand correctly; other lengths report `ok=false` |
+| `TestParseDimensionAndConstraint` | `fill`/`auto`/numeric and `N%`/absolute constraint resolution, including the no-available-width `fill` case |
+| `TestExpandSideCSS` | Side lists render as CSS shorthand; empty yields `""` |
+
+## UI callback router (uicallback_test.go)
+
+Unit tests for the inbound half of the sink contract: routing a front-end
+selection back into the engine, and the sentinels that let a server answer
+`501` rather than `500`.
+
+| Test | Intent |
+|------|--------|
+| `TestIsCoreCallback` | The `__wllr:` prefix is the sole core/extension predicate |
+| `TestFuncRouter_RoutesCoreAndExtension` | A core callback reaches the core handler and an extension callback the extension handler, with args intact |
+| `TestFuncRouter_NilHandlersReturnSentinels` | Nil fields yield `ErrNoCoreHandler`/`ErrNoExtensionHost` |
+| `TestFuncRouter_PropagatesHandlerError` | A handler error is returned unchanged (not masked by a sentinel) |
+| `TestCoreCallbackFunc_Adapts` | The function adapter satisfies `CoreCallbackHandler` |
+
+## Model-selection contract (modelchoice_test.go)
+
+Unit tests for the shared model-list/key/callback contract that the terminal
+picker and the HTTP front end must agree on. A divergence here is silent (a
+selection simply matches nothing), so the round trip is pinned directly.
+
+| Test | Intent |
+|------|--------|
+| `TestModelPickerKeyRoundTrip` | A provider-qualified key survives encode/decode with the unit separator present |
+| `TestModelPickerKeyBare` | An empty provider yields the bare model id and decodes back with an empty provider |
+| `TestSplitModelPickerKeyEmpty` | An empty key is rejected, so "no selection" is distinguishable |
+| `TestModelListerFunc` | The function adapter satisfies `ModelLister` |
+| `TestModelPickerCallbackIsCore` | `ModelPickerCallback` is recognized as core-owned by `IsCoreCallback` |
+
+## Slash-command contract (uicommand_test.go)
+
+Unit tests for the shared command-discovery contract. The trigger rule is
+reimplemented in the browser client, so it is pinned directly.
+
+| Test | Intent |
+|------|--------|
+| `TestSlashWordAt` | The trigger rule fires at a word-start slash and not mid-word or after the command name |
+| `TestCommandQuery` | The in-progress name is lower-cased and absent when no slash word is present |
+| `TestCommandListerFunc` | The function adapter satisfies `CommandLister` |
+
+## Markdown detection contract (md/markdown_test.go)
+
+The renderer is shared by both front ends (the terminal via `format_markdown`,
+the browser via `MessageHTML`), so its detection gate is pinned here rather than
+only through a front end.
+
+| Test | Intent |
+|------|--------|
+| `TestDetect_InlineCode` | A line with two backticks is markdown; a lone backtick is not |
+| `TestRender_InlineCode` | A code span is styled and its backticks are consumed |

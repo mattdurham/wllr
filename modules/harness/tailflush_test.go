@@ -8,29 +8,52 @@ import (
 	"testing"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/fantasy"
 	"github.com/mattdurham/wllr/modules/agent"
+	"github.com/mattdurham/wllr/modules/sdk"
 	"github.com/mattdurham/wllr/modules/testutil"
 )
 
-// captureSender records every tea.Msg sent, preserving order.
-type captureSender struct {
-	mu   sync.Mutex
-	msgs []tea.Msg
+// captureEvent is one recorded front-end effect.
+type captureEvent struct {
+	kind    string // "token", "tool", or "done"
+	text    string
+	agentID string
+	tool    string
 }
 
-func (c *captureSender) Send(msg tea.Msg) {
+// captureSender records the effects a front-end sink receives, preserving
+// order. It embeds sdk.FuncSink so the many methods it does not care about are
+// no-ops and it satisfies sdk.UISink for the wiring under test.
+type captureSender struct {
+	sdk.FuncSink
+	mu     sync.Mutex
+	events []captureEvent
+}
+
+func (c *captureSender) Token(text string) {
 	c.mu.Lock()
-	c.msgs = append(c.msgs, msg)
+	c.events = append(c.events, captureEvent{kind: "token", text: text})
 	c.mu.Unlock()
 }
 
-func (c *captureSender) snapshot() []tea.Msg {
+func (c *captureSender) ToolCallStart(agentID, id, toolName, input string) {
+	c.mu.Lock()
+	c.events = append(c.events, captureEvent{kind: "tool", agentID: agentID, tool: toolName})
+	c.mu.Unlock()
+}
+
+func (c *captureSender) StreamDone(err error) {
+	c.mu.Lock()
+	c.events = append(c.events, captureEvent{kind: "done"})
+	c.mu.Unlock()
+}
+
+func (c *captureSender) snapshot() []captureEvent {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	out := make([]tea.Msg, len(c.msgs))
-	copy(out, c.msgs)
+	out := make([]captureEvent, len(c.events))
+	copy(out, c.events)
 	return out
 }
 
@@ -38,9 +61,9 @@ func (c *captureSender) tokens() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	var sb strings.Builder
-	for _, m := range c.msgs {
-		if tm, ok := m.(TokenMsg); ok {
-			sb.WriteString(tm.Token)
+	for _, e := range c.events {
+		if e.kind == "token" {
+			sb.WriteString(e.text)
 		}
 	}
 	return sb.String()
@@ -89,7 +112,7 @@ func TestTokenBatcher_FlushIdempotent(t *testing.T) {
 
 // TestToolCallForwarder_FlushesTailBeforeToolCall pins the segment-boundary
 // contract: when a tool call is dispatched, the still-buffered token tail must
-// reach the UI before the ToolCallStartMsg, so the narration reads complete
+// reach the front end before the tool call, so the narration reads complete
 // before tool activity appears.
 func TestToolCallForwarder_FlushesTailBeforeToolCall(t *testing.T) {
 	sender := &captureSender{}
@@ -100,16 +123,16 @@ func TestToolCallForwarder_FlushesTailBeforeToolCall(t *testing.T) {
 	fwd := toolCallForwarder("main", sender, flush)
 	fwd("call-1", "get_agent_status", `{"agent_id":"main/brainstormer"}`)
 
-	msgs := sender.snapshot()
+	events := sender.snapshot()
 	tailIdx, callIdx := -1, -1
-	for i, m := range msgs {
-		if tm, ok := m.(TokenMsg); ok && tailIdx == -1 && tm.Token == "the brainstormer" {
+	for i, e := range events {
+		if e.kind == "token" && tailIdx == -1 && e.text == "the brainstormer" {
 			tailIdx = i
 		}
-		if tc, ok := m.(ToolCallStartMsg); ok && callIdx == -1 {
+		if e.kind == "tool" && callIdx == -1 {
 			callIdx = i
-			if tc.AgentID != "main" || tc.ToolName != "get_agent_status" {
-				t.Fatalf("ToolCallStartMsg = %+v, want agent=main tool=get_agent_status", tc)
+			if e.agentID != "main" || e.tool != "get_agent_status" {
+				t.Fatalf("tool call = %+v, want agent=main tool=get_agent_status", e)
 			}
 		}
 	}
@@ -117,7 +140,7 @@ func TestToolCallForwarder_FlushesTailBeforeToolCall(t *testing.T) {
 		t.Fatal("batched token tail never delivered at tool-call dispatch")
 	}
 	if callIdx == -1 {
-		t.Fatal("ToolCallStartMsg never sent")
+		t.Fatal("tool call never delivered")
 	}
 	if tailIdx > callIdx {
 		t.Fatalf("tail (idx %d) delivered after tool call (idx %d); text would render incomplete", tailIdx, callIdx)
@@ -130,12 +153,12 @@ func TestToolCallForwarder_NilFlushSafe(t *testing.T) {
 	sender := &captureSender{}
 	fwd := toolCallForwarder("main", sender, nil)
 	fwd("call-1", "exec", `{}`)
-	msgs := sender.snapshot()
-	if len(msgs) != 1 {
-		t.Fatalf("got %d messages, want 1 ToolCallStartMsg", len(msgs))
+	events := sender.snapshot()
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1 tool call", len(events))
 	}
-	if tc, ok := msgs[0].(ToolCallStartMsg); !ok || tc.ToolName != "exec" {
-		t.Fatalf("expected ToolCallStartMsg, got %T %+v", msgs[0], msgs[0])
+	if events[0].kind != "tool" || events[0].tool != "exec" {
+		t.Fatalf("expected a tool call for exec, got %+v", events[0])
 	}
 }
 
@@ -155,8 +178,8 @@ func (s *noopTool) SetProviderOptions(fantasy.ProviderOptions) {}
 
 // TestWireMainAgentCallbacks_TurnFlushesTailAtToolCall is the end-to-end
 // regression for text cut off mid-sentence: a scripted response of fast word
-// deltas followed by a tool call must deliver the COMPLETE text to the UI
-// before the ToolCallStartMsg. Before the segment-boundary flush, the batcher
+// deltas followed by a tool call must deliver the COMPLETE text to the front
+// end before the tool call. Before the segment-boundary flush, the batcher
 // held the last <75ms of tokens ("the brainstormer") until turn end, so long
 // orchestrator turns rendered narration frozen mid-sentence for minutes.
 func TestWireMainAgentCallbacks_TurnFlushesTailAtToolCall(t *testing.T) {
@@ -187,15 +210,15 @@ func TestWireMainAgentCallbacks_TurnFlushesTailAtToolCall(t *testing.T) {
 
 	m := New(pool, agent.MainAgentID, nil)
 	sender := &captureSender{}
-	m.wireMainAgentCallbacks(sender)
+	m.WireMainAgentCallbacks(sender)
 
 	pool.Get(agent.MainAgentID).Submit(context.Background(), "go")
 
-	// Wait for the wired onDone to fire (StreamDoneMsg captured by sender).
+	// Wait for the wired onDone to fire (the "done" effect captured by sender).
 	deadline := time.After(10 * time.Second)
 	for {
-		for _, msg := range sender.snapshot() {
-			if _, ok := msg.(StreamDoneMsg); ok {
+		for _, e := range sender.snapshot() {
+			if e.kind == "done" {
 				goto done
 			}
 		}
@@ -206,25 +229,25 @@ func TestWireMainAgentCallbacks_TurnFlushesTailAtToolCall(t *testing.T) {
 		}
 	}
 done:
-	// The complete response must have reached the UI, tail included.
+	// The complete response must have reached the front end, tail included.
 	if got := sender.tokens(); got != response {
 		t.Fatalf("tokens received = %q, want complete response %q", got, response)
 	}
-	// And the final token tail must precede the tool-call message.
-	msgs := sender.snapshot()
+	// And the final token tail must precede the tool call.
+	events := sender.snapshot()
 	lastTokenIdx, callIdx := -1, -1
-	for i, msg := range msgs {
-		if _, ok := msg.(TokenMsg); ok {
+	for i, e := range events {
+		if e.kind == "token" {
 			lastTokenIdx = i
 		}
-		if _, ok := msg.(ToolCallStartMsg); ok && callIdx == -1 {
+		if e.kind == "tool" && callIdx == -1 {
 			callIdx = i
 		}
 	}
 	if lastTokenIdx == -1 || callIdx == -1 {
-		t.Fatalf("expected tokens and ToolCallStartMsg; lastToken=%d call=%d", lastTokenIdx, callIdx)
+		t.Fatalf("expected tokens and a tool call; lastToken=%d call=%d", lastTokenIdx, callIdx)
 	}
 	if lastTokenIdx > callIdx {
-		t.Fatalf("token tail (idx %d) arrived after ToolCallStartMsg (idx %d)", lastTokenIdx, callIdx)
+		t.Fatalf("token tail (idx %d) arrived after the tool call (idx %d)", lastTokenIdx, callIdx)
 	}
 }

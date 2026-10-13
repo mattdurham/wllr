@@ -541,6 +541,33 @@ Returns an error if the area ID does not exist.
 
 **Invariant:** Area `ID` is unique across all areas; the host rejects a create for an existing ID. The `UIPatchOp.Index` `*int` distinction (nil = append, `0` = first position) is significant and must survive the wire.
 
+### Scene-graph operations and layout helpers (uigraph.go, uilayout.go)
+
+These files hold the **pure, renderer-independent** logic shared by every front
+end that draws a scene graph. They are Go helpers, not wire types: they never
+cross the ABI. They exist so the terminal renderer (`modules/harness`) and the
+HTML renderer (`modules/server`) manipulate the graph and resolve sizes
+identically and cannot drift.
+
+| Function | Purpose |
+|----------|---------|
+| `ApplyOp(root, op) (*UINode, error)` | Reference implementation of `UIPatchOp` semantics (set_root/insert/update/remove/append_text/replace_text) |
+| `FindNode(n, id) *UINode` | Locate a node by id (aliases the tree; clone to mutate safely) |
+| `InsertChild(parent, index, child) error` | Insert at a nil-append or bounded index |
+| `RemoveNode(n, id) bool` | Remove a child subtree; never removes the root |
+| `CloneNode` / `CloneProps` | Deep copies, for all-or-nothing batch validation |
+| `CollapseBlankLineRuns(s) string` | Collapse 3+ newlines to 2 (safe mid-stream) |
+| `PropSides(v) (t,r,b,l, ok)` | Expand a 1/2/4-length padding/margin spec |
+| `ParseDimension(v, fillWidth) (int, bool)` | Resolve `"fill"`/`"auto"`/decimal |
+| `ResolveConstraint(v, total) (int, bool)` | Resolve `"N"`/`"N%"` area constraints |
+| `ParseDecimal(s) (int, bool)` | Non-negative decimal parse |
+| `ExpandSideCSS(v, unit) string` | CSS padding/margin shorthand (used by the HTML renderer) |
+
+**Invariant:** `ApplyOp` is the single source of truth for patch semantics. A
+renderer that needs different behaviour must change this function, not fork it,
+so both front ends reject a bad batch with the same error and apply a good one
+with the same result.
+
 ---
 
 ## Event Payloads (Detailed)
@@ -593,6 +620,98 @@ Returned as `int32` from the `host_call` WASM import (not the JSON layer).
 
 ---
 
+## Renderer-neutral UI sink (UISink)
+
+`UISink` is the front-end seam between the engine and whatever renders it. The
+harness's extension bridges and its token/callback wiring emit every
+user-visible effect through this interface rather than reaching for a
+`*tea.Program`, so the same engine drives an interactive TUI, an HTTP/SSE server,
+or a programmatic embedder. The method set covers notification, modal, picker,
+agent-tree, focus, text-input, abort, status, submit, model switch, command
+registration, console, history reset, streamed tokens/tool calls/turn-done,
+agent wakeup, and the scene-graph ops (`SceneCreate`/`ScenePatch`/`SceneUpdate`/`SceneRemove`).
+
+Implementations must be safe for concurrent use (calls arrive from concurrent
+WASM dispatch and agent streaming goroutines) and must not block indefinitely.
+
+Narrow sub-interfaces exist so the streaming path can be driven by a small
+test double: `TokenSink` (`Token`), `ToolCallSink` (`ToolCallStart`), and
+`AgentUISink` (`Token`, `ToolCallStart`, `StreamDone`, `AgentWakeup`,
+`Notify`). `UISink` supersets all three.
+
+`FuncSink` is the programmatic implementation: a struct of optional function
+fields (`OnNotify`, `OnShowPicker`, `OnToken`, …). A nil field is a no-op, or a
+zero return for the value-returning methods. It is safe for concurrent use to
+the extent its functions are, and doubles as the convenient test double for
+code that emits engine effects. Concrete TUI and HTTP implementations live
+outside this package (`harness.teaSink`, `server.HubSink`).
+
+`UICallbackRouter` is the inbound counterpart: the path a selection takes *back*
+from a front end into the engine. The TUI resolves callbacks in its own update
+loop so it does not need one; a browser or an embedder has no such loop and
+posts the callback instead. `IsCoreCallback` (`__wllr:` prefix) decides the split
+between a harness-owned action and an extension command, exactly as the TUI's
+key handler does. `ErrNoCoreHandler` and `ErrNoExtensionHost` mean "this front
+end does not handle that class", so a server maps them to 501 rather than 500.
+`FuncRouter` and `CoreCallbackFunc` are the programmatic implementations;
+`harness.ExtensionRouter` (dispatches to the extension host) and
+`server`'s `/api/ui/callback` endpoint are the shipped concrete ones.
+
+---
+
+## Model-selection contract (modelchoice.go)
+
+Model selection is the one front-end interaction that is neither a pure sink
+call nor a pure callback: a front end must first *learn* the selectable models,
+then route a choice back. The contract for both halves lives here so the
+terminal picker and the HTTP front end cannot describe a model differently.
+
+`ModelChoice` is one selectable model (`ID`, `Name`, `Sublabel`, `Provider`,
+`Tiers`, `ContextWindow`, `ContextWindowKnown`, `Active`). The list spans
+providers — each configured or pinned model, not just the active provider's — so
+choosing one may switch provider. `harness.ModelChoice` is a type alias of it, so
+the harness picker and the server share one definition.
+
+`ModelLister` (`ModelChoices() []ModelChoice`) is the source a front end reads;
+`ModelListerFunc` adapts a function. The harness's `ModelListFn` is wrapped in it
+by serve mode.
+
+`ModelPickerKey`/`SplitModelPickerKey` encode a choice's stable per-row key as
+`provider<US>modelID` (`ModelPickerKeySep = "\x1f"`, a unit separator that cannot
+appear in either part). A bare key (empty provider) round-trips to an empty
+provider. The browser echoes the key the server built, so the encoding has one
+definition; if the two ends disagreed, a selection would silently match nothing.
+
+`ModelPickerCallback` (`"__wllr:model"`) is the reserved core callback id the
+selection is routed back under. It is core-owned (see `IsCoreCallback`), so a
+router sends it to the model handler rather than to an extension.
+
+---
+
+## Slash-command contract (uicommand.go)
+
+A second front end must offer the same slash-command discovery the terminal does:
+an autocomplete dropdown and a help listing. Both read one command set, so the
+command shape and the rule for when a `/word` is being typed live here rather
+than being reimplemented in each front end.
+
+`CommandInfo{Name, Desc, Instant}` is one registered command as a front end needs
+it: the name without its leading slash, a description, and whether it runs
+immediately (`Instant`) rather than being queued to an extension.
+
+`CommandLister` (and the `CommandListerFunc` adapter) returns the registered
+commands. The harness registry implements it (`Registry.ListInfo`), and serve
+mode installs `Model.CommandLister()` so `GET /api/commands` returns exactly the
+terminal's command set.
+
+`SlashWordAt` is the autocomplete trigger rule, stated as a shared contract
+because the browser reimplements it in JavaScript: a slash word begins at
+position 0 or after a space and has no space between it and the end of the input.
+`CommandQuery` returns the lower-cased in-progress name to filter by. A
+divergence would make the dropdown appear in one front end and not the other.
+
+---
+
 ## Key Package Invariants
 
 1. `EventType` values are stable string constants across ABI versions; numeric iota is never used.
@@ -613,3 +732,12 @@ Returned as `int32` from the `host_call` WASM import (not the JSON layer).
 16. All 67 `Method*` constants are documented above (59 in the method tables, 8 in the Task ledger wire contract); missing methods in SPECS.md indicate incomplete documentation rather than missing implementation.
 17. `ShowTextInputParams` mirrors `ShowPickerParams`: `Title` and `Callback` are required, `Placeholder` and `InitialValue` are `omitempty` and default to `""`. After submission the harness fires `EventOnCommand{name: callback, args: [value]}`, the same delivery shape as `show_picker`.
 18. `ShowPickerParams.Split` requests the two-pane picker layout: a type-to-filter list on the left half and the highlighted item's `ShowPickerItem.Preview` text on the right half. `Preview` is optional multi-line plain text (falls back to `Sublabel` when empty) and also participates in filter matching, so split pickers can filter on conversation content. `Split`/`Preview` are `omitempty`; older extensions that omit them get the single-pane picker unchanged. Selection fires the same `EventOnCommand{name: callback, args: [item.ID]}` as the single-pane picker.
+19. `UISink` is purely a front-end abstraction and lives in this package because its method signatures are entirely `sdk` types; it carries no engine logic and no terminal dependency. `FuncSink` is a no-op for any nil field, so a partially wired embedder never panics.
+20. Adding a method to `UISink` is a breaking change for every implementation; the four shipped implementations (`harness.teaSink`, `server.HubSink`, `sdk.FuncSink`, and the harness `noopSink`) must be updated together.
+21. `UICallbackRouter` is the inbound mirror of `UISink`: a front end whose selections cannot be resolved locally (no event loop) routes them back through it. The core/extension split is decided by `IsCoreCallback` (`__wllr:` prefix) so every front end makes the same split. `ErrNoCoreHandler` and `ErrNoExtensionHost` are "unsupported here" sentinels, not transport faults — a server answers 501 for them and 500 for anything else. `FuncRouter`/`CoreCallbackFunc` are the programmatic implementations, nil-tolerant by field.
+22. `ModelPickerKeySep`/`ModelPickerKey`/`SplitModelPickerKey` and `ModelPickerCallback` have exactly one definition. The harness picker (`modelPickerKey`, `modelPickerCallback`) and the HTTP front end (`GET /api/models`) both use them, because the browser sends a key the harness must decode and a callback the harness must classify; a divergence would make a browser model selection a silent no-op.
+23. `harness.ModelChoice` is a type alias of `sdk.ModelChoice`, not a parallel struct. `ContextWindow`/`ContextWindowKnown` are retained so a list can avoid rendering "0 tokens"; `Active` marks the live provider/model.
+24. `ModelLister` is nil-tolerant at the call site: a front end with no lister reports an empty list rather than an error, so model selection degrades to "not available" instead of failing.
+25. `CommandInfo` is the renderer-neutral command shape; `CommandLister`/`CommandListerFunc` are nil-tolerant at the call site, so a front end with no lister reports an empty list rather than an error.
+26. `SlashWordAt` is the single definition of the autocomplete trigger rule. The harness (`slashWordAt`) delegates to it, and the browser client reimplements the identical rule in JavaScript; both must agree or the dropdown would appear inconsistently between front ends.
+27. The command set has one source: the harness registry. Built-in commands, extension commands registered before serve-mode wiring, and extension commands registered after it (forwarded through `HubSink.RegisterCommand` to `Model.RegisterCommand`) all land in the same registry, so `GET /api/commands` cannot diverge from the terminal's list.

@@ -357,9 +357,78 @@ dispatched at all.
 |-------|------|----------|-----------|
 | High | `TestTokenBatcher_HoldsTailUntilFlush` | first token sends (interval elapsed), second arrives within the window, then flush | only the first batch is sent pre-flush; flush delivers the tail |
 | High | `TestTokenBatcher_FlushIdempotent` | flush called repeatedly after one batch | exactly one delivery, no duplicates |
-| High | `TestToolCallForwarder_FlushesTailBeforeToolCall` | buffered tail, then the forwarder fires | tail `TokenMsg` precedes `ToolCallStartMsg` with correct agent/tool |
+| High | `TestToolCallForwarder_FlushesTailBeforeToolCall` | buffered tail, then the forwarder fires | tail token effect precedes the tool-call effect with correct agent/tool |
 | Medium | `TestToolCallForwarder_NilFlushSafe` | forwarder built without a flush | forwards the tool call; no panic |
-| High | `TestWireMainAgentCallbacks_TurnFlushesTailAtToolCall` | real scripted turn: word-delta text then a tool call, through the wired callbacks | complete response text reaches the UI before `ToolCallStartMsg` |
+| High | `TestWireMainAgentCallbacks_TurnFlushesTailAtToolCall` | real scripted turn: word-delta text then a tool call, through the wired callbacks | complete response text reaches the front-end sink before the tool call |
+
+The capture double (`captureSender`) embeds `sdk.FuncSink` and records each
+front-end effect as an ordered event (`token`/`tool`/`done`) rather than a
+`tea.Msg`, so the regression asserts the same ordering through the
+renderer-neutral sink the producers now use.
+
+### bridges_sink_test.go (renderer-neutral bridges)
+
+Proves the extension bridges are front-end agnostic: driven by a programmatic
+`sdk.FuncSink` instead of the TUI, they still perform their engine-local work and
+forward effects to the sink, and `InstallHeadlessBridges` installs real bridges.
+
+| Priority | Test | Scenario | Assertions |
+|---|---|---|---|
+| High | `TestUIBridgeEngineMutationsRoutedThroughFuncSink` | UI bridge with a FuncSink | `SetSystemPrompt` mutates the pool; `ResetHistory` writes the pool history and calls the sink; `AfterToolCall` reports through the sink; `SetModel` delegates |
+| High | `TestAgentBridgeWakeupRoutedThroughSink` | `Run` on the root, then a sub-agent | root wake reported through the sink; sub-agent wake suppressed |
+| High | `TestInstallHeadlessBridgesEnablesSpawner` | `InstallHeadlessBridges` on a real host | host carries a spawner-backed bridge; `Spawn` is attempted for real, not the "session not yet started" stub error |
+| Medium | `TestUIBridgeNilSinkIsSafe` | UI bridge with a nil sink | presentation methods are silent no-ops; no panic |
+
+### headlessdispatch_test.go (front ends with no event loop)
+
+Proves a front end without a bubbletea loop can run the session-boot and
+message-end dispatches the TUI's `Init`/`updateStream` normally run, and that
+wiring the root agent does not displace an existing observer.
+
+| Priority | Test | Scenario | Assertions |
+|---|---|---|---|
+| High | `TestWireMainAgentCallbacksDoesNotClobberExistingObserver` | a pre-existing `SetOnToken` observer, then `WireMainAgentCallbacks(&sdk.FuncSink{})`, real turn | the pre-existing observer still receives tokens (no silent replacement) |
+| High | `TestDispatchSessionStartReachesExtensions` | host event-bus subscriber, `DispatchSessionStart` | `EventSessionStart` arrives with `reason=new_session` and a working directory |
+| High | `TestDispatchMessageEndReachesExtensions` | host event-bus subscriber, `DispatchMessageEnd` | `EventMessageEnd` arrives with role `assistant` and the finalized content |
+| Medium | `TestDispatchSessionStartNilHostIsNoop` | nil host | the three dispatch methods return nil without panicking |
+
+### commandlister_test.go (command discovery for other front ends)
+
+| Test | Scenario | Setup | Assertions |
+|---|---|---|---|
+| `TestModelCommandListerIncludesBuiltins` | The browser's command list is the terminal's | `newTestModel()` | help/clear/model/models/thinking/context/login present; `/help` is Instant and described |
+| `TestModelRegisterCommandAppearsInList` | A post-wiring extension command is listed, not dropped | `RegisterCommand("custom",...,true)` | the command appears with its desc and Instant flag |
+| `TestSlashWordAtMatchesSharedRule` | The harness trigger rule equals the shared one | a table of inputs | `slashWordAt` == `sdk.SlashWordAt` for every input |
+
+### callbackrouter_test.go (renderer-neutral callback router)
+
+Proves the inbound return path a non-terminal front end uses: a selection POSTed
+by a browser is split by the same `__wllr:` rule the TUI uses, then dispatched to
+the extension host or to an installed core handler.
+
+| Priority | Test | Scenario | Assertions |
+|---|---|---|---|
+| High | `TestExtensionRouter_DispatchesExtensionCallback` | `agents:focus` on a real host | host receives `EventOnCommand` with name and `[main/coder]` intact |
+| High | `TestExtensionRouter_CoreCallbackGoesToCoreHandler` | `__wllr:thinking` with a core handler | core handler invoked; nothing dispatched to the host |
+| Medium | `TestExtensionRouter_NilCoreHandlerSentinel` | core callback, no handler | returns `sdk.ErrNoCoreHandler` |
+| Medium | `TestExtensionRouter_NilHostSentinel` | extension callback, nil host | returns `sdk.ErrNoExtensionHost` |
+| Low | `TestExtensionRouter_EmptyCallback` | empty callback | returns `sdk.ErrNoCallbackRouter` |
+| Medium | `TestExtensionRouter_SetCoreCallbackHandler` | handler installed after construction | pre-install sentinel, post-install routed |
+
+### coredispatch_test.go (shared core-selection dispatch)
+
+Proves the callback-id → apply-action mapping is shared by the terminal and the
+headless front end, and that the headless entry reaches the same `apply*`
+methods the terminal uses.
+
+| Priority | Test | Scenario | Assertions |
+|---|---|---|---|
+| High | `TestClassifyCoreSelection` | bare/provider-qualified model key, thinking, speed, extension, stateful flow | each maps to the expected kind; non-stateless → `coreSelectNone` |
+| High | `TestResolveCoreCallback_ModelSelection` | `__wllr:model` id | `SelectModelFn` called with the id; `handled` true |
+| High | `TestResolveCoreCallback_ProviderModelRouting` | provider-qualified key, differing vs matching provider | differing → `SelectProviderModelFn`; matching → `SelectModelFn` |
+| High | `TestResolveCoreCallback_ThinkingAndSpeed` | `__wllr:thinking`, `__wllr:openrouter_speed` | `SelectThinkingFn`/`SelectSpeedFn` called and handled |
+| Medium | `TestResolveCoreCallback_Unhandled` | extension callback, auth, context-window | `handled` false (fall-through), no error |
+| Medium | `TestCoreCallbackFunc_Sentinel` | sdk adapter | handled → nil; unhandled → `sdk.ErrNoCoreHandler` |
 
 ### steer_test.go
 

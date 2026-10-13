@@ -11,25 +11,11 @@ import (
 	"github.com/mattdurham/wllr/modules/sdk"
 )
 
-// ModelChoice is one selectable model for the /model picker. ID is the wire
-// model identifier passed to the provider; Name is a human label.
-type ModelChoice struct {
-	ID       string
-	Name     string
-	Sublabel string
-	// Provider is the provider that owns this model. The list spans providers
-	// (each configured/pinned model, not just the active provider's), so
-	// selecting a model switches provider when it differs from the active one.
-	Provider string
-	// Tiers lists the model-tier names this model is tagged with (e.g.
-	// ["high"]). Rendered in the picker sublabel so the tagging is visible.
-	Tiers              []string
-	ContextWindow      int64
-	ContextWindowKnown bool
-	// Active marks the model currently in use, so the list can show which
-	// provider/model is live.
-	Active bool
-}
+// ModelChoice is one selectable model for the /model picker. It is an alias of
+// the renderer-neutral sdk.ModelChoice so the interactive picker and the HTTP
+// front end describe a model identically (see sdk/modelchoice.go); a second
+// front end presents the same list without a parallel type.
+type ModelChoice = sdk.ModelChoice
 
 // tierTagPrefix is the sublabel marker introducing the model's tier tags.
 const tierTagPrefix = "tier: "
@@ -213,29 +199,18 @@ func (m *Model) applyModelTierTag(tier string, untag bool) {
 	m.reopenModelPickerAt(key)
 }
 
-// modelPickerKeySep separates the provider from the model ID in a picker item
-// key. The list spans providers, so the ID alone is ambiguous; a unit separator
-// cannot appear in a provider name or a model ID.
-const modelPickerKeySep = "\x1f"
-
-// modelPickerKey builds the picker's stable per-row key.
+// modelPickerKey builds the picker's stable per-row key. The encoding —
+// including the provider/model separator — is the shared sdk.ModelPickerKey:
+// the browser front end sends a provider-qualified key the harness decodes here,
+// so the two must not diverge.
 func modelPickerKey(provider, modelID string) string {
-	if provider == "" {
-		return modelID
-	}
-	return provider + modelPickerKeySep + modelID
+	return sdk.ModelPickerKey(provider, modelID)
 }
 
 // splitModelPickerKey reverses modelPickerKey. A key without a separator is
 // reported with an empty provider so unqualified callers still work.
 func splitModelPickerKey(key string) (provider, modelID string, ok bool) {
-	if key == "" {
-		return "", "", false
-	}
-	if i := strings.Index(key, modelPickerKeySep); i >= 0 {
-		return key[:i], key[i+len(modelPickerKeySep):], true
-	}
-	return "", key, true
+	return sdk.SplitModelPickerKey(key)
 }
 
 // reopenModelPickerAt rebuilds the picker (so a changed tag is visible) with
