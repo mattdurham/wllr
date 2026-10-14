@@ -122,6 +122,54 @@ func TestCompactNow_FoldsHistoryAndRebases(t *testing.T) {
 	}
 }
 
+// TestCompactNow_CompressesEvenWhenHistoryFits pins the explicit-command
+// guarantee: a multi-turn history that fits the keep-recent budget (which
+// would make the automatic triggers skip) must still fold on the manual
+// /compact path, because the user asked for it.
+func TestCompactNow_CompressesEvenWhenHistoryFits(t *testing.T) {
+	pool := NewPool()
+	lm := &compactTestLM{response: "the forced summary"}
+	a, err := pool.Spawn(MainAgentID, lm, SpawnOpts{ContextWindow: 200_000})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	// Two short turns: far below the 20k-token keep-recent budget, but more
+	// than the task anchor plus a single turn.
+	a.historyMu.Lock()
+	a.history = []sdk.Message{
+		{Role: sdk.RoleUser, Content: "first question"},
+		{Role: sdk.RoleAssistant, Content: "first answer"},
+		{Role: sdk.RoleUser, Content: "second question"},
+		{Role: sdk.RoleAssistant, Content: "second answer"},
+	}
+	a.historyMu.Unlock()
+
+	result, err := a.CompactNow(context.Background())
+	if err != nil {
+		t.Fatalf("CompactNow: %v", err)
+	}
+	if result.Summary == "" {
+		t.Fatal("CompactNow no-op'd on an explicit command with foldable history")
+	}
+	if got := a.CompactionCount(); got != 1 {
+		t.Errorf("CompactionCount = %d, want 1", got)
+	}
+	// The newest user turn must survive verbatim; the older turn is folded.
+	kept := a.History()
+	found := false
+	for _, m := range kept {
+		if m.Role == sdk.RoleUser && m.Content == "second question" {
+			found = true
+		}
+		if m.Role == sdk.RoleAssistant && m.Content == "first answer" {
+			t.Error("pre-compaction assistant reply survived verbatim; want it folded")
+		}
+	}
+	if !found {
+		t.Error("newest user message not kept verbatim after manual compaction")
+	}
+}
+
 // TestCompactNow_NoOpWhenHistoryFits verifies the manual path reports a no-op
 // (empty summary) without touching history or the counter when nothing is
 // foldable.

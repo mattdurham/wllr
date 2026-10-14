@@ -341,6 +341,19 @@ func compactHistory(
 	// Find the token-budget cut point within rest.
 	// 0 = fits, j>0 = cut before j, -1 = no valid boundary (skip).
 	cutIdx := findCutPoint(rest, keepRecentTokens)
+	if cutIdx == 0 && trigger == CompactionTriggerManual {
+		// An explicit /compact must not be skipped just because the history
+		// fits the keep-recent budget that guards the automatic triggers:
+		// fold everything before the newest user turn. (cutIdx == -1 means no
+		// user boundary exists at all — that stays a genuine no-op, as does a
+		// newest user turn at rest[0], which would summarize nothing.)
+		for j := len(rest) - 1; j > 0; j-- {
+			if rest[j].Role == sdk.RoleUser {
+				cutIdx = j
+				break
+			}
+		}
+	}
 	if cutIdx == 0 || cutIdx == -1 {
 		// Everything fits, or no valid user boundary exists — skip compaction.
 		return noOpCompaction(history, trigger), nil

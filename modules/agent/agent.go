@@ -696,9 +696,11 @@ func (a *Agent) resolvedWindow(pool *AgentPool) int64 {
 // indicator drops immediately. history is rewritten in place, so the caller
 // must not invoke it while a turn is active.
 //
-// A returned result with Summary == "" means nothing was foldable (history too
-// short, or no user-bounded span exceeded the keep-recent budget); that is not
-// an error.
+// A returned result with Summary == "" means nothing was foldable (history
+// shorter than two messages, or no user boundary to cut on). The manual path
+// bypasses the fits-in-budget skip (compactHistory folds everything before the
+// newest user turn on a manual trigger), because an explicit /compact must
+// always compact when there is anything to fold. That is not an error.
 func (a *Agent) CompactNow(ctx context.Context) (CompactionResult, error) {
 	a.lmMu.RLock()
 	lm := a.lm

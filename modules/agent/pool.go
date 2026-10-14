@@ -370,7 +370,7 @@ func (p *AgentPool) CompactMainAgent(ctx context.Context) (CompactionResult, str
 		return CompactionResult{}, "", err
 	}
 	if result.Summary == "" {
-		return result, "nothing to compact (history already fits)", nil
+		return result, "nothing to compact (no foldable history)", nil
 	}
 	msg := fmt.Sprintf(
 		"compacted %d messages into the running summary",

@@ -507,9 +507,16 @@ display message.
 `a.history`, which a running turn holds, and `observeCompaction` is otherwise turn-goroutine
 only.
 
-**Invariant:** a no-op result (`Summary == ""` — history fits, or no user-bounded span
-exceeded the keep-recent budget) reports `"nothing to compact (history already fits)"`,
+**Invariant:** a no-op result (`Summary == ""` — fewer than two messages, or no
+user boundary to cut on) reports `"nothing to compact (no foldable history)"`,
 leaves history and the counter untouched, and is not an error.
+
+**Invariant:** an explicit `/compact` is never skipped merely because the
+history fits the keep-recent budget that guards the automatic triggers: when
+`findCutPoint` reports "everything fits" and the trigger is manual,
+`compactHistory` cuts before the newest user turn, so everything older than
+the latest turn is folded. Automatic (proactive/usage) triggers keep the
+fits-in-budget skip.
 
 ### lastUsage — Real API Token Tracking
 
