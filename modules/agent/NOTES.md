@@ -1119,6 +1119,24 @@ retain-on-error philosophy. The harness paints the segments from its 100ms strea
 Coverage: observestepusage_test.go (mid-turn liveness through a two-gate scripted turn,
 sub-agent no-dispatch guard, zero-usage/peak-retention rules).
 
+**Addendum (2026-10-06, ctx undercounted after cache-heavy turns):**
+`contextUsageFromResult` picked the turn's peak step by comparing raw
+`InputTokens` only, while every other consumer of "how full is the context"
+(`ContextUsageFromFantasy`, `shouldCompactByUsage`, `observeStepUsage`, and the
+function's own doc comment) sums input + cache reads + creations. Because
+Anthropic reports `input_tokens` additively with `cache_read` and OpenAI-family
+providers report `InputTokens = prompt - cached`, a cache-warm later step shows a
+*small* raw count and a cache-cold first step shows a large one — so the
+selector latched onto an early, smaller-total step. The turn-end value could then
+land **below** the live mid-turn peak `observeStepUsage` had already painted,
+making ctx tick *down* when a turn completed. The selector now compares
+`promptTokenTotal` (the shared helper, also used by `observeStepUsage`), returning
+the winning step's raw usage so downstream still sums cache back in. The prior
+`contextusage_test.go` used uncached steps (where total == InputTokens), so the
+divergence was invisible. Coverage: the cache-heavy
+`TestContextUsageFromResultPrefersLargestPromptTotalOverRawInput` and the
+never-tick-down `TestContextUsageFromResultEqualsOrExceedsEveryStepTotal`.
+
 ## 49. Hard kill is Close; the root is uncloseable (2026-10-06)
 
 `pool.Close(id)` is the hard kill the /agents tree's `x` key (and the
@@ -1218,3 +1236,46 @@ compaction path trusts keeps the two from drifting.
 **Consequence:** `SeedMainAgentBaseline` is main-agent-only for the dispatch (sub-agents
 record the baseline on themselves but never drive the indicator), matching every other
 context-usage dispatch. Coverage: seedbaseline_test.go.
+
+## 52. Compaction re-bases the carried usage baseline (2026-10-06)
+
+**Decision:** A successful compaction re-points `lastUsage` at the post-compaction context
+size. `Agent.rebaseUsageAfterCompaction(estimated)` is called from `observeCompaction` — the
+single choke point for proactive, usage-threshold, reactive, tool-loop, and manual
+compactions — and writes `lastUsage = {InputTokens: estimated}` (when `estimated > 0`) plus
+`usageIsEstimate = true`. The post-compaction estimate is carried on `CompactionResult.EstimatedTokens`.
+
+**Rationale:** `lastUsage` is a peak carried across turns (`observeStepUsage` only advances it
+when a step's prompt total is larger). Before this change nothing reset it when compaction
+shrank the context: every post-compaction step was smaller, the peak rule refused to move
+the value down, and the indicator — and the usage-threshold trigger that reads the same
+field — stayed pinned to the pre-compaction peak. The per-step display (dispatched from
+`step`) could also disagree with `/context` and the harness live status (read from
+`LastUsage`). Worst case was a failed or cancelled post-compaction turn: turn end retains
+`LastUsage()` on error/cancel, so ctx read large even though history had just been compacted.
+
+**Consequence:** `usageIsEstimate = true` makes the first real post-compaction provider step
+replace the baseline outright (the same rule the §50 seed uses), so the overestimating
+chars/4 baseline cannot pin the display. `observeCompaction` was already required to be
+turn-goroutine-only; `CompactNow` also calls it, and `CompactMainAgent` refuses while the
+main agent `IsRunning()`, preserving the one-writer invariant. `dispatchCompactionNotice`
+now reads `result.EstimatedTokens` instead of taking a separate estimate argument. Coverage:
+compactnow_test.go.
+
+## 53. /compact folds history on demand (2026-10-06)
+
+**Decision:** Add `Agent.CompactNow(ctx)` and the pool wrapper `AgentPool.CompactMainAgent(ctx)`,
+exposed as the built-in `/compact` command. It runs the same machinery as the automatic
+paths — `compactHistory`, `observeCompaction` (record, count, re-base), and
+`dispatchCompactionNotice` (announce) — with `CompactionTriggerManual`.
+
+**Rationale:** The automatic trigger fires at the turn boundary, so an operator watching ctx
+cross 80% while idle had no way to act on it without submitting a prompt. `/compact` gives a
+direct lever and reuses the compaction path so the counter, the canonical-transcript record,
+the log line, and the usage re-base all behave identically.
+
+**Consequence:** Compaction rewrites `a.history`, which a running turn holds, so
+`CompactMainAgent` refuses mid-turn with "cannot compact while a turn is running" rather than
+racing the turn goroutine. A no-op run (history fits, or no summarizable span) reports
+"nothing to compact" and counts nothing. The command runs off the update goroutine because
+summarization is a provider call. Coverage: compactnow_test.go and commands_test.go.

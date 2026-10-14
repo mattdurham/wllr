@@ -113,6 +113,17 @@ mismatched endpoint overrides.
 | `TestObserveCompaction_NoOp_DoesNotCount` | No-op compactions increment nothing | agent + no-op `compactHistory` (fits budget) | counter stays 0 |
 | `TestExecuteTurn_CompactionCounterIncrementsAndDispatches` | Full-turn observability wiring | main agent, 200k window, seeded over-budget history + usage above 0.80 threshold | turn completes, counter = 1, post-compaction notice dispatched (trigger `usage_threshold`, messages > 0, estimate > 0) + end-of-turn dispatch with nil notice; no fake `[Compacting context…]` token; canonical transcript holds the compaction record |
 
+### compactnow_test.go
+
+| Test | Scenario | Setup | Assertions |
+|------|----------|-------|------------|
+| `TestObserveCompaction_RebasesUsageBaseline` | Compaction re-points the carried baseline | `lastUsage` = 180k, successful compaction with `EstimatedTokens` = 12k | `LastUsage` = 12k; `usageIsEstimate` true |
+| `TestObserveCompaction_NoOp_DoesNotRebase` | No-op compaction leaves usage alone | empty-summary result with an estimate | `LastUsage` unchanged |
+| `TestRebaseUsageAfterCompaction_NextSmallerStepReplaces` | The re-base latch lets a smaller real step win | rebase to an overestimating 50k, then a 20k step | `LastUsage` = 20k (replace outright, not peak) |
+| `TestCompactNow_FoldsHistoryAndRebases` | Manual `/compact` folds, counts, re-bases | spawned main agent, 212-message history, peak 190k | summary non-empty, trigger `manual`, counter = 1, history shrinks, `LastUsage` in (0, 190k) |
+| `TestCompactNow_NoOpWhenHistoryFits` | Manual compaction of a short history | 2-message history | empty summary, counter = 0 |
+| `TestCompactMainAgent_RefusesWhileRunning` | Refuse to compact a mid-turn agent | `isRunning` set, then cleared | running → refusal message, counter 0; idle → success, counter 1 |
+
 ### activity_test.go
 
 | Test | Scenario | Setup | Assertions |
@@ -136,6 +147,8 @@ mismatched endpoint overrides.
 | `TestObserveStepUsage_Guard` | zero-usage steps ignored; stored peak never shrinks | unit: zero usage, big step, smaller step | zero ignored, big stored, small retained |
 | `TestSeedUsage_BaselineVisibleBeforeFirstStep` | fresh-session ctx shows the outgoing-request size, not 0 | blockingLM: seed checked inside Stream before any step reports; second turn checks no re-seed | seed = `(len(sys)+len(prompt))/4` mid-call with a window-carrying dispatch; turn 2 mid-call shows turn 1's real usage |
 | `TestSeedUsage_ReplacementNotPeak` | first real report replaces the seed outright; seeding disabled afterward | unit: seed 50k, step 30k, step 40k, re-seed | 30k replaces, 40k peaks, re-seed ignored |
+| `TestContextUsageFromResultPrefersLargestPromptTotalOverRawInput` | cache-warm step (tiny raw input, large cache read) wins over a cache-cold first step | unit: step1 raw 1000 + cacheCreate 15000, step2 raw 200 + cacheRead 19000 + cacheCreate 100 | selected step has InputTokens 200 and CacheReadTokens 19000 |
+| `TestContextUsageFromResultEqualsOrExceedsEveryStepTotal` | turn-end value never falls below the live mid-turn peak (no ctx tick-down) | unit: three steps with mixed cache usage | selected prompt total ≥ every step's prompt total |
 
 ## Stream tokens-per-second (streamstats_test.go)
 

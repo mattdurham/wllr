@@ -1261,3 +1261,22 @@ inside the transcript are claimed as selections while clicks on the queue button
 (below the transcript) still fall through. `MouseModeCellMotion` already
 delivers drag motion, so the mouse mode needed no change. Coverage:
 selection_test.go.
+
+## 31. /compact — on-demand context compaction (2026-10-06)
+
+*Added: 2026-10-06*
+
+**Decision:** Add the built-in `/compact` command. It emits `compactMsg{}`; `updateActions`
+sets a "compacting…" status, then runs `agentPool.CompactMainAgent(ctx)` in a `tea.Cmd`
+(off the update goroutine) and surfaces the result string as a `NotifyMsg`.
+
+**Rationale:** Automatic compaction fires at the turn boundary, so an operator watching the
+ctx indicator cross ~80% while idle had no way to act without submitting a prompt. The
+command delegates to the pool, which delegates to `Agent.CompactNow`, so the counter, the
+canonical-transcript record, the log line, and (crucially) the usage re-base are identical to
+the automatic paths — the ctx indicator drops as soon as compaction completes.
+
+**Consequence:** Compaction is a provider call (summarization), hence the async `tea.Cmd`.
+The pool refuses when the main agent is mid-turn, returning a message instead of racing the
+turn goroutine. The command is `Instant: true` (it bypasses the "queuing…" indicator, matching
+every other built-in). Coverage: commands_test.go (`TestBuiltinCompact_ReturnsCompactMsg`).

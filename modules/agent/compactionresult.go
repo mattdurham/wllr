@@ -33,4 +33,11 @@ type CompactionResult struct {
 	// Latency is the wall-clock duration of the summarization call (zero on
 	// no-op or failure).
 	Latency time.Duration
+	// EstimatedTokens is the chars/4 estimate of the post-compaction context
+	// (system prompt + tool definitions + the compacted history), used to
+	// re-base the agent's carried usage baseline so the ctx indicator and the
+	// usage-threshold trigger reflect the shrunken context instead of the
+	// pre-compaction peak. Zero means unknown; callers that know the full
+	// request surface (executeTurn) fill it before observeCompaction.
+	EstimatedTokens int64
 }

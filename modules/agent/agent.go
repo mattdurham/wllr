@@ -490,6 +490,14 @@ func (a *Agent) observeCompaction(result CompactionResult) {
 		return
 	}
 	a.compactionCount++
+	// Re-base the carried usage baseline to the post-compaction size. lastUsage
+	// is a peak carried across turns (see observeStepUsage), so without this the
+	// indicator would stay pinned to the pre-compaction peak: every
+	// post-compaction step is smaller, the peak rule refuses to move the value
+	// down, and the usage-threshold trigger would keep firing against a context
+	// that no longer exists. Marking it an estimate lets the first real
+	// post-compaction step replace it outright.
+	a.rebaseUsageAfterCompaction(result.EstimatedTokens)
 	// Record the compaction in the canonical transcript so the event (and the
 	// fact that older detail was folded into a summary) is retrievable through
 	// recall, matching how every other turn event is recorded there.
@@ -513,25 +521,23 @@ func (a *Agent) observeCompaction(result CompactionResult) {
 
 // dispatchCompactionNotice forwards a just-completed compaction to the pool's
 // context-usage dispatcher (main agent only) so the UI can surface a compaction
-// message while the turn is still running. estimated is the chars/4 estimate of
-// the post-compaction context; zero means unknown (tool-loop compactions, whose
-// compacted steps live inside the fantasy loop), in which case the last real
-// usage is forwarded so the display keeps its previous value. When neither an
-// estimate nor a previous usage exists (tool-loop compaction during the very
-// first turn), nothing is dispatched — the end-of-turn event will carry the
-// first real numbers anyway.
-// Called only from the agent's turn goroutine.
+// message while the turn is still running. result.EstimatedTokens is the
+// chars/4 estimate of the post-compaction context; zero means unknown, in which
+// case the last real usage is forwarded so the display keeps its previous value.
+// When neither an estimate nor a previous usage exists (compaction during the
+// very first turn), nothing is dispatched — the end-of-turn event will carry
+// the first real numbers anyway.
+// Called only from the agent's turn goroutine or CompactNow.
 func (a *Agent) dispatchCompactionNotice(
 	pool *AgentPool,
 	result CompactionResult,
-	estimated int64,
 	contextWindow int64,
 	fallback fantasy.Usage,
 ) {
 	if pool == nil || a.id != MainAgentID {
 		return
 	}
-	input := estimated
+	input := result.EstimatedTokens
 	if input <= 0 {
 		input = fallback.InputTokens
 		if input <= 0 {
@@ -543,7 +549,7 @@ func (a *Agent) dispatchCompactionNotice(
 		&CompactionNotice{
 			Trigger:              result.Trigger,
 			MessagesCompacted:    result.Messages,
-			EstimatedInputTokens: estimated,
+			EstimatedInputTokens: result.EstimatedTokens,
 		},
 		a.compactionCount,
 	)
@@ -562,6 +568,24 @@ func (a *Agent) LastUsage() fantasy.Usage {
 func (a *Agent) setLastUsage(u fantasy.Usage) {
 	a.lastUsageMu.Lock()
 	a.lastUsage = u
+	a.lastUsageMu.Unlock()
+}
+
+// rebaseUsageAfterCompaction re-points the carried usage baseline at the
+// post-compaction context size. Called from observeCompaction (the single
+// choke point for proactive, usage-threshold, reactive, tool-loop, and manual
+// compactions). When estimated > 0 it replaces lastUsage with that chars/4
+// estimate; otherwise it only arms the replace-outright rule, so the next real
+// provider step overrides the stale pre-compaction peak even though the
+// display keeps its previous value in the meantime. usageIsEstimate is set in
+// both cases: post-compaction usage is an estimate until the next provider
+// report, and the peak rule must not pin it to the pre-compaction value.
+func (a *Agent) rebaseUsageAfterCompaction(estimated int64) {
+	a.lastUsageMu.Lock()
+	if estimated > 0 {
+		a.lastUsage = fantasy.Usage{InputTokens: estimated}
+	}
+	a.usageIsEstimate = true
 	a.lastUsageMu.Unlock()
 }
 
@@ -664,6 +688,72 @@ func (a *Agent) resolvedWindow(pool *AgentPool) int64 {
 	return 0
 }
 
+// CompactNow folds the agent's current history into a summary on demand — the
+// /compact command path. It is the manual analog of executeTurn's proactive and
+// usage-threshold compaction and shares the same machinery: compactHistory
+// produces the summary, observeCompaction records the event and re-bases the
+// carried usage baseline, and dispatchCompactionNotice announces it so the ctx
+// indicator drops immediately. history is rewritten in place, so the caller
+// must not invoke it while a turn is active.
+//
+// A returned result with Summary == "" means nothing was foldable (history too
+// short, or no user-bounded span exceeded the keep-recent budget); that is not
+// an error.
+func (a *Agent) CompactNow(ctx context.Context) (CompactionResult, error) {
+	a.lmMu.RLock()
+	lm := a.lm
+	modelName := a.modelName
+	contextWindow := a.contextWindow
+	a.lmMu.RUnlock()
+	if lm == nil {
+		return CompactionResult{}, fmt.Errorf("agent %s: no language model configured", a.id)
+	}
+	if contextWindow <= 0 {
+		if contextWindow = contextWindowForModel(modelName); contextWindow <= 0 {
+			return CompactionResult{}, fmt.Errorf(
+				"agent %s: context window for model %q is unknown; configure it before compacting",
+				a.id, modelName,
+			)
+		}
+	}
+	keepRecent := contextWindow / 10
+	if keepRecent <= 0 {
+		keepRecent = defaultKeepRecentTokens
+	}
+	a.historyMu.Lock()
+	history := make([]sdk.Message, len(a.history))
+	copy(history, a.history)
+	a.historyMu.Unlock()
+	a.lastSummaryMu.RLock()
+	priorSummary := a.lastSummary
+	a.lastSummaryMu.RUnlock()
+	a.toolsFnMu.RLock()
+	toolsFn := a.toolsFn
+	a.toolsFnMu.RUnlock()
+	var tools []fantasy.AgentTool
+	if toolsFn != nil {
+		tools = toolsFn()
+	}
+
+	result, err := compactHistory(ctx, lm, history, priorSummary, keepRecent, CompactionTriggerManual)
+	if err != nil {
+		return CompactionResult{}, err
+	}
+	if result.Summary == "" {
+		return result, nil
+	}
+	result.EstimatedTokens = contextEstimate(result.History, a.SystemPrompt(), "", tools)
+	a.observeCompaction(result)
+	a.historyMu.Lock()
+	a.history = result.History
+	a.historyMu.Unlock()
+	a.lastSummaryMu.Lock()
+	a.lastSummary = result.Summary
+	a.lastSummaryMu.Unlock()
+	a.dispatchCompactionNotice(a.pool, result, contextWindow, a.LastUsage())
+	return result, nil
+}
+
 // observeStepUsage records one provider step's usage mid-turn, from
 // streamTurn's OnStepFinish callback (turn goroutine — the same thread that
 // already calls setLastUsage at turn end and pool.addTokens per delta).
@@ -690,7 +780,7 @@ func (a *Agent) resolvedWindow(pool *AgentPool) int64 {
 // The dispatch is safe from the turn goroutine: the harness-side dispatcher
 // detaches onto its own goroutine before touching any extension.
 func (a *Agent) observeStepUsage(step fantasy.Usage, pool *AgentPool, contextWindow int64) {
-	input := step.InputTokens + step.CacheReadTokens + step.CacheCreationTokens
+	input := promptTokenTotal(step)
 	if input <= 0 {
 		return
 	}
@@ -702,7 +792,7 @@ func (a *Agent) observeStepUsage(step fantasy.Usage, pool *AgentPool, contextWin
 		// display to the overestimate until real usage grew past it.
 		a.lastUsage = step
 		a.usageIsEstimate = false
-	} else if input > prev.InputTokens+prev.CacheReadTokens+prev.CacheCreationTokens {
+	} else if input > promptTokenTotal(prev) {
 		a.lastUsage = step
 	}
 	a.usageReported = true
@@ -1191,6 +1281,7 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 			a.finishTurn(ctx, compactionErr, nil, onDone, inboxMsgs)
 			return
 		}
+		result.EstimatedTokens = contextEstimate(result.History, sysPrompt, content, tools)
 		a.observeCompaction(result)
 		history = result.History
 		a.historyMu.Lock()
@@ -1204,9 +1295,7 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 			// a compaction message and an estimated post-compaction usage while
 			// the turn is still running, instead of the stale pre-compaction
 			// number until stream end.
-			a.dispatchCompactionNotice(pool, result,
-				contextEstimate(history, sysPrompt, content, tools),
-				contextWindow, a.LastUsage())
+			a.dispatchCompactionNotice(pool, result, contextWindow, a.LastUsage())
 		}
 	}
 
@@ -1254,11 +1343,15 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 	}
 
 	onToolLoopCompaction := func(result CompactionResult) {
-		a.observeCompaction(result)
 		// The compacted steps live inside the fantasy loop (not sdk history), so
-		// there is no post-compaction estimate here; the notice still announces
-		// the compaction mid-turn and keeps the last real usage on the display.
-		a.dispatchCompactionNotice(pool, result, 0, contextWindow, a.LastUsage())
+		// there is no sdk history to size. Estimate the post-compaction context
+		// from the summary the loop kept plus the static prompt and tool
+		// definitions that stay on the wire, so the display and the baseline
+		// reflect the shrink instead of the pre-compaction peak.
+		result.EstimatedTokens = estimateStr(sysPrompt) + estimateToolTokens(tools) +
+			estimateStr("[Compacted conversation and tool results]\n"+result.Summary)
+		a.observeCompaction(result)
+		a.dispatchCompactionNotice(pool, result, contextWindow, a.LastUsage())
 	}
 	// One injector per turn (shared by the reactive retry below) delivers /steer
 	// messages at step boundaries; executeTurn records what it delivered.
@@ -1331,6 +1424,7 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 			a.finishTurn(ctx, reactiveErr, nil, onDone, inboxMsgs)
 			return
 		}
+		result.EstimatedTokens = contextEstimate(result.History, sysPrompt, content, tools)
 		a.observeCompaction(result)
 		history = result.History
 		a.historyMu.Lock()
@@ -1340,9 +1434,7 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 			a.lastSummaryMu.Lock()
 			a.lastSummary = result.Summary
 			a.lastSummaryMu.Unlock()
-			a.dispatchCompactionNotice(pool, result,
-				contextEstimate(history, sysPrompt, content, tools),
-				contextWindow, a.LastUsage())
+			a.dispatchCompactionNotice(pool, result, contextWindow, a.LastUsage())
 		}
 		streamMsgs, streamPrompt, blocked, blockReason = buildStream(history, content)
 		if blocked {
@@ -1714,9 +1806,23 @@ func allControlMessages(msgs []sdk.Message) bool {
 	return true
 }
 
-// contextUsageFromResult returns the largest provider-reported input usage from
-// a tool-loop result. AgentResult.TotalUsage is cumulative across all steps and
-// therefore measures billing/activity, not the size of the current context.
+// promptTokenTotal returns the total prompt size reported for one step: raw
+// input plus cache reads and cache creations. This is the quantity that
+// measures "how full is the context"; a bare InputTokens count omits cached
+// tokens (Anthropic reports input_tokens additively with cache_read, and
+// OpenAI-family providers report InputTokens = prompt - cached), so comparing
+// raw InputTokens across steps undercounts a cache-warm step.
+func promptTokenTotal(u fantasy.Usage) int64 {
+	return u.InputTokens + u.CacheReadTokens + u.CacheCreationTokens
+}
+
+// contextUsageFromResult returns the provider-reported usage of the step with
+// the largest total prompt size from a tool-loop result. AgentResult.TotalUsage
+// is cumulative across all steps and therefore measures billing/activity, not
+// the size of the current context. Steps are compared by promptTokenTotal so a
+// cache-warm final step is not mistaken for a smaller one than a cache-cold
+// first step; the winner's raw usage is returned and downstream sums cache
+// back in.
 func contextUsageFromResult(res *fantasy.AgentResult) fantasy.Usage {
 	if res == nil {
 		return fantasy.Usage{}
@@ -1724,7 +1830,7 @@ func contextUsageFromResult(res *fantasy.AgentResult) fantasy.Usage {
 	usage := fantasy.Usage{}
 	found := false
 	for _, step := range res.Steps {
-		if step.Usage.InputTokens > usage.InputTokens {
+		if promptTokenTotal(step.Usage) > promptTokenTotal(usage) {
 			usage = step.Usage
 			found = true
 		}

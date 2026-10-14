@@ -68,10 +68,23 @@ func TestBuiltinHelp(t *testing.T) {
 	for _, c := range cmds {
 		names[c.Name] = true
 	}
-	for _, expected := range []string{"help", "clear", "reload", "model", "models", "history", "context"} {
+	for _, expected := range []string{"help", "clear", "reload", "model", "models", "history", "context", "compact"} {
 		if !names[expected] {
 			t.Errorf("expected builtin command %q to be registered", expected)
 		}
+	}
+}
+
+func TestBuiltinCompact_ReturnsCompactMsg(t *testing.T) {
+	r := NewRegistry()
+	registerBuiltins(r)
+
+	cmd := r.Dispatch("compact", nil)
+	if cmd == nil {
+		t.Fatal("expected non-nil command")
+	}
+	if _, ok := cmd().(compactMsg); !ok {
+		t.Fatalf("expected compactMsg, got %T", cmd())
 	}
 }
 

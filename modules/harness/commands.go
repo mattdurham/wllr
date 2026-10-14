@@ -204,6 +204,15 @@ func registerBuiltins(r *Registry) {
 		},
 	})
 
+	r.Register(Command{
+		Name:    "compact",
+		Desc:    "Compact the main agent's context now (folds older messages into a summary)",
+		Instant: true,
+		Handler: func(_ []string) tea.Cmd {
+			return func() tea.Msg { return compactMsg{} }
+		},
+	})
+
 	// The history extension owns the implementation, but reserving its command
 	// here keeps /history usable if a generated WASM artifact is stale or absent.
 	r.Register(Command{

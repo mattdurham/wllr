@@ -31,6 +31,9 @@ const (
 	// CompactionTriggerToolLoop is set when a long tool loop is summarized
 	// before its next provider request.
 	CompactionTriggerToolLoop = "tool_loop"
+	// CompactionTriggerManual is set when the user runs /compact to fold the
+	// current history on demand.
+	CompactionTriggerManual = "manual"
 )
 
 // builtInContextWindows covers model families whose limits are known without

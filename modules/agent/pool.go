@@ -350,6 +350,35 @@ func (p *AgentPool) SeedMainAgentBaseline(resetReported bool) {
 	a.SeedContextBaseline(p, resetReported)
 }
 
+// CompactMainAgent folds the main agent's history into a summary on demand
+// (/compact). It refuses while the main agent is mid-turn: compaction rewrites
+// history a running turn is holding, so the caller must wait or cancel first.
+// Returns the CompactionResult (Summary == "" means nothing was foldable) and
+// a status message suitable for display.
+func (p *AgentPool) CompactMainAgent(ctx context.Context) (CompactionResult, string, error) {
+	p.mu.RLock()
+	a := p.agents[MainAgentID]
+	p.mu.RUnlock()
+	if a == nil {
+		return CompactionResult{}, "", fmt.Errorf("no main agent")
+	}
+	if a.IsRunning() {
+		return CompactionResult{}, "cannot compact while a turn is running", nil
+	}
+	result, err := a.CompactNow(ctx)
+	if err != nil {
+		return CompactionResult{}, "", err
+	}
+	if result.Summary == "" {
+		return result, "nothing to compact (history already fits)", nil
+	}
+	msg := fmt.Sprintf(
+		"compacted %d messages into the running summary",
+		result.Messages,
+	)
+	return result, msg, nil
+}
+
 // MainAgentTps returns the main agent's current generation speed in output
 // tokens per second: the live rate while a turn streams, the frozen
 // end-of-turn rate afterwards (kept visible while idle, matching the ctx

@@ -450,6 +450,16 @@ mix queryable from logs without a metrics endpoint.
 only when `result.Summary != ""`. No-op compactions and failures increment nothing; failures
 are surfaced through the existing `slog.Error` path.
 
+**Invariant (usage re-base):** `observeCompaction` re-points the carried `lastUsage` at the
+post-compaction context size via `rebaseUsageAfterCompaction(result.EstimatedTokens)`: when
+`EstimatedTokens > 0` it stores `lastUsage = {InputTokens: estimated}`, and in every case it
+sets `usageIsEstimate = true`. `lastUsage` is a peak carried across turns, so without this it
+would stay pinned to the pre-compaction peak (post-compaction steps are smaller, so the peak
+rule never moves it down), and both the ctx indicator and the usage-threshold trigger — which
+read the same field — would keep sizing against a context that no longer exists. The estimate
+latch makes the first real post-compaction step replace the baseline outright, so the
+overestimating chars/4 baseline cannot pin the display.
+
 **Invariant:** `compactionCount` is only written from the agent's turn goroutine (one turn
 at a time), so it needs no lock; `CompactionCount()` is the read accessor.
 
@@ -481,6 +491,25 @@ type CompactConfig struct {
 
 **Invariant:** `WLLR_COMPACT_THRESHOLD` is read once at `NewPool()` time. Changing the env var
 after pool creation has no effect.
+
+### On-Demand Compaction (/compact)
+
+`Agent.CompactNow(ctx) (CompactionResult, error)` folds the agent's current history into a
+summary on demand, using the same machinery as the automatic paths: `compactHistory`
+produces the summary, `observeCompaction` records/counts it and re-bases the usage baseline,
+and `dispatchCompactionNotice` announces it, all with trigger `CompactionTriggerManual`
+("manual"). `AgentPool.CompactMainAgent(ctx) (CompactionResult, string, error)` is the
+main-agent-scoped wrapper behind the built-in `/compact` command; the returned string is a
+display message.
+
+**Invariant:** `CompactMainAgent` refuses while the main agent `IsRunning()` and returns
+`"cannot compact while a turn is running"` without touching history — compaction rewrites
+`a.history`, which a running turn holds, and `observeCompaction` is otherwise turn-goroutine
+only.
+
+**Invariant:** a no-op result (`Summary == ""` — history fits, or no user-bounded span
+exceeded the keep-recent budget) reports `"nothing to compact (history already fits)"`,
+leaves history and the counter untouched, and is not an error.
 
 ### lastUsage — Real API Token Tracking
 
@@ -577,12 +606,14 @@ There are two dispatch kinds:
 - **End-of-turn** (`notice == nil`): after a successful main-agent turn, carrying the
   provider-reported usage for that turn. Sub-agent turns never dispatch.
 - **Post-compaction** (`notice != nil`): immediately after a successful main-agent
-  compaction (proactive, usage-threshold, reactive, or tool-loop trigger), while the
-  turn is still running. The notice carries the `CompactionTrigger*` kind, the number
+  compaction (proactive, usage-threshold, reactive, tool-loop, or manual trigger), while
+  the turn is still running. The notice carries the `CompactionTrigger*` kind, the number
   of messages folded into the summary, and — when computable — a chars/4 estimate of
-  the post-compaction context (zero when unknown, e.g. tool-loop compactions whose
-  compacted steps live inside the fantasy loop; the dispatch then carries the last
-  real usage so the display does not collapse to zero).
+  the post-compaction context. Proactive and reactive compactions size it from the
+  post-compaction sdk history (`contextEstimate`); tool-loop compactions size it from
+  the summary the loop kept plus the system prompt and tool definitions still on the
+  wire. When it is zero (unknown), the dispatch carries the last real usage so the
+  display does not collapse to zero.
 
 `compactions` is the dispatching agent's cumulative successful-compaction count
 (`a.compactionCount`) — additive observability data for the `EventContextUsage` payload.
@@ -1045,8 +1076,9 @@ a twentieth of the window, capped at `DefaultRecallTokenBudget` and floored at
 ## 17. Context Breakdown (/context)
 
 `Agent.ContextBreakdown()` returns a `ContextBreakdown`: the usage of the most
-recently completed turn (`LastRequest`, the largest per-step input from
-`contextUsageFromResult`) plus estimated buckets for the NEXT request — system
+recently completed turn (`LastRequest`, the provider-reported usage of the step
+with the largest prompt total from `contextUsageFromResult`) plus estimated
+buckets for the NEXT request — system
 prompt, tool definitions, and history, all via the chars/4 estimators shared with
 compaction. Before the first provider report, `LastRequest` carries the turn-start
 baseline seed and `LastRequestIsEstimate` is true, so the renderer can label it

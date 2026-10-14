@@ -58,7 +58,8 @@ log, and reset behavior are covered by `wasmchat_test.go`, `tui_test.go`, and
 | `TestRegistry_Dispatch_KnownCommand` | Dispatch calls handler | Handler sets `called = true` | `called == true` |
 | `TestRegistry_Dispatch_UnknownCommand` | Dispatch unknown name yields NotifyMsg | Empty registry | `cmd != nil`; msg is `NotifyMsg` with non-empty text |
 | `TestBuiltinHistory_DispatchesExtensionEvent` | Host-reserved `/history` reaches the history extension | Built-in command registry | `dispatchOnCommandMsg.Name == "history"` |
-| `TestBuiltinHelp` | Builtins are registered | `registerBuiltins(r)` | help, clear, reload, model, models all present |
+| `TestBuiltinHelp` | Builtins are registered | `registerBuiltins(r)` | help, clear, reload, model, models, context, compact all present |
+| `TestBuiltinCompact_ReturnsCompactMsg` | /compact emits `compactMsg` | `registerBuiltins(r)` | msg is `compactMsg{}` |
 | `TestBuiltinClear_EmitsMsg` | /clear emits `clearMsg` | `registerBuiltins(r)` | msg is `clearMsg{}` |
 | `TestBuiltinReload_EmitsMsg` | /reload emits `ReloadMsg` | `registerBuiltins(r)` | msg is `ReloadMsg{}` |
 | `TestBuiltinModel_EmitsMsg` | /model sets model name | args `["claude-haiku-3-5"]` | msg is `setModelMsg{Model: "claude-haiku-3-5"}` |

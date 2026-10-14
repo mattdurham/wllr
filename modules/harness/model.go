@@ -1867,6 +1867,26 @@ func (m Model) updateActions(msg tea.Msg) (Model, tea.Cmd, bool) {
 		m.modalScroll = 0
 		return m, nil, true
 
+	case compactMsg:
+		if m.agentPool == nil {
+			return m, func() tea.Msg { return NotifyMsg{Text: "No agent pool available."} }, true
+		}
+		// Compaction summarizes via the provider, so run it off the update
+		// goroutine. The agent re-bases and dispatches its own context usage, so
+		// the ctx indicator drops as soon as it completes.
+		pool := m.agentPool
+		m.live.setStatus("stream", "compacting\u2026")
+		return m, func() tea.Msg {
+			_, msg, err := pool.CompactMainAgent(context.Background())
+			if err != nil {
+				return NotifyMsg{Text: "compact: " + err.Error()}
+			}
+			if msg == "" {
+				msg = "context compacted"
+			}
+			return NotifyMsg{Text: msg}
+		}, true
+
 	case SubmitMsg:
 		m.closeSuggestions()
 		n, cmd := m.submitToAgent(msg.Content, msg.Display)
