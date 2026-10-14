@@ -394,7 +394,10 @@ func projectRoot() string {
 	return "."
 }
 
-// resolveScopePath confines the listing root to the project directory.
+// resolveScopePath resolves the listing root. Relative paths inside the
+// project root stay in their clean relative form (rg output reads as
+// project-relative). Absolute paths anywhere on the host, and relative paths
+// that escape the root via '..', are resolved to absolute paths and allowed.
 func resolveScopePath(p string) (string, error) {
 	root := projectRoot()
 	if p == "" {
@@ -402,18 +405,23 @@ func resolveScopePath(p string) (string, error) {
 	}
 	if filepath.IsAbs(p) {
 		clean := filepath.Clean(p)
-		rootAbs, rerr := filepath.Abs(root)
-		if rerr == nil && (clean == rootAbs || strings.HasPrefix(clean, rootAbs+string(os.PathSeparator))) {
-			if _, err := os.Stat(clean); err != nil {
-				return "", fmt.Errorf("path_not_found: %s", p)
-			}
-			return clean, nil
+		if _, err := os.Stat(clean); err != nil {
+			return "", fmt.Errorf("path_not_found: %s", p)
 		}
-		return "", fmt.Errorf("path_out_of_scope: %s is outside the project root %s", p, root)
+		return clean, nil
 	}
 	clean := filepath.Clean(p)
 	if clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) {
-		return "", fmt.Errorf("path_out_of_scope: %s escapes the project root", p)
+		// Escapes the project root: resolve to an absolute path.
+		rootAbs, err := filepath.Abs(root)
+		if err != nil {
+			return "", fmt.Errorf("internal: cannot resolve root: %v", err)
+		}
+		abs := filepath.Join(rootAbs, clean)
+		if _, err := os.Stat(abs); err != nil {
+			return "", fmt.Errorf("path_not_found: %s", p)
+		}
+		return abs, nil
 	}
 	abs := filepath.Join(root, clean)
 	if _, err := os.Stat(abs); err != nil {

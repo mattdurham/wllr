@@ -30,7 +30,7 @@ path is relative to the project root; '..' and paths outside the project are rej
 		json.RawMessage(`{
 			"type": "object",
 			"properties": {
-				"path":      {"type": "string", "description": "Directory relative to the project root (default \".\")"},
+				"path":      {"type": "string", "description": "Directory: relative to the project root (default \".\"), or absolute anywhere; '..' escapes resolve to absolute paths"},
 				"glob":      {"type": "string", "description": "ripgrep glob filter, e.g. \"*.go\" or \"!*_test.go\""},
 				"type":      {"type": "string", "enum": ["files", "dirs", "both"], "description": "Entries to return; directories carry a trailing \"/\"", "default": "files"},
 				"max_depth": {"type": "integer", "description": "Maximum directory recursion depth, 0 = unlimited, max 100", "default": 0},

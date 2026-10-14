@@ -35,8 +35,10 @@ Key properties:
   cache (`cached: true`) instead of re-walking.
 - **Staleness detection** — if HEAD moved since the entry set was built,
   responses carry `stale: true` so the caller knows to re-run.
-- **Scope guard** — `path` must stay inside the launch directory;
-  out-of-scope paths return `path_out_of_scope` errors.
+- **Out-of-root listing** — `path` may be an absolute path anywhere on the
+  host, or a relative path that escapes the launch directory via `..` (both
+  resolve to absolute paths). In-root relative listings keep returning
+  project-relative entries. Nonexistent paths still return `path_not_found`.
 
 ## Layout
 

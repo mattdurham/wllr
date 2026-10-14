@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -258,14 +259,50 @@ func TestMaxDepthGuard(t *testing.T) {
 	}
 }
 
-func TestScopeGuard(t *testing.T) {
-	setup(&fakeExecT{})
-	for _, p := range []string{"..", "../x", "/etc/passwd"} {
-		out, isErr := runListFiles(json.RawMessage(fmt.Sprintf(`{"path":%q}`, p)))
-		if !isErr || !strings.Contains(out, "path_out_of_scope") {
-			t.Fatalf("path %q should be rejected: %s", p, out)
+func TestOutOfRootPathsAllowed(t *testing.T) {
+	f := &fakeExecT{out: "some.go\n"}
+	setup(f)
+
+	root := projectRoot()
+	parent := filepath.Dir(mustAbs(t, root))
+
+	// Relative escape via '..' resolves to the parent directory.
+	out, isErr := runListFiles(json.RawMessage(`{"path":".."}`))
+	if isErr {
+		t.Fatalf("path .. should be allowed: %s", out)
+	}
+	// The rg command must receive the resolved absolute parent path.
+	sawParent := false
+	for _, c := range f.cmds {
+		if strings.HasPrefix(c, "rg ") && strings.Contains(c, shellQuote(parent)) {
+			sawParent = true
 		}
 	}
+	if !sawParent {
+		t.Fatalf("rg command should target the resolved parent %q, cmds: %v", parent, f.cmds)
+	}
+
+	// Arbitrary absolute path outside the project root is allowed.
+	out, isErr = runListFiles(json.RawMessage(fmt.Sprintf(`{"path":%q}`, parent)))
+	if isErr {
+		t.Fatalf("absolute path %q should be allowed: %s", parent, out)
+	}
+
+	// Absolute path inside the project root still works.
+	rootAbs := mustAbs(t, root)
+	out, isErr = runListFiles(json.RawMessage(fmt.Sprintf(`{"path":%q}`, rootAbs)))
+	if isErr {
+		t.Fatalf("absolute root path should be allowed: %s", out)
+	}
+}
+
+func mustAbs(t *testing.T, p string) string {
+	t.Helper()
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		t.Fatalf("abs(%q): %v", p, err)
+	}
+	return abs
 }
 
 func TestPathNotFound(t *testing.T) {
