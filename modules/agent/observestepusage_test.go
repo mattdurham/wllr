@@ -203,3 +203,38 @@ func TestObserveStepUsage_Guard(t *testing.T) {
 		t.Fatalf("smaller step shrank the stored peak: %+v", a.LastUsage())
 	}
 }
+
+// TestObserveStepUsage_DispatchMatchesStored verifies the up-down-oscillation
+// fix: the per-step EventContextUsage dispatch carries the post-update stored
+// lastUsage — the same value the harness-side 100ms tick reads through
+// MainAgentContextUsage — never the raw step. A raw-step dispatch makes the ctx
+// display flip down on any smaller later step (provider cache-accounting
+// quirks, retries) and back up on the next tick; one value, one writer.
+func TestObserveStepUsage_DispatchMatchesStored(t *testing.T) {
+	pool := NewPool()
+	var mu sync.Mutex
+	var dispatched []sdk.ContextUsage
+	pool.SetContextUsageDispatcher(func(cu sdk.ContextUsage, _ *CompactionNotice, _ int) {
+		mu.Lock()
+		dispatched = append(dispatched, cu)
+		mu.Unlock()
+	})
+	a := &Agent{id: MainAgentID}
+	big := fantasy.Usage{InputTokens: 50_000}
+	small := fantasy.Usage{InputTokens: 10_000}
+
+	a.observeStepUsage(big, pool, 100_000)
+	a.observeStepUsage(small, pool, 100_000)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(dispatched) != 2 {
+		t.Fatalf("dispatches = %d, want 2", len(dispatched))
+	}
+	want := sdk.ContextUsageFromFantasy(big, 100_000)
+	for i, cu := range dispatched {
+		if cu.InputTokens != want.InputTokens || cu.ContextWindow != want.ContextWindow {
+			t.Fatalf("dispatch %d = %+v, want stored peak %+v — dispatch and tick must agree", i, cu, want)
+		}
+	}
+}

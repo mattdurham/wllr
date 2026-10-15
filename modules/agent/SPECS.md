@@ -544,7 +544,12 @@ called from `streamTurn`'s `OnStepFinish` after every provider step — includin
 inside the tool loop. It advances `lastUsage` when the step's input side (input + cache
 reads + creations) exceeds the stored peak (grow-within-turn, mirroring
 `contextUsageFromResult`), and for the main agent only, dispatches `EventContextUsage`
-per step so the statusline shows a live, advancing ctx during long turns. `OnStepFinish`
+per step so the statusline shows a live, advancing ctx during long turns. The
+dispatch carries the post-update stored `lastUsage` — the same value the
+harness-side 100ms tick reads through `MainAgentContextUsage()` — never the raw
+step, so a smaller later step (provider cache-accounting quirks, retries) cannot
+make the display oscillate down on the step dispatch and back up on the next tick
+(`one value, one writer`). `OnStepFinish`
 for step N fires after step N's tools complete and before step N+1's tools start — the
 moment between an orchestrator's sleep/poll loops. Sub-agent steps never dispatch (the
 main indicator is main-agent-only, matching the turn-end dispatch).

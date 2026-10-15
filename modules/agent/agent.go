@@ -779,6 +779,14 @@ func (a *Agent) CompactNow(ctx context.Context) (CompactionResult, error) {
 //     ctx hidden for an entire session). Sub-agent steps do not drive the
 //     main indicator, matching the turn-end dispatch.
 //
+//     The dispatched value is the post-update stored lastUsage — not the raw
+//     step — so the extension event agrees with the harness-side 100ms tick
+//     (refreshContextStatus → MainAgentContextUsage → LastUsage). A raw-step
+//     dispatch makes the display oscillate up and down whenever a later
+//     step reports a smaller input total than an earlier one (provider cache
+//     accounting quirks, retries): the event flips the display down, the
+//     next tick flips it back up to the stored peak. One value, one writer.
+//
 // The dispatch is safe from the turn goroutine: the harness-side dispatcher
 // detaches onto its own goroutine before touching any extension.
 func (a *Agent) observeStepUsage(step fantasy.Usage, pool *AgentPool, contextWindow int64) {
@@ -798,9 +806,10 @@ func (a *Agent) observeStepUsage(step fantasy.Usage, pool *AgentPool, contextWin
 		a.lastUsage = step
 	}
 	a.usageReported = true
+	stored := a.lastUsage
 	a.lastUsageMu.Unlock()
 	if pool != nil && a.id == MainAgentID {
-		pool.dispatchContextUsage(sdk.ContextUsageFromFantasy(step, contextWindow), nil, a.compactionCount)
+		pool.dispatchContextUsage(sdk.ContextUsageFromFantasy(stored, contextWindow), nil, a.compactionCount)
 	}
 }
 
