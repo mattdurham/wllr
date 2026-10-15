@@ -4,7 +4,7 @@
 
 The `tools` package adapts `sdk.Tool` values (the wllr-internal tool schema) into
 `fantasy.AgentTool` values (the LLM provider abstraction). It is a pure adapter —
-no I/O, no state beyond the watchdog duration.
+no I/O, no state beyond the watchdog duration and the circuit breaker.
 
 ## 2. Primary Types
 
@@ -25,6 +25,16 @@ Implements `fantasy.AgentTool`. Wraps an `sdk.Tool` schema and a `ToolExecutor`
    goroutine for the process lifetime; agent hard-kill ends it with the process.
 5. When the *parent* context is already done at breach, the response says
    `tool call cancelled` (turn ending), never `timed out`.
+6. **Circuit breaker**: watchdog timeouts are counted per (agent, tool, hash
+   of raw input). After `BreakerThreshold` (3) consecutive timeouts of the
+   identical call, the breaker opens: the next identical call fails fast
+   (no execution, no timeout wait) with a `circuit breaker is open` error
+   telling the model to narrow the request or use a different tool. A
+   successful execution of the tool (any arguments, same agent) clears all
+   breaker state for that tool. The breaker half-opens after `BreakerCooldown`
+   (5m): one attempt is allowed through, and a fresh timeout re-trips it.
+   Distinct arguments are distinct keys and are never blocked by another
+   call's open breaker.
 
 ### ToolExecutor
 

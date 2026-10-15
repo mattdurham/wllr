@@ -9,8 +9,11 @@ import (
 	"log/slog"
 	"reflect"
 	"time"
-
 	"charm.land/fantasy"
+	"crypto/sha256"
+	"encoding/hex"
+	"sync"
+
 	"github.com/mattdurham/wllr/modules/extension"
 	"github.com/mattdurham/wllr/modules/sdk"
 )
@@ -34,6 +37,19 @@ var toolCallTimeout = DefaultToolCallTimeout
 // ToolCallTimeout reports the active watchdog duration (test/config visibility).
 func ToolCallTimeout() time.Duration { return toolCallTimeout }
 
+// TestBackdateBreaker backdates the last recorded failure for the given
+// (agent, tool, input) so tests can exercise cooldown expiry without waiting.
+// Exported for tests only.
+func TestBackdateBreaker(agentID, toolName string, input json.RawMessage, lastFailure time.Time) {
+	key := breakerKey(agentID, toolName, input)
+	toolBreaker.mu.Lock()
+	defer toolBreaker.mu.Unlock()
+	if st, ok := toolBreaker.fails[key]; ok {
+		st.lastFailure = lastFailure
+		toolBreaker.fails[key] = st
+	}
+}
+
 // SetToolCallTimeout overrides the per-tool-call watchdog duration. Values
 // <= 0 restore the default. Safe to call before agents are spawned (startup
 // config load); not synchronized for concurrent adjustment at runtime.
@@ -43,6 +59,79 @@ func SetToolCallTimeout(d time.Duration) {
 		return
 	}
 	toolCallTimeout = d
+}
+
+// Circuit-breaker defaults. After BreakerThreshold consecutive watchdog
+// timeouts of the same (agent, tool, input) the breaker opens and the adapter
+// fails that call fast instead of executing it, breaking the model's
+// timeout-retry loops (the list_files stall pattern). The breaker half-opens
+// after BreakerCooldown, and any successful execution of the tool resets it.
+const (
+	BreakerThreshold = 3
+	BreakerCooldown  = 5 * time.Minute
+)
+
+// toolBreaker tracks consecutive watchdog timeouts per (agent, tool, input
+// hash). Package-level: one breaker is shared by all adapters in the process.
+var toolBreaker = &breaker{fails: map[string]breakerState{}}
+
+type breakerState struct {
+	consecutive int
+	lastFailure time.Time
+}
+
+type breaker struct {
+	mu    sync.Mutex
+	fails map[string]breakerState
+}
+
+// breakerKey identifies a call site: agent + tool + hash of the raw input.
+func breakerKey(agentID, toolName string, input json.RawMessage) string {
+	sum := sha256.Sum256(input)
+	return agentID + "\x00" + toolName + "\x00" + hex.EncodeToString(sum[:8])
+}
+
+// tripped reports whether the breaker is open for the given call and, if so,
+// when it can be retried. An open breaker half-opens (returns false) once the
+// cooldown has elapsed.
+func (b *breaker) tripped(key string, now time.Time) (bool, time.Time) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	st, ok := b.fails[key]
+	if !ok || st.consecutive < BreakerThreshold {
+		return false, time.Time{}
+	}
+	retryAt := st.lastFailure.Add(BreakerCooldown)
+	if now.After(retryAt) {
+		// Half-open: allow one attempt through; the next timeout re-trips it.
+		st.consecutive = BreakerThreshold - 1
+		b.fails[key] = st
+		return false, time.Time{}
+	}
+	return true, retryAt
+}
+
+// recordTimeout records a watchdog timeout for the call.
+func (b *breaker) recordTimeout(key string, now time.Time) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	st := b.fails[key]
+	st.consecutive++
+	st.lastFailure = now
+	b.fails[key] = st
+}
+
+// recordSuccess clears the breaker for the tool: any successful execution —
+// even with different arguments — proves the tool is healthy again.
+func (b *breaker) recordSuccess(agentID, toolName string) {
+	prefix := agentID + "\x00" + toolName + "\x00"
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for k := range b.fails {
+		if len(k) >= len(prefix) && k[:len(prefix)] == prefix {
+			delete(b.fails, k)
+		}
+	}
 }
 
 // sdkToolAdapter adapts an sdk.Tool to the fantasy.AgentTool interface.
@@ -144,12 +233,29 @@ func (a *sdkToolAdapter) Info() fantasy.ToolInfo {
 // Run implements fantasy.AgentTool. Execution is bounded by the tool-call
 // watchdog (toolCallTimeout): if the host does not answer in time — a hung
 // exec, a wedged WASM module — the model receives a timeout error and the
-// turn proceeds. The underlying ExecuteTool goroutine is abandoned on breach;
-// it cannot be forcibly interrupted from here, so a truly wedged host leaks
-// that goroutine for the process lifetime (bounded by agent hard-kill).
+// turn proceeds. Repeated watchdog timeouts of the same (agent, tool, input)
+// trip a circuit breaker (BreakerThreshold) that fails the call fast with
+// guidance to narrow the request, breaking timeout-retry loops. The breaker
+// resets on any successful execution of the tool and half-opens after
+// BreakerCooldown. The underlying ExecuteTool goroutine is abandoned on
+// breach; it cannot be forcibly interrupted from here, so a truly wedged
+// host leaks that goroutine for the process lifetime (bounded by agent
+// hard-kill).
 func (a *sdkToolAdapter) Run(ctx context.Context, call fantasy.ToolCall) (fantasy.ToolResponse, error) {
 	if a.host == nil {
 		return fantasy.NewTextErrorResponse("no extension host configured"), nil
+	}
+
+	key := breakerKey(a.agentID, call.Name, json.RawMessage(call.Input))
+	if open, retryAt := toolBreaker.tripped(key, time.Now()); open {
+		slog.Warn("tools: circuit breaker open, failing call fast",
+			"agent", a.agentID, "tool", call.Name, "call_id", call.ID,
+			"retry_at", retryAt)
+		return fantasy.NewTextErrorResponse(fmt.Sprintf(
+			"tool %q with these arguments has timed out %d times in a row and the circuit breaker is open "+
+				"until %s. Do not retry the same call unchanged — narrow the request (e.g. a smaller path or page size), "+
+				"use a different tool, or move on without this result.",
+			call.Name, BreakerThreshold, retryAt.Format(time.TimeOnly))), nil
 	}
 
 	type execResult struct {
@@ -176,6 +282,7 @@ func (a *sdkToolAdapter) Run(ctx context.Context, call fantasy.ToolCall) (fantas
 		slog.Warn("tools: tool call exceeded watchdog, abandoning",
 			"agent", a.agentID, "tool", call.Name, "call_id", call.ID,
 			"timeout", toolCallTimeout)
+		toolBreaker.recordTimeout(key, time.Now())
 		return fantasy.NewTextErrorResponse(fmt.Sprintf(
 			"tool %q timed out after %s and was abandoned; it may still be running in the background",
 			call.Name, toolCallTimeout)), nil
@@ -185,6 +292,8 @@ func (a *sdkToolAdapter) Run(ctx context.Context, call fantasy.ToolCall) (fantas
 	if r.err != nil {
 		return fantasy.NewTextErrorResponse(fmt.Sprintf("tool execution failed: %v", r.err)), nil
 	}
+
+	toolBreaker.recordSuccess(a.agentID, call.Name)
 
 	if r.result.IsError {
 		return fantasy.NewTextErrorResponse(r.result.Result), nil
