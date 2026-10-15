@@ -332,6 +332,34 @@ func TestCommandConstruction(t *testing.T) {
 	}
 }
 
+func TestCommandCarriesEntryEffortCap(t *testing.T) {
+	f := &fakeExecT{out: ""}
+	setup(f)
+	_, _ = runListFiles(json.RawMessage(`{"path":"."}`))
+	var cmd string
+	for _, c := range f.cmds {
+		if strings.HasPrefix(c, "rg ") {
+			cmd = c
+		}
+	}
+	if !strings.Contains(cmd, fmt.Sprintf("-v maxn=%d", maxWalkedEntries)) {
+		t.Fatalf("effort cap missing from awk pipeline:\n%s", cmd)
+	}
+}
+
+func TestEntryCapSentinelReportsTruncated(t *testing.T) {
+	// Simulate awk firing the entry cap: 3 real entries then the sentinel.
+	f := &fakeExecT{out: "a.go\nb.go\nc.go\n" + truncSentinel}
+	setup(f)
+	r := list(t, `{}`)
+	if r.Total != 3 || len(r.Files) != 3 {
+		t.Fatalf("want 3 entries, got total=%d files=%v", r.Total, r.Files)
+	}
+	if r.Complete || !r.Truncated {
+		t.Fatalf("entry cap must report truncated/complete=false, got %+v", r)
+	}
+}
+
 func TestEmptyListing(t *testing.T) {
 	f := &fakeExecT{out: ""}
 	setup(f)

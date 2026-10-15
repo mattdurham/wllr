@@ -22,6 +22,7 @@ const (
 	cacheTTL         = 5 * time.Minute
 	maxCacheBytes    = 50 << 20 // 50MB total across cached result sets
 	streamCapBytes   = 25 << 20 // 25MB awk cap on the rg --files stream
+	maxWalkedEntries = 10_000    // effort bound: entries awk passes before SIGPIPE stops rg
 	maxPageSize      = 1000
 	defaultPageSize  = 200
 	maxDepthLimit    = 100
@@ -214,10 +215,12 @@ func executeRgFiles(a listArgs, scopePath string, hidden bool) ([]string, bool, 
 	}
 	b.WriteString(" -- ")
 	b.WriteString(shellQuote(scopePath))
-	// Stream cap: awk closes the pipe (SIGPIPE to rg) after max bytes. When it
-	// cuts output it prints a sentinel so we can report complete=false.
-	fmt.Fprintf(&b, " 2>&1 | awk -v max=%d '{n+=length($0)+1; if(n>max){print \"%s\"; exit} print}'",
-		streamCapBytes, truncSentinel)
+	// Stream caps: awk counts entries and bytes; when either budget is
+	// exhausted it prints a sentinel and exits, SIGPIPE-ing rg so the walk
+	// itself stops — bounding effort, not just output. complete=false is
+	// reported so callers know the listing was cut short.
+	fmt.Fprintf(&b, ` 2>&1 | awk -v maxb=%d -v maxn=%d '{n+=length($0)+1; c++; if(n>maxb||c>maxn){print "%s"; exit} print}'`,
+		streamCapBytes, maxWalkedEntries, truncSentinel)
 
 	out, err := execFn(b.String(), projectRoot())
 	if err != nil {

@@ -20,13 +20,14 @@ func init() {
 
 Prefer this over find/ls via exec:
 - Output is bounded: default 200 entries (max 1000) with an explicit truncated/complete signal — no silent | head -N guesswork.
+- Effort is bounded too: the walk stops after 10,000 entries (or 25MB) and reports truncated:true — a huge tree returns in seconds, then narrow with glob/max_depth/path.
 - Respects .gitignore and skips hidden files by default (pass hidden:true to include them).
 - 'total' is the full entry count, so you know up-front how much exists.
 - More entries come from list_files_page(result_id, offset) — served from a 5-minute cache with ZERO re-walk. Never re-run the same listing with a deeper head/limit.
 - Identical listings within 5 minutes are served from cache (cached: true).
 - No-match returns an empty list, not a shell exit-code error.
 
-path is relative to the project root; '..' and paths outside the project are rejected. type selects files (default), dirs, or both — directories are returned with a trailing "/". glob filters with ripgrep glob syntax (e.g. "*.go", "!*_test.go"). max_depth limits recursion.`,
+path is relative to the project root; absolute paths anywhere on the host are allowed, and '..' escapes resolve to absolute paths. type selects files (default), dirs, or both — directories are returned with a trailing "/". glob filters with ripgrep glob syntax (e.g. "*.go", "!*_test.go"). max_depth limits recursion.`,
 		json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -47,7 +48,7 @@ path is relative to the project root; '..' and paths outside the project are rej
 				"total":        {"type": "integer", "description": "Full entry count"},
 				"returned":     {"type": "integer"},
 				"next_offset":  {"type": ["integer", "null"], "description": "Pass as offset to list_files_page; null when exhausted"},
-				"truncated":    {"type": "boolean", "description": "true when the 25MB stream cap cut the listing"},
+				"truncated":    {"type": "boolean", "description": "true when the 10k-entry or 25MB cap cut the listing"},
 				"complete":     {"type": "boolean", "description": "false when the listing was truncated"},
 				"cached":       {"type": "boolean"},
 				"stale":        {"type": "boolean", "description": "git HEAD changed since the listing ran"},

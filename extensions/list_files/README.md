@@ -22,10 +22,14 @@ Key properties:
 
 - **Bounded pages** — `page_size` defaults to 200 and is capped at 1000, so a
   single call can never dump a huge tree into context.
+- **Bounded effort** — the walk itself stops after 10,000 entries (or 25MB of
+  stream); awk exits and SIGPIPE stops `rg` mid-walk, so even a monster tree
+  returns in seconds with `truncated: true` instead of timing out. Narrow
+  with `glob`, `max_depth`, or a tighter `path` for full coverage.
 - **Gitignore-aware** — `rg --files` respects `.gitignore`; hidden files/dirs
   are skipped unless `hidden: true`.
 - **Explicit completeness** — responses carry `truncated`/`complete` so a
-  stream-capped listing is never mistaken for a full one.
+  cap-cut listing is never mistaken for a full one.
 - **Entry types** — `type` selects `files` (default), `dirs`, or `both`.
   Directories are returned with a trailing `/` so they are visually distinct.
 - **Glob + depth filters** — `glob` (ripgrep syntax, e.g. `*.go`) and
