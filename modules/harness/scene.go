@@ -397,6 +397,9 @@ func (s *SceneRenderer) Render(areaID string, width int) string {
 	if !ok || root == nil {
 		return ""
 	}
+	if areaID == statuslineAreaID && root.ID == "statusline-root" && root.Type == sdk.UINodeHStack {
+		return renderDefaultStatusLine(root, width)
+	}
 	return renderNode(*root, width)
 }
 

@@ -18,7 +18,7 @@ Spec-driven Go packages — each has SPECS.md / NOTES.md / TESTS.md.
 * [agents (built-in)](ext-agents.md) — Sub-agent orchestration, message passing, the WASM-driven chat transcript.
 * [history (built-in)](ext-history.md) — Records sessions to JSONL; `/history` browses and replays from a chosen point.
 * [logging (built-in)](ext-logging.md) — The log sink; appends `log`-event records to a per-run file.
-* [statusline (built-in)](ext-statusline.md) — Renders the status-line scene area from live harness state.
+* [statusline (built-in)](ext-statusline.md) — Model and live status fields with width-aware directory shortening and truncation.
 
 ## Installed Extensions (`~/.wllr/extensions/`)
 

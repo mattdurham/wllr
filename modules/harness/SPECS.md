@@ -878,6 +878,8 @@ Local model replacement flow: when the configured local model is not advertised 
 
 **Invariant:** `m.textInput.IsActive()` is checked before `m.picker.IsActive()` in both key routing (`updateKeyPress`) and rendering (`View`), so the two overlays are mutually exclusive and text input takes priority if both were somehow opened.
 
+An active text input also receives otherwise unhandled non-key messages, including terminal paste, clipboard command results, and cursor updates. These messages do not reach the chat composer. Other active overlays consume terminal paste without changing the hidden composer; without an overlay, paste continues to enter chat. Secret inputs retain password masking for pasted values.
+
 **Invariant:** `show_text_input` (`MethodShowTextInput`) requires no permission, matching `show_picker`.
 
 ### Local-Model Setup Flow
@@ -972,6 +974,8 @@ scene graph. The `statusline` scene area (`statuslineAreaID = "statusline"`, pla
 `session_start` fires. The bundled `statusline` WASM extension owns the content.
 
 ### Layout methods
+
+The bundled `statusline-root` hstack omits the provider label. Its render-time layout uses terminal cell widths and preserves the stored scene tree across resizing. On overflow it collapses the directory to its final component, then hides the directory, speed, compaction count, and agent label in that order. It truncates the model to preserve activity and context, and applies a final ANSI-safe ellipsis clamp. Separators appear only between visible fields. This fitting applies only to the bundled root; other scene trees retain their existing layout.
 
 | Method | Behavior |
 |--------|----------|

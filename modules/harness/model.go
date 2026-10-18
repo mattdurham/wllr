@@ -1060,6 +1060,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return n, cmd
 	}
 
+	// The text input overlay owns non-key input too, including terminal paste
+	// and the asynchronous clipboard result returned by textinput's paste Cmd.
+	if m.textInput.IsActive() {
+		var cmd tea.Cmd
+		m.textInput.input, cmd = m.textInput.input.Update(msg)
+		return m, cmd
+	}
+	// Pasting into a picker or informational modal must not populate the
+	// hidden chat composer (especially when the pasted text is a credential).
+	switch msg.(type) {
+	case tea.PasteMsg, tea.PasteStartMsg, tea.PasteEndMsg:
+		if m.overlayActive() {
+			return m, nil
+		}
+	}
+
 	// Forward to sub-models.
 	var cmds []tea.Cmd
 	var inputCmd tea.Cmd

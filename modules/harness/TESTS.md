@@ -2,6 +2,19 @@
 
 ## Existing Tests
 
+### statusline_layout_test.go
+
+| Test | Scenario | Assertions |
+|---|---|---|
+| `TestStatusLineFitsWidth` | Render bundled status tree at wide, narrow, Unicode, and zero widths | Provider hidden; output fits terminal cells; model/context survive practical widths; resize restores directory |
+
+### textinput_paste_test.go
+
+| Test | Scenario | Assertions |
+|---|---|---|
+| `TestTextInputPasteStaysInOverlay` | Paste into plain and secret text inputs through `Model.Update` | Overlay receives and can submit paste; chat draft stays unchanged; secret value stays masked |
+| `TestPasteRespectsOtherOverlays` | Paste with chat, picker, or informational modal active | Chat accepts paste only when no overlay is active |
+
 ### model_test.go
 
 | Test | Scenario | Setup | Assertions |

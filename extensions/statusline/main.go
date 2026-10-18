@@ -10,8 +10,6 @@
 // Default node tree:
 //
 //	statusline-root  (hstack)
-//	  sl-provider    (text, fg:muted)
-//	  sl-sep1        (text, "  ")
 //	  sl-cwd         (text, fg:muted)   — working directory; "~/"-collapsed against $HOME
 //	  sl-sep2        (text, "  ")
 //	  sl-model       (text)
@@ -38,26 +36,23 @@ import (
 // ─── node IDs ────────────────────────────────────────────────────────────────
 
 const (
-	areaID     = "statusline"
-	rootID     = "statusline-root"
-	providerID = "sl-provider"
-	sep1ID     = "sl-sep1"
-	cwdID      = "sl-cwd"
-	sep2ID     = "sl-sep2"
-	modelID    = "sl-model"
-	sep3ID     = "sl-sep3"
-	agentID    = "sl-agent"
-	sep4ID     = "sl-sep4"
-	workingID  = "sl-working"
-	tpsID      = "sl-tps"
-	ctxID      = "sl-ctx"
-	compactID  = "sl-compact"
+	areaID    = "statusline"
+	rootID    = "statusline-root"
+	cwdID     = "sl-cwd"
+	sep2ID    = "sl-sep2"
+	modelID   = "sl-model"
+	sep3ID    = "sl-sep3"
+	agentID   = "sl-agent"
+	sep4ID    = "sl-sep4"
+	workingID = "sl-working"
+	tpsID     = "sl-tps"
+	ctxID     = "sl-ctx"
+	compactID = "sl-compact"
 )
 
 // ─── display state ───────────────────────────────────────────────────────────
 
 var (
-	lastProvider    string
 	lastModel       string
 	lastCwd         string // rendered cwd segment or "" when host_info fails
 	lastAgent       string // focused-agent segment text
@@ -72,7 +67,6 @@ var (
 func init() {
 	OnSessionStart(func() {
 		info, _ := GetStatusInfo()
-		lastProvider = info.Provider
 		lastModel = info.Model
 		// The cwd is fetched once: it is the host working directory at
 		// session start (the sandbox has no os.Getwd) and does not change.
@@ -125,13 +119,12 @@ func init() {
 		patchAll()
 	})
 
-	OnModelChanged(func(provider, model string) {
+	OnModelChanged(func(_, model string) {
 		info, _ := GetStatusInfo()
 		changed := syncDynamicStatus(info)
-		if provider == lastProvider && model == lastModel && !changed {
+		if model == lastModel && !changed {
 			return
 		}
-		lastProvider = provider
 		lastModel = model
 		patchAll()
 	})
@@ -146,8 +139,6 @@ func patchAll() {
 	accent := UIProps{Fg: "accent"}
 
 	nodes := []UINode{
-		{ID: providerID, Type: "text", Text: ">> " + providerLabel(lastProvider), Props: &muted},
-		UIText(sep1ID, "  "),
 		{ID: cwdID, Type: "text", Text: lastCwd, Props: &muted},
 		UIText(sep2ID, "  "),
 		{ID: modelID, Type: "text", Text: modelLabel(lastModel)},
@@ -169,23 +160,6 @@ func patchAll() {
 		)
 	}
 	UIPatch(areaID, OpSetRoot(UIHStack(rootID, nodes...)))
-}
-
-func providerLabel(provider string) string {
-	switch provider {
-	case "openai":
-		return "ChatGPT"
-	case "anthropic":
-		return "Claude"
-	case "gemini":
-		return "Gemini"
-	case "local":
-		return "Local"
-	case "":
-		return "Provider"
-	default:
-		return provider
-	}
 }
 
 func modelLabel(model string) string {
