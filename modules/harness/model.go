@@ -3308,16 +3308,7 @@ func (m Model) renderToolActivity() string {
 }
 
 func (m Model) toolActivityContentHeight() int {
-	const maxContentLines = 12
-	width := m.width - 4
-	if width < 1 {
-		width = 1
-	}
-	lines := m.chat.ToolActivityLines(width, maxContentLines)
-	if len(lines) < toolActivityContentLines {
-		return toolActivityContentLines
-	}
-	return len(lines)
+	return toolActivityContentLines
 }
 
 func (m Model) consoleHeight() int {

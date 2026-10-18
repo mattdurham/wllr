@@ -116,21 +116,23 @@ func TestChatView_UpdateToolCall_CreatesEntryForMissingStart(t *testing.T) {
 	}
 }
 
-func TestChatView_ToolActivityLinesWrapsFullCommand(t *testing.T) {
+func TestChatView_ToolActivityLinesTruncatesCommand(t *testing.T) {
 	c := NewChatView(80, 5)
 	command := `go test ./... && go test -race ./pkg/indexo && go vet ./...`
 	c.AddToolCall("call-1", "main", "exec", `{"command":"`+command+`"}`)
 
 	lines := c.ToolActivityLines(30, 12)
-	joined := strings.Join(lines, "")
-	if strings.Contains(joined, "…") {
-		t.Fatalf("wrapped tool activity should not contain an ellipsis: %q", joined)
+	if len(lines) != 1 || !strings.HasPrefix(lines[0], "running exec  command:") || !strings.HasSuffix(lines[0], "…") {
+		t.Fatalf("expected one truncated command row, got %#v", lines)
 	}
-	if !strings.Contains(joined, command) {
-		t.Fatalf("wrapped tool activity lost command: %q", joined)
+	if ansi.StringWidth(lines[0]) > 30 {
+		t.Fatalf("tool activity exceeds content width: %q", lines[0])
 	}
-	if len(lines) < 2 {
-		t.Fatalf("long command should wrap, got %d line(s): %q", len(lines), joined)
+	if !strings.Contains(c.ToolLogModal(), command) {
+		t.Fatal("full command missing from /tools")
+	}
+	if wide := c.ToolActivityLines(120, 3); len(wide) != 1 || !strings.Contains(wide[0], command) {
+		t.Fatalf("widening did not restore command: %#v", wide)
 	}
 }
 
@@ -143,29 +145,30 @@ func TestChatView_ViewOmitsViewportPaddingRows(t *testing.T) {
 	}
 }
 
-// wrapRunes must measure display width, not rune count. A rune-count split
-// under-measures wide characters (emoji, CJK) and emits lines wider than the
-// pane, which the terminal then hard-wraps into the doubled-border garble of
-// issue #45.
-func TestWrapRunes_UsesDisplayWidth(t *testing.T) {
-	emoji := strings.Repeat("🎉", 40) // 40 runes, 80 columns
-	lines := wrapRunes(emoji, 20)
-	if len(lines) == 0 {
-		t.Fatal("wrapRunes returned no lines")
-	}
-	for i, line := range lines {
-		if got := ansi.StringWidth(line); got > 20 {
-			t.Fatalf("line %d is %d columns wide, want <= 20: %q", i, got, line)
+func TestChatView_ToolActivityLinesFitAndPreserveRecentCalls(t *testing.T) {
+	c := NewChatView(80, 5)
+	c.AddToolCall("1", "main", "exec", `{"command":"echo \"hello\"\n`+strings.Repeat("🎉", 40)+`"}`)
+	c.AddToolCall("2", "main/worker", "read_file", `{"path":"/very/long/parent/directory/important.go"}`)
+	c.AddToolCall("3", "main", "search", `{"query":"日本語のテキストを検索します"}`)
+	for _, width := range []int{1, 20, 60, 120} {
+		lines := c.ToolActivityLines(width, 3)
+		if len(lines) != 3 {
+			t.Fatalf("width %d: got %d rows, want three calls", width, len(lines))
+		}
+		for _, line := range lines {
+			if strings.ContainsAny(line, "\r\n") || ansi.StringWidth(line) > width {
+				t.Fatalf("width %d: invalid row %q", width, line)
+			}
+		}
+		if width == 60 && !strings.Contains(lines[1], "important.go") {
+			t.Fatalf("path lost filename: %q", lines[1])
 		}
 	}
-	if joined := strings.Join(lines, ""); joined != emoji {
-		t.Fatalf("wrapRunes lost content: got %q want %q", joined, emoji)
+	if lines := c.ToolActivityLines(0, 3); len(lines) != 0 {
+		t.Fatalf("zero width returned rows: %#v", lines)
 	}
-}
-
-func TestWrapRunes_ShortStringUnchanged(t *testing.T) {
-	if got := wrapRunes("hello", 20); len(got) != 1 || got[0] != "hello" {
-		t.Fatalf("wrapRunes = %#v, want [hello]", got)
+	if got := c.toolLog[0].Preview; !strings.HasPrefix(got, "command: echo \"hello\"\n") {
+		t.Fatalf("JSON escapes decoded incorrectly: %q", got)
 	}
 }
 

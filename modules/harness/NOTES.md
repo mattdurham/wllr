@@ -608,6 +608,8 @@ persists only the chosen model ID.
 
 *Addendum (2026-07-02):* Tool lifecycle messages now carry `AgentID`, and sub-agent tool-call starts are routed through the same pane as main-agent calls. Non-main rows render with the agent ID, and a completion with no matching start creates a completed row when tool metadata is available. This keeps logs and the live pane coherent when sub-agents are doing work while the main stream remains open.
 
+*Addendum (2026-10-18):* Each of the latest three calls now occupies one row, keeping long commands from crowding out other calls or resizing the pane. Truncation uses terminal cell widths and an ellipsis, retaining the start of commands and the end of paths. Only the live preview is shortened; `/tools` retains the full decoded argument preview and widening restores it.
+
 ---
 
 ## Agent List Runtime State

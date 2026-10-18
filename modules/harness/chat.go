@@ -3,6 +3,7 @@ package harness
 // NOTE: Any changes to this file must be reflected in the corresponding SPECS.md or NOTES.md.
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -84,7 +85,7 @@ func (c *ChatView) UpdateToolCall(id, agentID, toolName string, isError bool, _ 
 }
 
 func (c *ChatView) ToolActivityLines(width, height int) []string {
-	if height <= 0 || len(c.toolLog) == 0 {
+	if width <= 0 || height <= 0 || len(c.toolLog) == 0 {
 		return nil
 	}
 	start := len(c.toolLog) - toolActivityEntryLimit
@@ -104,9 +105,23 @@ func (c *ChatView) ToolActivityLines(width, height int) []string {
 			line += " [" + e.AgentID + "]"
 		}
 		if e.Preview != "" {
-			line += "  " + e.Preview
+			preview := strings.Join(strings.Fields(e.Preview), " ")
+			budget := width - ansi.StringWidth(line) - 2
+			// For paths retain the filename and trailing directories; commands
+			// and other arguments retain their beginning. The log stays intact.
+			for _, key := range []string{"path: ", "file_path: "} {
+				if value, ok := strings.CutPrefix(preview, key); ok && budget > len(key) {
+					preview = key + ansi.TruncateLeft(value, budget-len(key), "…")
+					break
+				}
+			}
+			if budget > 0 {
+				line += "  " + ansi.Truncate(preview, budget, "…")
+			} else {
+				line += "  " + preview
+			}
 		}
-		lines = append(lines, wrapRunes(line, width)...)
+		lines = append(lines, ansi.Truncate(line, width, "…"))
 	}
 	if len(lines) > height {
 		lines = lines[:height]
@@ -115,18 +130,6 @@ func (c *ChatView) ToolActivityLines(width, height int) []string {
 }
 
 const toolActivityEntryLimit = 3
-
-// wrapRunes hard-wraps s into lines of at most width display columns. It
-// measures display width (via ansi.Hardwrap), not rune count: a rune-count
-// split under-measures wide characters (emoji, CJK) and emits lines wider than
-// the pane, which the terminal then hard-wraps and shreds the box borders with
-// (issue #45).
-func wrapRunes(s string, width int) []string {
-	if width <= 0 || ansi.StringWidth(s) <= width {
-		return []string{s}
-	}
-	return strings.Split(ansi.Hardwrap(s, width, true), "\n")
-}
 
 // Update handles viewport scrolling.
 func (c ChatView) Update(msg tea.Msg) (ChatView, tea.Cmd) {
@@ -158,30 +161,27 @@ func (c ChatView) View() string {
 // suitable for compact display in the modal tool log.
 // Returns empty string if input cannot be parsed or yields nothing useful.
 func toolInputPreview(input string) string {
-	priority := []string{"command", "path", "name", "message", "query", "text", "url", "content"}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(input), &fields); err != nil {
+		return ""
+	}
+	priority := []string{
+		"command",
+		"path",
+		"file_path",
+		"name",
+		"message",
+		"query",
+		"pattern",
+		"text",
+		"url",
+		"content",
+	}
 	for _, key := range priority {
-		needle := `"` + key + `"`
-		idx := strings.Index(input, needle)
-		if idx < 0 {
-			continue
+		var value string
+		if err := json.Unmarshal(fields[key], &value); err == nil && value != "" {
+			return key + ": " + value
 		}
-		rest := input[idx+len(needle):]
-		colon := strings.Index(rest, ":")
-		if colon < 0 {
-			continue
-		}
-		rest = strings.TrimSpace(rest[colon+1:])
-		if len(rest) == 0 {
-			continue
-		}
-		if rest[0] == '"' {
-			end := strings.Index(rest[1:], `"`)
-			if end >= 0 {
-				val := rest[1 : end+1]
-				return key + ": " + val
-			}
-		}
-		break
 	}
 	return ""
 }

@@ -178,7 +178,7 @@ there is no built-in message renderer.
 - `SetSize(width, height)`: resizes the viewport and re-applies `externalContent`; if the viewport was at the tail before resize, it remains at the tail afterward.
 - `ScrollUp(n)` / `ScrollDown(n)`: scroll the viewport.
 - `AddToolCall(id, name, input)` / `UpdateToolCall(id, isError, output)` / `ClearToolLog()`: maintain the per-turn tool log.
-- `ToolActivityLines(width, height)`: renders the most recent tool log entries as compact status rows, hard-wrapped to `width` **display columns** and capped at `height` rows. Measurement is by display width, not rune count: a rune-count split under-measures wide characters (emoji, CJK), emitting rows wider than the pane.
+- `ToolActivityLines(width, height)`: renders the latest three tool log entries as one row each, capped to `width` terminal display columns with an ANSI-safe ellipsis and limited to `height` rows. Status and tool name precede the agent ID and argument preview. Commands retain their beginning; long `path`/`file_path` previews retain their filename and trailing directories. Preview whitespace is collapsed for display, while stored previews remain intact for `/tools` and widening the terminal. Zero width or height produces no rows. JSON string arguments are decoded before selecting a useful preview, including escaped quotes and newlines.
 - `ToolLogModal()`: renders the tool log for the `/tools` modal.
 - `View()`: returns the viewport view, with the selection span highlighted when a drag is in progress.
 
@@ -579,7 +579,7 @@ Appends the canonical-transcript `recall` tool (`agent.RecallTool()`) to `base` 
 - The output is padded to exactly `m.height` lines to prevent old content bleeding through on resize.
 - `statusLineHeight()` sums the constrained heights of all `UIAreaStatus` areas; it is called on every `View()` and `chatHeight()` invocation.
 - `inputBoxHeight()` counts the rendered input box lines instead of relying on a fixed constant, so the statusline cannot push the input bottom border off-screen if textarea rendering changes.
-- `toolActivityHeight()` reserves the tools border plus the wrapped rows for the latest three tool calls (at least 5 rows total, capped at 14 rows); those rows are subtracted from `chatHeight()`.
+- `toolActivityHeight()` reserves three single-line tool rows plus two border rows (5 rows total); those rows are subtracted from `chatHeight()`.
 - Before a normal `View()` render, `ChatView.height` equals the layout computed from the same stable main-agent inbox snapshot used to render the queued-message pane, including its current five-row height when non-empty. Layout synchronization runs before updates and rendering; an inbox transition is reflected on the next render without allowing height/render decisions from one frame to disagree.
 - If the terminal cannot fit the queue pane while preserving the fixed lower UI, the queue pane is omitted from the render as well as from the height calculation; otherwise the chat viewport yields space to the queue and may shrink to zero while the input remains visible.
 - `bottomGutterHeight()` reserves one trailing row when the terminal has more than one row, so the input bottom border is not rendered on the final terminal line.
@@ -1027,7 +1027,7 @@ The main chat transcript content is produced by a WASM extension (the bundled `a
 - `Model.streamContent` accumulates streamed assistant text from `TokenMsg` so the completed response can be captured for `OnMessageEnd`/logging; it is reset on `StreamDoneMsg` and `/clear`.
 - `Model.pushNotification(text)` dispatches `sdk.EventNotify` (in a goroutine) so the transcript-owning extension renders notifications; it no longer writes to `ChatView`.
 - `renderScenes` always skips the `chat` area (it is rendered inside the viewport, not stacked below it). Non-chat scene areas are rendered above the chat viewport; their height is subtracted by `chatHeight()` so the chat history viewport is what shrinks when extra UI appears.
-- `renderToolActivity()` renders a persistent pane below the chat viewport with the latest three tool calls. Long command previews wrap across rows instead of being hard-truncated; when no tools have run this turn, the pane renders as three empty content rows. Rows for non-main agents include the agent ID so sub-agent activity is distinguishable from main-agent tool calls. Each row is clamped to the content width before padding so the pane can never emit a row wider than the terminal.
+- `renderToolActivity()` renders a persistent pane below the chat viewport with the latest three tool calls, one row per call. Long previews are truncated to the available content width with an ellipsis; when no tools have run this turn, the pane renders as three empty content rows. Rows for non-main agents include the agent ID so sub-agent activity is distinguishable from main-agent tool calls. Each row is clamped to the content width before padding so the pane can never emit a row wider than the terminal.
 
 **Invariants:**
 
