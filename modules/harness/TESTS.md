@@ -76,6 +76,7 @@ log, and reset behavior are covered by `wasmchat_test.go`, `tui_test.go`, and
 | `TestBuiltinHelp` | Builtins are registered | `registerBuiltins(r)` | help, clear, reload, model, models, context, compact all present |
 | `TestBuiltinCompact_ReturnsCompactMsg` | /compact emits `compactMsg` | `registerBuiltins(r)` | msg is `compactMsg{}` |
 | `TestBuiltinClear_EmitsMsg` | /clear emits `clearMsg` | `registerBuiltins(r)` | msg is `clearMsg{}` |
+| `TestBuiltinQuitAndExit` | /quit and /exit close the application | `registerBuiltins(r)` | each command returns `tea.QuitMsg` |
 | `TestBuiltinReload_EmitsMsg` | /reload emits `ReloadMsg` | `registerBuiltins(r)` | msg is `ReloadMsg{}` |
 | `TestBuiltinModel_EmitsMsg` | /model sets model name | args `["claude-haiku-3-5"]` | msg is `setModelMsg{Model: "claude-haiku-3-5"}` |
 | `TestBuiltinModel_NoArgs` | /model with no args opens the picker | no args | msg is `showModelPickerMsg` |

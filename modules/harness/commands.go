@@ -84,6 +84,17 @@ func registerBuiltins(r *Registry) {
 		},
 	})
 
+	for _, name := range []string{"quit", "exit"} {
+		r.Register(Command{
+			Name:    name,
+			Desc:    "Close the application",
+			Instant: true,
+			Handler: func(_ []string) tea.Cmd {
+				return tea.Quit
+			},
+		})
+	}
+
 	r.Register(Command{
 		Name:    "reload",
 		Desc:    "Hot-reload all extensions",

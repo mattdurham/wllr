@@ -68,9 +68,25 @@ func TestBuiltinHelp(t *testing.T) {
 	for _, c := range cmds {
 		names[c.Name] = true
 	}
-	for _, expected := range []string{"help", "clear", "reload", "model", "models", "history", "context", "compact"} {
+	for _, expected := range []string{"help", "clear", "quit", "exit", "reload", "model", "models", "history", "context", "compact"} {
 		if !names[expected] {
 			t.Errorf("expected builtin command %q to be registered", expected)
+		}
+	}
+}
+
+func TestBuiltinQuitAndExit(t *testing.T) {
+	r := NewRegistry()
+	registerBuiltins(r)
+
+	for _, name := range []string{"quit", "exit"} {
+		cmd := r.Dispatch(name, nil)
+		if cmd == nil {
+			t.Fatalf("expected non-nil command for /%s", name)
+		}
+		msg := cmd()
+		if _, ok := msg.(tea.QuitMsg); !ok {
+			t.Errorf("/%s message = %T, want tea.QuitMsg", name, msg)
 		}
 	}
 }
@@ -278,7 +294,7 @@ func TestRegistry_ExtensionCommand_Callable(t *testing.T) {
 func TestInstantCommandsMarkedInstant(t *testing.T) {
 	r := NewRegistry()
 	registerBuiltins(r)
-	for _, name := range []string{"clear", "reload", "model", "status", "tools"} {
+	for _, name := range []string{"clear", "quit", "exit", "reload", "model", "status", "tools"} {
 		cmds := r.List()
 		found := false
 		for _, c := range cmds {

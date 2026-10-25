@@ -37,7 +37,7 @@ func New(pool *agent.AgentPool, mainAgentID string, h *extension.Host) Model
 - `h` may be nil; extension bridge installation is skipped when nil.
 - Reads `pool.ProviderName()` at construction to initialise the status bar.
 - Reads the spawned main agent's `ModelName()` at construction, when present, to initialise active model/status state before extension `session_start`.
-- Registers built-in commands (`/help`, `/clear`, `/reload`, `/model`, `/models`) and a `/prompt` command (when pool is non-nil) that shows the accumulated base system prompt in a modal.
+- Registers built-in commands (`/help`, `/clear`, `/quit`, `/exit`, `/reload`, `/model`, `/models`) and a `/prompt` command (when pool is non-nil) that shows the accumulated base system prompt in a modal.
 - Immediately installs an `earlyUIBridge` on the extension host so that extensions can register commands during `_init` (before `SetProgram`).
 - Immediately installs an `earlyAgentBridge` stub on the extension host so that extensions calling `agent_spawn` during `_init` receive a clear error instead of a nil-pointer dereference.
 
@@ -350,7 +350,7 @@ type Command struct {
 
 **Invariant:** Commands with `Instant=true` bypass the "queuing..." UI indicator in `updateActions`. When a `CommandMsg` for an Instant command arrives, `updateActions` invokes `cmd.Handler(msg.Args)` directly without setting `statusBar.statuses["stream"] = "queuing…"`.
 
-**Invariant:** All built-in commands (`/help`, `/clear`, `/reload`, `/model`, `/models`, `/thinking`, `/openrouter-speed`, `/login`, `/status`, `/tools`, `/context`, `/compact`, `/steer`) have `Instant=true`. The zero value of `Command.Instant` is `false`. (The `/prompt` command is registered without `Instant=true` because it executes synchronously in the update loop via `ShowModalMsg`, not via WASM dispatch — it is intentionally excluded from the instant list.)
+**Invariant:** All built-in commands (`/help`, `/clear`, `/quit`, `/exit`, `/reload`, `/model`, `/models`, `/thinking`, `/openrouter-speed`, `/login`, `/status`, `/tools`, `/context`, `/compact`, `/steer`) have `Instant=true`. The zero value of `Command.Instant` is `false`. (The `/prompt` command is registered without `Instant=true` because it executes synchronously in the update loop via `ShowModalMsg`, not via WASM dispatch — it is intentionally excluded from the instant list.)
 
 **Invariant:** Extension-registered commands set `Instant` from the `instant bool` parameter passed to `UIBridge.RegisterCommand(name, desc, instant bool)`. When `instant=true`, the flag is stored on the `Command`, suppressing the "queuing…" status. The handler still routes through `dispatchOnCommandMsg` → `EventOnCommand`.
 
@@ -360,6 +360,8 @@ Built-in commands registered at startup:
 |-----------------|---------|--------------------------------------------------------------|
 | `/help`         | true    | Shows `ShowModalMsg{Text: commands.HelpText()}`              |
 | `/clear`        | true    | Emits `clearMsg{}`                                           |
+| `/quit`         | true    | Returns `tea.Quit`, closing the application                  |
+| `/exit`         | true    | Alias for `/quit`; returns `tea.Quit`                        |
 | `/reload`       | true    | Emits `ReloadMsg{}`                                          |
 | `/model`        | true    | No arg → `showModelPickerMsg{}` (opens model picker); `/model <name|tier>` → `setModelMsg{Model: name}`; `/model tiers` → `showModelTiersMsg{}` |
 | `/models`       | true    | Alias for `/model`; no args opens the picker (which tags tiers with h/l/u), `<name|tier>` → `setModelMsg`, `tiers` → `showModelTiersMsg` |
