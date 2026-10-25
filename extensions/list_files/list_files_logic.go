@@ -22,7 +22,7 @@ const (
 	cacheTTL         = 5 * time.Minute
 	maxCacheBytes    = 50 << 20 // 50MB total across cached result sets
 	streamCapBytes   = 25 << 20 // 25MB awk cap on the rg --files stream
-	maxWalkedEntries = 10_000    // effort bound: entries awk passes before SIGPIPE stops rg
+	maxWalkedEntries = 10_000   // effort bound: entries awk passes before SIGPIPE stops rg
 	maxPageSize      = 1000
 	defaultPageSize  = 200
 	maxDepthLimit    = 100

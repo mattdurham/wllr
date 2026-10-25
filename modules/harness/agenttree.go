@@ -242,7 +242,7 @@ func (t *AgentTreeView) HandleKey(kp tea.KeyPressMsg) AgentTreeKeyResult {
 			t.ensureVisible()
 		}
 		return AgentTreeKeyResult{Handled: true}
-	case "down":
+	case keyDown:
 		if t.cursor < len(rows)-1 {
 			t.cursor++
 			t.ensureVisible()

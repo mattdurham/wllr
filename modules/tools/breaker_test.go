@@ -23,11 +23,9 @@ import (
 // timeoutThenOKHost wedges only for the given input; other inputs succeed.
 type timeoutThenOKHost struct {
 	wedgeInput string
-	calls      int
 }
 
 func (h *timeoutThenOKHost) ExecuteTool(ctx context.Context, _, _, _ string, input json.RawMessage) (extension.ToolResult, error) {
-	h.calls++
 	if string(input) != h.wedgeInput {
 		return extension.ToolResult{Result: "done"}, nil
 	}

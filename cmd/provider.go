@@ -796,11 +796,11 @@ func runShellCommand(ctx context.Context, command, dir string, timeout time.Dura
 	case <-runCtx.Done():
 		terminateProcessGroup(cmd.Process.Pid, syscall.SIGTERM)
 		select {
-		case <-done:
+		case <-done: //nolint:errcheck // Cancellation takes precedence over the process exit error.
 			return output.String(), execContextError(runCtx)
 		case <-time.After(execKillGrace):
 			terminateProcessGroup(cmd.Process.Pid, syscall.SIGKILL)
-			<-done
+			<-done //nolint:errcheck // Reap the process; report cancellation rather than the exit error.
 			return output.String(), execContextError(runCtx)
 		}
 	}

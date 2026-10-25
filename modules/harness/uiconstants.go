@@ -7,6 +7,7 @@ const (
 	commandModel  = "model"
 	commandModels = "models"
 	keyEsc        = "esc"
+	keyDown       = "down"
 	keyEnter      = "enter"
 	// keyKillAgent hard-kills the highlighted agent from the /agents tree.
 	// `x` reads as an eXterminate/cut affordance and does not collide with any

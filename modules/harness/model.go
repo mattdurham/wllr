@@ -409,13 +409,13 @@ type Model struct {
 
 	console ConsoleView
 
-	chat ChatView
-
 	agentTree AgentTreeView
 
 	textInput TextInputView
 
 	picker PickerView
+
+	chat ChatView
 
 	localSetupManualStep int
 
@@ -1558,7 +1558,7 @@ func (m Model) updateKeyPressModal(kp tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		if m.modalScroll > 0 {
 			m.modalScroll--
 		}
-	case "down":
+	case keyDown:
 		chatH := m.height - m.inputBoxHeight()
 		if chatH < 5 {
 			chatH = 5

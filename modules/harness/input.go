@@ -90,7 +90,7 @@ func (i InputArea) Update(msg tea.Msg) (InputArea, tea.Cmd) {
 				return i, nil
 			}
 
-		case "down":
+		case keyDown:
 			i.lastWasEsc = false
 			if i.histIdx != -1 {
 				i.historyNewer()

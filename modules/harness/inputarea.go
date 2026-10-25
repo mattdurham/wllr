@@ -9,15 +9,14 @@ const maxInputHistory = 100
 
 // InputArea wraps a textarea and handles command detection.
 type InputArea struct {
-	ta         textarea.Model
-	width      int
-	lastWasEsc bool
-
 	// history is the most recent submitted prompts, oldest first, used by the
 	// up/down recall in Update. histIdx indexes the entry currently recalled
 	// (-1 when not navigating history); histDraft holds the text that was in
 	// the box when recall started so down past the newest entry restores it.
-	history   []string
-	histIdx   int
-	histDraft string
+	history    []string
+	histDraft  string
+	ta         textarea.Model
+	width      int
+	histIdx    int
+	lastWasEsc bool
 }

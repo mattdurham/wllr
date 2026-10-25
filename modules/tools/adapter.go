@@ -4,15 +4,16 @@ package tools
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"reflect"
-	"time"
-	"charm.land/fantasy"
-	"crypto/sha256"
-	"encoding/hex"
 	"sync"
+	"time"
+
+	"charm.land/fantasy"
 
 	"github.com/mattdurham/wllr/modules/extension"
 	"github.com/mattdurham/wllr/modules/sdk"
@@ -76,13 +77,13 @@ const (
 var toolBreaker = &breaker{fails: map[string]breakerState{}}
 
 type breakerState struct {
-	consecutive int
 	lastFailure time.Time
+	consecutive int
 }
 
 type breaker struct {
-	mu    sync.Mutex
 	fails map[string]breakerState
+	mu    sync.Mutex
 }
 
 // breakerKey identifies a call site: agent + tool + hash of the raw input.
