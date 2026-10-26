@@ -18,6 +18,12 @@ import (
 // would offer choices that fail only once the user tries them.
 const openRouterModelsURL = "https://openrouter.ai/api/v1/models/user"
 
+type openRouterModelsFetchFunc func(
+	ctx context.Context,
+	client *http.Client,
+	endpoint, key string,
+) ([]openRouterModelConfig, error)
+
 type openRouterModelConfig struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
@@ -41,6 +47,30 @@ func (cfg *Config) openRouterModel(id string) (openRouterModelConfig, bool) {
 		}
 	}
 	return openRouterModelConfig{}, false
+}
+
+// validateOpenRouterSubagentModel checks the account-scoped catalog before a
+// sub-agent constructs a model. The returned window comes from the same
+// catalog entry, so valid but unpinned models can also resolve their metadata.
+func validateOpenRouterSubagentModel(
+	ctx context.Context,
+	cfg *Config,
+	model string,
+	fetchModels openRouterModelsFetchFunc,
+) (int64, error) {
+	models, err := fetchModels(ctx, nil, openRouterModelsURL, cfg.OpenRouterAPIKey)
+	if err != nil {
+		return 0, fmt.Errorf("validate OpenRouter model %q: %w", model, err)
+	}
+	for _, available := range models {
+		if available.ID == model {
+			return available.ContextWindow, nil
+		}
+	}
+	return 0, fmt.Errorf(
+		"OpenRouter model %q is not available to this account; use /models to choose an available model",
+		model,
+	)
 }
 
 // openRouterReasoningCapability reports whether a pinned OpenRouter model

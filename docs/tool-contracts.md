@@ -234,10 +234,14 @@ An empty model uses the configured working tier (`low`) when one is tagged in
 the tier default. For the local provider, a named model must exist in
 `wllr.local_models`; its configured `base_url` and `api_key` are used
 automatically. If `endpoint` is supplied, it must match that model's configured
-`base_url`. Other providers reject `endpoint`.
+`base_url`. Other providers reject `endpoint`. For OpenRouter, an explicit
+model must appear in the account's available-model catalog; validation happens
+before model construction, and the catalog entry supplies the model's context
+window. OpenRouter working-tier models are checked before use as well. A
+catalog lookup failure is reported separately from an unavailable model.
 
 Output: JSON object `{ "agent_id": string, "status": "created" }`. Fatal
-errors include missing `name` or host spawn failure.
+errors include missing `name`, model validation failure, or host spawn failure.
 
 ### `shutdown_agent`
 

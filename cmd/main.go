@@ -89,17 +89,7 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 	if fantasyProv != nil {
 		pool.SetProvider(fantasyProv)
 	}
-	pool.SetModelFactory(
-		func(modelCtx context.Context, currentProvider fantasy.Provider, model, endpoint string) (fantasy.LanguageModel, error) {
-			lm, modelErr := subagentLanguageModel(modelCtx, cfg, currentProvider, model, endpoint)
-			if modelErr == nil && cfg.Provider == providerLocal {
-				if entry, ok := cfg.localModelByID(model); ok && entry.ContextWindow > 0 {
-					pool.SetModelContextWindow(model, entry.ContextWindow)
-				}
-			}
-			return lm, modelErr
-		},
-	)
+	pool.SetModelFactory(newSubagentModelFactory(cfg, pool, fetchOpenRouterModels))
 	pool.SetProviderName(cfg.Provider)
 	pool.SetDefaultModelName(cfg.Model)
 	// Sub-agents without an explicit model default to the configured working

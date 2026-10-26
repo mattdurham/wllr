@@ -21,6 +21,7 @@ import (
 	fantasygoogleprovider "charm.land/fantasy/providers/google"
 	fantasyopenapiprovider "charm.land/fantasy/providers/openai"
 	fantasyopenrouterprovider "charm.land/fantasy/providers/openrouter"
+	"github.com/mattdurham/wllr/modules/agent"
 	"github.com/mattdurham/wllr/modules/extension"
 	"github.com/mattdurham/wllr/modules/sdk"
 )
@@ -91,35 +92,75 @@ func newAnthropicProvider(apiKey string) (fantasy.Provider, error) {
 	return fantasyanthropicprovider.New(opts...)
 }
 
-// subagentLanguageModel binds local sub-agents to the endpoint and credentials
-// of their configured model. An explicit endpoint must match that entry.
-func subagentLanguageModel(
+// newSubagentModelFactory wires model validation into the pool and records
+// each successfully resolved model's context window for compaction sizing.
+func newSubagentModelFactory(
+	cfg *Config,
+	pool *agent.AgentPool,
+	fetchModels openRouterModelsFetchFunc,
+) agent.ModelFactory {
+	return func(
+		ctx context.Context,
+		currentProvider fantasy.Provider,
+		model, endpoint string,
+	) (fantasy.LanguageModel, error) {
+		lm, contextWindow, err := subagentLanguageModelWithModelFetcher(
+			ctx,
+			cfg,
+			currentProvider,
+			model,
+			endpoint,
+			fetchModels,
+		)
+		if err == nil && contextWindow > 0 {
+			pool.SetModelContextWindow(model, contextWindow)
+		}
+		return lm, err
+	}
+}
+
+// subagentLanguageModelWithModelFetcher resolves a sub-agent model and its
+// context window. Local sub-agents use the endpoint and credentials of their
+// configured model; OpenRouter sub-agents are first checked against the
+// account's model catalog.
+func subagentLanguageModelWithModelFetcher(
 	ctx context.Context,
 	cfg *Config,
 	currentProvider fantasy.Provider,
 	model, endpoint string,
-) (fantasy.LanguageModel, error) {
+	fetchModels openRouterModelsFetchFunc,
+) (fantasy.LanguageModel, int64, error) {
 	if cfg.Provider != providerLocal {
 		if endpoint != "" {
-			return nil, fmt.Errorf("endpoint is only supported for configured local models")
+			return nil, 0, fmt.Errorf("endpoint is only supported for configured local models")
 		}
-		return currentProvider.LanguageModel(ctx, model)
+		var contextWindow int64
+		if cfg.Provider == providerOpenRouter {
+			var err error
+			contextWindow, err = validateOpenRouterSubagentModel(ctx, cfg, model, fetchModels)
+			if err != nil {
+				return nil, 0, err
+			}
+		}
+		lm, err := currentProvider.LanguageModel(ctx, model)
+		return lm, contextWindow, err
 	}
 	entry, ok := cfg.localModelByID(model)
 	if !ok || entry.BaseURL == "" {
-		return nil, fmt.Errorf("local model %q is not configured in wllr.local_models", model)
+		return nil, 0, fmt.Errorf("local model %q is not configured in wllr.local_models", model)
 	}
 	if endpoint != "" && endpoint != entry.BaseURL {
-		return nil, fmt.Errorf("endpoint %q does not match configured endpoint for local model %q", endpoint, model)
+		return nil, 0, fmt.Errorf("endpoint %q does not match configured endpoint for local model %q", endpoint, model)
 	}
 	provider, err := fantasyopenapiprovider.New(
 		fantasyopenapiprovider.WithAPIKey(entry.APIKey),
 		fantasyopenapiprovider.WithBaseURL(entry.BaseURL),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("create local model provider: %w", err)
+		return nil, 0, fmt.Errorf("create local model provider: %w", err)
 	}
-	return provider.LanguageModel(ctx, model)
+	lm, err := provider.LanguageModel(ctx, model)
+	return lm, entry.ContextWindow, err
 }
 
 // buildProvider constructs a fantasy.Provider and fetches the configured

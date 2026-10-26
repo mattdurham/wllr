@@ -442,11 +442,25 @@ func thinkingModeLabelForLevel(lvl thinkingLevel) string {
 // name a provider other than the session's, and spawning a sub-agent must not
 // switch the session's provider.
 func modelForProviderTier(ctx context.Context, cfg *Config, provider, modelID string) (fantasy.LanguageModel, error) {
+	return modelForProviderTierWithModelFetcher(ctx, cfg, provider, modelID, fetchOpenRouterModels)
+}
+
+func modelForProviderTierWithModelFetcher(
+	ctx context.Context,
+	cfg *Config,
+	provider, modelID string,
+	fetchModels openRouterModelsFetchFunc,
+) (fantasy.LanguageModel, error) {
 	candidate := *cfg
 	candidate.Provider = provider
 	candidate.Model = modelID
 	if provider == providerLocal && !candidate.applyLocalModelSelection(modelID) {
 		return nil, fmt.Errorf("local model %q is not configured in wllr.local_models", modelID)
+	}
+	if provider == providerOpenRouter {
+		if _, err := validateOpenRouterSubagentModel(ctx, &candidate, modelID, fetchModels); err != nil {
+			return nil, err
+		}
 	}
 	_, lm, err := buildProvider(ctx, &candidate)
 	if err != nil {
