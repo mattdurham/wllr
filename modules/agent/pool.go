@@ -612,6 +612,23 @@ func (p *AgentPool) LanguageModelForModel(ctx context.Context, model string) (fa
 	return p.LanguageModelForModelAtEndpoint(ctx, model, "")
 }
 
+// SessionLanguageModel creates a main-session language model directly from the
+// pool's provider, bypassing the model factory reserved for sub-agent
+// validation and endpoint selection. An empty model selects the pool default.
+func (p *AgentPool) SessionLanguageModel(ctx context.Context, model string) (fantasy.LanguageModel, error) {
+	p.mu.RLock()
+	provider := p.provider
+	defaultModel := p.defaultModelName
+	p.mu.RUnlock()
+	if model == "" {
+		model = defaultModel
+	}
+	if provider == nil {
+		return nil, errors.New("agent: no provider configured on pool")
+	}
+	return provider.LanguageModel(ctx, model)
+}
+
 // SetModelFactory installs the resolver used for sub-agent model requests.
 // A nil factory restores the pool's default provider path.
 func (p *AgentPool) SetModelFactory(factory ModelFactory) {

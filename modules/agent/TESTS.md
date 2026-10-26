@@ -3,7 +3,9 @@
 Sub-agent spawn tests verify that model requests, including an optional endpoint,
 reach the pool's model factory. Command-layer tests verify that configured local
 models select their own endpoint and credentials and reject unknown models or
-mismatched endpoint overrides.
+mismatched endpoint overrides. Session-resolution regressions verify that main
+model construction and working-tier fallback bypass the sub-agent factory, so
+an OpenRouter catalog outage cannot block use of the current session model.
 
 ## Existing Tests
 

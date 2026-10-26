@@ -474,6 +474,6 @@ func modelForProviderTierWithModelFetcher(
 // a missing or broken tier degrades to the previous behavior instead of
 // failing the spawn.
 func sessionModel(ctx context.Context, pool *agent.AgentPool) (fantasy.LanguageModel, string, error) {
-	lm, err := pool.LanguageModelForModel(ctx, "")
+	lm, err := pool.SessionLanguageModel(ctx, "")
 	return lm, pool.DefaultModelName(), err
 }

@@ -238,7 +238,9 @@ automatically. If `endpoint` is supplied, it must match that model's configured
 model must appear in the account's available-model catalog; validation happens
 before model construction, and the catalog entry supplies the model's context
 window. OpenRouter working-tier models are checked before use as well. A
-catalog lookup failure is reported separately from an unavailable model.
+catalog lookup failure is reported separately from an unavailable model. In
+particular, main-session `/models` and `/model` selection and fallback to the
+session model do not make catalog requests.
 
 Output: JSON object `{ "agent_id": string, "status": "created" }`. Fatal
 errors include missing `name`, model validation failure, or host spawn failure.

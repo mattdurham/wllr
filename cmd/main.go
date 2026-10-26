@@ -337,7 +337,7 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 			lm = newLM
 		} else {
 			var lmErr error
-			lm, lmErr = pool.LanguageModelForModel(ctx, modelID)
+			lm, lmErr = pool.SessionLanguageModel(ctx, modelID)
 			if lmErr != nil {
 				return lmErr
 			}
@@ -470,7 +470,7 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 				return "", "", err
 			}
 		} else {
-			lm, lmErr := pool.LanguageModelForModel(ctx, modelID)
+			lm, lmErr := pool.SessionLanguageModel(ctx, modelID)
 			if lmErr != nil {
 				return "", "", lmErr
 			}

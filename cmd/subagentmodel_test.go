@@ -207,6 +207,61 @@ func TestSubagentLanguageModelReportsOpenRouterCatalogFailure(t *testing.T) {
 	}
 }
 
+func TestSessionLanguageModelBypassesSubagentFactory(t *testing.T) {
+	provider := newSubagentRecordingProvider()
+	pool := agent.NewPool()
+	pool.SetProvider(provider)
+	pool.SetDefaultModelName("session-model")
+	pool.SetModelFactory(func(
+		_ context.Context,
+		_ fantasy.Provider,
+		_, _ string,
+	) (fantasy.LanguageModel, error) {
+		return nil, errors.New("sub-agent factory must not be called")
+	})
+
+	lm, err := pool.SessionLanguageModel(context.Background(), "")
+	if err != nil {
+		t.Fatalf("session model resolution: %v", err)
+	}
+	if lm == nil {
+		t.Fatal("session model resolution returned no language model")
+	}
+	if len(provider.requested) != 1 || provider.requested[0] != "session-model" {
+		t.Fatalf("provider requests = %v, want the session default", provider.requested)
+	}
+}
+
+func TestSessionModelDoesNotUseOpenRouterSubagentValidation(t *testing.T) {
+	cfg := &Config{Provider: providerOpenRouter, OpenRouterAPIKey: "test-key"}
+	provider := newSubagentRecordingProvider()
+	catalogRequests := 0
+	fetchModels := func(
+		_ context.Context,
+		_ *http.Client,
+		_, _ string,
+	) ([]openRouterModelConfig, error) {
+		catalogRequests++
+		return nil, errors.New("catalog offline")
+	}
+
+	pool := agent.NewPool()
+	pool.SetProvider(provider)
+	pool.SetDefaultModelName("session-model")
+	pool.SetModelFactory(newSubagentModelFactory(cfg, pool, fetchModels))
+
+	lm, model, err := sessionModel(context.Background(), pool)
+	if err != nil {
+		t.Fatalf("session fallback during catalog outage: %v", err)
+	}
+	if lm == nil || model != "session-model" {
+		t.Fatalf("session fallback = (%v, %q), want session model", lm, model)
+	}
+	if catalogRequests != 0 {
+		t.Fatalf("session fallback made %d catalog requests, want none", catalogRequests)
+	}
+}
+
 func TestSubagentOpenRouterTierValidatesModel(t *testing.T) {
 	cfg := &Config{OpenRouterAPIKey: "test-key"}
 	fetchModels := func(
