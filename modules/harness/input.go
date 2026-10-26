@@ -37,8 +37,11 @@ func (i *InputArea) SetWidth(w int) {
 // Value returns the current textarea content.
 func (i InputArea) Value() string { return i.ta.Value() }
 
-// Reset clears the textarea.
-func (i *InputArea) Reset() { i.ta.Reset() }
+// Reset clears the textarea and permanently retires the launch placeholder.
+func (i *InputArea) Reset() {
+	i.ta.Placeholder = ""
+	i.ta.Reset()
+}
 
 // SetValue replaces the textarea content with v and moves the cursor to the end.
 func (i *InputArea) SetValue(v string) { i.ta.SetValue(v) }
@@ -55,7 +58,7 @@ func (i InputArea) Update(msg tea.Msg) (InputArea, tea.Cmd) {
 			if content == "" {
 				return i, nil
 			}
-			i.ta.Reset()
+			i.Reset()
 			if strings.HasPrefix(content, "/") {
 				// Parse as command.
 				parts := strings.Fields(content[1:])

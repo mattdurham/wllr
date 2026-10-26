@@ -282,6 +282,7 @@ Called after every key event. Computes `slashWordAt(input.Value())`. If a slash 
 
 InputArea only receives key events that the model-level overlay/global handlers do not consume.
 
+- **Launch placeholder**: the input hint is shown on launch, then permanently cleared by the first `InputArea.Reset`, including non-empty Enter submissions and autocomplete command dispatch. Later empty-input states retain the existing focused, blinking cursor without repeatedly displaying onboarding help.
 - **Enter**: submits trimmed content. Empty → no-op. `/word...` → `CommandMsg`. Plain text → `SubmitMsg` (and is recorded in the recall history; slash commands are not).
 - **Shift+Enter**: inserts a newline (overrides default Enter binding in textarea).
 - **Esc (first press)**: clears the textarea, sets `lastWasEsc = true`, ends any recall. No message emitted.

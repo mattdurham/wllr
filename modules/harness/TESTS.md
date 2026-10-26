@@ -393,6 +393,13 @@ dispatched at all.
 | High | `TestResetHistoryMsg_PaintsContextStatus` | restore rewrites the ctx segment in the same update | model with a known window; `Update(ResetHistoryMsg{...})` | `ctx` was empty before; non-empty after — the restored-conversation path |
 | High | `TestExtensionTick_PaintsContextStatusWhileIdle` | idle 1s tick keeps ctx visible | known window, no turn run; `updateExtension(extensionTickMsg{})` | handler handled; `ctx` key painted — the vanish-between-turns regression path |
 
+### inputplaceholder_test.go
+
+| Priority | Test | Scenario | Assertions |
+|---|---|---|---|
+| Medium | `TestInputArea_PlaceholderOnlyShownAtLaunch` | slash-command and plain-message submissions | launch view shows the hint; the first submission removes it; later resets do not restore it |
+| Medium | `TestModel_AutocompleteCommandRetiresLaunchPlaceholder` | `/help` dispatched through the model's autocomplete handler | the model-level reset permanently clears the launch hint |
+
 ### inputhistory_test.go
 
 | Priority | Test | Scenario | Assertions |
