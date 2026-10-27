@@ -868,7 +868,7 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 		return
 	}
 
-	prog := tea.NewProgram(&m)
+	prog := tea.NewProgram(&m, tea.WithEnvironment(terminalEnvironment(os.Environ())))
 	m.SetProgram(prog)
 
 	if _, err := prog.Run(); err != nil {
