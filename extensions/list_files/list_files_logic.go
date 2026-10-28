@@ -219,8 +219,13 @@ func executeRgFiles(a listArgs, scopePath string, hidden bool) ([]string, bool, 
 	// exhausted it prints a sentinel and exits, SIGPIPE-ing rg so the walk
 	// itself stops — bounding effort, not just output. complete=false is
 	// reported so callers know the listing was cut short.
-	fmt.Fprintf(&b, ` 2>&1 | awk -v maxb=%d -v maxn=%d '{n+=length($0)+1; c++; if(n>maxb||c>maxn){print "%s"; exit} print}'`,
-		streamCapBytes, maxWalkedEntries, truncSentinel)
+	fmt.Fprintf(
+		&b,
+		` 2>&1 | awk -v maxb=%d -v maxn=%d '{n+=length($0)+1; c++; if(n>maxb||c>maxn){print "%s"; exit} print}'`,
+		streamCapBytes,
+		maxWalkedEntries,
+		truncSentinel,
+	)
 
 	out, err := execFn(b.String(), projectRoot())
 	if err != nil {

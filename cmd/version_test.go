@@ -23,7 +23,8 @@ func TestRunVersionCommand_PrintsCommitAndDate(t *testing.T) {
 	if code := runVersionCommand(nil, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
-	if !strings.Contains(stdout.String(), "abc123def456") || !strings.Contains(stdout.String(), "2026-04-05T10:42:00Z") {
+	if !strings.Contains(stdout.String(), "abc123def456") ||
+		!strings.Contains(stdout.String(), "2026-04-05T10:42:00Z") {
 		t.Fatalf("stdout = %q, want commit and build date", stdout.String())
 	}
 	if stderr.Len() != 0 {

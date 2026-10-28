@@ -20,7 +20,14 @@ func TestShouldRecordUserPrompt(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := shouldRecordUserPrompt(tt.agentID, tt.queued, tt.steer); got != tt.want {
-				t.Errorf("shouldRecordUserPrompt(%q, %t, %t) = %t, want %t", tt.agentID, tt.queued, tt.steer, got, tt.want)
+				t.Errorf(
+					"shouldRecordUserPrompt(%q, %t, %t) = %t, want %t",
+					tt.agentID,
+					tt.queued,
+					tt.steer,
+					got,
+					tt.want,
+				)
 			}
 		})
 	}

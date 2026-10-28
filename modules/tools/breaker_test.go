@@ -25,7 +25,11 @@ type timeoutThenOKHost struct {
 	wedgeInput string
 }
 
-func (h *timeoutThenOKHost) ExecuteTool(ctx context.Context, _, _, _ string, input json.RawMessage) (extension.ToolResult, error) {
+func (h *timeoutThenOKHost) ExecuteTool(
+	ctx context.Context,
+	_, _, _ string,
+	input json.RawMessage,
+) (extension.ToolResult, error) {
 	if string(input) != h.wedgeInput {
 		return extension.ToolResult{Result: "done"}, nil
 	}
@@ -60,7 +64,10 @@ func TestBreaker_TripsAfterConsecutiveTimeouts(t *testing.T) {
 
 	// Burn through the threshold with identical timeouts.
 	for i := 0; i < tools.BreakerThreshold; i++ {
-		resp, err := adapter.Run(context.Background(), fantasy.ToolCall{ID: fmt.Sprintf("c%d", i), Name: "search", Input: input})
+		resp, err := adapter.Run(
+			context.Background(),
+			fantasy.ToolCall{ID: fmt.Sprintf("c%d", i), Name: "search", Input: input},
+		)
 		if err != nil || !resp.IsError || !strings.Contains(resp.Content, "timed out") {
 			t.Fatalf("attempt %d: expected timeout error, got err=%v resp=%+v", i, err, resp.Content)
 		}
@@ -152,12 +159,20 @@ func TestBreaker_HalfOpensAfterCooldown(t *testing.T) {
 	for i := 0; i < tools.BreakerThreshold; i++ {
 		adapter.Run(context.Background(), fantasy.ToolCall{ID: fmt.Sprintf("c%d", i), Name: "search", Input: wedged})
 	}
-	if resp, _ := adapter.Run(context.Background(), fantasy.ToolCall{ID: "fast", Name: "search", Input: wedged}); !strings.Contains(resp.Content, "circuit breaker") {
+	if resp, _ := adapter.Run(context.Background(), fantasy.ToolCall{ID: "fast", Name: "search", Input: wedged}); !strings.Contains(
+		resp.Content,
+		"circuit breaker",
+	) {
 		t.Fatalf("expected breaker open, got: %s", resp.Content)
 	}
 
 	// Age the failure past the cooldown by backdating the last failure.
-	tools.TestBackdateBreaker("agent-d", "search", json.RawMessage(wedged), time.Now().Add(-tools.BreakerCooldown-time.Second))
+	tools.TestBackdateBreaker(
+		"agent-d",
+		"search",
+		json.RawMessage(wedged),
+		time.Now().Add(-tools.BreakerCooldown-time.Second),
+	)
 
 	resp, err := adapter.Run(context.Background(), fantasy.ToolCall{ID: "retry", Name: "search", Input: wedged})
 	if err != nil {

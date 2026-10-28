@@ -132,8 +132,12 @@ func TestStreamTurnUsageZeroOnError(t *testing.T) {
 	u := a.LastUsage()
 	want := int64(len("will fail") / 4)
 	if u.InputTokens != want || u.OutputTokens != 0 {
-		t.Errorf("LastUsage after error = {InputTokens:%d, OutputTokens:%d}, want seed {InputTokens:%d, OutputTokens:0}",
-			u.InputTokens, u.OutputTokens, want)
+		t.Errorf(
+			"LastUsage after error = {InputTokens:%d, OutputTokens:%d}, want seed {InputTokens:%d, OutputTokens:0}",
+			u.InputTokens,
+			u.OutputTokens,
+			want,
+		)
 	}
 }
 
@@ -253,7 +257,10 @@ func TestPoolMainAgentContextUsage_UsesAgentWindow(t *testing.T) {
 
 	cu := pool.MainAgentContextUsage()
 	if cu.ContextWindow != 200_000 {
-		t.Errorf("ContextUsage.ContextWindow = %d, want 200000 (the agent's window, not the pool's 1000000)", cu.ContextWindow)
+		t.Errorf(
+			"ContextUsage.ContextWindow = %d, want 200000 (the agent's window, not the pool's 1000000)",
+			cu.ContextWindow,
+		)
 	}
 	if cu.Percent < 24.9 || cu.Percent > 25.1 {
 		t.Errorf("ContextUsage.Percent = %f, want ~25 (50000/200000)", cu.Percent)
@@ -355,7 +362,11 @@ func TestAgentLastUsageRetainedOnError(t *testing.T) {
 
 	u = a.LastUsage()
 	if u.InputTokens != 1200 || u.OutputTokens != 50 {
-		t.Errorf("LastUsage after error = {InputTokens:%d, OutputTokens:%d}, want retained {1200, 50}", u.InputTokens, u.OutputTokens)
+		t.Errorf(
+			"LastUsage after error = {InputTokens:%d, OutputTokens:%d}, want retained {1200, 50}",
+			u.InputTokens,
+			u.OutputTokens,
+		)
 	}
 }
 

@@ -526,7 +526,9 @@ func main() { //nolint:gocyclo // main wires CLI, providers, extensions, and TUI
 			return err
 		}
 		if main := pool.Get(agent.MainAgentID); main != nil {
-			main.SetProviderOptions(providerOptionsForRuntime(currentProvider, startupThinkingMode(ctx, cfg, currentProvider), cfg.Model))
+			main.SetProviderOptions(
+				providerOptionsForRuntime(currentProvider, startupThinkingMode(ctx, cfg, currentProvider), cfg.Model),
+			)
 		}
 		return nil
 	}

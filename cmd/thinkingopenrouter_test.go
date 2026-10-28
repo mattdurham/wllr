@@ -35,7 +35,10 @@ func withOpenRouterModels(t *testing.T, selected string, params map[string][]str
 		}
 		entries = append(entries, entry+`}`)
 	}
-	cfgJSON := `{"wllr":{"provider":"openrouter","model":"` + selected + `","openrouter_models":[` + strings.Join(entries, ",") + `]}}`
+	cfgJSON := `{"wllr":{"provider":"openrouter","model":"` + selected + `","openrouter_models":[` + strings.Join(
+		entries,
+		",",
+	) + `]}}`
 	if err := os.WriteFile(path, []byte(cfgJSON), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -53,20 +56,25 @@ func TestOpenRouterReasoningCapability(t *testing.T) {
 		{ID: "legacy-param/model", SupportedParameters: []string{"include_reasoning"}},
 		{ID: "uncaptured/model"},
 	}}
-	if supports, declared := openRouterReasoningCapability(settings.OpenRouterModels, "reasoning/model"); !supports || !declared {
+	if supports, declared := openRouterReasoningCapability(settings.OpenRouterModels, "reasoning/model"); !supports ||
+		!declared {
 		t.Errorf("reasoning/model = (%v, %v), want (true, true)", supports, declared)
 	}
-	if supports, declared := openRouterReasoningCapability(settings.OpenRouterModels, "plain/model"); supports || !declared {
+	if supports, declared := openRouterReasoningCapability(settings.OpenRouterModels, "plain/model"); supports ||
+		!declared {
 		t.Errorf("plain/model = (%v, %v), want (false, true)", supports, declared)
 	}
-	if supports, declared := openRouterReasoningCapability(settings.OpenRouterModels, "legacy-param/model"); !supports || !declared {
+	if supports, declared := openRouterReasoningCapability(settings.OpenRouterModels, "legacy-param/model"); !supports ||
+		!declared {
 		t.Errorf("legacy spelling must count as reasoning-capable, got (%v, %v)", supports, declared)
 	}
 	// No captured data means an older pin: treated as able, not declared.
-	if supports, declared := openRouterReasoningCapability(settings.OpenRouterModels, "uncaptured/model"); !supports || declared {
+	if supports, declared := openRouterReasoningCapability(settings.OpenRouterModels, "uncaptured/model"); !supports ||
+		declared {
 		t.Errorf("uncaptured/model = (%v, %v), want (true, false)", supports, declared)
 	}
-	if supports, declared := openRouterReasoningCapability(settings.OpenRouterModels, "not-pinned"); !supports || declared {
+	if supports, declared := openRouterReasoningCapability(settings.OpenRouterModels, "not-pinned"); !supports ||
+		declared {
 		t.Errorf("not-pinned = (%v, %v), want (true, false)", supports, declared)
 	}
 }
@@ -118,7 +126,8 @@ func TestOpenRouterRuntimeOptionsMergeReasoningAndRouting(t *testing.T) {
 	// just the reasoning options.
 	po := openRouterRuntimeProviderOptions(thinkingModeMedium)
 	opts := po[fantasyopenrouterprovider.Name].(*fantasyopenrouterprovider.ProviderOptions)
-	if opts.Reasoning == nil || opts.Reasoning.Effort == nil || *opts.Reasoning.Effort != fantasyopenrouterprovider.ReasoningEffortMedium {
+	if opts.Reasoning == nil || opts.Reasoning.Effort == nil ||
+		*opts.Reasoning.Effort != fantasyopenrouterprovider.ReasoningEffortMedium {
 		t.Fatalf("reasoning-only: %#v", po)
 	}
 	if opts.Provider != nil {
@@ -291,7 +300,8 @@ func newOpenRouterModelsServer(t *testing.T, body string) *httptest.Server {
 }
 
 func TestFetchOpenRouterModelsCapturesSupportedParameters(t *testing.T) {
-	server := newOpenRouterModelsServer(t,
+	server := newOpenRouterModelsServer(
+		t,
 		`{"data":[{"id":"a/b","name":"A","context_length":1000,"supported_parameters":["reasoning","temperature"]},{"id":"c/d","context_length":2000}]}`,
 	)
 	defer server.Close()

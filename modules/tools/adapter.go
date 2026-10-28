@@ -22,7 +22,11 @@ import (
 // ToolExecutor is the slice of the extension host the adapter needs. A
 // concrete *extension.Host satisfies it; tests substitute fakes.
 type ToolExecutor interface {
-	ExecuteTool(ctx context.Context, agentID, toolCallID, toolName string, input json.RawMessage) (extension.ToolResult, error)
+	ExecuteTool(
+		ctx context.Context,
+		agentID, toolCallID, toolName string,
+		input json.RawMessage,
+	) (extension.ToolResult, error)
 	RegisteredTools() []extension.RegisteredToolInfo
 }
 

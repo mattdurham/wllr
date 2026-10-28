@@ -115,7 +115,11 @@ func TestObserveStepUsage_LiveMidTurn(t *testing.T) {
 	}
 	mu.Unlock()
 	if midDispatches == 0 || !windowOK {
-		t.Fatalf("mid-turn dispatches = %d (windowOK=%v), want >=1 with the agent's window and usage", midDispatches, windowOK)
+		t.Fatalf(
+			"mid-turn dispatches = %d (windowOK=%v), want >=1 with the agent's window and usage",
+			midDispatches,
+			windowOK,
+		)
 	}
 
 	close(relB)

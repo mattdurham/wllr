@@ -229,7 +229,16 @@ func TestThinkingModeIDForSet(t *testing.T) {
 		{"exact id", openAIThinkingModes, "high", "high"},
 		{"label maps budget", anthropicThinkingModes, "medium", "16384"},
 		{"label maps budget high", geminiThinkingModes, "xhigh", "65536"},
-		{"degrade stronger tie", []thinkingMode{{ID: thinkingModeNone, Name: "None"}, {ID: thinkingModeLow, Name: thinkingLabelLow}, {ID: thinkingModeHigh, Name: thinkingLabelHigh}}, "minimal", "low"},
+		{
+			"degrade stronger tie",
+			[]thinkingMode{
+				{ID: thinkingModeNone, Name: "None"},
+				{ID: thinkingModeLow, Name: thinkingLabelLow},
+				{ID: thinkingModeHigh, Name: thinkingLabelHigh},
+			},
+			"minimal",
+			"low",
+		},
 		{"degrade nearest", gpt56ThinkingModes, "minimal", "low"},
 		{"degrade below", openAIThinkingModes, "xhigh", "xhigh"},
 		{"only none set", []thinkingMode{{ID: thinkingModeNone, Name: "None"}}, "high", "none"},

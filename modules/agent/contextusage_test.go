@@ -28,7 +28,11 @@ func TestContextUsageFromResultEqualsOrExceedsEveryStepTotal(t *testing.T) {
 	res := &fantasy.AgentResult{
 		Steps: []fantasy.StepResult{
 			{Response: fantasy.Response{Usage: fantasy.Usage{InputTokens: 1_000, CacheCreationTokens: 15_000}}},
-			{Response: fantasy.Response{Usage: fantasy.Usage{InputTokens: 200, CacheReadTokens: 19_000, CacheCreationTokens: 100}}},
+			{
+				Response: fantasy.Response{
+					Usage: fantasy.Usage{InputTokens: 200, CacheReadTokens: 19_000, CacheCreationTokens: 100},
+				},
+			},
 			{Response: fantasy.Response{Usage: fantasy.Usage{InputTokens: 150, CacheReadTokens: 500}}},
 		},
 		TotalUsage: fantasy.Usage{InputTokens: 1_350, CacheReadTokens: 19_500, CacheCreationTokens: 15_100},
@@ -59,7 +63,11 @@ func TestContextUsageFromResultPrefersLargestPromptTotalOverRawInput(t *testing.
 	res := &fantasy.AgentResult{
 		Steps: []fantasy.StepResult{
 			{Response: fantasy.Response{Usage: fantasy.Usage{InputTokens: 1_000, CacheCreationTokens: 15_000}}},
-			{Response: fantasy.Response{Usage: fantasy.Usage{InputTokens: 200, CacheReadTokens: 19_000, CacheCreationTokens: 100}}},
+			{
+				Response: fantasy.Response{
+					Usage: fantasy.Usage{InputTokens: 200, CacheReadTokens: 19_000, CacheCreationTokens: 100},
+				},
+			},
 		},
 		TotalUsage: fantasy.Usage{InputTokens: 1_200, CacheReadTokens: 19_000, CacheCreationTokens: 15_100},
 	}

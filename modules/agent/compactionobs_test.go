@@ -254,7 +254,10 @@ func TestExecuteTurn_CompactionCounterIncrementsAndDispatches(t *testing.T) {
 					t.Errorf("notice MessagesCompacted = %d, want > 0", ev.notice.MessagesCompacted)
 				}
 				if ev.notice.EstimatedInputTokens <= 0 {
-					t.Errorf("notice EstimatedInputTokens = %d, want > 0 (post-compaction estimate)", ev.notice.EstimatedInputTokens)
+					t.Errorf(
+						"notice EstimatedInputTokens = %d, want > 0 (post-compaction estimate)",
+						ev.notice.EstimatedInputTokens,
+					)
 				}
 				if ev.cu.InputTokens <= 0 {
 					t.Errorf("notice dispatch InputTokens = %d, want > 0", ev.cu.InputTokens)

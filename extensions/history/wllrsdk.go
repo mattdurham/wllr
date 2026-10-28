@@ -254,7 +254,9 @@ func OnAfterToolCall(fn func(callID, toolName, result string, isError bool)) {
 // "reactive", "tool_loop") and messages is how many history messages the
 // summary folded away. inputTokens/contextWindow are the provider-reported
 // usage and the model's window; percent is inputTokens/contextWindow*100.
-func OnContextUsage(fn func(inputTokens, contextWindow int64, percent float64, compacted bool, trigger string, messages int)) {
+func OnContextUsage(
+	fn func(inputTokens, contextWindow int64, percent float64, compacted bool, trigger string, messages int),
+) {
 	_sdkOn("context_usage", func(payload json.RawMessage) {
 		var p struct {
 			Usage struct {

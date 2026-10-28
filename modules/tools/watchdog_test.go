@@ -25,7 +25,11 @@ type blockingHost struct {
 	started chan struct{}
 }
 
-func (b *blockingHost) ExecuteTool(ctx context.Context, _, _, _ string, _ json.RawMessage) (extension.ToolResult, error) {
+func (b *blockingHost) ExecuteTool(
+	ctx context.Context,
+	_, _, _ string,
+	_ json.RawMessage,
+) (extension.ToolResult, error) {
 	close(b.started)
 	<-ctx.Done()
 	return extension.ToolResult{}, ctx.Err()

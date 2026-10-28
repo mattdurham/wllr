@@ -54,10 +54,12 @@ func TestOpenRouterSpeedAppliesAndPersistsIndependently(t *testing.T) {
 	// openrouter.ProviderOptions struct under the single fantasy key.
 	po := providerOptionsForRuntime(providerOpenRouter, "high", "")
 	opts, ok := po[fantasyopenrouterprovider.Name].(*fantasyopenrouterprovider.ProviderOptions)
-	if !ok || opts.Provider == nil || opts.Provider.Sort == nil || opts.Reasoning == nil || opts.Reasoning.Effort == nil {
+	if !ok || opts.Provider == nil || opts.Provider.Sort == nil || opts.Reasoning == nil ||
+		opts.Reasoning.Effort == nil {
 		t.Fatalf("routing and reasoning must coexist in one struct: %#v", po)
 	}
-	if *opts.Provider.Sort != openRouterSpeedThroughput || *opts.Reasoning.Effort != fantasyopenrouterprovider.ReasoningEffortHigh {
+	if *opts.Provider.Sort != openRouterSpeedThroughput ||
+		*opts.Reasoning.Effort != fantasyopenrouterprovider.ReasoningEffortHigh {
 		t.Errorf("merged options = sort %v effort %v, want throughput/high", opts.Provider.Sort, opts.Reasoning.Effort)
 	}
 	if got := savedOpenRouterSpeed(); got != "nitro" {

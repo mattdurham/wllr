@@ -423,6 +423,15 @@ dispatched at all.
 | Medium | `TestEsc_IdleDoesNotArmQueueFlush` | Esc with the main agent idle | `cancelFlushQueue` remains false |
 | Medium | `TestStreamDone_NormalCompletionDoesNotFlushQueue` | armed flag but `Err == nil` | flag reset; queue untouched (drain already happened in the agent) |
 
+### builtin_ui_test.go
+
+`TestBuiltinWASMTranscriptAndStatusline` loads the generated agents and
+statusline WASM modules through the real extension host and UI bridge. It
+dispatches session start, a user prompt, and assistant tokens, then verifies
+that the scene and full harness view retain the transcript, model status,
+and ANSI colors. Run `make builtins` first; the test skips only when the
+generated artifacts are absent.
+
 ### selection_test.go
 
 | Priority | Test | Scenario | Assertions |

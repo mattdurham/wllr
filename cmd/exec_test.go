@@ -49,7 +49,12 @@ func TestRunExec_PipePressureCancel(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		// writer floods the pipe; reader trickles — both stay alive past cancel
-		_, err := runExec(ctx, "yes 'some output line for the pipe' | while read -r l; do echo \"$l\"; sleep 0.05; done", "", nil)
+		_, err := runExec(
+			ctx,
+			"yes 'some output line for the pipe' | while read -r l; do echo \"$l\"; sleep 0.05; done",
+			"",
+			nil,
+		)
 		done <- err
 	}()
 	time.Sleep(500 * time.Millisecond)
