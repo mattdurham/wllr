@@ -59,10 +59,23 @@ func TestStreamTurnCompactsGrowingToolTranscript(t *testing.T) {
 	a := &Agent{}
 	fa := fantasy.NewAgent(lm, fantasy.WithTools(tool))
 	var observed []CompactionResult
-	got, _, err := a.streamTurn(context.Background(), fa, lm, nil, "do the task", nil, nil, nil,
-		262_144, CompactConfig{Enabled: true, ThresholdPct: 0.80}, func(result CompactionResult) {
+	got, _, err := a.streamTurn(
+		context.Background(),
+		fa,
+		lm,
+		nil,
+		"do the task",
+		[]fantasy.AgentTool{tool},
+		nil,
+		nil,
+		nil,
+		262_144,
+		CompactConfig{Enabled: true, ThresholdPct: 0.80},
+		func(result CompactionResult) {
 			observed = append(observed, result)
-		}, nil)
+		},
+		nil,
+	)
 	if err != nil {
 		t.Fatalf("streamTurn: %v", err)
 	}

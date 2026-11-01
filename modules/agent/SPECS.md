@@ -554,6 +554,19 @@ for step N fires after step N's tools complete and before step N+1's tools start
 moment between an orchestrator's sleep/poll loops. Sub-agent steps never dispatch (the
 main indicator is main-agent-only, matching the turn-end dispatch).
 
+**Missing-usage fallback:** some compatible endpoints omit prompt usage even
+while reporting output tokens. Before each provider step after the first, the
+`PrepareStep` wrapper checks the previous step after compaction and steering
+have prepared the outgoing messages. If that step's total prompt usage is zero,
+`observeEstimatedStepUsage` stores a chars/4 estimate of the prepared
+provider-facing messages plus the turn's serialized tool definitions, marks it
+with `usageIsEstimate`, and dispatches it for the main agent. This keeps the
+indicator advancing with tool traffic instead of freezing at the turn-start
+seed. The fallback never runs for a step with real input/cache usage, and the
+next real report replaces the estimate outright through the existing
+first-report latch. The first provider step remains covered by the turn-start
+baseline seed.
+
 **Baseline seed (fresh sessions):** until any provider-reported usage exists
 (`usageReported`), `executeTurn` calls `seedUsageEstimate(contextEstimate(history,
 sysPrompt, content, tools), pool, contextWindow)` before each `streamTurn` attempt,
@@ -685,12 +698,15 @@ interceptor can never crash a turn.
 
 `streamTurn` is the internal helper extracted from `Submit` to keep cyclomatic complexity below threshold. It:
 
-1. Calls `fa.Stream` with history, content, and callbacks.
+1. Calls `fa.Stream` with history, content, the resolved tools, and callbacks.
 2. Counts each text delta as one token via `pool.addTokens(1)`.
 3. Forwards text deltas to `onToken` (if set).
 4. Forwards tool calls to `onToolCall` (if set), skipping provider-executed tool calls (`toolCall.ProviderExecuted == true`).
-5. Returns the collected text, the peak provider-step `fantasy.Usage`, and any error. `TotalUsage` is cumulative across tool-loop steps and is not used for context occupancy or compaction thresholds.
-6. On error, returns a zero-valued `fantasy.Usage`.
+5. Wraps `PrepareStep` so steering/compaction run first and the missing-usage
+   fallback can estimate the actual prepared request when the previous step
+   reported no prompt tokens.
+6. Returns the collected text, the peak provider-step `fantasy.Usage`, and any error. `TotalUsage` is cumulative across tool-loop steps and is not used for context occupancy or compaction thresholds.
+7. On error, returns a zero-valued `fantasy.Usage`.
 
 **Message filtering before LLM calls:** `sdkToFantasyMessages` is called on the history slice before constructing the `AgentStreamCall`. It skips any message whose `Type` is `sdk.MessageTypeSystem` or `sdk.MessageTypeSteering`. These messages are consumed by the Go runtime and must never reach the provider.
 

@@ -76,7 +76,7 @@ func TestStreamTurn_SeparatesTextPartsWithParagraphBreak(t *testing.T) {
 
 	var streamed strings.Builder
 	a := &Agent{}
-	got, _, err := a.streamTurn(context.Background(), fa, lm, nil, "inspect", nil,
+	got, _, err := a.streamTurn(context.Background(), fa, lm, nil, "inspect", []fantasy.AgentTool{tool}, nil,
 		func(text string) { streamed.WriteString(text) }, nil,
 		262_144, CompactConfig{}, nil, nil)
 	if err != nil {

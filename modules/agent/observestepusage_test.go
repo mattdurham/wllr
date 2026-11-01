@@ -46,6 +46,36 @@ func (g *namedGate) Run(_ context.Context, _ fantasy.ToolCall) (fantasy.ToolResp
 func (g *namedGate) ProviderOptions() fantasy.ProviderOptions   { return nil }
 func (g *namedGate) SetProviderOptions(fantasy.ProviderOptions) {}
 
+// scriptedUsageLM replaces each scripted response's finish usage while
+// delegating all other language-model behavior to FakeLM.
+type scriptedUsageLM struct {
+	*testutil.FakeLM
+	usages []fantasy.Usage
+	mu     sync.Mutex
+	next   int
+}
+
+func (lm *scriptedUsageLM) Stream(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
+	stream, err := lm.FakeLM.Stream(ctx, call)
+	if err != nil {
+		return nil, err
+	}
+	lm.mu.Lock()
+	idx := lm.next
+	if idx < len(lm.usages) {
+		lm.next++
+	}
+	lm.mu.Unlock()
+	return func(yield func(fantasy.StreamPart) bool) {
+		stream(func(part fantasy.StreamPart) bool {
+			if part.Type == fantasy.StreamPartTypeFinish && idx < len(lm.usages) {
+				part.Usage = lm.usages[idx]
+			}
+			return yield(part)
+		})
+	}, nil
+}
+
 // TestObserveStepUsage_LiveMidTurn reproduces the missing-ctx bug: a long
 // orchestrator turn used to leave LastUsage at its previous-turn value and
 // EventContextUsage undispatched until the turn ended — so the statusline
@@ -144,6 +174,73 @@ func TestObserveStepUsage_LiveMidTurn(t *testing.T) {
 	mu.Unlock()
 	if total <= midDispatches {
 		t.Fatalf("dispatches after turn = %d, want > mid-turn %d (step 2 + turn end)", total, midDispatches)
+	}
+}
+
+func TestObserveStepUsage_AdvancesWithEstimateWhenProviderOmitsInput(t *testing.T) {
+	lm := &scriptedUsageLM{
+		FakeLM: testutil.NewFakeLM(),
+		usages: []fantasy.Usage{
+			{OutputTokens: 10},
+			{OutputTokens: 20},
+			{OutputTokens: 30},
+			{OutputTokens: 40},
+		},
+	}
+	lm.SetScript([]testutil.ScriptedTurn{
+		{ToolCalls: []testutil.ScriptedToolCall{{ID: "tc1", Name: "gate_a", Input: json.RawMessage(`{}`)}}},
+		{ToolCalls: []testutil.ScriptedToolCall{{ID: "tc2", Name: "gate_b", Input: json.RawMessage(`{}`)}}},
+		{ToolCalls: []testutil.ScriptedToolCall{{ID: "tc3", Name: "gate_c", Input: json.RawMessage(`{}`)}}},
+		{Text: "done"},
+	})
+	pool := NewPool()
+	a, err := pool.Spawn(MainAgentID, lm, SpawnOpts{ModelName: "fake-model", ContextWindow: 100_000})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	relA := make(chan struct{})
+	relB := make(chan struct{})
+	relC := make(chan struct{})
+	close(relA)
+	a.SetToolsFn(func() []fantasy.AgentTool {
+		return []fantasy.AgentTool{
+			&namedGate{name: "gate_a", release: relA},
+			&namedGate{name: "gate_b", release: relB},
+			&namedGate{name: "gate_c", release: relC},
+		}
+	})
+	done := make(chan error, 1)
+	a.SetOnDone(func(err error) { done <- err })
+	a.Submit(context.Background(), "grow context across provider steps")
+
+	waitForLiveCtx(t, func() bool { return a.Activity().ActiveToolName == "gate_b" }, "gate_b to start")
+	first := pool.MainAgentContextUsage().InputTokens
+	if first <= 0 {
+		t.Fatalf("context after step 1 = %d, want a positive live estimate", first)
+	}
+
+	close(relB)
+	waitForLiveCtx(t, func() bool { return a.Activity().ActiveToolName == "gate_c" }, "gate_c to start")
+	second := pool.MainAgentContextUsage().InputTokens
+	if second <= first {
+		t.Fatalf(
+			"context stuck at %d after step 2 (first value %d); work continued without input usage reports",
+			second,
+			first,
+		)
+	}
+	if !a.ContextBreakdown().LastRequestIsEstimate {
+		t.Fatal("fallback usage is not marked as an estimate for /context")
+	}
+
+	close(relC)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("turn errored: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("turn did not finish")
 	}
 }
 

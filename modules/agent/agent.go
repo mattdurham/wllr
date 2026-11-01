@@ -813,6 +813,49 @@ func (a *Agent) observeStepUsage(step fantasy.Usage, pool *AgentPool, contextWin
 	}
 }
 
+// observeEstimatedStepUsage keeps the context indicator advancing when an
+// endpoint omits prompt usage from streaming responses. PrepareStep sees the
+// complete provider-facing messages for the next request, including the prior
+// step's tool traffic, so it is the earliest point where that growth is known.
+// Real usage always wins: the fallback runs only after a step with no input or
+// cache tokens, and observeStepUsage replaces an estimate with the next real
+// report outright. Tool definitions are included from the turn's resolved tool
+// list; chars/4 matches the other display estimates.
+func (a *Agent) observeEstimatedStepUsage(
+	opts fantasy.PrepareStepFunctionOptions,
+	result fantasy.PrepareStepResult,
+	tools []fantasy.AgentTool,
+	pool *AgentPool,
+	contextWindow int64,
+) {
+	if len(opts.Steps) == 0 {
+		return
+	}
+	last := opts.Steps[len(opts.Steps)-1]
+	if promptTokenTotal(last.Usage) > 0 {
+		return
+	}
+	messages := opts.Messages
+	if result.Messages != nil {
+		messages = result.Messages
+	}
+	estimated := estimateFantasyMessageBytes(messages)/4 + estimateToolTokens(tools)
+	if estimated <= 0 {
+		return
+	}
+	a.lastUsageMu.Lock()
+	a.lastUsage = fantasy.Usage{InputTokens: estimated, OutputTokens: last.Usage.OutputTokens}
+	a.usageIsEstimate = true
+	a.lastUsageMu.Unlock()
+	if pool != nil && a.id == MainAgentID {
+		pool.dispatchContextUsage(
+			sdk.ContextUsageFromFantasy(a.LastUsage(), contextWindow),
+			nil,
+			a.compactionCount,
+		)
+	}
+}
+
 // beginStreamStats installs a fresh stream tracker for the turn about to
 // stream and returns it for direct use by the turn's stream callbacks (which
 // fantasy invokes on the turn goroutine). Called only from the turn goroutine
@@ -1378,6 +1421,7 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 		lm,
 		streamMsgs,
 		streamPrompt,
+		tools,
 		pool,
 		onToken,
 		onToolCall,
@@ -1461,6 +1505,7 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 			lm,
 			streamMsgs,
 			streamPrompt,
+			tools,
 			pool,
 			onToken,
 			onToolCall,
@@ -1863,6 +1908,7 @@ func (a *Agent) streamTurn(
 	lm fantasy.LanguageModel,
 	history []sdk.Message,
 	content string,
+	tools []fantasy.AgentTool,
 	pool *AgentPool,
 	onToken func(string),
 	onToolCall func(id, name, input string),
@@ -1880,10 +1926,20 @@ func (a *Agent) streamTurn(
 	// already cleared the tracker.
 	stats := a.beginStreamStats()
 	defer a.endStreamStats(0, false)
+	prepareStep := steer.wrap(compactor.prepare)
 	res, err := fa.Stream(ctx, fantasy.AgentStreamCall{
-		Messages:    sdkToFantasyMessages(history),
-		Prompt:      content,
-		PrepareStep: steer.wrap(compactor.prepare),
+		Messages: sdkToFantasyMessages(history),
+		Prompt:   content,
+		PrepareStep: func(
+			ctx context.Context,
+			opts fantasy.PrepareStepFunctionOptions,
+		) (context.Context, fantasy.PrepareStepResult, error) {
+			ctx, result, err := prepareStep(ctx, opts)
+			if err == nil {
+				a.observeEstimatedStepUsage(opts, result, tools, pool, contextWindow)
+			}
+			return ctx, result, err
+		},
 		OnStepStart: func(_ int) error {
 			stats.stepStart(time.Now())
 			return nil
