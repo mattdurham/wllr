@@ -350,9 +350,14 @@ estimate of the newest messages, including tool results. The
 full provider-facing message size is used when an endpoint omits usage. The
 threshold is the configured percentage when enabled, capped at 85% of the
 model window and by the output reserve. Reaching it summarizes the active
-provider-facing transcript with the same model, replaces that transcript with
-one user summary message, and retains later tool-step messages verbatim. The
-summary request is bounded by the model window. If summarization fails, the
+provider-facing transcript with the same model, and replaces that transcript
+with one user context packet. The packet preserves the original task and
+rolling summary, plus a bounded section of up to 40 recent messages as JSON excerpts (each
+truncated to 2,000 bytes); later tool-step messages remain verbatim. Keeping
+recent excerpts inside the user packet avoids orphaned provider tool results.
+The original task and recent concrete tool activity therefore survive repeated
+compactions instead of being reduced to prose alone. The summary request is
+bounded by the model window. If summarization fails, the
 turn stops with an explicit error before making another provider request.
 Successful in-turn summaries use the `tool_loop` compaction trigger and count
 toward the session compaction total. Persisted conversation history is recorded
@@ -1203,6 +1208,18 @@ model sees as the tool error. See `extensions/agents/README.md` for the
 detection rules and `~/.wllr/extensions/agents/config.yaml` for configuration
 (`loop_guard:` — enabled/window/scope/min_repeats/max_period; missing config
 uses defaults). NOTES §45 records why the extension seam beat the pool seam.
+
+**Assistant-output loop guard:** `outputloop.go` provides a separate fatal guard
+inside `streamTurn`, because a provider can repeat assistant text indefinitely
+without ever dispatching a tool call that the extension could intercept. The
+guard compares whitespace-normalized paragraphs across arbitrary provider delta
+and text-part boundaries. A paragraph is substantive only at 80 or more bytes
+and 12 or more words; short status fragments are ignored. The third consecutive
+identical substantive paragraph returns `errAssistantOutputLoop`, which aborts
+the provider stream, finishes the agent turn with an error, and leaves the agent
+idle rather than waiting for manual cancellation or the turn timeout. Detection
+state is per stream attempt. Its unterminated-paragraph buffer is capped at
+64 KiB; overflow retains a 32 KiB suffix and resets the comparison sequence.
 
 ---
 

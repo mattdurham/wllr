@@ -92,7 +92,13 @@ func TestStreamTurnCompactsGrowingToolTranscript(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(encoded), "task state summary") || len(encoded) > 10_000 {
+	finalPrompt := string(encoded)
+	for _, want := range []string{"do the task", "task state summary", "large_tool"} {
+		if !strings.Contains(finalPrompt, want) {
+			t.Errorf("final prompt omits %q: %s", want, finalPrompt)
+		}
+	}
+	if len(encoded) > 10_000 {
 		t.Fatalf("final prompt was not compacted: %d bytes", len(encoded))
 	}
 }
@@ -145,6 +151,12 @@ func TestToolLoopCompactorSummarizesBeforeNextStep(t *testing.T) {
 			len(prepared.Messages),
 			len(observed),
 		)
+	}
+	retained := prepared.Messages[0].Content[0].(fantasy.TextPart).Text
+	for _, want := range []string{"original task", "task and tool result summary", "tool result"} {
+		if !strings.Contains(retained, want) {
+			t.Errorf("retained context omits %q: %q", want, retained)
+		}
 	}
 	if got := prepared.Messages[1].Content[0].(fantasy.TextPart).Text; got != "new tool result" {
 		t.Fatalf("new result = %q", got)

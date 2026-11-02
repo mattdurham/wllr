@@ -1918,6 +1918,7 @@ func (a *Agent) streamTurn(
 	steer *steerInjector,
 ) (string, fantasy.Usage, error) {
 	var collected string
+	outputLoops := newOutputLoopDetector()
 	compactor := newToolLoopCompactor(lm, contextWindow, compactCfg, onCompaction)
 	// Live tokens-per-second tracking: spans follow the step lifecycle so
 	// tool execution and sub-agent wait time are excluded from the streamed
@@ -1954,6 +1955,10 @@ func (a *Agent) streamTurn(
 			return nil
 		},
 		OnTextStart: func(_ string) error {
+			if collected != "" && outputLoops.Observe("\n\n") {
+				slog.Warn("agent: assistant output loop detected; stopping turn", "agent", a.id)
+				return errAssistantOutputLoop
+			}
 			// Each text part is a separate assistant segment — typically the
 			// narration surrounding a tool call. Parts carry no separating
 			// whitespace of their own, so concatenating them raw fuses the last
@@ -1978,6 +1983,10 @@ func (a *Agent) streamTurn(
 			case <-ctx.Done():
 				return ctx.Err()
 			default:
+			}
+			if outputLoops.Observe(text) {
+				slog.Warn("agent: assistant output loop detected; stopping turn", "agent", a.id)
+				return errAssistantOutputLoop
 			}
 			collected += text
 			stats.token(time.Now(), text)

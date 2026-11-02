@@ -16,12 +16,15 @@ import (
 // Fantasy tool loop. Fantasy reconstructs the original prompt for each step,
 // so cutStep records which completed steps are already included in summary.
 type toolLoopCompactor struct {
+	anchor       fantasy.Message
 	lm           fantasy.LanguageModel
 	onCompaction func(CompactionResult)
 	summary      string
+	retained     string
 	window       int64
 	threshold    int64
 	cutStep      int
+	hasAnchor    bool
 }
 
 func newToolLoopCompactor(
@@ -51,7 +54,7 @@ func (c *toolLoopCompactor) prepare(
 
 	messages := opts.Messages
 	if c.summary != "" {
-		messages = []fantasy.Message{fantasy.NewUserMessage("[Compacted conversation and tool results]\n" + c.summary)}
+		messages = []fantasy.Message{fantasy.NewUserMessage(c.retained)}
 		for _, step := range opts.Steps[c.cutStep:] {
 			messages = append(messages, step.Messages...)
 		}
@@ -86,6 +89,7 @@ func (c *toolLoopCompactor) prepare(
 		return ctx, fantasy.PrepareStepResult{}, fmt.Errorf("tool-loop context compaction failed: %w", err)
 	}
 	c.summary = summary
+	c.retained = c.compactionContext(messages, summary)
 	c.cutStep = len(opts.Steps)
 	if c.onCompaction != nil {
 		c.onCompaction(CompactionResult{
@@ -94,8 +98,49 @@ func (c *toolLoopCompactor) prepare(
 		})
 	}
 	return ctx, fantasy.PrepareStepResult{Messages: []fantasy.Message{
-		fantasy.NewUserMessage("[Compacted conversation and tool results]\n" + summary),
+		fantasy.NewUserMessage(c.retained),
 	}}, nil
+}
+
+// compactionContext preserves the operational context that a prose-only
+// summary can lose: the original task and concrete recent tool activity. The
+// recent messages are bounded JSON excerpts inside the user message, so a tail
+// can never begin with an orphaned provider tool result.
+func (c *toolLoopCompactor) compactionContext(messages []fantasy.Message, summary string) string {
+	recent := messages
+	if !c.hasAnchor && len(messages) > 0 {
+		c.anchor = messages[0]
+		c.hasAnchor = true
+		recent = messages[1:]
+	} else if len(recent) > 0 {
+		// On later compactions the first message is the previous retained
+		// packet; the fresh summary already incorporates it.
+		recent = recent[1:]
+	}
+
+	var retained strings.Builder
+	retained.WriteString("[Compacted conversation and tool results]")
+	if c.hasAnchor {
+		retained.WriteString("\n\n[Original task]\n")
+		if encoded, err := json.Marshal(c.anchor); err == nil {
+			retained.Write(encoded)
+		}
+	}
+	retained.WriteString("\n\n[Rolling summary]\n")
+	retained.WriteString(summary)
+	if len(recent) == 0 {
+		return retained.String()
+	}
+
+	retained.WriteString("\n\n[Recent messages; large payloads truncated]\n")
+	start := len(recent) - 40
+	if start < 0 {
+		start = 0
+	}
+	for _, message := range recent[start:] {
+		appendToolLoopMessage(&retained, message, 2_000)
+	}
+	return retained.String()
 }
 
 func estimateFantasyMessageBytes(messages []fantasy.Message) int64 {

@@ -101,8 +101,8 @@ an OpenRouter catalog outage cannot block use of the current session model.
 
 | Test | Scenario | Setup | Assertions |
 |------|----------|-------|------------|
-| `TestStreamTurnCompactsGrowingToolTranscript` | Real Fantasy tool loop approaches its context window | Mock provider reports 190k input tokens, tool returns a large result | One bounded summary call runs; next provider call receives the summary without the large tool result |
-| `TestToolLoopCompactorSummarizesBeforeNextStep` | Tool output grows the active prompt beyond the threshold | Provider usage near 80%, large new tool result | Next step receives a summary; following step retains later result without summarizing again |
+| `TestStreamTurnCompactsGrowingToolTranscript` | Real Fantasy tool loop approaches its context window | Mock provider reports 190k input tokens, tool returns a large result | One bounded summary call runs; next provider call receives the original task, summary, and recent tool activity without the large tool payload |
+| `TestToolLoopCompactorSummarizesBeforeNextStep` | Tool output grows the active prompt beyond the threshold | Provider usage near 80%, large new tool result | Next step receives retained original/recent context and a summary; following step retains that context plus the later result without summarizing again |
 | `TestToolLoopCompactorStopsOnSummaryFailure` | Summarizer returns no text | Usage above threshold | PrepareStep returns an explicit error instead of sending an oversized request |
 | `TestToolLoopCompactorUsesMessageSizeWhenProviderOmitsUsage` | Compatible endpoint reports zero usage | Large provider-facing prompt | Bounded message-size estimate still triggers compaction |
 
@@ -189,6 +189,15 @@ through the agent/pool accessors.
 | `TestSpark_NoPollNoBars` | turn ends before any poll follows its first token | no bars frozen — the number alone shows |
 | `TestAgent_StreamTpsSpark_Lifecycle` | agent-level sparkline lifecycle | "" fresh; live while the tracker is open; frozen by `endStreamStats` exactly as the tracker holds them; redundant end call is a no-op |
 | `TestPool_MainAgentTpsSpark_NoMain` | pool without a main agent | "" (mirrors `MainAgentTps`'s zero) |
+
+### outputloop_test.go (fatal repeated-assistant-output guard)
+
+| Test | Scenario | Assertions |
+|------|----------|------------|
+| `TestOutputLoopDetector_ThirdRepeatedParagraph` | two, then three identical substantive paragraphs | first two are accepted; third triggers termination |
+| `TestOutputLoopDetector_SplitDeltas` | repeated paragraphs split into arbitrary 17-byte deltas | chunk boundaries do not hide the loop; detection fires before the stream is consumed |
+| `TestOutputLoopDetector_DifferentParagraphsDoNotTrigger` | three distinct substantive status paragraphs | no false positive on progressing output |
+| `TestAgent_RepeatedAssistantOutputStopsRun` | real `Submit` turn whose provider offers twelve identical paragraphs | `OnDone` receives an output-loop error after at most three paragraphs and `IsRunning` becomes false |
 
 ## Missing / Recommended Tests
 
