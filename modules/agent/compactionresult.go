@@ -21,6 +21,10 @@ type CompactionResult struct {
 	// caused this run. Set for every result so callers can log it without
 	// re-deriving it.
 	Trigger string
+	// Method is CompactionMethodSummary for an LLM summary or
+	// CompactionMethodTruncate for the deterministic fallback. Empty on a
+	// no-op.
+	Method string
 	// History is the post-compaction history (input unchanged on no-op or
 	// failure).
 	History []sdk.Message
@@ -33,11 +37,22 @@ type CompactionResult struct {
 	// Latency is the wall-clock duration of the summarization call (zero on
 	// no-op or failure).
 	Latency time.Duration
-	// EstimatedTokens is the chars/4 estimate of the post-compaction context
-	// (system prompt + tool definitions + the compacted history), used to
-	// re-base the agent's carried usage baseline so the ctx indicator and the
-	// usage-threshold trigger reflect the shrunken context instead of the
-	// pre-compaction peak. Zero means unknown; callers that know the full
-	// request surface (executeTurn) fill it before observeCompaction.
+	// EstimatedTokens is the estimate of the post-compaction context (system
+	// prompt + tool definitions + the compacted history), used to re-base the
+	// agent's carried usage baseline so the ctx indicator and the trigger
+	// reflect the shrunken context instead of the pre-compaction peak. Zero
+	// means unknown.
 	EstimatedTokens int64
+	// TokensBefore and TokensAfter size the request before and after the run
+	// (including the system prompt, next message, and tool definitions). They
+	// make the reduction observable even when the summary result is truncated.
+	TokensBefore int64
+	TokensAfter  int64
+}
+
+// carriesSummary reports whether Summary is a conversation summary that the
+// agent should carry into the next compaction as priorSummary, rather than a
+// deterministic truncation notice.
+func (r CompactionResult) carriesSummary() bool {
+	return r.Summary != "" && r.Method != CompactionMethodTruncate
 }

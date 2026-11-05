@@ -206,6 +206,11 @@ medium-length messages). On smaller models the 10% value may coincide with
 `defaultKeepRecentTokens`. The `defaultKeepRecentTokens` constant is retained for callers
 that invoke `compactHistory` directly and pass `keepRecentTokens=0`.
 
+*Addendum (2026-11-04):* the window/10 value is now the starting point for
+`newCompactionBudget`'s `KeepRecent`, capped to `0.8 × trigger − reserve` so a
+compacted context lands below the recovery band. Large windows still use
+window/10; small or provider-capped windows keep less. See §54.
+
 ---
 
 ## 15. AgentPool.ListTeams and GetTeamMembers — Pool-Level Team Introspection
@@ -312,8 +317,14 @@ and `EventContextUsage`.
 **Rationale:** The chars/4 heuristic systematically underestimates token counts for
 code-heavy conversations (identifiers and symbols cost more than 0.25 tokens/char on
 average) and can underestimate heavily by 30–50% in practice. Real API counts allow the
-percentage-based compaction trigger (`shouldCompactByUsage`) to fire at the correct time
-rather than too late, reducing context-length errors.
+percentage-based compaction trigger to fire at the correct time rather than too
+late, reducing context-length errors.
+
+*Addendum (2026-11-04):* provider usage remains authoritative for the ctx
+display, `/context`'s `LastRequest`, and the in-turn tool-loop threshold, but
+the sdk-history preflight now compares `contextEstimate` of the next request to
+the budget. Persisted history carries only user/assistant text, so a tool-heavy
+turn's provider peak overstates the next request; see §54.
 
 **Consequence:** The first turn still uses the heuristic because `lastUsage` is zero before
 the first API call completes. This chicken-and-egg bootstrap is unavoidable and documented
@@ -1279,3 +1290,64 @@ the log line, and the usage re-base all behave identically.
 racing the turn goroutine. A no-op run (history fits, or no summarizable span) reports
 "nothing to compact" and counts nothing. The command runs off the update goroutine because
 summarization is a provider call. Coverage: compactnow_test.go and commands_test.go.
+
+## 54. Adaptive compaction pipeline (2026-11-04)
+
+**Decision:** Compaction is one budgeted pipeline shared by proactive,
+usage-threshold, reactive, and manual runs:
+
+1. **Preflight sizes the next request.** `executeTurn` computes
+   `contextEstimate(history, sysPrompt, content, tools)` and compares it to
+   `newCompactionBudget(window, cfg).Trigger` (80% by default, or
+   `window − reserve` when disabled). The previous turn's provider usage is no
+   longer the trigger numerator. `reserve = min(16_384, window/4)`;
+   `Safety = window − reserve`; `Recovery = 0.8 × Trigger`;
+   `KeepRecent = min(window/10, 0.8 × Trigger − reserve, floor 1_000)`.
+2. **Budgeted summary input.** `compactHistory` serializes the folded span
+   within `clamp(window/4, 8_000, 120_000)` tokens. It keeps full text when it
+   fits, head+tail truncates per message otherwise, and omits the oldest
+   messages when the per-message floor cannot fit them. A context-too-long
+   rejection halves the input and retries once instead of failing.
+3. **Progress guard.** If the first summary still exceeds `Recovery`, the keep
+   budget is above the 1,000-token floor, and the fixed system-prompt/tool
+   overhead is itself below `Recovery`, `runCompaction` runs a second pass over
+   the reduced history with half the keep budget and the first summary as
+   `priorSummary`. A fixed overhead that alone fills the band makes the extra
+   call pointless; truncation still runs if the hard limit was crossed.
+4. **Deterministic fallback.** If summarization fails or the result is still
+   over `Safety`, `truncateHistory` keeps the cheap original-task anchor and
+   the newest messages that fit, replacing the rest with an explicit notice.
+   Automatic triggers therefore never abort a turn merely because the
+   summarizer failed; manual `/compact` (`AllowTruncate=false`) still surfaces
+   the error. An automatic summary that does not reduce the request estimate is
+   discarded rather than committed (manual may commit one on a tiny history).
+
+`CompactionResult` carries `Method` (`summary`/`truncate`),
+`TokensBefore`/`TokensAfter`, and the existing trigger/messages/usage fields;
+`observeCompaction` logs the method and both sizes.
+
+The estimator is now UTF-8 aware: ASCII bytes/4 plus one token per non-ASCII
+rune, because bytes/4 undercounts CJK by roughly 2x — the unsafe direction for
+a preflight.
+
+**Rationale:** wllr's model-visible history is prose-only (`sdkToFantasyMessages`
+drops tool traffic; the canonical transcript and `recall` retain it). Provider
+usage from a tool-heavy turn therefore measures a prompt that will never be
+replayed. The old 80%-of-provider-usage trigger could compact a history that was
+nowhere near the window, while the chars/4 preflight could also fail to reduce
+because of a fixed system prompt/tool schema or an unfoldable first message.
+The pipeline fixes both: trigger the request that is about to be sent, budget
+the summarizer independently, verify the result actually created headroom, and
+degrade deterministically instead of aborting.
+
+**Consequence:** `shouldCompactWithTools` and `shouldCompactByUsage` are gone;
+`shouldCompactByBudget` is the only sdk-history trigger. The tool-loop compactor
+keeps its provider-usage threshold because its provider-facing transcript is the
+next request. Truncation notices are `CompactionResult.Summary` values but are
+never stored in `lastSummary` (`carriesSummary`). Provider-native compaction
+(OpenAI Responses compact, Anthropic's beta), snapcompact image archives,
+handoff documents, and branch summaries are deliberately not ported: fantasy's
+`LanguageModel` exposes no native compaction endpoint, wllr has no image/archive
+pipeline, and it has no session tree to summarize. Coverage:
+compactionpipeline_test.go, compaction_test.go, compactnow_test.go,
+compactionobs_test.go, canonical_test.go.

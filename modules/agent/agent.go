@@ -494,7 +494,7 @@ func (a *Agent) observeCompaction(result CompactionResult) {
 	// is a peak carried across turns (see observeStepUsage), so without this the
 	// indicator would stay pinned to the pre-compaction peak: every
 	// post-compaction step is smaller, the peak rule refuses to move the value
-	// down, and the usage-threshold trigger would keep firing against a context
+	// down, and ctx (plus /context's LastRequest) would keep showing a context
 	// that no longer exists. Marking it an estimate lets the first real
 	// post-compaction step replace it outright.
 	a.rebaseUsageAfterCompaction(result.EstimatedTokens)
@@ -510,7 +510,10 @@ func (a *Agent) observeCompaction(result CompactionResult) {
 		"agent", a.id,
 		"model", a.ModelName(),
 		"trigger", result.Trigger,
+		"method", result.Method,
 		"messages_compacted", result.Messages,
+		"tokens_before", result.TokensBefore,
+		"tokens_after", result.TokensAfter,
 		"summary_chars", len(result.Summary),
 		"usage_input", result.Usage.InputTokens,
 		"usage_output", result.Usage.OutputTokens,
@@ -718,10 +721,6 @@ func (a *Agent) CompactNow(ctx context.Context) (CompactionResult, error) {
 			)
 		}
 	}
-	keepRecent := contextWindow / 10
-	if keepRecent <= 0 {
-		keepRecent = defaultKeepRecentTokens
-	}
 	a.historyMu.Lock()
 	history := make([]sdk.Message, len(a.history))
 	copy(history, a.history)
@@ -737,21 +736,36 @@ func (a *Agent) CompactNow(ctx context.Context) (CompactionResult, error) {
 		tools = toolsFn()
 	}
 
-	result, err := compactHistory(ctx, lm, history, priorSummary, keepRecent, CompactionTriggerManual)
+	cfg := CompactConfig{Enabled: true, ThresholdPct: 0.80}
+	if a.pool != nil {
+		cfg = a.pool.CompactConfig()
+	}
+	result, err := runCompaction(ctx, lm, compactionRun{
+		History:       history,
+		PriorSummary:  priorSummary,
+		SystemPrompt:  a.SystemPrompt(),
+		Tools:         tools,
+		Window:        contextWindow,
+		Config:        cfg,
+		Trigger:       CompactionTriggerManual,
+		Force:         true,
+		AllowTruncate: false,
+	})
 	if err != nil {
 		return CompactionResult{}, err
 	}
 	if result.Summary == "" {
 		return result, nil
 	}
-	result.EstimatedTokens = contextEstimate(result.History, a.SystemPrompt(), "", tools)
 	a.observeCompaction(result)
 	a.historyMu.Lock()
 	a.history = result.History
 	a.historyMu.Unlock()
-	a.lastSummaryMu.Lock()
-	a.lastSummary = result.Summary
-	a.lastSummaryMu.Unlock()
+	if result.carriesSummary() {
+		a.lastSummaryMu.Lock()
+		a.lastSummary = result.Summary
+		a.lastSummaryMu.Unlock()
+	}
 	a.dispatchCompactionNotice(a.pool, result, contextWindow, a.LastUsage())
 	return result, nil
 }
@@ -763,9 +777,11 @@ func (a *Agent) CompactNow(ctx context.Context) (CompactionResult, error) {
 // Two effects:
 //
 //  1. lastUsage advances as soon as a step finishes, keeping LastUsage() —
-//     and through it MainAgentContextUsage(), the /context breakdown, and
-//     the usage-threshold compaction trigger — live during the turn instead
-//     of frozen at the previous turn boundary. The stored value keeps the
+//     and through it MainAgentContextUsage() and the /context breakdown —
+//     live during the turn instead of frozen at the previous turn boundary.
+//     The preflight trigger does not consume this value (it sizes the next
+//     request with contextEstimate), but the in-turn tool-loop compactor
+//     reads provider step usage directly. The stored value keeps the
 //     turn-end semantics (peak input side within the turn): it advances only
 //     when the step's input side (input + cache read + cache creation)
 //     exceeds what is stored, mirroring contextUsageFromResult's peak rule
@@ -839,7 +855,7 @@ func (a *Agent) observeEstimatedStepUsage(
 	if result.Messages != nil {
 		messages = result.Messages
 	}
-	estimated := estimateFantasyMessageBytes(messages)/4 + estimateToolTokens(tools)
+	estimated := estimateFantasyMessageTokens(messages) + estimateToolTokens(tools)
 	if estimated <= 0 {
 		return
 	}
@@ -1311,40 +1327,48 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 	if pool != nil {
 		compactCfg = pool.CompactConfig()
 	}
-	// Keep 10% of the model's context window as recent history. This budget is
-	// shared by proactive and reactive compaction.
-	keepRecent := contextWindow / 10
-	if keepRecent <= 0 {
-		keepRecent = defaultKeepRecentTokens
-	}
-	shouldProactivelyCompact := shouldCompactWithTools(history, sysPrompt, content, tools, contextWindow)
-	usageTriggerFired := compactCfg.Enabled &&
-		shouldCompactByUsage(a.LastUsage(), contextWindow, compactCfg.ThresholdPct)
-	if usageTriggerFired {
-		shouldProactivelyCompact = true
-	}
-	if shouldProactivelyCompact {
+	// The preflight sizes the request that is about to go over the wire, not
+	// the previous turn's provider report: wllr history carries only
+	// user/assistant text, so a tool-heavy previous turn's prompt usage can be
+	// far larger than the next request and would compact (and inflate the ctx
+	// display) prematurely.
+	budget := newCompactionBudget(contextWindow, compactCfg)
+	preRequestEstimate := contextEstimate(history, sysPrompt, content, tools)
+	if shouldCompactByBudget(preRequestEstimate, budget) {
 		trigger := CompactionTriggerProactive
-		if usageTriggerFired {
+		if pctTrigger := int64(float64(contextWindow) * compactCfg.ThresholdPct); compactCfg.Enabled &&
+			pctTrigger > 0 && preRequestEstimate >= pctTrigger {
 			trigger = CompactionTriggerUsage
 		}
-		result, cerr := compactHistory(childCtx, lm, history, priorSummary, keepRecent, trigger)
+		result, cerr := runCompaction(childCtx, lm, compactionRun{
+			History:       history,
+			PriorSummary:  priorSummary,
+			SystemPrompt:  sysPrompt,
+			NextMessage:   content,
+			Tools:         tools,
+			Window:        contextWindow,
+			Config:        compactCfg,
+			Trigger:       trigger,
+			Force:         true,
+			AllowTruncate: true,
+		})
 		if cerr != nil {
 			compactionErr := fmt.Errorf("context compaction failed: %w", cerr)
 			slog.Error("agent: context compaction failed", "agent", a.id, "model", modelName, "error", compactionErr)
 			a.finishTurn(ctx, compactionErr, nil, onDone, inboxMsgs)
 			return
 		}
-		result.EstimatedTokens = contextEstimate(result.History, sysPrompt, content, tools)
 		a.observeCompaction(result)
 		history = result.History
 		a.historyMu.Lock()
 		a.history = history
 		a.historyMu.Unlock()
-		if result.Summary != "" {
+		if result.carriesSummary() {
 			a.lastSummaryMu.Lock()
 			a.lastSummary = result.Summary
 			a.lastSummaryMu.Unlock()
+		}
+		if result.Summary != "" {
 			// Announce the compaction immediately (mid-turn) so the UI surfaces
 			// a compaction message and an estimated post-compaction usage while
 			// the turn is still running, instead of the stale pre-compaction
@@ -1381,7 +1405,6 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 				lm = newLM
 				fa = fantasy.NewAgent(lm, agentOpts...)
 				contextWindow = newContextWindow
-				keepRecent = contextWindow / 10
 				// Record the model that will actually run: usage is attributed
 				// to the rerouted model, not the one the turn started with.
 				modelName = newModel
@@ -1439,7 +1462,18 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 		// compacting so the retry, and every later turn, sizes against the
 		// true limit instead of the estimate that just failed.
 		a.adoptAuthoritativeContextWindow(pool, modelName, err)
-		result, cerr := compactHistory(childCtx, lm, history, priorSummary, keepRecent, CompactionTriggerReactive)
+		result, cerr := runCompaction(childCtx, lm, compactionRun{
+			History:       history,
+			PriorSummary:  priorSummary,
+			SystemPrompt:  sysPrompt,
+			NextMessage:   content,
+			Tools:         tools,
+			Window:        contextWindow,
+			Config:        compactCfg,
+			Trigger:       CompactionTriggerReactive,
+			Force:         true,
+			AllowTruncate: true,
+		})
 		if cerr != nil {
 			compactionErr := fmt.Errorf("context compaction failed after context limit: %w", cerr)
 			slog.Error(
@@ -1479,16 +1513,17 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 			a.finishTurn(ctx, reactiveErr, nil, onDone, inboxMsgs)
 			return
 		}
-		result.EstimatedTokens = contextEstimate(result.History, sysPrompt, content, tools)
 		a.observeCompaction(result)
 		history = result.History
 		a.historyMu.Lock()
 		a.history = history
 		a.historyMu.Unlock()
-		if result.Summary != "" {
+		if result.carriesSummary() {
 			a.lastSummaryMu.Lock()
 			a.lastSummary = result.Summary
 			a.lastSummaryMu.Unlock()
+		}
+		if result.Summary != "" {
 			a.dispatchCompactionNotice(pool, result, contextWindow, a.LastUsage())
 		}
 		streamMsgs, streamPrompt, blocked, blockReason = buildStream(history, content)
@@ -1517,9 +1552,8 @@ func (a *Agent) executeTurn( //nolint:gocyclo // Turn execution coordinates comp
 	}
 
 	// Record token usage for the turn. The display value (LastUsage) feeds the
-	// statusline context indicator and the usage-threshold compaction trigger,
-	// and both represent "how full is the context", which does not shrink
-	// because a turn failed or was cancelled. So the last-known usage is
+	// statusline context indicator (and /context's LastRequest), which does not
+	// shrink because a turn failed or was cancelled. So the last-known usage is
 	// retained on error/cancel turns and on successful turns whose provider
 	// reported nothing; zeroing here made the statusline show ctx:0 after any
 	// failed turn and silently disabled usage-based compaction. Failed-turn

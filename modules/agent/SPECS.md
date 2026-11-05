@@ -270,64 +270,107 @@ Each `Agent` stores a `modelName string`, its `lm fantasy.LanguageModel`, and it
 
 **Invariant:** `SetProviderOptions` is safe to call concurrently with turns; a turn in flight finishes on the options it captured, the next `Submit` picks up the swap. `providerOpts` is always read/written under `lmMu`.
 
-Token estimation uses the `chars/4` heuristic (`estimateTokens`, `estimateStr`).
-`contextWindowForModel` returns a built-in known model window or zero when
-metadata is unavailable. Provider/API metadata and user-entered values are
-stored on the pool per model and take precedence over built-in metadata. The
-application must resolve a positive value before starting a configured model;
-there is no unsafe unknown-model fallback.
+Token estimation (`estimateTokens`, `estimateStr`) counts ASCII bytes at 4 per
+token and each non-ASCII rune as one token. The non-ASCII rule deliberately errs
+high: UTF-8 bytes/4 undercounts CJK and other multibyte text. `contextWindowForModel`
+returns a built-in known model window or zero when metadata is unavailable.
+Provider/API metadata and user-entered values are stored on the pool per model
+and take precedence over built-in metadata. The application must resolve a
+positive value before starting a configured model; there is no unsafe
+unknown-model fallback.
 
 ### Proactive Compaction
 
-Before each API call, `shouldCompact` checks whether the estimated context (history + system
-prompt + next message) exceeds `contextWindow - reserveTokens` (16,384 tokens reserved for
-output). If so, `compactHistory` is called first.
+Before each API call, `executeTurn` computes
 
-`compactHistory(ctx, lm, history, priorSummary string, keepRecentTokens int64, trigger string) (CompactionResult, error)`:
+```go
+preRequestEstimate = contextEstimate(history, sysPrompt, content, tools)
+budget = newCompactionBudget(contextWindow, compactCfg)
+```
 
-1. Applies a token-budget walk via `findCutPoint(rest, keepRecentTokens)` (default 20,000
-   tokens) to determine how many recent messages to keep verbatim. `keepRecentTokens=0` uses
-   the default.
-2. `findCutPoint` walks backwards from the newest message, accumulating `len(content)/4`
-   tokens per message. When the budget is exhausted, it snaps forward (starting at the
-   bust point itself) to the nearest `RoleUser` message boundary, ensuring the kept slice
-   always begins with a user message. Returns 0 when the entire history fits in the budget
-   (no compaction needed), or when no user boundary exists after the bust point (skip
-   compaction rather than produce a malformed kept slice).
-3. Asks the LLM to produce a structured summary of all older messages using
-   `compactionSummaryPrompt`. When `priorSummary` is non-empty, the prompt is prefixed with
-   the prior summary so the model produces an incremental update.
-4. Scans the to-be-compacted messages for absolute file paths via `extractFilePaths` and
-   appends a "Files referenced in compacted span" list to the summary message.
-5. Replaces the old messages with a single `sdk.RoleUser` summary message, then appends
-   the kept recent messages. Returns a `CompactionResult`.
-6. Updates `a.history` and `a.lastSummary` under their respective mutexes if compaction
-   succeeds.
-7. If the LLM call fails or returns an empty summary, returns the original history and an
-   empty summary string.
+`compactionBudget` is the derived policy:
 
-`CompactionResult` fields: `History` (post-compaction history; input unchanged on no-op or
-failure), `Summary` (raw summary text; empty on no-op or failure), `Messages` (count of
-history messages folded into the summary), `Usage` (token cost of the summarization call,
-from the stream result's `TotalUsage`), `Latency` (wall-clock duration of the summarization
-call), and `Trigger` (the `CompactionTrigger*` kind that caused the run — carried in the
-result so callers log it without re-deriving it). No-op runs (history under 2 messages,
-everything fits the budget, or no valid user boundary) are built by `noOpCompaction`: zero
-`Summary`, zero `Usage`/`Messages`/`Latency`.
+- `Trigger` = `min(ThresholdPct × window, window − reserve)` when the percentage
+  trigger is enabled; otherwise the hard limit. `reserve` is
+  `min(16,384, window/4)`.
+- `Safety` = `window − reserve` (the hard preflight ceiling).
+- `KeepRecent` = `window/10`, capped to `0.8 × Trigger − reserve` and floored at
+  `1,000`, so the compacted context lands below the trigger's recovery band.
+- `Recovery` = `0.8 × Trigger`.
+
+`shouldCompactByBudget(preRequestEstimate, budget)` fires when the estimate
+reaches `Trigger`. The numerator is the request about to be sent, not the
+previous turn's provider usage: wllr's model-visible history carries only
+user/assistant text, so a tool-heavy turn's provider prompt can be much larger
+than the next request; using that peak would compact prose that was never near
+the limit.
+
+`runCompaction(ctx, lm, compactionRun)` is the single pipeline shared by the
+proactive, usage-threshold, reactive, and manual paths:
+
+1. `compactHistory(compactionRequest)` keeps the first message as the original
+   task anchor and folds the oldest span.
+2. `findCutPoint(rest, keepRecentTokens)` walks backwards accumulating
+   `estimateStr(content)` and returns `(idx, ok)`. When the budget is exhausted
+   it snaps forward to the nearest `RoleUser` boundary; `ok == false` means the
+   history fits or no user boundary exists after the overflow point.
+   `Force` (manual `/compact`, an already-fired trigger, or a retry) instead
+   folds everything before the newest user turn.
+3. `buildSummarySource` serializes the folded span within
+   `summaryInputBudget(window)` = `clamp(window/4, 8_000, 120_000)` tokens. Full
+   text is preserved when it fits; otherwise messages are head+tail truncated,
+   and the oldest messages are omitted with a marker when even the per-message
+   floor cannot fit.
+4. `runSummary` streams the structured summary. A context-too-long rejection
+   halves the input budget and re-plans once (down to `8_000` tokens) instead of
+   failing.
+5. The summary message (header + LLM text + detected absolute file paths)
+   replaces the folded span.
+6. **Progress guard:** if the post-compaction estimate still exceeds `Recovery`,
+   the keep budget is above `1_000`, and the fixed system-prompt/tool overhead
+   is itself below `Recovery`, the pipeline runs a second summary pass over the
+   reduced history with half the keep budget and the first summary as
+   `priorSummary`.
+7. **Deterministic fallback:** if the result still exceeds `Safety`, or
+   summarization failed, `truncateHistory` keeps the cheap anchor and the newest
+   messages that fit, replacing the rest with an explicit truncation notice.
+   Manual `/compact` (`AllowTruncate=false`) surfaces the summarization error
+   instead of silently discarding detail.
+
+`CompactionResult` fields: `History` (post-compaction history; input unchanged
+on no-op or failure), `Summary` (raw summary text, or the truncation notice;
+empty on no-op or failure), `Method` (`summary` or `truncate`), `Messages`
+(count folded/removed), `Usage` (summarization-call tokens, cumulative across
+progress-guard passes), `Latency`,
+`Trigger`, `EstimatedTokens` (post-compaction estimate), and
+`TokensBefore`/`TokensAfter` (request-sized estimates). No-op runs (history
+under 2 messages, everything fits when not forced, or no valid user boundary)
+are built by `noOpCompaction`: zero `Summary`, zero `Usage`/`Messages`/`Latency`.
 
 **Invariant:** `Summary == ""` means "compaction did not happen". Callers must not increment
 compaction counters or emit successful-compaction log records for such results.
 
-**Invariant:** If compaction fails, the original history is used unchanged and the turn
-proceeds normally.
+**Invariant:** An automatic trigger never aborts a turn because summarization
+failed; if the context can be reduced at all, `truncateHistory` produces a
+`truncate` result. The turn aborts only when no reduction is possible (for
+example a fixed system prompt or a single newest message that cannot shrink).
+Manual `/compact` reports the summarization error instead of truncating.
+
+**Invariant:** An automatic compaction must reduce the request estimate. A
+summary whose post-compaction estimate is not smaller than the input is
+discarded as a no-op instead of being committed; manual `/compact` may still
+commit one on a tiny history because the user explicitly asked for the fold.
 
 **Invariant:** The cut point always lands on a `RoleUser` message boundary. The kept slice
 never starts with an `RoleAssistant` message.
 
-**Invariant:** When `compactHistory` is called from `Submit`, `keepRecentTokens` is set to
-`contextWindow / 10` (10% of the model's context window). For a 1M-token model this is
-100,000 tokens; for a 200k model it is 20,000 tokens. This scaling ensures the kept recent
-span is proportional to the available context regardless of model tier.
+**Invariant:** `KeepRecent` is the recovery-band budget, not a fixed percentage
+of the window. On large windows `window/10` is smaller and remains in effect;
+on small windows the `0.8 × Trigger − reserve` cap keeps the compacted context
+from immediately re-triggering.
+
+**Invariant:** `lastSummary` is updated only for `Method == summary`; a
+truncation notice must never become the next `priorSummary`.
 
 ### Iterative Summary
 
@@ -345,7 +388,7 @@ after a successful `compactHistory` call, under `lastSummaryMu.Lock()`.
 
 Before every provider step after the first, Fantasy's `PrepareStep` hook checks
 the previous step's provider-reported prompt size (input plus cache tokens, the
-same numerator `shouldCompactByUsage` uses) plus its output and a conservative
+same prompt-token numerator the display uses) plus its output and a conservative
 estimate of the newest messages, including tool results. The
 full provider-facing message size is used when an endpoint omits usage. The
 threshold is the configured percentage when enabled, capped at 85% of the
@@ -416,38 +459,41 @@ window cache it maintains follows the same value the agent now sizes against.
 
 ### Percentage-Based Compaction Trigger
 
-In addition to the chars/4 heuristic, `Submit` checks a percentage-based trigger before falling
-back to the heuristic. The trigger uses the real API token counts from the most recently completed
-turn (`a.lastUsage`) rather than an estimate. The heuristic also includes serialized tool
-definitions, since provider requests count those definitions against the context window.
+`Submit` uses one preflight budget check rather than separate heuristic and
+provider-usage triggers:
 
-`shouldCompactByUsage(lastUsage fantasy.Usage, contextWindow int64, thresholdPct float64) bool`:
+```go
+if shouldCompactByBudget(preRequestEstimate, budget) { ... }
+```
 
-- Returns `true` when the retained last-known prompt size (`InputTokens + CacheReadTokens +
-  CacheCreationTokens`) divided by `contextWindow` is `>= thresholdPct`. Cache tokens count:
-  OpenAI-family providers subtract cached tokens from `InputTokens`, so a heavily cache-served
-  context would otherwise never reach the trigger.
-- Returns `false` when that prompt size is 0 (first turn — no prior usage data, or nothing
-  retained).
-- Returns `false` when `contextWindow == 0` (window not configured).
-- Returns `false` when `thresholdPct <= 0`.
+`shouldCompactByBudget` returns `estimate >= Trigger`, where `Trigger` is the
+configured percentage of the window (default 80%, `WLLR_COMPACT_THRESHOLD`) or
+the hard `window − reserve` limit when the percentage trigger is disabled. The
+estimate includes the system prompt, the next message, and serialized tool
+definitions, because providers count all three against the window.
 
-The check order in `Submit` is:
+The provider's reported prompt usage remains authoritative for the ctx display,
+`/context`'s `LastRequest`, and the in-turn tool-loop threshold. It is **not**
+the numerator for the sdk-history preflight: wllr never replays a turn's tool
+traffic, so the previous turn's peak can overstate the next request and compact
+a history that is nowhere near the window.
 
-1. If `pool.CompactConfig().Enabled` and `shouldCompactByUsage(a.LastUsage(), contextWindow, cfg.ThresholdPct)` → compact with trigger `CompactionTriggerUsage` ("usage_threshold").
-2. Else if `shouldCompactWithTools(history, sysPrompt, content, tools, contextWindow)` → compact with trigger `CompactionTriggerProactive` ("proactive") (chars/4 heuristic including serialized tool definitions).
-3. Else → no proactive compaction.
-
-Reactive compaction after a context-too-long error uses `CompactionTriggerReactive` ("reactive").
+The trigger label is `CompactionTriggerUsage` ("usage_threshold") when the
+percentage trigger is enabled and its threshold fired, and
+`CompactionTriggerProactive` ("proactive") when the hard safety limit fired with
+the percentage trigger disabled. Reactive compaction after a context-too-long
+error uses `CompactionTriggerReactive` ("reactive").
 
 ### Compaction Observability
 
-After a successful `compactHistory` call, `executeTurn` calls `a.observeCompaction(result)`,
-which increments the per-session `compactionCount` and emits a structured log record
-(`"agent: context compaction completed"`) carrying agent ID, model, trigger, messages
-compacted, summary size, the summarization call's input/output tokens, latency, and the
-cumulative session compaction count. This makes compaction frequency, cost, and trigger
-mix queryable from logs without a metrics endpoint.
+After a successful `runCompaction` call, `executeTurn` calls
+`a.observeCompaction(result)`, which increments the per-session `compactionCount`
+and emits a structured log record (`"agent: context compaction completed"`)
+carrying agent ID, model, trigger, method (`summary`/`truncate`), messages
+compacted, request tokens before and after, summary size, the summarization
+call's input/output tokens, latency, and the cumulative session compaction
+count. This makes compaction frequency, cost, reduction, and trigger mix
+queryable from logs without a metrics endpoint.
 
 `compactionCount` is a per-`Agent` monotonic counter (session lifetime, never reset).
 
@@ -460,10 +506,10 @@ post-compaction context size via `rebaseUsageAfterCompaction(result.EstimatedTok
 `EstimatedTokens > 0` it stores `lastUsage = {InputTokens: estimated}`, and in every case it
 sets `usageIsEstimate = true`. `lastUsage` is a peak carried across turns, so without this it
 would stay pinned to the pre-compaction peak (post-compaction steps are smaller, so the peak
-rule never moves it down), and both the ctx indicator and the usage-threshold trigger — which
-read the same field — would keep sizing against a context that no longer exists. The estimate
-latch makes the first real post-compaction step replace the baseline outright, so the
-overestimating chars/4 baseline cannot pin the display.
+rule never moves it down), and the ctx indicator (plus `/context`'s `LastRequest`) would keep
+showing a context that no longer exists. The estimate latch makes the first real
+post-compaction step replace the baseline outright, so the overestimating estimate cannot
+pin the display.
 
 **Invariant:** `compactionCount` is only written from the agent's turn goroutine (one turn
 at a time), so it needs no lock; `CompactionCount()` is the read accessor.
@@ -500,12 +546,13 @@ after pool creation has no effect.
 ### On-Demand Compaction (/compact)
 
 `Agent.CompactNow(ctx) (CompactionResult, error)` folds the agent's current history into a
-summary on demand, using the same machinery as the automatic paths: `compactHistory`
-produces the summary, `observeCompaction` records/counts it and re-bases the usage baseline,
-and `dispatchCompactionNotice` announces it, all with trigger `CompactionTriggerManual`
-("manual"). `AgentPool.CompactMainAgent(ctx) (CompactionResult, string, error)` is the
-main-agent-scoped wrapper behind the built-in `/compact` command; the returned string is a
-display message.
+summary on demand through `runCompaction` with `Force: true` and `AllowTruncate: false`.
+`observeCompaction` records/counts it and re-bases the usage baseline, and
+`dispatchCompactionNotice` announces it, all with trigger `CompactionTriggerManual`
+("manual"). A summarization failure is returned to the caller rather than silently
+truncating the conversation. `AgentPool.CompactMainAgent(ctx) (CompactionResult, string, error)`
+is the main-agent-scoped wrapper behind the built-in `/compact` command; the returned string
+is a display message.
 
 **Invariant:** `CompactMainAgent` refuses while the main agent `IsRunning()` and returns
 `"cannot compact while a turn is running"` without touching history — compaction rewrites
@@ -517,11 +564,12 @@ user boundary to cut on) reports `"nothing to compact (no foldable history)"`,
 leaves history and the counter untouched, and is not an error.
 
 **Invariant:** an explicit `/compact` is never skipped merely because the
-history fits the keep-recent budget that guards the automatic triggers: when
-`findCutPoint` reports "everything fits" and the trigger is manual,
-`compactHistory` cuts before the newest user turn, so everything older than
-the latest turn is folded. Automatic (proactive/usage) triggers keep the
-fits-in-budget skip.
+history fits the keep-recent budget that guards the automatic triggers:
+`compactionRequest.Force` makes `compactHistory` cut before the newest user
+turn, so everything older than the latest turn is folded. Automatic triggers
+also set `Force` once their budget check has fired, so a fixed overhead
+(system prompt + tools) that alone exceeds the budget still folds what it can
+before the truncation fallback runs.
 
 ### lastUsage — Real API Token Tracking
 
@@ -535,14 +583,14 @@ lastUsageMu sync.RWMutex
 `setLastUsage(u fantasy.Usage)` is called in the `Submit` goroutine after every `streamTurn`
 call — including the reactive retry. On error or cancellation the **previous** value is
 retained, not zeroed: the context does not shrink because a turn failed, and `LastUsage`
-feeds both the statusline context indicator (which visibly dropped to `ctx:0` after any
-failed turn) and the usage-threshold compaction trigger (which silently stopped firing
-after one). A successful turn whose provider reported no tokens at all (input + cache
+feeds the statusline context indicator (which visibly dropped to `ctx:0` after any
+failed turn). A successful turn whose provider reported no tokens at all (input + cache
 reads + creations all zero) also retains the previous value. Failed-turn accounting is
 carried by `TurnUsage.Err` (§ Observability), never by wiping the context size.
 
 `LastUsage() fantasy.Usage` is a read-safe accessor used by `MainAgentContextUsage()` and
-the percentage-based compaction check.
+`/context`'s `LastRequest`. It is not the preflight trigger numerator; that is
+`contextEstimate` of the request about to be sent (see Proactive Compaction).
 
 **Mid-turn recording:** `observeStepUsage(step fantasy.Usage, pool, contextWindow)` is
 called from `streamTurn`'s `OnStepFinish` after every provider step — including steps
@@ -579,7 +627,7 @@ storing a chars/4 baseline as `lastUsage` (`usageIsEstimate = true`) and dispatc
 for the main agent. The seed makes ctx show the size of what is actually sent — system
 prompt, tool definitions, and the conversation — from the first moment of the first
 turn, instead of 0 until the first step reports. `contextEstimate` is the same sum
-`shouldCompactWithTools` preflights and `dispatchCompactionNotice` reports. Seeding is
+`shouldCompactByBudget` preflights and `dispatchCompactionNotice` reports. Seeding is
 permanently disabled once real usage is stored (`markUsageReported`, called on every
 successful turn end with reported tokens): reported numbers are authoritative and
 already include everything on the wire, so re-seeding each turn would bounce the

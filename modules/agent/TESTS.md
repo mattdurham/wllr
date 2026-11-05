@@ -106,6 +106,19 @@ an OpenRouter catalog outage cannot block use of the current session model.
 | `TestToolLoopCompactorStopsOnSummaryFailure` | Summarizer returns no text | Usage above threshold | PrepareStep returns an explicit error instead of sending an oversized request |
 | `TestToolLoopCompactorUsesMessageSizeWhenProviderOmitsUsage` | Compatible endpoint reports zero usage | Large provider-facing prompt | Bounded message-size estimate still triggers compaction |
 
+### compactionpipeline_test.go
+
+| Test | Scenario | Setup | Assertions |
+|------|----------|-------|------------|
+| `TestEstimateStr_NonASCII` | UTF-8 text must not be undercounted | ASCII and CJK strings | ASCII floors at 4 bytes/token; each non-ASCII rune costs one token |
+| `TestRunCompaction_TruncatesWhenSummarizerFails` | A failed summarizer must not abort an automatic turn | 30k-token history, 20k window, failing LM | `truncate` method, non-empty notice, estimate ≤ safety, history shrinks, newest message preserved |
+| `TestRunCompaction_ManualDoesNotTruncateOnFailure` | Manual `/compact` surfaces failures instead of silently dropping detail | 30k-token history, failing LM, `AllowTruncate=false` | error returned, summary empty, history unchanged |
+| `TestRunCompaction_ProgressGuardFoldsFurther` | A first pass that leaves no real headroom retries with a smaller keep budget | 30k-token history, 12.5k system prompt, 20k window | two summarization calls; final result is a summary under safety |
+| `TestRunCompaction_NonShrinkingSummaryNotCommitted` | Automatic compaction must not grow the request | 4-message history, forced fold, automatic allow-truncate | non-shrinking summary discarded; empty summary; history unchanged |
+| `TestBuildSummarySource_PreservesFullTextWithinBudget` | Full frozen text is kept when it fits | two 400-char messages, 10k budget | no truncation marker; both full contents present |
+| `TestBuildSummarySource_TruncatesOverBudget` | Oversized folded spans are budgeted | 10 × 10k-char messages, 1k budget | truncation marker present; source near the budget |
+| `TestTruncateContent_PreservesHeadAndTail` | Truncation keeps operational context at both edges | 10k-char middle, 100-token budget | head and tail preserved, marker present, estimate near budget |
+
 ### compactionobs_test.go
 
 | Test | Scenario | Setup | Assertions |
@@ -113,7 +126,7 @@ an OpenRouter catalog outage cannot block use of the current session model.
 | `TestCompactHistory_UsageSurfaced` | Summarization cost is observable | `compactTestLM` emitting fixed usage; 212×400-char history over budget | result carries the summarize call's input/output tokens, trigger, and messages_compacted; no-op run reports zero usage and empty summary |
 | `TestObserveCompaction_Summary_IncrementsCounter` | Per-session counter counts real compactions | agent + successful `compactHistory` | `CompactionCount()` increments once per observed summary |
 | `TestObserveCompaction_NoOp_DoesNotCount` | No-op compactions increment nothing | agent + no-op `compactHistory` (fits budget) | counter stays 0 |
-| `TestExecuteTurn_CompactionCounterIncrementsAndDispatches` | Full-turn observability wiring | main agent, 200k window, seeded over-budget history + usage above 0.80 threshold | turn completes, counter = 1, post-compaction notice dispatched (trigger `usage_threshold`, messages > 0, estimate > 0) + end-of-turn dispatch with nil notice; no fake `[Compacting context…]` token; canonical transcript holds the compaction record |
+| `TestExecuteTurn_CompactionCounterIncrementsAndDispatches` | Full-turn observability wiring | main agent, 200k window, seeded 170k-token history so the next-request estimate crosses the 0.80 trigger | turn completes, counter = 1, post-compaction notice dispatched (trigger `usage_threshold`, messages > 0, estimate > 0) + end-of-turn dispatch with nil notice; no fake `[Compacting context…]` token; canonical transcript holds the compaction record |
 
 ### compactnow_test.go
 
@@ -271,7 +284,7 @@ through the agent/pool accessors.
 
 | Test | Scenario | Setup | Assertions |
 |------|----------|-------|------------|
-| `TestExecuteTurn_CompactionPreservesCanonicalTranscript` | **acceptance:** compaction must not destroy the transcript | seeded transcript, 212-message history over budget, usage above threshold | compaction ran; detail gone from `History()`; transcript intact plus one compaction record; recall still returns the exact detail |
+| `TestExecuteTurn_CompactionPreservesCanonicalTranscript` | **acceptance:** compaction must not destroy the transcript | seeded transcript, 1700-message history whose next-request estimate is over the trigger | compaction ran; detail gone from `History()`; transcript intact plus one compaction record; recall still returns the exact detail |
 | `TestExecuteTurn_CanonicalTranscriptDoesNotEnterHistory` | transcript is not compaction input | transcript entry then a turn | marker never appears in `History()` |
 | `TestExecuteTurn_ReactiveCompaction_DispatchesNotice` | reactive path announces the fold instead of faking a token | first stream call rejects with a context-too-long error; seeded history over the keep-recent budget | retried turn succeeds after one summary call (3 stream calls total); notice dispatched with trigger `reactive`; no `[Context limit reached…]` marker in the stream |
 | `TestPoolMainAgentContextUsage_UsesAgentWindow` | display denominator follows the agent, not the pool default | pool default-model window 1M (decoy), agent explicit window 200k, 50k-input turn | `ContextUsage.ContextWindow` = 200000, `Percent` ≈ 25 |

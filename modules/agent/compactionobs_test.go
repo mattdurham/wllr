@@ -93,7 +93,11 @@ func longHistory(n int) []sdk.Message {
 func TestCompactHistory_UsageSurfaced(t *testing.T) {
 	lm := &compactTestLM{response: "the summary", inputTok: 4000, outputTok: 500}
 
-	res, err := compactHistory(context.Background(), lm, longHistory(212), "", 0, CompactionTriggerUsage)
+	res, err := compactHistory(context.Background(), lm, compactionRequest{
+		History:          longHistory(212),
+		KeepRecentTokens: 0,
+		Trigger:          CompactionTriggerUsage,
+	})
 	if err != nil {
 		t.Fatalf("compactHistory: %v", err)
 	}
@@ -108,7 +112,11 @@ func TestCompactHistory_UsageSurfaced(t *testing.T) {
 	}
 
 	// No-op run: usage and summary must stay zero.
-	resNoop, err := compactHistory(context.Background(), lm, longHistory(2), "", 0, CompactionTriggerProactive)
+	resNoop, err := compactHistory(context.Background(), lm, compactionRequest{
+		History:          longHistory(2),
+		KeepRecentTokens: 0,
+		Trigger:          CompactionTriggerProactive,
+	})
 	if err != nil {
 		t.Fatalf("compactHistory (no-op): %v", err)
 	}
@@ -131,10 +139,11 @@ func TestObserveCompaction_Summary_IncrementsCounter(t *testing.T) {
 	res, err := compactHistory(
 		context.Background(),
 		&compactTestLM{response: "s", inputTok: 1, outputTok: 1},
-		longHistory(212),
-		"",
-		0,
-		CompactionTriggerUsage,
+		compactionRequest{
+			History:          longHistory(212),
+			KeepRecentTokens: 0,
+			Trigger:          CompactionTriggerUsage,
+		},
 	)
 	if err != nil {
 		t.Fatalf("compactHistory: %v", err)
@@ -158,10 +167,11 @@ func TestObserveCompaction_NoOp_DoesNotCount(t *testing.T) {
 	res, err := compactHistory(
 		context.Background(),
 		&compactTestLM{response: "s"},
-		longHistory(2),
-		"",
-		0,
-		CompactionTriggerProactive,
+		compactionRequest{
+			History:          longHistory(2),
+			KeepRecentTokens: 0,
+			Trigger:          CompactionTriggerProactive,
+		},
 	)
 	if err != nil {
 		t.Fatalf("compactHistory: %v", err)
@@ -212,14 +222,13 @@ func TestExecuteTurn_CompactionCounterIncrementsAndDispatches(t *testing.T) {
 		tokenMu.Unlock()
 	})
 
-	// Seed a history that exceeds the compaction budget.
+	// Seed a history whose next-request estimate exceeds the 0.80 trigger
+	// (160k of 200k) so the usage-threshold trigger fires during this turn's
+	// preflight. The preflight sizes the request, not the previous turn's
+	// provider peak: tool traffic from an earlier turn is never replayed.
 	a.historyMu.Lock()
-	a.history = longHistory(212)
+	a.history = longHistory(1700)
 	a.historyMu.Unlock()
-
-	// Seed prior-turn usage above the 0.80 threshold (160k of 200k) so the
-	// usage-threshold trigger fires during this turn's preflight.
-	a.setLastUsage(fantasy.Usage{InputTokens: 170_000})
 
 	done := make(chan error, 1)
 	a.SetOnDone(func(e error) { done <- e })

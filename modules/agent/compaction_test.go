@@ -60,67 +60,71 @@ func TestEstimateTokens_SingleMessage(t *testing.T) {
 	}
 }
 
-// ---- shouldCompact ----
+// ---- compaction budget / preflight ----
 
-func TestShouldCompact_BelowThreshold_ReturnsFalse(t *testing.T) {
-	// Very small history — nowhere near the limit.
-	history := []sdk.Message{
-		{Role: sdk.RoleUser, Content: "hello"},
-		{Role: sdk.RoleAssistant, Content: "world"},
-	}
-	result := shouldCompact(history, "sys", "next", 200_000)
-	if result {
-		t.Error("shouldCompact returned true for small history, expected false")
+func TestShouldCompactByBudget_BelowTrigger(t *testing.T) {
+	b := newCompactionBudget(200_000, CompactConfig{Enabled: true, ThresholdPct: 0.80})
+	if shouldCompactByBudget(100_000, b) {
+		t.Error("100k estimate fired the 80% trigger on a 200k window")
 	}
 }
 
-func TestShouldCompact_AboveThreshold_ReturnsTrue(t *testing.T) {
-	// History that fills most of the context window.
-	// contextWindow=200_000, reserveTokens=16_384 → threshold=183_616 tokens
-	// 183_616 tokens * 4 chars/token = 734_464 chars
-	longMsg := strings.Repeat("a", 750_000) // definitely over
-	history := []sdk.Message{
-		{Role: sdk.RoleUser, Content: longMsg},
-	}
-	result := shouldCompact(history, "", "", 200_000)
-	if !result {
-		t.Error("shouldCompact returned false for history above threshold, expected true")
+func TestShouldCompactByBudget_AtTrigger(t *testing.T) {
+	b := newCompactionBudget(200_000, CompactConfig{Enabled: true, ThresholdPct: 0.80})
+	if !shouldCompactByBudget(b.Trigger, b) {
+		t.Errorf("estimate at trigger %d did not fire", b.Trigger)
 	}
 }
 
-func TestShouldCompact_ZeroWindow_UsesDefault(t *testing.T) {
-	// passing 0 should fall back to defaultContextWindow (1_000_000), not panic.
-	history := []sdk.Message{
-		{Role: sdk.RoleUser, Content: "tiny"},
+func TestShouldCompactByBudget_DisabledUsesSafety(t *testing.T) {
+	b := newCompactionBudget(200_000, CompactConfig{Enabled: false})
+	if b.Trigger != b.Safety {
+		t.Fatalf("trigger = %d, want safety %d when the percentage trigger is disabled", b.Trigger, b.Safety)
 	}
-	// Should not panic.
-	result := shouldCompact(history, "", "", 0)
-	if result {
-		t.Error("shouldCompact(tiny, 0 window) returned true, expected false")
+	if shouldCompactByBudget(b.Safety-1, b) {
+		t.Error("estimate below the safety limit fired with the percentage trigger disabled")
 	}
-}
-
-func TestShouldCompact_NegativeWindow_UsesDefault(t *testing.T) {
-	history := []sdk.Message{
-		{Role: sdk.RoleUser, Content: "tiny"},
-	}
-	result := shouldCompact(history, "", "", -1)
-	if result {
-		t.Error("shouldCompact(tiny, -1 window) returned true, expected false")
+	if !shouldCompactByBudget(b.Safety, b) {
+		t.Error("estimate at the safety limit did not fire with the percentage trigger disabled")
 	}
 }
 
-func TestShouldCompactWithTools_IncludesToolDefinitions(t *testing.T) {
+func TestNewCompactionBudget_RecoveryBand(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		window int64
+	}{
+		{"200k", 200_000},
+		{"1M", 1_000_000},
+		{"32k", 32_000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := newCompactionBudget(tc.window, CompactConfig{Enabled: true, ThresholdPct: 0.80})
+			if b.KeepRecent <= 0 || b.KeepRecent > b.Trigger/2 {
+				t.Fatalf("KeepRecent = %d, want in (0, trigger/2=%d]", b.KeepRecent, b.Trigger/2)
+			}
+			if b.Recovery != int64(float64(b.Trigger)*0.8) {
+				t.Fatalf("Recovery = %d, want 80%% of trigger %d", b.Recovery, b.Trigger)
+			}
+			if b.Safety < b.Trigger {
+				t.Fatalf("Safety = %d, want >= Trigger %d", b.Safety, b.Trigger)
+			}
+		})
+	}
+}
+
+func TestShouldCompactByBudget_IncludesToolDefinitions(t *testing.T) {
 	tool := fantasy.NewAgentTool(
 		"large_tool",
-		strings.Repeat("description ", 3000),
+		strings.Repeat("description ", 6000),
 		func(context.Context, map[string]any, fantasy.ToolCall) (fantasy.ToolResponse, error) {
 			return fantasy.NewTextResponse("ok"), nil
 		},
 	)
-
-	if !shouldCompactWithTools(nil, "", "", []fantasy.AgentTool{tool}, 20_000) {
-		t.Error("shouldCompactWithTools returned false even though the tool definition fills the context budget")
+	b := newCompactionBudget(20_000, CompactConfig{Enabled: true, ThresholdPct: 0.80})
+	estimate := contextEstimate(nil, "", "", []fantasy.AgentTool{tool})
+	if !shouldCompactByBudget(estimate, b) {
+		t.Error("tool definition estimate did not fill the budget")
 	}
 }
 
@@ -136,7 +140,11 @@ func TestCompactHistory_ShortHistory_ReturnsUnchanged(t *testing.T) {
 		history[i] = sdk.Message{Role: sdk.RoleUser, Content: msg}
 	}
 
-	result, err := compactHistory(context.Background(), lm, history, "", 0, CompactionTriggerProactive)
+	result, err := compactHistory(context.Background(), lm, compactionRequest{
+		History:          history,
+		KeepRecentTokens: 0,
+		Trigger:          CompactionTriggerProactive,
+	})
 	if err != nil {
 		t.Fatalf("compactHistory: %v", err)
 	}
@@ -167,7 +175,11 @@ func TestCompactHistory_LongHistory_ReturnsSummaryPlusRecent(t *testing.T) {
 	// Override the first message to be identifiable as the anchor.
 	history[0] = sdk.Message{Role: sdk.RoleUser, Content: "anchor message"}
 
-	result, err := compactHistory(context.Background(), lm, history, "", 0, CompactionTriggerProactive)
+	result, err := compactHistory(context.Background(), lm, compactionRequest{
+		History:          history,
+		KeepRecentTokens: 0,
+		Trigger:          CompactionTriggerProactive,
+	})
 	if err != nil {
 		t.Fatalf("compactHistory: %v", err)
 	}
@@ -210,7 +222,11 @@ func TestCompactHistory_EmptySummary_ReturnsOriginal(t *testing.T) {
 		}
 	}
 
-	result, err := compactHistory(context.Background(), lm, history, "", 0, CompactionTriggerProactive)
+	result, err := compactHistory(context.Background(), lm, compactionRequest{
+		History:          history,
+		KeepRecentTokens: 0,
+		Trigger:          CompactionTriggerProactive,
+	})
 	// Should error and return original.
 	if err == nil {
 		t.Error("expected error for empty summary")
@@ -265,15 +281,15 @@ func (c *compactTestLM) StreamObject(_ context.Context, _ fantasy.ObjectCall) (f
 
 // ---- findCutPoint ----
 
-func TestFindCutPoint_SmallHistory_ReturnsZero(t *testing.T) {
+func TestFindCutPoint_SmallHistory_Fits(t *testing.T) {
 	history := []sdk.Message{
 		{Role: sdk.RoleUser, Content: "hello"},
 		{Role: sdk.RoleAssistant, Content: "world"},
 		{Role: sdk.RoleUser, Content: "next"},
 	}
-	got := findCutPoint(history, 20_000)
-	if got != 0 {
-		t.Errorf("findCutPoint small history = %d, want 0", got)
+	got, ok := findCutPoint(history, 20_000)
+	if ok || got != 0 {
+		t.Errorf("findCutPoint small history = (%d, %v), want (0, false)", got, ok)
 	}
 }
 
@@ -292,9 +308,9 @@ func TestFindCutPoint_SnapToUserBoundary(t *testing.T) {
 		{Role: sdk.RoleUser, Content: msg},      // 4
 		{Role: sdk.RoleAssistant, Content: msg}, // 5
 	}
-	got := findCutPoint(history, 250)
-	if got != 4 {
-		t.Errorf("findCutPoint snap-to-user = %d, want 4", got)
+	got, ok := findCutPoint(history, 250)
+	if !ok || got != 4 {
+		t.Errorf("findCutPoint snap-to-user = (%d, %v), want (4, true)", got, ok)
 	}
 }
 
@@ -304,24 +320,24 @@ func TestFindCutPoint_AllFitInBudget_ReturnsZero(t *testing.T) {
 		{Role: sdk.RoleAssistant, Content: "b"},
 		{Role: sdk.RoleUser, Content: "c"},
 	}
-	got := findCutPoint(history, 1_000_000)
-	if got != 0 {
-		t.Errorf("findCutPoint huge budget = %d, want 0", got)
+	got, ok := findCutPoint(history, 1_000_000)
+	if ok || got != 0 {
+		t.Errorf("findCutPoint huge budget = (%d, %v), want (0, false)", got, ok)
 	}
 }
 
 func TestFindCutPoint_NoUserBoundaryFound_ReturnsFallback(t *testing.T) {
 	// Pathological: all assistant messages, budget = 1 token.
-	// No user boundary exists — findCutPoint must return -1 (skip compaction sentinel)
-	// so the caller never produces a history slice starting with an assistant message.
+	// No user boundary exists, so there is no safe cut: the caller must skip
+	// compaction rather than produce a kept slice starting with an assistant.
 	history := []sdk.Message{
 		{Role: sdk.RoleAssistant, Content: strings.Repeat("x", 400)},
 		{Role: sdk.RoleAssistant, Content: strings.Repeat("x", 400)},
 		{Role: sdk.RoleAssistant, Content: strings.Repeat("x", 400)},
 	}
-	got := findCutPoint(history, 1)
-	if got != -1 {
-		t.Errorf("findCutPoint no-user-boundary fallback = %d, want -1", got)
+	got, ok := findCutPoint(history, 1)
+	if ok || got != 0 {
+		t.Errorf("findCutPoint no-user-boundary = (%d, %v), want (0, false)", got, ok)
 	}
 }
 
@@ -386,7 +402,12 @@ func TestCompactHistory_WithPriorSummary_IncludesPriorInPrompt(t *testing.T) {
 	}
 
 	priorSummary := "## Goal\nPrior work summary."
-	res, err := compactHistory(context.Background(), lm, history, priorSummary, 0, CompactionTriggerProactive)
+	res, err := compactHistory(context.Background(), lm, compactionRequest{
+		History:          history,
+		PriorSummary:     priorSummary,
+		KeepRecentTokens: 0,
+		Trigger:          CompactionTriggerProactive,
+	})
 	if err != nil {
 		t.Fatalf("compactHistory: %v", err)
 	}
@@ -409,7 +430,11 @@ func TestCompactHistory_ReturnsSummaryString(t *testing.T) {
 			history[i] = sdk.Message{Role: sdk.RoleAssistant, Content: msg}
 		}
 	}
-	res, err := compactHistory(context.Background(), lm, history, "", 0, CompactionTriggerProactive)
+	res, err := compactHistory(context.Background(), lm, compactionRequest{
+		History:          history,
+		KeepRecentTokens: 0,
+		Trigger:          CompactionTriggerProactive,
+	})
 	if err != nil {
 		t.Fatalf("compactHistory: %v", err)
 	}
@@ -432,7 +457,11 @@ func TestCompactHistory_FilePathsAppendedToSummaryMessage(t *testing.T) {
 	// Inject a file path into one of the messages that will be summarized.
 	history[2] = sdk.Message{Role: sdk.RoleAssistant, Content: "read_file /home/user/project/foo.go result: ok"}
 
-	result, err := compactHistory(context.Background(), lm, history, "", 0, CompactionTriggerProactive)
+	result, err := compactHistory(context.Background(), lm, compactionRequest{
+		History:          history,
+		KeepRecentTokens: 0,
+		Trigger:          CompactionTriggerProactive,
+	})
 	if err != nil {
 		t.Fatalf("compactHistory: %v", err)
 	}
@@ -491,83 +520,6 @@ func (c *captureLM) GenerateObject(_ context.Context, _ fantasy.ObjectCall) (*fa
 
 func (c *captureLM) StreamObject(_ context.Context, _ fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
 	return nil, nil
-}
-
-// ---- shouldCompactByUsage ----
-
-// TestShouldCompactByUsage_BelowThreshold verifies that usage below the threshold returns false.
-func TestShouldCompactByUsage_BelowThreshold(t *testing.T) {
-	// 79% of window with 0.80 threshold: should not compact.
-	u := fantasy.Usage{InputTokens: 158_000, OutputTokens: 100}
-	got := shouldCompactByUsage(u, 200_000, 0.80)
-	if got {
-		t.Error("expected false at 79% with threshold 0.80, got true")
-	}
-}
-
-// TestShouldCompactByUsage_AtThreshold verifies that usage at exactly the threshold returns true.
-func TestShouldCompactByUsage_AtThreshold(t *testing.T) {
-	// 80% of window with 0.80 threshold: should compact.
-	u := fantasy.Usage{InputTokens: 160_000, OutputTokens: 100}
-	got := shouldCompactByUsage(u, 200_000, 0.80)
-	if !got {
-		t.Error("expected true at 80% with threshold 0.80, got false")
-	}
-}
-
-// TestShouldCompactByUsage_CacheTokensCountTowardThreshold pins the trigger's
-// numerator to the same "true prompt size" the display uses. Anthropic reports
-// cache reads additively to input_tokens, so a mostly-cache-served prompt can
-// report a small InputTokens alongside a large CacheReadTokens. Counting only
-// InputTokens made the trigger disagree with the ctx percentage the user sees:
-// the display said 85% while the trigger computed 10% and never fired.
-func TestShouldCompactByUsage_CacheTokensCountTowardThreshold(t *testing.T) {
-	// 20k fresh + 150k cache read = 170k of a 200k window = 85%.
-	u := fantasy.Usage{InputTokens: 20_000, CacheReadTokens: 150_000}
-	if !shouldCompactByUsage(u, 200_000, 0.80) {
-		t.Error("expected true at 85% (input+cache_read) with threshold 0.80, got false")
-	}
-}
-
-// TestShouldCompactByUsage_CacheCreationCountsTowardThreshold covers the
-// cache-write side of the same rule: a turn that mostly created cache entries
-// is just as full as one that read them.
-func TestShouldCompactByUsage_CacheCreationCountsTowardThreshold(t *testing.T) {
-	// 20k fresh + 150k cache creation = 170k of a 200k window = 85%.
-	u := fantasy.Usage{InputTokens: 20_000, CacheCreationTokens: 150_000}
-	if !shouldCompactByUsage(u, 200_000, 0.80) {
-		t.Error("expected true at 85% (input+cache_creation) with threshold 0.80, got false")
-	}
-}
-
-// TestShouldCompactByUsage_CacheTokensBelowThreshold is the negative control:
-// summing cache tokens must not make the trigger fire early.
-func TestShouldCompactByUsage_CacheTokensBelowThreshold(t *testing.T) {
-	// 10k fresh + 140k cache read = 150k of a 200k window = 75%.
-	u := fantasy.Usage{InputTokens: 10_000, CacheReadTokens: 140_000}
-	if shouldCompactByUsage(u, 200_000, 0.80) {
-		t.Error("expected false at 75% (input+cache_read) with threshold 0.80, got true")
-	}
-}
-
-// TestShouldCompactByUsage_ZeroUsage verifies that zero InputTokens always returns false.
-func TestShouldCompactByUsage_ZeroUsage(t *testing.T) {
-	// First turn before any usage is recorded: InputTokens is 0.
-	u := fantasy.Usage{}
-	got := shouldCompactByUsage(u, 200_000, 0.80)
-	if got {
-		t.Error("expected false when InputTokens is zero, got true")
-	}
-}
-
-// TestShouldCompactByUsage_ZeroContextWindow verifies that a zero window returns false.
-func TestShouldCompactByUsage_ZeroContextWindow(t *testing.T) {
-	// No context window configured — fall back to heuristic.
-	u := fantasy.Usage{InputTokens: 500_000, OutputTokens: 100}
-	got := shouldCompactByUsage(u, 0, 0.80)
-	if got {
-		t.Error("expected false when ContextWindow is zero, got true")
-	}
 }
 
 // TestAutoCompactEnvDefault verifies that NewPool reads WLLR_COMPACT_THRESHOLD and

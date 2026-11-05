@@ -61,10 +61,11 @@ func (c *toolLoopCompactor) prepare(
 	}
 
 	last := opts.Steps[len(opts.Steps)-1]
-	// Provider input usage is the reliable baseline. As in shouldCompactByUsage,
-	// the prompt size is InputTokens plus cached tokens: a cache-served step can
-	// report most of its prompt as cache reads, and counting InputTokens alone
-	// would undercount it and let the loop run on past the threshold. The most
+	// Provider input usage is the reliable baseline. As in the display's
+	// prompt-token numerator, the prompt size is InputTokens plus cached
+	// tokens: a cache-served step can report most of its prompt as cache
+	// reads, and counting InputTokens alone would undercount it and let the
+	// loop run on past the threshold. The most
 	// recent step's tool results have not yet been counted in that input, so
 	// estimate their additional cost conservatively at two bytes per token.
 	promptTokens := last.Usage.InputTokens + last.Usage.CacheReadTokens + last.Usage.CacheCreationTokens
@@ -152,6 +153,21 @@ func estimateFantasyMessageBytes(messages []fantasy.Message) int64 {
 		}
 	}
 	return size
+}
+
+// estimateFantasyMessageTokens applies the shared UTF-8-aware estimator to the
+// serialized provider-facing messages. It is used for display fallbacks where
+// consistency with the compaction preflight matters more than the tool-loop
+// predictor's deliberately conservative bytes/2 rule.
+func estimateFantasyMessageTokens(messages []fantasy.Message) int64 {
+	var tokens int64
+	for _, message := range messages {
+		encoded, err := json.Marshal(message)
+		if err == nil {
+			tokens += estimateStr(string(encoded))
+		}
+	}
+	return tokens
 }
 
 // summarizeToolLoop bounds the summary request independently of the request

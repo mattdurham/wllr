@@ -90,12 +90,11 @@ func TestExecuteTurn_CompactionPreservesCanonicalTranscript(t *testing.T) {
 
 	// Seed a history long enough to force compaction, with the same detail in an
 	// old message that compaction will fold away.
-	history := longHistory(212)
+	history := longHistory(1700)
 	history[10].Content = "earlier turn: exec go test -> " + detail
 	a.historyMu.Lock()
 	a.history = history
 	a.historyMu.Unlock()
-	a.setLastUsage(fantasy.Usage{InputTokens: 170_000})
 
 	runTurn(t, a, "continue")
 

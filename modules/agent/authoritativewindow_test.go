@@ -232,26 +232,26 @@ func TestExecuteTurn_ReactiveAdoptsAuthoritativeWindow(t *testing.T) {
 }
 
 // TestAdoptAuthoritativeContextWindow_DrivesUsageTrigger ties the clamp to the
-// behavior it exists for: a prompt that exceeded the model's real window while
-// the stale window still reported it as comfortably under the trigger must
-// cross the 80% threshold once the real window is adopted — so the next turn
-// compacts instead of being rejected again.
+// behavior it exists for: a next request that exceeded the model's real window
+// while the stale window still reported it as comfortably under the trigger
+// must cross the 80% threshold once the real window is adopted — so the next
+// turn compacts instead of being rejected again.
 func TestAdoptAuthoritativeContextWindow_DrivesUsageTrigger(t *testing.T) {
 	a := &Agent{id: MainAgentID, modelName: "m"}
 	a.contextWindow = 200_000
 	pool := NewPool()
+	cfg := CompactConfig{Enabled: true, ThresholdPct: 0.80}
 
-	// 130k prompt served mostly from cache: 30k fresh input + 100k cache read.
-	// It already exceeds the model's real 128k window (hence the rejection),
-	// but against the stale 200k window it reads as 65%.
-	usage := fantasy.Usage{InputTokens: 30_000, CacheReadTokens: 100_000}
-	if shouldCompactByUsage(usage, a.ContextWindow(), 0.80) {
+	// The rejected request was ~130k tokens: already over the model's real
+	// 128k window, but 65% of the stale 200k window.
+	const estimate int64 = 130_000
+	if shouldCompactByBudget(estimate, newCompactionBudget(a.ContextWindow(), cfg)) {
 		t.Fatal("precondition: 130k of the stale 200k window should sit below the 80% trigger")
 	}
 
 	a.adoptAuthoritativeContextWindow(pool, "m", contextTooLongErr(128_000, 130_000))
 
-	if !shouldCompactByUsage(usage, a.ContextWindow(), 0.80) {
-		t.Error("after adopting the 128k window, a 130k prompt must exceed the 80% trigger")
+	if !shouldCompactByBudget(estimate, newCompactionBudget(a.ContextWindow(), cfg)) {
+		t.Error("after adopting the 128k window, a 130k request must exceed the 80% trigger")
 	}
 }
